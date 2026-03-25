@@ -14,11 +14,9 @@ from src.logs import logger
 from src.requirements import requirement_service
 
 # 导入 DDL 检查引擎
-try:
-    from ddl_check_engine import DDLCheckEngine
-    DDL_ENGINE_AVAILABLE = True
-except ImportError:
-    DDL_ENGINE_AVAILABLE = False
+sys.path.insert(0, str(Path(__file__).parent.parent / "modules" / "ddl_check_engine"))
+from ddl_check_engine import DDLCheckEngine
+DDL_ENGINE_AVAILABLE = True
 
 # 页面配置
 st.set_page_config(
