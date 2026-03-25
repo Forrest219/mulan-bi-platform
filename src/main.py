@@ -11,6 +11,7 @@ from src.ddl_checker import DDLSanner, DDLScanResult
 from src.ddl_generator import DDLGenerator, TableDefinition, ColumnDefinition, IndexDefinition
 from src.ddl_generator.templates import DDLTemplateGenerator, TableTemplate
 from src.logs import logger
+from src.requirements import requirement_service
 
 # 页面配置
 st.set_page_config(
@@ -84,8 +85,8 @@ def render_sidebar():
     if st.sidebar.button("⚙️ DDL 生成器", use_container_width=True):
         st.session_state.current_page = "DDL 生成器"
         st.rerun()
-    if st.sidebar.button("📋 报告查看", use_container_width=True):
-        st.session_state.current_page = "报告查看"
+    if st.sidebar.button("📋 需求管理", use_container_width=True):
+        st.session_state.current_page = "需求管理"
         st.rerun()
     if st.sidebar.button("📊 扫描日志", use_container_width=True):
         st.session_state.current_page = "扫描日志"
@@ -94,7 +95,7 @@ def render_sidebar():
     st.sidebar.markdown("---")
     st.sidebar.info("""
     **项目信息**
-    - 项目名称：Mulan
+    - 项目名称：Mulan BI Platform
     - 开始日期：2026-03-24
     - 版本：v1.0.0
     """)
@@ -624,6 +625,175 @@ def render_report_page():
     """)
 
 
+def render_requirements_page():
+    """渲染需求管理页面"""
+    st.subheader("📋 需求管理")
+
+    # 获取统计数据
+    stats = requirement_service.get_statistics()
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("总计", stats.get("total", 0))
+    col2.metric("待审批", stats.get("pending", 0))
+    col3.metric("已通过", stats.get("approved", 0))
+    col4.metric("已拒绝", stats.get("rejected", 0))
+    col5.metric("已完成", stats.get("done", 0))
+
+    st.markdown("---")
+
+    # Tab: 创建需求 / 查看需求
+    tab1, tab2 = st.tabs(["📝 创建需求", "📋 需求列表"])
+
+    with tab1:
+        st.markdown("### 创建新需求")
+
+        with st.form("create_requirement_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                title = st.text_input("需求标题", placeholder="简洁描述需求")
+            with col2:
+                req_type = st.selectbox("需求类型", [
+                    ("ddl_change", "DDL 变更"),
+                    ("quality_issue", "数据质量问题"),
+                    ("exception_apply", "规范例外申请"),
+                    ("other", "其他")
+                ], format_func=lambda x: x[1])
+
+            col1, col2 = st.columns(2)
+            with col1:
+                priority = st.selectbox("优先级", ["low", "medium", "high", "urgent"],
+                                       format_func=lambda x: {"low": "低", "medium": "中", "high": "高", "urgent": "紧急"}[x])
+            with col2:
+                related_tables = st.text_input("涉及表（多个用逗号分隔）", placeholder="dim_user, fact_order")
+
+            st.markdown("#### 做什么")
+            what_to_do = st.text_area("做什么", height=80, placeholder="具体要做什么...")
+
+            st.markdown("#### 为什么做")
+            why_to_do = st.text_area("为什么做", height=80, placeholder="业务背景/目的...")
+
+            st.markdown("#### 影响范围")
+            impact_scope = st.text_area("影响范围", height=80, placeholder="影响的表/系统/团队...")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                applicant = st.text_input("申请人", placeholder="你的名字")
+            with col2:
+                assignee = st.text_input("负责人", placeholder="谁来做")
+
+            submitted = st.form_submit_button("提交需求", type="primary")
+            if submitted:
+                if not title or not what_to_do:
+                    st.error("请填写标题和「做什么」")
+                else:
+                    req_id = requirement_service.create_requirement(
+                        title=title,
+                        requirement_type=req_type[0],
+                        what_to_do=what_to_do,
+                        why_to_do=why_to_do,
+                        impact_scope=impact_scope,
+                        priority=priority,
+                        related_tables=related_tables,
+                        applicant=applicant,
+                        assignee=assignee
+                    )
+                    st.success(f"✅ 需求创建成功！ID: {req_id}")
+                    st.rerun()
+
+    with tab2:
+        st.markdown("### 需求列表")
+
+        # 筛选器
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            filter_status = st.selectbox("状态筛选", ["全部", "pending", "approved", "rejected", "done"],
+                                        format_func=lambda x: {"全部": "全部", "pending": "待审批", "approved": "已通过", "rejected": "已拒绝", "done": "已完成"}[x])
+        with col2:
+            filter_type = st.selectbox("类型筛选", ["全部", "ddl_change", "quality_issue", "exception_apply", "other"],
+                                       format_func=lambda x: {"全部": "全部", "ddl_change": "DDL 变更", "quality_issue": "质量问题", "exception_apply": "例外申请", "other": "其他"}[x])
+        with col3:
+            filter_priority = st.selectbox("优先级筛选", ["全部", "low", "medium", "high", "urgent"],
+                                          format_func=lambda x: {"全部": "全部", "low": "低", "medium": "中", "high": "高", "urgent": "紧急"}[x])
+
+        # 获取需求列表
+        status_filter = None if filter_status == "全部" else filter_status
+        type_filter = None if filter_type == "全部" else filter_type
+        priority_filter = None if filter_priority == "全部" else filter_priority
+
+        requirements = requirement_service.get_requirements(
+            limit=100,
+            status=status_filter,
+            requirement_type=type_filter,
+            priority=priority_filter
+        )
+
+        if requirements:
+            for req in requirements:
+                status_color = {
+                    "pending": "🟡",
+                    "approved": "🟢",
+                    "rejected": "🔴",
+                    "done": "✅"
+                }.get(req["status"], "⚪")
+
+                priority_label = {
+                    "low": "低",
+                    "medium": "中",
+                    "high": "高",
+                    "urgent": "紧急"
+                }.get(req["priority"], req["priority"])
+
+                req_type_label = {
+                    "ddl_change": "DDL变更",
+                    "quality_issue": "质量问题",
+                    "exception_apply": "例外申请",
+                    "other": "其他"
+                }.get(req["requirement_type"], req["requirement_type"])
+
+                with st.expander(f"{status_color} #{req['id']} {req['title']} | {priority_label} | {req_type_label}", expanded=False):
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.markdown(f"**📌 做什么：**\n>{req['what_to_do']}")
+                        if req.get("why_to_do"):
+                            st.markdown(f"**❓ 为什么做：**\n>{req['why_to_do']}")
+                        if req.get("impact_scope"):
+                            st.markdown(f"**📊 影响范围：**\n>{req['impact_scope']}")
+
+                        col_a, col_b, col_c, col_d = st.columns(4)
+                        with col_a:
+                            st.caption(f"📅 创建: {req['create_time'][:10] if req['create_time'] else '-'}")
+                        with col_b:
+                            st.caption(f"👤 申请人: {req.get('applicant') or '-'}")
+                        with col_c:
+                            st.caption(f"🎯 负责人: {req.get('assignee') or '-'}")
+                        with col_d:
+                            st.caption(f"📋 涉及表: {req.get('related_tables') or '-'}")
+
+                        if req.get("approver"):
+                            st.markdown(f"**✅ 审批意见：** {req.get('approver')} - {req.get('approve_comment') or ''}")
+
+                    with col2:
+                        if req["status"] == "pending":
+                            if st.button("✅ 通过", key=f"approve_{req['id']}"):
+                                requirement_service.approve_requirement(req['id'], approver="admin", comment="同意", approved=True)
+                                st.success("已通过审批")
+                                st.rerun()
+                            if st.button("❌ 拒绝", key=f"reject_{req['id']}"):
+                                requirement_service.approve_requirement(req['id'], approver="admin", comment="拒绝", approved=False)
+                                st.rerun()
+                        elif req["status"] == "approved":
+                            if st.button("🏁 标记完成", key=f"done_{req['id']}"):
+                                requirement_service.mark_as_done(req['id'])
+                                st.success("已标记完成")
+                                st.rerun()
+                        if st.button("🗑️ 删除", key=f"delete_{req['id']}"):
+                            requirement_service.delete_requirement(req['id'])
+                            st.success("已删除")
+                            st.rerun()
+        else:
+            st.info("暂无需求，创建一个吧！")
+
+
 def render_logs_page():
     """渲染扫描日志页面"""
     st.subheader("📊 扫描日志")
@@ -717,8 +887,8 @@ def main():
         render_checker_page()
     elif page == "DDL 生成器":
         render_generator_page()
-    elif page == "报告查看":
-        render_report_page()
+    elif page == "需求管理":
+        render_requirements_page()
     elif page == "扫描日志":
         render_logs_page()
 
