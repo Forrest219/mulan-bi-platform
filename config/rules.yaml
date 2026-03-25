@@ -1,0 +1,68 @@
+# DDL 规范规则配置
+# 项目开始日期：2026-03-24
+
+# 表命名规范
+table_naming:
+  enabled: true
+  pattern: "^[a-z][a-z0-9_]*$"  # 小写字母开头，支持字母、数字、下划线
+  max_length: 64
+  prefix_whitelist: []  # 允许的表名前缀，如 ["dim_", "fact_", "ods_", "dwd_", "dws_", "ads_"]
+
+# 字段命名规范
+column_naming:
+  enabled: true
+  pattern: "^[a-z][a-z0-9_]*$"
+  max_length: 64
+  reserved_words: ["id", "create_time", "update_time", "creator", "updater", "is_deleted"]
+
+# 字段类型规范
+data_type:
+  enabled: true
+  recommended_types:
+    - BIGINT
+    - DECIMAL
+    - VARCHAR
+    - TEXT
+    - DATETIME
+    - DATE
+    - BOOLEAN
+  deprecated_types:  # 不推荐使用的类型
+    - FLOAT
+    - DOUBLE
+    - TINYINT
+    - SMALLINT
+
+# 主键规范
+primary_key:
+  enabled: true
+  require_primary_key: true
+  primary_key_name_pattern: "pk_{table_name}"
+
+# 索引规范
+index:
+  enabled: true
+  max_index_count_per_table: 10
+  index_name_pattern: "idx_{table_name}_{column}"
+  unique_index_name_pattern: "uk_{table_name}_{column}"
+
+# 注释规范
+comment:
+  enabled: true
+  require_table_comment: true
+  require_column_comment: true
+  max_comment_length: 500
+
+# 创建时间/更新时间规范
+timestamp:
+  enabled: true
+  require_create_time: true
+  require_update_time: true
+  create_time_type: "DATETIME"
+  update_time_type: "DATETIME"
+
+# 软删除规范
+soft_delete:
+  enabled: true
+  require_is_deleted: true
+  is_deleted_type: "TINYINT"
+  default_value: 0

@@ -1,0 +1,17 @@
+# Web Framework
+streamlit>=1.28.0
+
+# Database
+sqlalchemy>=2.0.0
+pymysql>=1.1.0
+psycopg2-binary>=2.9.0
+
+# DDL Parsing
+sql-metadata>=0.1.1
+sqlparse>=0.4.0
+
+# Configuration
+pyyaml>=6.0.0
+
+# Utilities
+python-dateutil>=2.8.0
