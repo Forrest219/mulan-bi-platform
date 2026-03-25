@@ -13,6 +13,13 @@ from src.ddl_generator.templates import DDLTemplateGenerator, TableTemplate
 from src.logs import logger
 from src.requirements import requirement_service
 
+# 导入 DDL 检查引擎
+try:
+    from ddl_check_engine import DDLCheckEngine
+    DDL_ENGINE_AVAILABLE = True
+except ImportError:
+    DDL_ENGINE_AVAILABLE = False
+
 # 页面配置
 st.set_page_config(
     page_title="Mulan - DDL 规范管理平台",
@@ -231,30 +238,84 @@ def render_checker_page():
                         else:
                             st.error(f"扫描失败: {result.error}")
 
-        # SQL 检查
-        st.markdown("---")
-        st.subheader("SQL 语句检查")
-        sql_input = st.text_area("输入 CREATE TABLE SQL 语句", height=150, placeholder="CREATE TABLE ...")
-
-        if st.button("🔍 检查 SQL", type="secondary"):
-            if sql_input.strip():
-                with st.spinner("正在检查..."):
-                    result = st.session_state.scanner.scan_sql(sql_input)
-                    if result.success:
-                        st.session_state.last_report = result.report
-                        st.success("检查完成！")
-                    else:
-                        st.error(f"检查失败: {result.error}")
-            else:
-                st.warning("请输入 SQL 语句")
+        # 数据库扫描结果
+        if st.session_state.last_report:
+            st.markdown("---")
+            render_report(st.session_state.last_report)
 
     else:
         st.info("请先配置并连接数据库")
 
-    # 显示检查结果
-    if st.session_state.last_report:
-        st.markdown("---")
-        render_report(st.session_state.last_report)
+    # SQL 语句检查（独立功能，不需要数据库连接）
+    st.markdown("---")
+    st.subheader("📝 SQL 语句检查（规则引擎）")
+
+    if not DDL_ENGINE_AVAILABLE:
+        st.warning("DDL 检查引擎未安装，请运行: pip install ddl_check_engine")
+    else:
+        col1, col2 = st.columns(2)
+        with col1:
+            db_type_sql = st.selectbox("数据库类型", ["mysql", "sqlserver"], key="sql_db_type")
+        with col2:
+            pass
+
+        sql_input = st.text_area("输入 CREATE TABLE SQL 语句", height=150,
+                                placeholder="CREATE TABLE `dim_user` (...);", key="sql_input")
+
+        if st.button("🔍 检查 SQL", type="primary"):
+            if sql_input.strip():
+                with st.spinner("正在检查..."):
+                    engine = DDLCheckEngine()
+                    result = engine.check(sql_input, db_type_sql)
+                    st.session_state.last_engine_result = result
+                st.success("检查完成！")
+            else:
+                st.warning("请输入 SQL 语句")
+
+        # 显示引擎检查结果
+        if st.session_state.get("last_engine_result"):
+            st.markdown("---")
+            render_engine_result(st.session_state.last_engine_result)
+
+
+def render_engine_result(result):
+    """渲染 DDL 检查引擎结果（符合 PRD 格式）"""
+    st.subheader("📊 检查结果")
+
+    # Summary
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+    status = "✅ 通过" if result.passed else "❌ 未通过"
+    status_color = "success" if result.passed else "error"
+
+    col1.metric("状态", status)
+    col2.metric("评分", result.score)
+    col3.metric("High", result.summary.get("High", 0))
+    col4.metric("Medium", result.summary.get("Medium", 0))
+    col5.metric("Low", result.summary.get("Low", 0))
+
+    # 执行判断
+    executable_status = "✅ 允许执行" if result.executable else "❌ 不允许执行"
+    if result.executable:
+        st.success(f"**执行判断**: {executable_status}")
+    else:
+        st.error(f"**执行判断**: {executable_status}")
+
+    # Issues
+    if result.issues:
+        st.markdown("### Issues")
+        for issue in result.issues:
+            level_color = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}.get(issue["risk_level"], "⚪")
+
+            with st.expander(f"{level_color} [{issue['risk_level']}] {issue['rule_id']} - {issue['object_type']}: {issue['object_name']}", expanded=False):
+                st.markdown(f"**描述**: {issue['description']}")
+                st.markdown(f"**建议**: {issue['suggestion']}")
+    else:
+        st.success("🎉 未发现问题！")
+
+    # JSON 输出
+    with st.expander("📄 JSON 输出"):
+        st.json(result.to_dict())
 
 
 def render_report(report):
