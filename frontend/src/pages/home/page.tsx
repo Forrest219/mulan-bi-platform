@@ -33,9 +33,10 @@ export default function HomePage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-blue-50">
       <div className="max-w-4xl mx-auto px-8 pt-16">
         {/* Welcome */}
-        <div className="text-center mb-5">
-          <h1 className="text-xl font-bold text-slate-700 mb-0.5">{getGreeting()}</h1>
-          <p className="text-sm text-slate-400">{user?.display_name || '访客'}</p>
+        <div className="text-center mb-6">
+          <h1 className="text-4xl font-bold text-slate-600">
+            {getGreeting()}，{user?.display_name || '访客'}
+          </h1>
         </div>
 
         {/* Search Input - Hero */}
@@ -80,8 +81,8 @@ export default function HomePage() {
         </div>
 
         {/* Feature Icons */}
-        <div className="flex justify-center gap-4">
-          {features.map((feature) => (
+        <div className="flex justify-center items-center gap-6">
+          {features.map((feature, i) => (
             <button
               key={feature.label}
               onClick={() => navigate(feature.path)}
@@ -92,7 +93,9 @@ export default function HomePage() {
               </div>
               <span className="text-xs text-slate-400 group-hover:text-slate-600">{feature.label}</span>
             </button>
-          ))}
+          )).flatMap((el, i, arr) =>
+            i < arr.length - 1 ? [el, <span key={`sep-${i}`} className="text-slate-300 select-none">｜</span>] : [el]
+          )}
         </div>
       </div>
     </div>
