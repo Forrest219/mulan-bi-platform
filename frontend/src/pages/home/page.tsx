@@ -31,9 +31,9 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-blue-50">
-      <div className="max-w-2xl mx-auto px-6 pt-20">
+      <div className="max-w-4xl mx-auto px-8 pt-16">
         {/* Welcome */}
-        <div className="text-center mb-6">
+        <div className="text-center mb-5">
           <h1 className="text-xl font-bold text-slate-700 mb-0.5">{getGreeting()}</h1>
           <p className="text-sm text-slate-400">{user?.display_name || '访客'}</p>
         </div>
@@ -41,7 +41,7 @@ export default function HomePage() {
         {/* Search Input - Hero */}
         <div className="relative mb-8">
           <div className="absolute inset-0 bg-white rounded-2xl shadow-xl shadow-slate-300/50" />
-          <div className="relative flex items-start pt-5 pb-4">
+          <div className="relative flex items-start pt-4 pb-3">
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -51,22 +51,22 @@ export default function HomePage() {
                   handleSend();
                 }
               }}
-              placeholder="问问你的数据…"
-              rows={3}
-              className="flex-1 px-8 pr-28 bg-transparent text-slate-800 placeholder-slate-400 focus:outline-none text-lg resize-none leading-relaxed"
+              placeholder="有什么可以帮到您"
+              rows={2}
+              className="flex-1 px-8 pr-28 bg-transparent text-slate-800 placeholder-slate-400 focus:outline-none text-base resize-none leading-relaxed"
               style={{ border: 'none' }}
             />
             <button
               onClick={handleSend}
-              className="absolute right-3 bottom-3 p-3 bg-gradient-to-br from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white rounded-xl transition-all shadow-lg shadow-blue-500/30"
+              className="absolute right-3 bottom-2.5 p-2.5 bg-gradient-to-br from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white rounded-xl transition-all shadow-lg shadow-blue-500/30"
             >
-              <i className="ri-send-plane-fill text-lg" />
+              <i className="ri-send-plane-fill text-base" />
             </button>
           </div>
         </div>
 
         {/* Example Prompts */}
-        <div className="flex flex-wrap justify-center gap-2 mb-10">
+        <div className="flex flex-wrap justify-center gap-2 mb-8">
           {[
             '最近7天表结构变化',
             '找出没有主键的表',
