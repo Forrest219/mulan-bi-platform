@@ -40,33 +40,30 @@ export default function HomePage() {
 
         {/* Search Input - Hero */}
         <div className="relative mb-8">
-          <div className="absolute inset-0 bg-white rounded-2xl shadow-xl shadow-slate-300/50" />
-          <div className="relative flex items-start pt-4 pb-3">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              placeholder="有什么可以帮到您"
-              rows={2}
-              className="flex-1 px-8 pr-28 bg-transparent text-slate-800 placeholder-slate-400 focus:outline-none text-base resize-none leading-relaxed"
-              style={{ border: 'none' }}
-            />
-            <button
-              onClick={handleSend}
-              className="absolute right-3 bottom-2.5 p-2.5 bg-gradient-to-br from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white rounded-xl transition-all shadow-lg shadow-blue-500/30"
-            >
-              <i className="ri-send-plane-fill text-base" />
-            </button>
-          </div>
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            placeholder="有什么可以帮到您"
+            rows={2}
+            className="w-full px-8 pr-20 py-4 bg-white text-slate-800 placeholder-slate-400 focus:outline-none text-base resize-none leading-relaxed rounded-full"
+            style={{ border: '1px solid #dfe1e5' }}
+          />
+          <button
+            onClick={handleSend}
+            className="absolute right-3 top-1/2 -translate-y-1/2 p-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-full transition-colors"
+          >
+            <i className="ri-send-plane-fill text-base" />
+          </button>
         </div>
 
         {/* Example Prompts */}
-        <div className="flex flex-wrap justify-center gap-2 mb-8">
+        <div className="flex flex-wrap justify-center gap-2 mb-8 opacity-60">
           {[
             '最近7天表结构变化',
             '找出没有主键的表',
@@ -75,7 +72,7 @@ export default function HomePage() {
             <button
               key={i}
               onClick={() => setInput(prompt)}
-              className="text-xs px-3 py-1 bg-white/80 hover:bg-white text-slate-400 hover:text-slate-600 rounded-full transition-colors"
+              className="text-xs px-3 py-1 hover:bg-slate-200/60 text-slate-500 rounded-full transition-colors"
             >
               {prompt}
             </button>
@@ -83,15 +80,15 @@ export default function HomePage() {
         </div>
 
         {/* Feature Icons */}
-        <div className="flex justify-center gap-5">
+        <div className="flex justify-center gap-4">
           {features.map((feature) => (
             <button
               key={feature.label}
               onClick={() => navigate(feature.path)}
-              className="flex flex-col items-center gap-1.5 group"
+              className="flex flex-col items-center gap-1 group"
             >
-              <div className="w-12 h-12 rounded-xl bg-white shadow-sm shadow-slate-200/50 flex items-center justify-center group-hover:shadow-md group-hover:-translate-y-0.5 transition-all">
-                <i className={`${feature.icon} text-xl text-slate-500 group-hover:text-blue-500`} />
+              <div className="w-10 h-10 rounded-full bg-white/80 flex items-center justify-center group-hover:bg-white group-hover:shadow-sm transition-all">
+                <i className={`${feature.icon} text-lg text-slate-400 group-hover:text-blue-500`} />
               </div>
               <span className="text-xs text-slate-400 group-hover:text-slate-600">{feature.label}</span>
             </button>
