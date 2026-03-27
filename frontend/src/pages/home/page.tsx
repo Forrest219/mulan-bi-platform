@@ -33,23 +33,23 @@ export default function HomePage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-blue-50">
       <div className="max-w-2xl mx-auto px-6 pt-20">
         {/* Welcome */}
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-slate-800 mb-1">{getGreeting()}</h1>
-          <p className="text-sm text-slate-500">{user?.display_name || '访客'}</p>
+        <div className="text-center mb-6">
+          <h1 className="text-xl font-bold text-slate-700 mb-0.5">{getGreeting()}</h1>
+          <p className="text-sm text-slate-400">{user?.display_name || '访客'}</p>
         </div>
 
-        {/* Search Input */}
+        {/* Search Input - Hero */}
         <div className="relative mb-8">
-          <div className="absolute inset-0 bg-white rounded-2xl shadow-lg shadow-slate-200/80" />
+          <div className="absolute inset-0 bg-white rounded-2xl shadow-xl shadow-slate-300/50" />
           <div className="relative flex items-center">
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              placeholder="Ask your data anything..."
-              className="w-full px-7 py-5 pr-24 bg-transparent rounded-2xl text-slate-800 placeholder-slate-400 focus:outline-none text-base"
-              style={{ border: '1.5px solid rgba(0,0,0,0.08)' }}
+              placeholder="问问你的数据…"
+              className="w-full px-8 py-6 pr-28 bg-transparent rounded-2xl text-slate-800 placeholder-slate-400 focus:outline-none text-lg"
+              style={{ border: '1.5px solid rgba(0,0,0,0.06)' }}
             />
             <button
               onClick={handleSend}
@@ -61,7 +61,7 @@ export default function HomePage() {
         </div>
 
         {/* Example Prompts */}
-        <div className="flex flex-wrap justify-center gap-2 mb-12">
+        <div className="flex flex-wrap justify-center gap-2 mb-10">
           {[
             '最近7天表结构变化',
             '找出没有主键的表',
@@ -70,7 +70,7 @@ export default function HomePage() {
             <button
               key={i}
               onClick={() => setInput(prompt)}
-              className="text-xs px-4 py-1.5 bg-white hover:bg-slate-50 text-slate-500 rounded-full transition-colors shadow-sm"
+              className="text-xs px-3 py-1 bg-white/80 hover:bg-white text-slate-400 hover:text-slate-600 rounded-full transition-colors"
             >
               {prompt}
             </button>
@@ -78,17 +78,17 @@ export default function HomePage() {
         </div>
 
         {/* Feature Icons */}
-        <div className="flex justify-center gap-6">
+        <div className="flex justify-center gap-5">
           {features.map((feature) => (
             <button
               key={feature.label}
               onClick={() => navigate(feature.path)}
-              className="flex flex-col items-center gap-2 group"
+              className="flex flex-col items-center gap-1.5 group"
             >
-              <div className="w-14 h-14 rounded-2xl bg-white shadow-md shadow-slate-200/60 flex items-center justify-center group-hover:shadow-lg group-hover:-translate-y-1 transition-all">
-                <i className={`${feature.icon} text-2xl text-slate-600 group-hover:text-blue-600`} />
+              <div className="w-12 h-12 rounded-xl bg-white shadow-sm shadow-slate-200/50 flex items-center justify-center group-hover:shadow-md group-hover:-translate-y-0.5 transition-all">
+                <i className={`${feature.icon} text-xl text-slate-500 group-hover:text-blue-500`} />
               </div>
-              <span className="text-xs text-slate-500 group-hover:text-slate-700">{feature.label}</span>
+              <span className="text-xs text-slate-400 group-hover:text-slate-600">{feature.label}</span>
             </button>
           ))}
         </div>
