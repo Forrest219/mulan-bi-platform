@@ -1,281 +1,96 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-
-interface ModuleCard {
-  icon: string;
-  title: string;
-  subtitle: string;
-  description: string;
-  path?: string;
-  active: boolean;
-  highlight?: boolean;
-  stats?: { label: string; value: string }[];
-}
-
-const modules: ModuleCard[] = [
-  {
-    icon: 'ri-database-2-line',
-    title: 'Data Source Manager',
-    subtitle: '数据源管理',
-    description: '配置数据库连接，统一管理 MySQL、SQL Server 等多类型数据源，支持连接健康检测与元数据同步。',
-    path: '/database-monitor',
-    active: true,
-    stats: [
-      { label: 'Connected', value: '3' },
-      { label: 'Tables', value: '205' },
-    ],
-  },
-  {
-    icon: 'ri-shield-check-line',
-    title: 'Schema Governance',
-    subtitle: '结构规范治理',
-    description: '扫描数据库表结构，批量检查是否符合建模规范，识别存量问题，输出全库治理报告。',
-    active: false,
-    stats: [
-      { label: 'Rules', value: '12' },
-      { label: 'Scanned', value: '—' },
-    ],
-  },
-  {
-    icon: 'ri-code-box-line',
-    title: 'DDL Validator',
-    subtitle: 'DDL 检查',
-    description: '粘贴 CREATE TABLE SQL，立即校验是否符合团队建模规范，输出分级问题清单与评分报告。',
-    path: '/ddl-validator',
-    active: true,
-    highlight: true,
-    stats: [
-      { label: 'Rules Active', value: '12' },
-      { label: 'Last Check', value: '9 min ago' },
-    ],
-  },
-  {
-    icon: 'ri-bar-chart-grouped-line',
-    title: 'Data Quality Monitor',
-    subtitle: '数据质量监控',
-    description: '持续监控数据表的空值率、重复率、异常值等质量指标，实时预警数据质量下降趋势。',
-    active: false,
-    stats: [
-      { label: 'Monitors', value: '—' },
-      { label: 'Alerts', value: '—' },
-    ],
-  },
-];
+import { useAuth } from '../../context/AuthContext';
 
 export default function HomePage() {
+  const [input, setInput] = useState('');
   const navigate = useNavigate();
+  const { user, isAdmin, hasPermission } = useAuth();
+
+  const handleSend = () => {
+    if (!input.trim()) return;
+    console.log('Query:', input);
+  };
+
+  // Get greeting based on time of day
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return '☀️ 早上好';
+    if (hour < 18) return '🌤️ 下午好';
+    return '🌙 晚上好';
+  };
+
+  // Feature icons based on user role/permissions
+  const features = [
+    { icon: 'ri-database-2-line', label: '数据库', path: '/database-monitor', show: hasPermission('database_monitor') || isAdmin },
+    { icon: 'ri-shield-check-line', label: 'DDL检查', path: '/ddl-validator', show: hasPermission('ddl_check') || isAdmin },
+    { icon: 'ri-settings-line', label: '规则配置', path: '/rule-config', show: hasPermission('rule_config') || isAdmin },
+    { icon: 'ri-user-settings-line', label: '用户管理', path: '/admin/users', show: isAdmin },
+    { icon: 'ri-group-line', label: '用户组', path: '/admin/groups', show: isAdmin },
+  ].filter(f => f.show);
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Page header */}
-      <div className="bg-white border-b border-slate-200 px-8 py-6">
-        <div className="max-w-6xl mx-auto">
-          <div className="flex items-end justify-between">
-            <div>
-              <h2 className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-1">
-                Platform Overview
-              </h2>
-              <h1 className="text-xl font-semibold text-slate-800">数据建模与治理平台</h1>
-              <p className="text-sm text-slate-500 mt-1">
-                面向 BI 团队 · 数据质量 · DDL 规范 · 结构治理
-              </p>
-            </div>
-            <div className="flex items-center gap-6 text-center">
-              <div>
-                <div className="text-2xl font-bold text-slate-800">4</div>
-                <div className="text-[11px] text-slate-400 mt-0.5">模块</div>
-              </div>
-              <div className="w-px h-8 bg-slate-200" />
-              <div>
-                <div className="text-2xl font-bold text-emerald-600">1</div>
-                <div className="text-[11px] text-slate-400 mt-0.5">已启用</div>
-              </div>
-              <div className="w-px h-8 bg-slate-200" />
-              <div>
-                <div className="text-2xl font-bold text-amber-500">3</div>
-                <div className="text-[11px] text-slate-400 mt-0.5">规划中</div>
-              </div>
-            </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-blue-50">
+      <div className="max-w-2xl mx-auto px-6 pt-20">
+        {/* Welcome */}
+        <div className="text-center mb-8">
+          <h1 className="text-2xl font-bold text-slate-800 mb-1">{getGreeting()}</h1>
+          <p className="text-sm text-slate-500">{user?.display_name || '访客'}</p>
+        </div>
+
+        {/* Search Input */}
+        <div className="relative mb-8">
+          <div className="absolute inset-0 bg-white rounded-2xl shadow-lg shadow-slate-200/80" />
+          <div className="relative flex items-center">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+              placeholder="Ask your data anything..."
+              className="w-full px-7 py-5 pr-24 bg-transparent rounded-2xl text-slate-800 placeholder-slate-400 focus:outline-none text-base"
+              style={{ border: '1.5px solid rgba(0,0,0,0.08)' }}
+            />
+            <button
+              onClick={handleSend}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-3 bg-gradient-to-br from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white rounded-xl transition-all shadow-lg shadow-blue-500/30"
+            >
+              <i className="ri-send-plane-fill text-lg" />
+            </button>
           </div>
         </div>
-      </div>
 
-      {/* Module cards */}
-      <div className="max-w-6xl mx-auto px-8 py-8">
-        {/* Current focus banner */}
-        <div className="flex items-center gap-2 mb-6">
-          <div className="w-1.5 h-4 rounded-full bg-orange-500" />
-          <span className="text-[13px] font-medium text-slate-600">
-            当前迭代重点：<strong className="text-slate-800">DDL Validator</strong> — 快速接入，即可使用
-          </span>
-        </div>
-
-        <div className="grid grid-cols-2 gap-5">
-          {modules.map((mod) => (
-            <div
-              key={mod.title}
-              onClick={() => mod.path && navigate(mod.path)}
-              className={`relative bg-white rounded-xl border transition-all group ${
-                mod.highlight
-                  ? 'border-orange-300 ring-2 ring-orange-100 cursor-pointer hover:shadow-md hover:-translate-y-0.5'
-                  : mod.active && mod.path
-                  ? 'border-slate-200 cursor-pointer hover:border-slate-300 hover:shadow-sm hover:-translate-y-0.5'
-                  : 'border-slate-200 opacity-70'
-              }`}
+        {/* Example Prompts */}
+        <div className="flex flex-wrap justify-center gap-2 mb-12">
+          {[
+            '最近7天表结构变化',
+            '找出没有主键的表',
+            '生成月度报告',
+          ].map((prompt, i) => (
+            <button
+              key={i}
+              onClick={() => setInput(prompt)}
+              className="text-xs px-4 py-1.5 bg-white hover:bg-slate-50 text-slate-500 rounded-full transition-colors shadow-sm"
             >
-              {/* Highlight badge */}
-              {mod.highlight && (
-                <div className="absolute -top-2.5 right-4">
-                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-orange-500 text-white uppercase tracking-wide">
-                    Current Focus
-                  </span>
-                </div>
-              )}
-
-              {/* Coming Soon badge */}
-              {!mod.active && (
-                <div className="absolute top-4 right-4">
-                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-400 border border-slate-200">
-                    Coming Soon
-                  </span>
-                </div>
-              )}
-
-              <div className="p-6">
-                <div className="flex items-start gap-4">
-                  <div
-                    className={`w-10 h-10 flex items-center justify-center rounded-lg shrink-0 ${
-                      mod.highlight
-                        ? 'bg-orange-50 text-orange-500'
-                        : mod.active
-                        ? 'bg-slate-100 text-slate-600'
-                        : 'bg-slate-50 text-slate-400'
-                    }`}
-                  >
-                    <i className={`${mod.icon} text-lg`} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline gap-2 mb-0.5">
-                      <h3
-                        className={`text-[15px] font-semibold ${
-                          mod.active ? 'text-slate-800' : 'text-slate-500'
-                        }`}
-                      >
-                        {mod.title}
-                      </h3>
-                      <span className="text-[11px] text-slate-400">{mod.subtitle}</span>
-                    </div>
-                    <p className={`text-[13px] leading-relaxed mt-1 ${mod.active ? 'text-slate-500' : 'text-slate-400'}`}>
-                      {mod.description}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Stats row */}
-                {mod.stats && (
-                  <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center gap-5">
-                      {mod.stats.map((s) => (
-                        <div key={s.label}>
-                          <div
-                            className={`text-base font-bold ${
-                              mod.active ? 'text-slate-800' : 'text-slate-400'
-                            }`}
-                          >
-                            {s.value}
-                          </div>
-                          <div className="text-[11px] text-slate-400 mt-0.5">{s.label}</div>
-                        </div>
-                      ))}
-                    </div>
-                    {mod.path && mod.active && (
-                      <div
-                        className={`flex items-center gap-1 text-[12px] font-medium ${
-                          mod.highlight
-                            ? 'text-orange-500 group-hover:gap-2'
-                            : 'text-slate-500 group-hover:gap-2'
-                        } transition-all`}
-                      >
-                        进入模块
-                        <i className="ri-arrow-right-line text-sm" />
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
+              {prompt}
+            </button>
           ))}
         </div>
 
-        {/* Bottom info section */}
-        <div className="mt-8 grid grid-cols-3 gap-4">
-          <div className="bg-white border border-slate-200 rounded-xl p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-6 h-6 flex items-center justify-center">
-                <i className="ri-git-branch-line text-slate-500" />
+        {/* Feature Icons */}
+        <div className="flex justify-center gap-6">
+          {features.map((feature) => (
+            <button
+              key={feature.label}
+              onClick={() => navigate(feature.path)}
+              className="flex flex-col items-center gap-2 group"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-white shadow-md shadow-slate-200/60 flex items-center justify-center group-hover:shadow-lg group-hover:-translate-y-1 transition-all">
+                <i className={`${feature.icon} text-2xl text-slate-600 group-hover:text-blue-600`} />
               </div>
-              <span className="text-[13px] font-semibold text-slate-700">平台版本</span>
-            </div>
-            <div className="space-y-2">
-              <div className="flex justify-between text-[12px]">
-                <span className="text-slate-400">Core Engine</span>
-                <span className="text-slate-700 font-medium">v0.3.1</span>
-              </div>
-              <div className="flex justify-between text-[12px]">
-                <span className="text-slate-400">Rule Pack</span>
-                <span className="text-slate-700 font-medium">2026-03</span>
-              </div>
-              <div className="flex justify-between text-[12px]">
-                <span className="text-slate-400">Last Updated</span>
-                <span className="text-slate-700 font-medium">2026-03-25</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white border border-slate-200 rounded-xl p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-6 h-6 flex items-center justify-center">
-                <i className="ri-team-line text-slate-500" />
-              </div>
-              <span className="text-[13px] font-semibold text-slate-700">团队使用情况</span>
-            </div>
-            <div className="space-y-2">
-              <div className="flex justify-between text-[12px]">
-                <span className="text-slate-400">本周 DDL 检查次数</span>
-                <span className="text-slate-700 font-medium">84</span>
-              </div>
-              <div className="flex justify-between text-[12px]">
-                <span className="text-slate-400">发现问题总数</span>
-                <span className="text-slate-700 font-medium">312</span>
-              </div>
-              <div className="flex justify-between text-[12px]">
-                <span className="text-slate-400">活跃用户</span>
-                <span className="text-slate-700 font-medium">7</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white border border-slate-200 rounded-xl p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-6 h-6 flex items-center justify-center">
-                <i className="ri-roadmap-line text-slate-500" />
-              </div>
-              <span className="text-[13px] font-semibold text-slate-700">迭代计划</span>
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-[12px]">
-                <div className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" />
-                <span className="text-slate-600">Q2 · Schema Governance 上线</span>
-              </div>
-              <div className="flex items-center gap-2 text-[12px]">
-                <div className="w-1.5 h-1.5 rounded-full bg-slate-300 shrink-0" />
-                <span className="text-slate-400">Q3 · Data Quality Monitor</span>
-              </div>
-              <div className="flex items-center gap-2 text-[12px]">
-                <div className="w-1.5 h-1.5 rounded-full bg-slate-300 shrink-0" />
-                <span className="text-slate-400">Q4 · 全库扫描 + 报告导出</span>
-              </div>
-            </div>
-          </div>
+              <span className="text-xs text-slate-500 group-hover:text-slate-700">{feature.label}</span>
+            </button>
+          ))}
         </div>
       </div>
     </div>
