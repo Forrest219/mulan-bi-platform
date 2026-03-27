@@ -41,19 +41,24 @@ export default function HomePage() {
         {/* Search Input - Hero */}
         <div className="relative mb-8">
           <div className="absolute inset-0 bg-white rounded-2xl shadow-xl shadow-slate-300/50" />
-          <div className="relative flex items-center">
-            <input
-              type="text"
+          <div className="relative flex items-start pt-5 pb-4">
+            <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
               placeholder="问问你的数据…"
-              className="w-full px-8 py-6 pr-28 bg-transparent rounded-2xl text-slate-800 placeholder-slate-400 focus:outline-none text-lg"
-              style={{ border: '1.5px solid rgba(0,0,0,0.06)' }}
+              rows={3}
+              className="flex-1 px-8 pr-28 bg-transparent text-slate-800 placeholder-slate-400 focus:outline-none text-lg resize-none leading-relaxed"
+              style={{ border: 'none' }}
             />
             <button
               onClick={handleSend}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-3 bg-gradient-to-br from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white rounded-xl transition-all shadow-lg shadow-blue-500/30"
+              className="absolute right-3 bottom-3 p-3 bg-gradient-to-br from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white rounded-xl transition-all shadow-lg shadow-blue-500/30"
             >
               <i className="ri-send-plane-fill text-lg" />
             </button>
