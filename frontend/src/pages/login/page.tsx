@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -15,7 +15,7 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
 
-    const result = await login(email, password);
+    const result = await login(username, password);
 
     if (result.success) {
       navigate('/');
@@ -47,14 +47,14 @@ export default function LoginPage() {
 
           <div>
             <label className="block text-sm font-medium text-slate-600 mb-1.5">
-              邮箱
+              用户名
             </label>
             <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
               className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
-              placeholder="your@email.com"
+              placeholder="请输入用户名"
               required
             />
           </div>
@@ -90,7 +90,7 @@ export default function LoginPage() {
           <Link to="/register" className="block text-sm text-blue-600 hover:text-blue-700">
             注册新账号
           </Link>
-          <p className="text-xs text-slate-400">默认管理员: admin@mulan.local / admin123</p>
+          <p className="text-xs text-slate-400">默认管理员: admin / admin123</p>
         </div>
       </div>
     </div>
