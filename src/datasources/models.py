@@ -1,4 +1,5 @@
 """数据源数据模型"""
+import threading
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
@@ -48,26 +49,38 @@ class DataSource(Base):
 
 
 class DataSourceDatabase:
-    """数据源数据库管理 - 单例模式"""
+    """数据源数据库管理 - 单例模式（线程安全）"""
 
     _instance = None
+    _lock = threading.Lock()
 
     def __new__(cls, db_path: str = None):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            if db_path is None:
-                db_path = "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/data/datasources.db"
-            cls._instance._init_db(db_path)
+            with cls._lock:
+                if cls._instance is None:  # 二次检查
+                    cls._instance = super().__new__(cls)
+                    if db_path is None:
+                        db_path = "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/data/datasources.db"
+                    cls._instance._init_db(db_path)
         return cls._instance
 
     def _init_db(self, db_path: str):
         """初始化数据库"""
         import os
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        self.engine = create_engine(f"sqlite:///{db_path}", echo=False)
+        self.engine = create_engine(f"sqlite:///{db_path}", echo=False, pool_pre_ping=True)
         Base.metadata.create_all(self.engine)
-        Session = sessionmaker(bind=self.engine)
-        self.session = Session()
+        Session = sessionmaker(bind=self.engine, expire_on_commit=False)
+        from sqlalchemy.orm import scoped_session
+        self._scoped_session = scoped_session(Session)
+
+    @property
+    def session(self):
+        """线程本地的 session，每次调用返回当前线程的 session"""
+        return self._scoped_session()
+
+    def close(self):
+        self._scoped_session.remove()
 
     def create(self, name: str, db_type: str, host: str, port: int,
                database_name: str, username: str, password_encrypted: str,

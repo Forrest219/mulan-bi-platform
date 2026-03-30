@@ -16,11 +16,11 @@ from tableau.sync_service import TableauSyncService
 
 router = APIRouter()
 
-# 加密密钥
-_ENCRYPTION_KEY = os.environ.get(
-    "TABLEAU_ENCRYPTION_KEY",
-    os.environ.get("DATASOURCE_ENCRYPTION_KEY", "mulan-datasource-dev-key-32bytes!!")
-)
+# 加密密钥：优先 TABLEAU_ENCRYPTION_KEY，没有则复用 DATASOURCE_ENCRYPTION_KEY（已有数据依赖）
+# 生产环境应单独设置 TABLEAU_ENCRYPTION_KEY，禁止两个都为空
+_ENCRYPTION_KEY = os.environ.get("TABLEAU_ENCRYPTION_KEY") or os.environ.get("DATASOURCE_ENCRYPTION_KEY")
+if not _ENCRYPTION_KEY:
+    raise RuntimeError("TABLEAU_ENCRYPTION_KEY or DATASOURCE_ENCRYPTION_KEY must be set")
 
 
 def _get_cipher():

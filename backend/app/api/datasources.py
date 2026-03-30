@@ -15,15 +15,28 @@ from datasources.models import DataSourceDatabase
 
 router = APIRouter()
 
-# 加密密钥（生产环境必须通过环境变量设置）
-_ENCRYPTION_KEY = os.environ.get("DATASOURCE_ENCRYPTION_KEY", "mulan-datasource-dev-key-32bytes!!")
+# 加密密钥（生产环境必须通过环境变量设置，禁止硬编码 fallback）
+_ENCRYPTION_KEY = os.environ.get("DATASOURCE_ENCRYPTION_KEY")
+if not _ENCRYPTION_KEY:
+    raise RuntimeError("DATASOURCE_ENCRYPTION_KEY environment variable must be set")
 
 
 def _get_cipher():
     from cryptography.fernet import Fernet
-    key = _ENCRYPTION_KEY.encode()
-    if len(key) != 32:
-        key = Fernet.generate_key()
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.backends import default_backend
+    import base64
+
+    key_bytes = _ENCRYPTION_KEY.encode()
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=b'mulan-datasource-salt-v1',
+        iterations=100000,
+        backend=default_backend()
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(key_bytes))
     return Fernet(key)
 
 
@@ -179,7 +192,9 @@ async def delete_datasource(ds_id: int, request: Request):
 
 @router.post("/{ds_id}/test")
 async def test_connection(ds_id: int, request: Request):
-    """测试数据源连接"""
+    """测试数据源连接（10秒超时）"""
+    import asyncio
+
     user = require_admin_or_data_admin(request)
     _db = DataSourceDatabase(db_path=_db_path())
 
@@ -203,10 +218,15 @@ async def test_connection(ds_id: int, request: Request):
 
         sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "modules" / "ddl_check_engine"))
         from ddl_check_engine.connector import DatabaseConnector
-        connector = DatabaseConnector(db_config)
-        connected = connector.connect()
 
+        def _do_connect():
+            connector = DatabaseConnector(db_config)
+            return connector.connect()
+
+        connected = await asyncio.wait_for(asyncio.to_thread(_do_connect), timeout=10.0)
         return {"success": connected, "message": "连接成功" if connected else "连接失败"}
 
+    except asyncio.TimeoutError:
+        return {"success": False, "message": "连接超时（10秒），请检查主机和网络"}
     except Exception as e:
         return {"success": False, "message": f"连接失败: {str(e)}"}
