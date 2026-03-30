@@ -9,6 +9,7 @@ export const ALL_PERMISSIONS = [
   { key: 'rule_config', label: '规则配置' },
   { key: 'scan_logs', label: '扫描日志' },
   { key: 'user_management', label: '用户管理' },
+  { key: 'tableau', label: 'Tableau 资产' },
 ];
 
 export const ROLE_LABELS: Record<string, string> = {
@@ -20,8 +21,8 @@ export const ROLE_LABELS: Record<string, string> = {
 
 export const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
   admin: ALL_PERMISSIONS.map(p => p.key),
-  data_admin: ['database_monitor', 'ddl_check', 'rule_config', 'scan_logs'],
-  analyst: ['scan_logs'],
+  data_admin: ['database_monitor', 'ddl_check', 'rule_config', 'scan_logs', 'tableau'],
+  analyst: ['scan_logs', 'tableau'],
   user: [],
 };
 

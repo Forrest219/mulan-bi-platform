@@ -12,6 +12,9 @@ import UsersAdminPage from "../pages/admin/user-management/page";
 import GroupsAdminPage from "../pages/admin/groups/page";
 import PermissionsAdminPage from "../pages/admin/permissions/page";
 import ActivityAdminPage from "../pages/admin/activity/page";
+import TableauConnectionsPage from "../pages/tableau/connections/page";
+import TableauAssetBrowserPage from "../pages/tableau/assets/page";
+import TableauAssetDetailPage from "../pages/tableau/asset-detail/page";
 
 const routes: RouteObject[] = [
   {
@@ -79,6 +82,30 @@ const routes: RouteObject[] = [
     element: (
       <ProtectedRoute adminOnly>
         <AdminLayout><ActivityAdminPage /></AdminLayout>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/tableau/connections",
+    element: (
+      <ProtectedRoute requiredPermission="tableau">
+        <AdminLayout><TableauConnectionsPage /></AdminLayout>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/tableau/assets",
+    element: (
+      <ProtectedRoute requiredPermission="tableau">
+        <TableauAssetBrowserPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/tableau/assets/:id",
+    element: (
+      <ProtectedRoute requiredPermission="tableau">
+        <TableauAssetDetailPage />
       </ProtectedRoute>
     ),
   },
