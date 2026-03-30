@@ -39,6 +39,28 @@ class AuthService:
         "user_management": "用户管理",
     }
 
+    # 角色定义
+    ROLE_ADMIN = "admin"
+    ROLE_DATA_ADMIN = "data_admin"   # 数据管理员 - 数据域的 admin
+    ROLE_ANALYST = "analyst"         # 业务分析师 - 只读
+    ROLE_USER = "user"               # 普通用户
+
+    # 角色标签映射
+    ROLE_LABELS = {
+        ROLE_ADMIN: "管理员",
+        ROLE_DATA_ADMIN: "数据管理员",
+        ROLE_ANALYST: "业务分析师",
+        ROLE_USER: "普通用户",
+    }
+
+    # 角色默认权限
+    ROLE_DEFAULT_PERMISSIONS = {
+        ROLE_ADMIN: ALL_PERMISSIONS,
+        ROLE_DATA_ADMIN: ["database_monitor", "ddl_check", "rule_config", "scan_logs"],
+        ROLE_ANALYST: ["scan_logs"],
+        ROLE_USER: [],
+    }
+
     def _ensure_admin(self):
         """确保存在管理员账户"""
         admin = self._db.get_user_by_username("admin")
@@ -97,15 +119,19 @@ class AuthService:
         users = self._db.get_users(role=role)
         return [u.to_dict() for u in users]
 
-    def create_user(self, username: str, password: str, role: str = "user", display_name: str = None, email: str = None, permissions: list = None, group_ids: list = None) -> Optional[Dict[str, Any]]:
+    def create_user(self, username: str, password: str, role: str = None, display_name: str = None, email: str = None, permissions: list = None, group_ids: list = None) -> Optional[Dict[str, Any]]:
         """创建用户（管理员）"""
         existing = self._db.get_user_by_username(username)
         if existing:
             return None
 
-        # 如果没有指定权限，默认给空权限列表
+        # 如果没有指定角色，默认普通用户
+        if role is None:
+            role = self.ROLE_USER
+
+        # 如果没有指定权限，使用角色默认权限
         if permissions is None:
-            permissions = []
+            permissions = self.ROLE_DEFAULT_PERMISSIONS.get(role, [])
 
         user = self._db.create_user(
             username=username,
@@ -150,10 +176,10 @@ class AuthService:
         user = self._db.create_user(
             username=username,
             password_hash=self.hash_password(password),
-            role="user",
+            role=self.ROLE_USER,
             display_name=display_name,
             email=email,
-            permissions=[]
+            permissions=self.ROLE_DEFAULT_PERMISSIONS.get(self.ROLE_USER, [])
         )
 
         return user.to_dict()
@@ -183,6 +209,31 @@ class AuthService:
             if perm not in self.ALL_PERMISSIONS:
                 return False
         return self._db.update_user_permissions(user_id, permissions)
+
+    def get_effective_permissions(self, user_id: int) -> List[str]:
+        """获取用户实际生效的权限（角色默认 + 个人额外）"""
+        user = self._db.get_user(user_id)
+        if not user:
+            return []
+        # 角色默认权限
+        role_perms = self.ROLE_DEFAULT_PERMISSIONS.get(user.role, [])
+        # 个人额外权限
+        personal_perms = user.permissions or []
+        return list(set(role_perms + personal_perms))
+
+    def has_permission(self, user_id: int, permission: str) -> bool:
+        """检查用户是否拥有指定权限"""
+        if not user_id:
+            return False
+        user = self._db.get_user(user_id)
+        if not user:
+            return False
+        # admin 拥有所有权限
+        if user.role == self.ROLE_ADMIN:
+            return True
+        # 合并角色默认权限和个人权限
+        effective = self.get_effective_permissions(user_id)
+        return permission in effective
 
     def delete_user(self, user_id: int) -> bool:
         """删除用户"""

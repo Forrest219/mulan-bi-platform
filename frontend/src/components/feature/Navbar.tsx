@@ -77,9 +77,19 @@ export default function Navbar() {
                 <span className="text-[13px] font-medium text-slate-700">
                   {user.username}
                 </span>
-                {isAdmin && (
+                {user.role === 'admin' && (
                   <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
-                    ADMIN
+                    管理员
+                  </span>
+                )}
+                {user.role === 'data_admin' && (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                    数据管理员
+                  </span>
+                )}
+                {user.role === 'analyst' && (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">
+                    分析师
                   </span>
                 )}
               </div>

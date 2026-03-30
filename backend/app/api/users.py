@@ -49,12 +49,12 @@ class CreateUserRequest(BaseModel):
     display_name: str
     password: str
     email: Optional[str] = None
-    role: str = "user"  # admin, user
+    role: str = "user"  # admin, data_admin, analyst, user
 
 
 class UpdateUserRoleRequest(BaseModel):
     """更新用户角色请求"""
-    role: str  # admin, user
+    role: str  # admin, data_admin, analyst, user
 
 
 class UpdatePermissionsRequest(BaseModel):
@@ -82,7 +82,8 @@ async def create_user(request: CreateUserRequest):
     sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
     from auth import auth_service
 
-    if request.role not in ["admin", "user"]:
+    VALID_ROLES = ["admin", "data_admin", "analyst", "user"]
+    if request.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail="无效的角色")
 
     user = auth_service.create_user(
@@ -107,8 +108,17 @@ async def update_user_role(user_id: int, request: UpdateUserRoleRequest):
     sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
     from auth import auth_service
 
-    if request.role not in ["admin", "user"]:
+    VALID_ROLES = ["admin", "data_admin", "analyst", "user"]
+    if request.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail="无效的角色")
+
+    # 防止把自己降级
+    session = request.cookies.get("session")
+    if session:
+        parts = session.split(":")
+        current_user_id = int(parts[0])
+        if current_user_id == user_id and request.role != "admin":
+            raise HTTPException(status_code=400, detail="不能将自己的角色降级")
 
     success = auth_service.update_user_role(user_id, request.role)
     if not success:
@@ -174,6 +184,21 @@ async def get_all_permissions():
         for key in auth_service.ALL_PERMISSIONS
     ]
     return {"permissions": permissions}
+
+
+@router.get("/roles", dependencies=[Depends(get_current_admin)])
+async def get_all_roles():
+    """获取所有可用角色（管理员）"""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    from auth import auth_service
+
+    roles = [
+        {"key": key, "label": label, "permissions": auth_service.ROLE_DEFAULT_PERMISSIONS.get(key, [])}
+        for key, label in auth_service.ROLE_LABELS.items()
+    ]
+    return {"roles": roles}
 
 
 @router.delete("/{user_id}", dependencies=[Depends(get_current_admin)])

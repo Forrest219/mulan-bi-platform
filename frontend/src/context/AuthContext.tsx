@@ -11,12 +11,28 @@ export const ALL_PERMISSIONS = [
   { key: 'user_management', label: '用户管理' },
 ];
 
+export const ROLE_LABELS: Record<string, string> = {
+  admin: '管理员',
+  data_admin: '数据管理员',
+  analyst: '业务分析师',
+  user: '普通用户',
+};
+
+export const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
+  admin: ALL_PERMISSIONS.map(p => p.key),
+  data_admin: ['database_monitor', 'ddl_check', 'rule_config', 'scan_logs'],
+  analyst: ['scan_logs'],
+  user: [],
+};
+
+type UserRole = 'admin' | 'data_admin' | 'analyst' | 'user';
+
 interface User {
   id: number;
   username: string;
   display_name: string;
   email: string | null;
-  role: 'admin' | 'user';
+  role: UserRole;
   permissions: string[];
   is_active: boolean;
   created_at: string;
@@ -30,6 +46,8 @@ interface AuthContextType {
   logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
   isAdmin: boolean;
+  isDataAdmin: boolean;
+  isAnalyst: boolean;
   hasPermission: (permission: string) => boolean;
   updateUser: (user: User) => void;
 }
@@ -98,7 +116,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const hasPermission = (permission: string): boolean => {
     if (!user) return false;
     if (user.role === 'admin') return true;  // admin has all permissions
-    return user.permissions?.includes(permission) || false;
+    // 合并角色默认权限和个人权限
+    const rolePerms = ROLE_DEFAULT_PERMISSIONS[user.role] || [];
+    const personalPerms = user.permissions || [];
+    return [...rolePerms, ...personalPerms].includes(permission);
   };
 
   const updateUser = (updatedUser: User) => {
@@ -114,6 +135,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logout,
         checkAuth,
         isAdmin: user?.role === 'admin',
+        isDataAdmin: user?.role === 'data_admin',
+        isAnalyst: user?.role === 'analyst',
         hasPermission,
         updateUser,
       }}

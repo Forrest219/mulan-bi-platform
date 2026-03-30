@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react';
-import { ALL_PERMISSIONS } from '../../../context/AuthContext';
+import { ALL_PERMISSIONS, ROLE_LABELS, ROLE_DEFAULT_PERMISSIONS } from '../../../context/AuthContext';
 
 const API_BASE = 'http://localhost:8000';
+
+type UserRole = 'admin' | 'data_admin' | 'analyst' | 'user';
 
 interface User {
   id: number;
   username: string;
   display_name: string;
   email: string | null;
-  role: 'admin' | 'user';
+  role: UserRole;
   permissions: string[];
   group_ids: number[];
   group_names: string[];
@@ -16,6 +18,13 @@ interface User {
   created_at: string;
   last_login: string | null;
 }
+
+const ROLES: { key: UserRole; label: string }[] = [
+  { key: 'admin', label: '管理员' },
+  { key: 'data_admin', label: '数据管理员' },
+  { key: 'analyst', label: '业务分析师' },
+  { key: 'user', label: '普通用户' },
+];
 
 // 头像颜色配置
 const AVATAR_GRADIENTS = [
@@ -61,7 +70,14 @@ export default function UserManagementPage() {
   const [showPermModal, setShowPermModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [newUser, setNewUser] = useState({
+  const [newUser, setNewUser] = useState<{
+    username: string;
+    display_name: string;
+    password: string;
+    confirm_password: string;
+    email: string;
+    role: UserRole;
+  }>({
     username: '',
     display_name: '',
     password: '',
@@ -344,8 +360,9 @@ export default function UserManagementPage() {
                 <td className="px-4 py-3">
                   <select value={user.role} onChange={(e) => handleUpdateRole(user.id, e.target.value)}
                     className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white">
-                    <option value="user">用户</option>
-                    <option value="admin">管理员</option>
+                    {ROLES.map(r => (
+                      <option key={r.key} value={r.key}>{r.label}</option>
+                    ))}
                   </select>
                 </td>
                 <td className="px-4 py-3">
@@ -417,9 +434,15 @@ export default function UserManagementPage() {
                 <label className="block text-sm font-medium text-slate-600 mb-1.5">角色</label>
                 <select value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
                   className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500">
-                  <option value="user">普通用户</option>
-                  <option value="admin">管理员</option>
+                  {ROLES.map(r => (
+                    <option key={r.key} value={r.key}>{r.label}</option>
+                  ))}
                 </select>
+                <p className="text-xs text-slate-400 mt-1">
+                  预设权限：{(ROLE_DEFAULT_PERMISSIONS[newUser.role] || []).length > 0
+                    ? (ROLE_DEFAULT_PERMISSIONS[newUser.role] || []).map(k => ALL_PERMISSIONS.find(p => p.key === k)?.label || k).join('、')
+                    : '无默认权限，可后续手动分配'}
+                </p>
               </div>
             </div>
             <div className="flex justify-end gap-3 mt-6">
