@@ -1,6 +1,6 @@
 # Tableau MCP 集成模块 PRD
 
-> 文档版本：v1.1（草案）
+> 文档版本：v1.2（草案）
 > 更新日期：2026-03-30
 > 状态：待审阅
 
@@ -56,10 +56,25 @@
 
 ### 3.1 Tableau 连接配置
 
-**3.1.1 添加 Tableau Server**
-- 字段：服务器地址、Site、API Version、Personal Access Token Name / Token Secret（替代用户名密码）
-- 支持多实例：可配置多个不同的 Tableau Server（测试环境、生产环境）
-- 连接测试：验证 Token 是否有效、Server 是否可达
+> **多 Server / 多 Site 支持说明**
+>
+> Tableau 组织结构：Server → Site → Project → Workbook/View
+> - 一个 Server 可有多个 Site（独立用户体系和资产命名空间）
+> - PAT 绑定在 Site 级别，不是 Server 级别
+>
+> **设计映射**：每条连接记录 = 一个 Site
+> - 同一 Server 不同 Site → 加多条记录，`server_url` 相同，`site` 不同
+> - 不同 Server → 加多条记录，`server_url` 不同
+> - UI 上用「连接名称」区分（如"生产-Site A""测试-Site B"）
+
+**3.1.1 添加 Tableau Server / Site**
+- 字段：
+  - 连接名称（业务命名，如"生产-Site A"）
+  - 服务器地址（Server URL）
+  - Site 名称（区分同一 Server 下的多个 Site）
+  - API Version（默认 v3）
+  - Personal Access Token Name / Token Secret
+- 连接测试：验证 Token 是否有效、Server + Site 是否可达
 
 **3.1.2 Tableau 资产同步**
 - 同步内容（只读）：
@@ -101,19 +116,21 @@
 
 ```
 /tableau
-├── 连接管理页
-│   ├── 已配置实例列表（名称、URL、同步状态）
+├── 连接管理页（admin / data_admin）
+│   ├── 已配置实例列表（名称、URL、Site、同步状态）
 │   ├── 「添加连接」按钮
 │   └── 同步历史日志
-├── 资产浏览页
-│   ├── 左侧：项目树导航
+├── 资产浏览页（所有已登录用户）
+│   ├── 左侧：Site/连接选择下拉 + 项目树导航
 │   ├── 右侧：资产列表（Workbooks / Views）
-│   └── 快捷搜索框
+│   └── 顶部：全局搜索框
 └── 报表详情页
     ├── 基本信息（名称、项目、描述）
-    ├── 关联数据源
+    ├── 关联数据源（可跳转 DDL 检查）
     └── 解读摘要（预留 AI 能力）
 ```
+
+> **分析师的入口**：登录 Mulan 后，顶部导航「Tableau」或左侧菜单 → 进入 `/tableau/assets`（资产浏览页），无需进入「连接管理」页。
 
 ---
 
@@ -124,12 +141,12 @@
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | id | INT | 主键 |
-| name | VARCHAR(128) | 实例名称（如"生产环境"） |
+| name | VARCHAR(128) | 连接名称（UI 显示，如"生产-Site A"） |
 | server_url | VARCHAR(512) | Tableau Server URL |
-| site | VARCHAR(128) | Site 名称 |
+| site | VARCHAR(128) | Site 名称/ID（一个 URL 可对应多个 Site） |
 | api_version | VARCHAR(16) | API 版本（如 v3） |
 | token_name | VARCHAR(128) | Personal Access Token 名称 |
-| token_encrypted | TEXT | Token Secret（加密） |
+| token_encrypted | TEXT | Token Secret（Fernet 加密） |
 | owner_id | INT | 创建者用户 ID |
 | is_active | BOOL | 启用状态 |
 | last_sync_at | DATETIME | 最近同步时间 |
@@ -164,18 +181,20 @@
 
 ## 6. API 设计
 
+> 所有资产相关 API 均以 `connection_id`（即 Site）为隔离边界，不会跨 Site 混查。
+
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | /api/tableau/connections | 连接列表 |
+| GET | /api/tableau/connections | 连接列表（admin/data_admin） |
 | POST | /api/tableau/connections | 添加连接 |
 | PUT | /api/tableau/connections/{id} | 编辑连接 |
 | DELETE | /api/tableau/connections/{id} | 删除连接 |
 | POST | /api/tableau/connections/{id}/test | 测试连接 |
 | POST | /api/tableau/connections/{id}/sync | 触发同步 |
-| GET | /api/tableau/assets | 资产列表（分页、筛选） |
+| GET | /api/tableau/assets | 资产列表（分页、筛选，按 connection_id） |
 | GET | /api/tableau/assets/{id} | 资产详情 |
-| GET | /api/tableau/assets/search?q= | 搜索资产 |
-| GET | /api/tableau/projects | 项目列表（树形） |
+| GET | /api/tableau/assets/search?q= | 搜索资产（跨 Site 可选） |
+| GET | /api/tableau/projects | 项目列表（树形，按 connection_id） |
 
 ---
 
