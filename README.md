@@ -20,8 +20,8 @@
 
 ## 技术栈
 
-- **后端**：Python 3.10+ / SQLAlchemy
-- **前端**：Streamlit
+- **前端**：React + TypeScript + Vite + Tailwind CSS + React Router v7
+- **后端**：Python 3.10+ / FastAPI + SQLAlchemy
 - **数据库**：SQLite（本地日志）、MySQL/PostgreSQL（目标数据库）
 - **规范规则**：YAML 配置文件
 
@@ -32,12 +32,23 @@
 git clone https://github.com/Forrest219/mulan-bi-platform.git
 cd mulan-bi-platform
 
-# 安装依赖
+# 安装后端依赖
 pip install -r requirements.txt
 
-# 启动应用
-streamlit run src/main.py
+# 设置环境变量
+export SESSION_SECRET=dev-secret-key-change-in-production
+
+# 启动后端（端口 8000）
+cd backend && uvicorn app.main:app --reload --port 8000
+
+# 新终端 - 安装前端依赖
+cd frontend && npm install
+
+# 启动前端（端口 5173）
+npm run dev
 ```
+
+访问 http://localhost:5173 登录使用。
 
 ## 项目结构
 

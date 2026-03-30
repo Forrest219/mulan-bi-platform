@@ -1,6 +1,8 @@
 """
 Mulan BI Platform - FastAPI Backend
 """
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -13,8 +15,10 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Session secret key - in production, use environment variable
-SESSION_SECRET = "mulan-bi-platform-secret-key-change-in-production"
+# Session secret key - must be set via environment variable in production
+SESSION_SECRET = os.environ.get("SESSION_SECRET")
+if not SESSION_SECRET:
+    raise RuntimeError("SESSION_SECRET environment variable must be set")
 
 # 添加 SessionMiddleware
 app.add_middleware(
@@ -24,10 +28,11 @@ app.add_middleware(
     max_age=86400 * 7  # 7 days
 )
 
-# CORS 配置
+# CORS 配置 - 仅允许明确的前端域名
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3002").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
