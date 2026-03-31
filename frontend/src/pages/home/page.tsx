@@ -9,7 +9,8 @@ export default function HomePage() {
 
   const handleSend = () => {
     if (!input.trim()) return;
-    console.log('Query:', input);
+    // TODO: AI 搜索功能开发中
+    alert('功能开发中');
   };
 
   // Get greeting based on time of day

@@ -62,17 +62,27 @@ class AuthService:
     }
 
     def _ensure_admin(self):
-        """确保存在管理员账户"""
-        admin = self._db.get_user_by_username("admin")
-        if not admin:
-            self._db.create_user(
-                username="admin",
-                password_hash=self.hash_password("admin123"),
-                role="admin",
-                display_name="管理员",
-                email="admin@mulan.local",  # 管理员邮箱
-                permissions=self.ALL_PERMISSIONS  # admin 拥有所有权限
-            )
+        """确保存在管理员账户（从环境变量读取账号密码）"""
+        import os
+        admin_username = os.environ.get("ADMIN_USERNAME", "admin")
+        admin_password = os.environ.get("ADMIN_PASSWORD")
+
+        if not admin_password:
+            # 未配置管理员密码时跳过自动创建（生产模式）
+            return
+
+        existing = self._db.get_user_by_username(admin_username)
+        if existing:
+            return
+
+        self._db.create_user(
+            username=admin_username,
+            password_hash=self.hash_password(admin_password),
+            role="admin",
+            display_name="管理员",
+            email="admin@mulan.local",
+            permissions=self.ALL_PERMISSIONS
+        )
 
     def hash_password(self, password: str) -> str:
         """哈希密码 - 使用 PBKDF2"""

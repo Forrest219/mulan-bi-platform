@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { mockDataSources, mockQualityMetrics, monitorStats, DataSource } from '../../mocks/databaseMonitorData';
 
 const statusConfig = {
@@ -21,6 +22,7 @@ function ScoreBar({ score }: { score: number }) {
 }
 
 export default function DatabaseMonitorPage() {
+  const navigate = useNavigate();
   const [selectedDs, setSelectedDs] = useState<DataSource | null>(null);
   const [activeTab, setActiveTab] = useState<'sources' | 'quality'>('sources');
 
@@ -42,7 +44,10 @@ export default function DatabaseMonitorPage() {
             </div>
             <p className="text-[13px] text-slate-400 ml-7">数据源连接状态 · 质量指标监控</p>
           </div>
-          <button className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-900 text-white text-[12px] font-medium rounded-lg hover:bg-slate-700 transition-colors cursor-pointer whitespace-nowrap">
+          <button
+            onClick={() => navigate('/datasources')}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-900 text-white text-[12px] font-medium rounded-lg hover:bg-slate-700 transition-colors cursor-pointer whitespace-nowrap"
+          >
             <i className="ri-add-line" />
             添加数据源
           </button>

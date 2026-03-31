@@ -1,36 +1,48 @@
 """
 访问日志 API
 """
-from fastapi import APIRouter, Request, Depends
+from fastapi import APIRouter, Request, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
+import os
+import jwt
 
 router = APIRouter(tags=["访问日志"])
+
+# JWT 验签
+_JWT_SECRET = os.environ.get("SESSION_SECRET")
+_JWT_ALGORITHM = "HS256"
+
+
+def _decode_session_token(token: str):
+    """验证并解码 session token"""
+    try:
+        payload = jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALGORITHM])
+        return {"id": int(payload["sub"]), "username": payload["username"], "role": payload["role"]}
+    except jwt.InvalidTokenError:
+        return None
 
 
 def get_current_user(request: Request) -> dict:
     """依赖：获取当前登录用户"""
-    session = request.cookies.get("session")
-    if not session:
+    token = request.cookies.get("session")
+    if not token:
         raise HTTPException(status_code=401, detail="未登录")
-
-    parts = session.split(":")
-    if len(parts) < 3:
+    user_info = _decode_session_token(token)
+    if not user_info:
         raise HTTPException(status_code=401, detail="无效的会话")
-
-    return {"id": int(parts[0]), "username": parts[1], "role": parts[2]}
-
-
-from fastapi import HTTPException
+    return user_info
 
 
 @router.get("/logs")
 async def get_access_logs(
+    request: Request,
     limit: int = 50,
     user_id: Optional[int] = None,
     operation_type: Optional[str] = None
 ):
     """获取访问日志"""
+    get_current_user(request)
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
@@ -52,8 +64,9 @@ async def get_access_logs(
 
 
 @router.get("/stats")
-async def get_activity_stats():
+async def get_activity_stats(request: Request):
     """获取活动统计"""
+    get_current_user(request)
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))

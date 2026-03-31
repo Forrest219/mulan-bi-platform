@@ -21,31 +21,56 @@ if not _ENCRYPTION_KEY:
     raise RuntimeError("DATASOURCE_ENCRYPTION_KEY environment variable must be set")
 
 
-def _get_cipher():
+def _get_cipher(salt: bytes = None):
+    """根据 salt 派生 Fernet 密钥。salt=None 时生成随机 salt 用于新加密。"""
     from cryptography.fernet import Fernet
     from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.backends import default_backend
     import base64
 
-    key_bytes = _ENCRYPTION_KEY.encode()
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    # 每个连接用不同 salt，避免批量破解
+    if salt is None:
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+        from cryptography.hazmat.backends import default_backend
+        salt = os.urandom(16)
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+            backend=default_backend()
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(_ENCRYPTION_KEY.encode()))
+        return salt, Fernet(key)
+
+    # 解密时从 token 前 16 字节提取 salt
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
-        salt=b'mulan-datasource-salt-v1',
+        salt=salt,
         iterations=100000,
         backend=default_backend()
     )
-    key = base64.urlsafe_b64encode(kdf.derive(key_bytes))
+    key = base64.urlsafe_b64encode(kdf.derive(_ENCRYPTION_KEY.encode()))
     return Fernet(key)
 
 
 def _encrypt(text: str) -> str:
-    return _get_cipher().encrypt(text.encode()).decode()
+    """加密：随机 salt（16B）+ Fernet(token)，salt 前置用于解密时提取"""
+    salt, cipher = _get_cipher()
+    encrypted = cipher.encrypt(text.encode())
+    # salt 前置，decode 方便存储
+    return base64.urlsafe_b64encode(salt + encrypted).decode()
 
 
 def _decrypt(token: str) -> str:
-    return _get_cipher().decrypt(token.encode()).decode()
+    """解密：提取前 16 字节 salt，用同密钥派生解密"""
+    import base64
+    data = base64.urlsafe_b64decode(token.encode())
+    salt = data[:16]
+    ciphertext = data[16:]
+    cipher = _get_cipher(salt)
+    return cipher.decrypt(ciphertext).decode()
 
 
 def _db_path():

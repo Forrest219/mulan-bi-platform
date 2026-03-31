@@ -2,11 +2,38 @@
 规则配置 API
 """
 from pydantic import BaseModel
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException, Request
 from typing import Optional, List
 from datetime import datetime
+import os
+import jwt
 
 router = APIRouter()
+
+# JWT 验签
+_JWT_SECRET = os.environ.get("SESSION_SECRET")
+_JWT_ALGORITHM = "HS256"
+
+
+def _decode_session_token(token: str):
+    """验证并解码 session token"""
+    try:
+        payload = jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALGORITHM])
+        return {"id": int(payload["sub"]), "username": payload["username"], "role": payload["role"]}
+    except jwt.InvalidTokenError:
+        return None
+
+
+def get_current_user(request: Request) -> dict:
+    """获取当前登录用户"""
+    token = request.cookies.get("session")
+    if not token:
+        raise HTTPException(status_code=401, detail="未登录")
+    user_info = _decode_session_token(token)
+    if not user_info:
+        raise HTTPException(status_code=401, detail="无效的会话")
+    return user_info
+
 
 # 内存存储规则状态（实际应持久化到数据库）
 rules_storage = {
@@ -170,12 +197,14 @@ DEFAULT_RULES = [
 
 @router.get("/")
 async def get_rules(
+    request: Request,
     category: Optional[str] = None,
     level: Optional[str] = None,
     db_type: Optional[str] = None,
     status: Optional[str] = None
 ):
     """获取规则列表"""
+    get_current_user(request)
     rules = DEFAULT_RULES.copy()
 
     # 应用过滤
@@ -205,8 +234,9 @@ async def get_rules(
 
 
 @router.put("/{rule_id}/toggle")
-async def toggle_rule(rule_id: str):
+async def toggle_rule(rule_id: str, request: Request):
     """切换规则启用/禁用状态"""
+    get_current_user(request)
     if rule_id not in rules_storage:
         rules_storage[rule_id] = {"status": "enabled"}
 
@@ -222,8 +252,9 @@ async def toggle_rule(rule_id: str):
 
 
 @router.post("/")
-async def create_custom_rule(rule: ValidationRule):
+async def create_custom_rule(rule: ValidationRule, request: Request):
     """创建自定义规则"""
+    get_current_user(request)
     rule.built_in = False
     rule.status = "enabled"
     DEFAULT_RULES.append(rule)
@@ -232,8 +263,9 @@ async def create_custom_rule(rule: ValidationRule):
 
 
 @router.delete("/{rule_id}")
-async def delete_custom_rule(rule_id: str):
+async def delete_custom_rule(rule_id: str, request: Request):
     """删除自定义规则"""
+    get_current_user(request)
     global DEFAULT_RULES
     rule = next((r for r in DEFAULT_RULES if r.id == rule_id and not r.built_in), None)
     if not rule:

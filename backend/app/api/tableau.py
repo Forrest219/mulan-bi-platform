@@ -16,39 +16,85 @@ from tableau.sync_service import TableauSyncService
 
 router = APIRouter()
 
-# 加密密钥：优先 TABLEAU_ENCRYPTION_KEY，没有则复用 DATASOURCE_ENCRYPTION_KEY（已有数据依赖）
-# 生产环境应单独设置 TABLEAU_ENCRYPTION_KEY，禁止两个都为空
-_ENCRYPTION_KEY = os.environ.get("TABLEAU_ENCRYPTION_KEY") or os.environ.get("DATASOURCE_ENCRYPTION_KEY")
+# 加密密钥：必须设置 TABLEAU_ENCRYPTION_KEY（生产环境禁止与 DATASOURCE_ENCRYPTION_KEY 共用）
+_ENCRYPTION_KEY = os.environ.get("TABLEAU_ENCRYPTION_KEY")
 if not _ENCRYPTION_KEY:
-    raise RuntimeError("TABLEAU_ENCRYPTION_KEY or DATASOURCE_ENCRYPTION_KEY must be set")
+    raise RuntimeError("TABLEAU_ENCRYPTION_KEY environment variable must be set")
 
 
-def _get_cipher():
+def _get_cipher(salt: bytes = None):
+    """根据 salt 派生 Fernet 密钥。salt=None 时生成随机 salt 用于新加密。"""
     from cryptography.fernet import Fernet
     from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
     import base64
 
-    key_bytes = _ENCRYPTION_KEY.encode()
-    # Derive a proper 32-byte Fernet key from the password using PBKDF2
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    if salt is None:
+        salt = os.urandom(16)
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+            backend=default_backend()
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(_ENCRYPTION_KEY.encode()))
+        return salt, Fernet(key)
+
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
-        salt=b'mulan-tableau-salt-v1',
+        salt=salt,
         iterations=100000,
         backend=default_backend()
     )
-    key = base64.urlsafe_b64encode(kdf.derive(key_bytes))
+    key = base64.urlsafe_b64encode(kdf.derive(_ENCRYPTION_KEY.encode()))
     return Fernet(key)
 
 
+def _create_session_token(user_id: int, username: str, role: str) -> str:
+    """创建带签名的 JWT session token"""
+    import jwt
+    _secret = os.environ.get("SESSION_SECRET")
+    if not _secret:
+        raise RuntimeError("SESSION_SECRET environment variable must be set")
+    payload = {"sub": str(user_id), "username": username, "role": role}
+    return jwt.encode(payload, _secret, algorithm="HS256")
+
+
+def _decode_session_token(token: str) -> Optional[dict]:
+    """验证并解码 session token"""
+    import jwt
+    _secret = os.environ.get("SESSION_SECRET")
+    if not _secret:
+        return None
+    try:
+        payload = jwt.decode(token, _secret, algorithms=["HS256"])
+        return {
+            "id": int(payload["sub"]),
+            "username": payload["username"],
+            "role": payload["role"]
+        }
+    except jwt.InvalidTokenError:
+        return None
+
+
 def _encrypt(text: str) -> str:
-    return _get_cipher().encrypt(text.encode()).decode()
+    """加密：随机 salt（16B）+ Fernet(token)，salt 前置"""
+    salt, cipher = _get_cipher()
+    encrypted = cipher.encrypt(text.encode())
+    return base64.urlsafe_b64encode(salt + encrypted).decode()
 
 
 def _decrypt(token: str) -> str:
-    return _get_cipher().decrypt(token.encode()).decode()
+    """解密：提取前 16 字节 salt"""
+    import base64
+    data = base64.urlsafe_b64decode(token.encode())
+    salt = data[:16]
+    ciphertext = data[16:]
+    cipher = _get_cipher(salt)
+    return cipher.decrypt(ciphertext).decode()
 
 
 def _db_path():
@@ -56,14 +102,14 @@ def _db_path():
 
 
 def get_current_user(request: Request) -> dict:
-    """获取当前登录用户"""
-    session = request.cookies.get("session")
-    if not session:
+    """获取当前登录用户（JWT 验签）"""
+    token = request.cookies.get("session")
+    if not token:
         raise HTTPException(status_code=401, detail="未登录")
-    parts = session.split(":")
-    if len(parts) < 3:
+    user_info = _decode_session_token(token)
+    if not user_info:
         raise HTTPException(status_code=401, detail="无效的会话")
-    return {"id": int(parts[0]), "username": parts[1], "role": parts[2]}
+    return user_info
 
 
 def require_admin_or_data_admin(request: Request) -> dict:
@@ -72,6 +118,16 @@ def require_admin_or_data_admin(request: Request) -> dict:
     if user["role"] not in ("admin", "data_admin"):
         raise HTTPException(status_code=403, detail="需要管理员或数据管理员权限")
     return user
+
+
+def _verify_connection_access(connection_id: int, user: dict, _db: TableauDatabase) -> None:
+    """验证用户有权访问指定连接（IDOR 修复）"""
+    conn = _db.get_connection(connection_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="连接不存在")
+    # admin 可访问所有连接，非 admin 只能访问自己的
+    if user["role"] != "admin" and conn.owner_id != user["id"]:
+        raise HTTPException(status_code=403, detail="无权访问该连接")
 
 
 # --- Pydantic Models ---
@@ -254,6 +310,9 @@ async def list_assets(
     user = get_current_user(request)
     _db = TableauDatabase(db_path=_db_path())
 
+    # 验证用户有权访问该连接
+    _verify_connection_access(connection_id, user, _db)
+
     assets, total = _db.get_assets(
         connection_id=connection_id,
         asset_type=asset_type,
@@ -280,6 +339,9 @@ async def get_asset(asset_id: int, request: Request):
     if not asset or asset.is_deleted:
         raise HTTPException(status_code=404, detail="资产不存在")
 
+    # 验证用户有权访问该资产所属的连接
+    _verify_connection_access(asset.connection_id, user, _db)
+
     result = asset.to_dict()
 
     # 获取关联的数据源
@@ -301,6 +363,10 @@ async def search_assets(
     """搜索资产"""
     user = get_current_user(request)
     _db = TableauDatabase(db_path=_db_path())
+
+    # 如果指定了 connection_id，验证用户有权访问
+    if connection_id is not None:
+        _verify_connection_access(connection_id, user, _db)
 
     assets, total = _db.search_assets(
         connection_id=connection_id,
@@ -327,9 +393,8 @@ async def get_projects(
     user = get_current_user(request)
     _db = TableauDatabase(db_path=_db_path())
 
-    conn = _db.get_connection(connection_id)
-    if not conn:
-        raise HTTPException(status_code=404, detail="连接不存在")
+    # 验证用户有权访问该连接
+    _verify_connection_access(connection_id, user, _db)
 
     projects = _db.get_project_tree(connection_id)
     return {"projects": projects}

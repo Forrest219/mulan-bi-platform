@@ -37,9 +37,9 @@
 
 | 问题 | 严重度 | 状态 |
 |------|--------|------|
-| Session 令牌可伪造（无签名） | 🔴 CRITICAL | **待修复** |
-| 默认弱口令 admin/admin123 | 🔴 CRITICAL | **待修复** |
-| rules/requirements/logs/activity 路由无认证 | 🟠 HIGH | **待修复** |
+| Session 令牌可伪造（无签名） | 🔴 CRITICAL | ✅ 已修复 |
+| 默认弱口令 admin/admin123 | 🔴 CRITICAL | ✅ 已修复 |
+| rules/requirements/logs/activity 路由无认证 | 🟠 HIGH | ✅ 已修复 |
 | 注册成功后跳转 Home 而非 Login | Low | 可选修复 |
 
 ---
@@ -60,8 +60,8 @@
 
 | 问题 | 严重度 | 状态 |
 |------|--------|------|
-| 硬编码 PBKDF2 Salt | 🔴 CRITICAL | **待修复** |
-| 跨服务共用加密密钥 | 🔴 CRITICAL | **待修复** |
+| 硬编码 PBKDF2 Salt | 🔴 CRITICAL | ✅ 已修复 |
+| 跨服务共用加密密钥 | 🔴 CRITICAL | ✅ 已修复 |
 | Singleton 并发竞态（已修复，加锁） | 已修复 | ✅ |
 
 ---
@@ -96,7 +96,7 @@
 
 | 问题 | 严重度 | 状态 |
 |------|--------|------|
-| 资产列表存在 IDOR（可枚举他 人 connection） | 🟠 HIGH | **待修复** |
+| 资产列表存在 IDOR（可枚举他 人 connection） | 🟠 HIGH | ✅ 已修复 |
 | 同步异常静默吞掉（只 print） | Medium | 可选修复 |
 | tableauserverclient 模块级导入失败静默跳过 | Medium | 可选修复 |
 
@@ -172,13 +172,13 @@
 
 | # | 严重度 | 问题 | 影响模块 | 状态 |
 |---|--------|------|----------|------|
-| 1 | 🔴 CRITICAL | Session 令牌可伪造 | 认证 | **待修复** |
-| 2 | 🔴 CRITICAL | 默认弱口令 admin/admin123 | 认证 | **待修复** |
-| 3 | 🔴 CRITICAL | 硬编码 PBKDF2 Salt | 数据源/Tableau | **待修复** |
-| 4 | 🔴 CRITICAL | 跨服务共用加密密钥 | Tableau | **待修复** |
-| 5 | 🟠 HIGH | 多个路由无认证 | rules/requirements/logs/activity | **待修复** |
-| 6 | 🟠 HIGH | Tableau 资产列表 IDOR | Tableau | **待修复** |
-| 7 | 🟠 HIGH | 活动日志无认证 | activity | **待修复** |
+| 1 | 🔴 CRITICAL | Session 令牌可伪造 | 认证 | ✅ 已修复（PyJWT HS256 签名） |
+| 2 | 🔴 CRITICAL | 默认弱口令 admin/admin123 | 认证 | ✅ 已修复（环境变量 ADMIN_PASSWORD） |
+| 3 | 🔴 CRITICAL | 硬编码 PBKDF2 Salt | 数据源/Tableau | ✅ 已修复（随机 salt） |
+| 4 | 🔴 CRITICAL | 跨服务共用加密密钥 | Tableau | ✅ 已修复（TABLEAU_ENCRYPTION_KEY） |
+| 5 | 🟠 HIGH | 多个路由无认证 | rules/requirements/logs/activity | ✅ 已修复 |
+| 6 | 🟠 HIGH | Tableau 资产列表 IDOR | Tableau | ✅ 已修复 |
+| 7 | 🟠 HIGH | 活动日志无认证 | activity | ✅ 已修复 |
 | 8 | 🟡 MEDIUM | 同步异常静默吞掉 | Tableau | 可选修复 |
 | 9 | 🟡 MEDIUM | tableauserverclient 导入失败静默 | Tableau | 可选修复 |
 | 10 | 🟡 MEDIUM | Log 注入风险 | 日志 | 可选修复 |
@@ -188,11 +188,11 @@
 ## 下一步计划
 
 ### 立即（安全问题修复）
-1. Session 令牌签名（itsdangerous）
-2. 移除默认 admin/admin123
-3. 修复 Salt + 密钥问题
-4. 补全 rules/requirements/logs/activity 认证
-5. 修复 Tableau IDOR
+1. Session 令牌签名（itsdangerous） ✅
+2. 移除默认 admin/admin123 ✅
+3. 修复 Salt + 密钥问题 ✅
+4. 补全 rules/requirements/logs/activity 认证 ✅
+5. 修复 Tableau IDOR ✅
 
 ### 短期（功能补全）
 - Tableau P2：定时同步 + 日志

@@ -1,17 +1,45 @@
 """
 认证 API
 """
-from fastapi import APIRouter, HTTPException, Response, Request
-from pydantic import BaseModel
-from typing import Optional
+import os
 import sys
 from pathlib import Path
+from typing import Optional
+
+import jwt
+from fastapi import APIRouter, HTTPException, Response, Request
+from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 
 from auth import auth_service
 
 router = APIRouter()
+
+# Session 签名密钥（从环境变量获取）
+_JWT_SECRET = os.environ.get("SESSION_SECRET")
+if not _JWT_SECRET:
+    raise RuntimeError("SESSION_SECRET environment variable must be set")
+_JWT_ALGORITHM = "HS256"
+
+
+def _create_session_token(user_id: int, username: str, role: str) -> str:
+    """创建带签名的 JWT session token"""
+    payload = {"sub": str(user_id), "username": username, "role": role}
+    return jwt.encode(payload, _JWT_SECRET, algorithm=_JWT_ALGORITHM)
+
+
+def _decode_session_token(token: str) -> Optional[dict]:
+    """验证并解码 session token"""
+    try:
+        payload = jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALGORITHM])
+        return {
+            "id": int(payload["sub"]),
+            "username": payload["username"],
+            "role": payload["role"]
+        }
+    except jwt.InvalidTokenError:
+        return None
 
 
 class LoginRequest(BaseModel):
@@ -35,20 +63,11 @@ class LoginResponse(BaseModel):
 
 
 def get_session_user(request: Request) -> Optional[dict]:
-    """从 session cookie 获取用户信息"""
-    session = request.cookies.get("session")
-    if not session:
+    """从 session cookie 获取用户信息（JWT 验签）"""
+    token = request.cookies.get("session")
+    if not token:
         return None
-
-    parts = session.split(":")
-    if len(parts) < 3:
-        return None
-
-    return {
-        "id": int(parts[0]),
-        "username": parts[1],
-        "role": parts[2]
-    }
+    return _decode_session_token(token)
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -59,10 +78,10 @@ async def login(request: LoginRequest, response: Response):
     if not user:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
-    # 设置 session cookie
+    token = _create_session_token(user["id"], user["username"], user["role"])
     response.set_cookie(
         key="session",
-        value=f"{user['id']}:{user['username']}:{user['role']}",
+        value=token,
         httponly=True,
         samesite="lax",
         max_age=86400 * 7  # 7 days
@@ -86,10 +105,11 @@ async def register(request: RegisterRequest, response: Response):
     if not user:
         raise HTTPException(status_code=400, detail="邮箱已被注册或格式无效")
 
-    # 自动登录
+    # 自动登录（使用 JWT）
+    token = _create_session_token(user["id"], user["username"], user["role"])
     response.set_cookie(
         key="session",
-        value=f"{user['id']}:{user['username']}:{user['role']}",
+        value=token,
         httponly=True,
         samesite="lax",
         max_age=86400 * 7  # 7 days
@@ -105,19 +125,17 @@ async def register(request: RegisterRequest, response: Response):
 @router.post("/logout")
 async def logout(request: Request, response: Response):
     """用户登出"""
-    session = request.cookies.get("session")
-    if session:
-        parts = session.split(":")
-        if len(parts) >= 2:
-            username = parts[1]
-            # Log logout operation (optional, skip if logger not available)
+    token = request.cookies.get("session")
+    if token:
+        user_info = _decode_session_token(token)
+        if user_info:
             try:
                 from logs import logger
                 logger.log_operation(
                     operation_type="logout",
-                    target=username,
+                    target=user_info["username"],
                     status="success",
-                    operator=username
+                    operator=user_info["username"]
                 )
             except Exception:
                 pass
@@ -129,18 +147,15 @@ async def logout(request: Request, response: Response):
 @router.get("/me")
 async def get_current_user(request: Request):
     """获取当前登录用户信息"""
-    session = request.cookies.get("session")
-    if not session:
+    token = request.cookies.get("session")
+    if not token:
         raise HTTPException(status_code=401, detail="未登录")
 
-    parts = session.split(":")
-    if len(parts) < 3:
+    user_info = _decode_session_token(token)
+    if not user_info:
         raise HTTPException(status_code=401, detail="无效的会话")
 
-    user_id = int(parts[0])
-
-    # 从数据库验证用户仍然有效
-    user = auth_service.get_user(user_id)
+    user = auth_service.get_user(user_info["id"])
     if not user or not user.get("is_active"):
         raise HTTPException(status_code=401, detail="用户不存在或已被禁用")
 
@@ -150,17 +165,15 @@ async def get_current_user(request: Request):
 @router.get("/verify")
 async def verify_session(request: Request):
     """验证会话是否有效"""
-    session = request.cookies.get("session")
-    if not session:
+    token = request.cookies.get("session")
+    if not token:
         return {"valid": False}
 
-    parts = session.split(":")
-    if len(parts) < 3:
+    user_info = _decode_session_token(token)
+    if not user_info:
         return {"valid": False}
 
-    user_id = int(parts[0])
-    user = auth_service.get_user(user_id)
-
+    user = auth_service.get_user(user_info["id"])
     if not user or not user.get("is_active"):
         return {"valid": False}
 
