@@ -26,6 +26,12 @@ const adminMenuItems = [
     icon: 'ri-history-line',
     desc: '用户活动统计'
   },
+  {
+    path: '/admin/llm',
+    label: 'LLM 配置',
+    icon: 'ri-robot-line',
+    desc: 'AI 能力配置'
+  },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

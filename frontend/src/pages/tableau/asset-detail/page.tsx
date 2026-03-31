@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getAsset, TableauAsset } from '../../../api/tableau';
+import { getAssetSummary } from '../../../api/llm';
 
 const ASSET_TYPE_LABELS: Record<string, string> = {
   workbook: '工作簿',
@@ -13,6 +14,11 @@ export default function TableauAssetDetailPage() {
   const navigate = useNavigate();
   const [asset, setAsset] = useState<TableauAsset | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'info' | 'datasources' | 'ai'>('info');
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiCached, setAiCached] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -21,6 +27,32 @@ export default function TableauAssetDetailPage() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [id]);
+
+  async function loadAISummary(refresh = false) {
+    if (!id) return;
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const result = await getAssetSummary(Number(id), refresh);
+      setAiSummary(result.summary);
+      setAiError(result.error || null);
+      setAiCached(result.cached);
+    } catch (e: any) {
+      setAiError(e.message || '获取摘要失败');
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  function handleRefreshSummary() {
+    if (aiSummary) {
+      if (confirm('确定要重新生成解读吗？')) {
+        loadAISummary(true);
+      }
+    } else {
+      loadAISummary(false);
+    }
+  }
 
   if (loading) return <div className="p-8 text-center text-slate-400">加载中...</div>;
   if (!asset) return <div className="p-8 text-center text-slate-400">资产不存在</div>;
@@ -56,47 +88,76 @@ export default function TableauAssetDetailPage() {
       </div>
 
       <div className="max-w-5xl mx-auto px-8 py-6">
-        <div className="grid grid-cols-3 gap-6">
-          {/* Main Info */}
-          <div className="col-span-2 space-y-6">
-            <div className="bg-white border border-slate-200 rounded-xl p-5">
-              <h3 className="text-sm font-semibold text-slate-700 mb-4">基本信息</h3>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="text-slate-400">资产名称</span>
-                  <p className="font-medium text-slate-800">{asset.name}</p>
-                </div>
-                <div>
-                  <span className="text-slate-400">资产类型</span>
-                  <p className="font-medium text-slate-800">{ASSET_TYPE_LABELS[asset.asset_type] || asset.asset_type}</p>
-                </div>
-                <div>
-                  <span className="text-slate-400">项目</span>
-                  <p className="font-medium text-slate-800">{asset.project_name || '-'}</p>
-                </div>
-                <div>
-                  <span className="text-slate-400">所有者</span>
-                  <p className="font-medium text-slate-800">{asset.owner_name || '-'}</p>
-                </div>
-                <div>
-                  <span className="text-slate-400">Tableau ID</span>
-                  <p className="font-mono text-xs text-slate-600">{asset.tableau_id}</p>
-                </div>
-                <div>
-                  <span className="text-slate-400">同步时间</span>
-                  <p className="text-slate-600">{asset.synced_at}</p>
-                </div>
-              </div>
-              {asset.description && (
-                <div className="mt-4 pt-4 border-t border-slate-100">
-                  <span className="text-slate-400 text-sm">描述</span>
-                  <p className="text-sm text-slate-700 mt-1">{asset.description}</p>
-                </div>
-              )}
-            </div>
+        {/* Tabs */}
+        <div className="flex items-center gap-1 px-1 py-1 bg-slate-100 rounded-lg w-fit mb-6">
+          {[
+            { key: 'info', label: '基本信息' },
+            { key: 'datasources', label: '关联数据源' },
+            { key: 'ai', label: 'AI 解读' },
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => {
+                setActiveTab(tab.key as typeof activeTab);
+                if (tab.key === 'ai' && !aiSummary && !aiLoading) {
+                  loadAISummary();
+                }
+              }}
+              className={`px-4 py-1.5 rounded-md text-[12px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                activeTab === tab.key ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
 
-            {/* Datasources */}
-            {asset.datasources && asset.datasources.length > 0 && (
+        {/* Tab Content */}
+        {activeTab === 'info' && (
+          <div className="grid grid-cols-3 gap-6">
+            <div className="col-span-2 space-y-6">
+              <div className="bg-white border border-slate-200 rounded-xl p-5">
+                <h3 className="text-sm font-semibold text-slate-700 mb-4">基本信息</h3>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="text-slate-400">资产名称</span>
+                    <p className="font-medium text-slate-800">{asset.name}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">资产类型</span>
+                    <p className="font-medium text-slate-800">{ASSET_TYPE_LABELS[asset.asset_type] || asset.asset_type}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">项目</span>
+                    <p className="font-medium text-slate-800">{asset.project_name || '-'}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">所有者</span>
+                    <p className="font-medium text-slate-800">{asset.owner_name || '-'}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">Tableau ID</span>
+                    <p className="font-mono text-xs text-slate-600">{asset.tableau_id}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">同步时间</span>
+                    <p className="text-slate-600">{asset.synced_at}</p>
+                  </div>
+                </div>
+                {asset.description && (
+                  <div className="mt-4 pt-4 border-t border-slate-100">
+                    <span className="text-slate-400 text-sm">描述</span>
+                    <p className="text-sm text-slate-700 mt-1">{asset.description}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'datasources' && (
+          <div className="space-y-4">
+            {asset.datasources && asset.datasources.length > 0 ? (
               <div className="bg-white border border-slate-200 rounded-xl p-5">
                 <h3 className="text-sm font-semibold text-slate-700 mb-4">关联数据源</h3>
                 <div className="space-y-2">
@@ -113,21 +174,84 @@ export default function TableauAssetDetailPage() {
                   ))}
                 </div>
               </div>
+            ) : (
+              <div className="bg-white border border-slate-200 rounded-xl p-5 text-center text-slate-400">
+                暂无关联数据源
+              </div>
             )}
           </div>
+        )}
 
-          {/* Sidebar */}
-          <aside className="space-y-6">
+        {activeTab === 'ai' && (
+          <div className="space-y-4">
             <div className="bg-white border border-slate-200 rounded-xl p-5">
-              <h3 className="text-sm font-semibold text-slate-700 mb-4">链接信息</h3>
-              {asset.content_url ? (
-                <p className="text-xs text-slate-400 break-all">{asset.content_url}</p>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-slate-700">AI 解读</h3>
+                <button
+                  onClick={handleRefreshSummary}
+                  disabled={aiLoading}
+                  className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                >
+                  <i className="ri-refresh-line mr-1" />
+                  {aiSummary ? '刷新解读' : '生成解读'}
+                </button>
+              </div>
+
+              {aiLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="flex items-center gap-2 text-slate-400">
+                    <i className="ri-loader-2-line animate-spin" />
+                    <span className="text-sm">正在生成解读...</span>
+                  </div>
+                </div>
+              ) : aiError ? (
+                <div className="text-center py-8">
+                  <div className="text-red-500 text-sm mb-2">⚠️ {aiError}</div>
+                  <button
+                    onClick={() => loadAISummary()}
+                    className="text-sm text-blue-500 hover:underline"
+                  >
+                    重试
+                  </button>
+                </div>
+              ) : aiSummary ? (
+                <div>
+                  <div className="bg-slate-50 rounded-lg p-4 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                    {aiSummary}
+                  </div>
+                  {aiCached && (
+                    <div className="mt-2 text-xs text-slate-400">
+                      <i className="ri-checkbox-circle-line mr-1" />
+                      已缓存，1 小时内不重复生成
+                    </div>
+                  )}
+                </div>
               ) : (
-                <p className="text-xs text-slate-400">-</p>
+                <div className="text-center py-8">
+                  <div className="text-slate-400 text-sm mb-3">暂无解读内容</div>
+                  <button
+                    onClick={() => loadAISummary()}
+                    className="px-4 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                  >
+                    生成 AI 解读
+                  </button>
+                </div>
               )}
             </div>
-          </aside>
-        </div>
+          </div>
+        )}
+
+        {/* Sidebar */}
+        <aside className="space-y-6">
+          <div className="bg-white border border-slate-200 rounded-xl p-5">
+            <h3 className="text-sm font-semibold text-slate-700 mb-4">链接信息</h3>
+            {asset.content_url ? (
+              <p className="text-xs text-slate-400 break-all">{asset.content_url}</p>
+            ) : (
+              <p className="text-xs text-slate-400">-</p>
+            )}
+          </div>
+        </aside>
       </div>
     </div>
   );

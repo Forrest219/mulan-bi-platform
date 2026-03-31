@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau
+from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm
 
 app = FastAPI(
     title="Mulan BI Platform API",
@@ -50,6 +50,7 @@ app.include_router(permissions.router, prefix="/api/permissions", tags=["权限�
 app.include_router(activity.router, prefix="/api/activity", tags=["访问日志"])
 app.include_router(datasources.router, prefix="/api/datasources", tags=["数据源管理"])
 app.include_router(tableau.router, prefix="/api/tableau", tags=["Tableau 管理"])
+app.include_router(llm.router, prefix="/api/llm", tags=["LLM 管理"])
 
 
 @app.get("/")

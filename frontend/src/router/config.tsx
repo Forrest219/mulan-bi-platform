@@ -12,6 +12,7 @@ import UsersAdminPage from "../pages/admin/user-management/page";
 import GroupsAdminPage from "../pages/admin/groups/page";
 import PermissionsAdminPage from "../pages/admin/permissions/page";
 import ActivityAdminPage from "../pages/admin/activity/page";
+import LLMAdminPage from "../pages/admin/llm/page";
 import TableauConnectionsPage from "../pages/tableau/connections/page";
 import TableauAssetBrowserPage from "../pages/tableau/assets/page";
 import TableauAssetDetailPage from "../pages/tableau/asset-detail/page";
@@ -82,6 +83,14 @@ const routes: RouteObject[] = [
     element: (
       <ProtectedRoute adminOnly>
         <AdminLayout><ActivityAdminPage /></AdminLayout>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/admin/llm",
+    element: (
+      <ProtectedRoute adminOnly>
+        <AdminLayout><LLMAdminPage /></AdminLayout>
       </ProtectedRoute>
     ),
   },

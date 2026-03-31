@@ -62,6 +62,9 @@ class TableauAsset(Base):
     raw_metadata = Column(Text, nullable=True)
     is_deleted = Column(Boolean, default=False)
     synced_at = Column(DateTime, default=datetime.now, nullable=False)
+    ai_summary = Column(Text, nullable=True)
+    ai_summary_generated_at = Column(DateTime, nullable=True)
+    ai_summary_error = Column(Text, nullable=True)
 
     connection = relationship("TableauConnection", back_populates="assets")
     datasources = relationship("TableauAssetDatasource", back_populates="asset", cascade="all, delete-orphan")
@@ -80,6 +83,8 @@ class TableauAsset(Base):
             "content_url": self.content_url,
             "is_deleted": self.is_deleted,
             "synced_at": self.synced_at.strftime("%Y-%m-%d %H:%M:%S") if self.synced_at else None,
+            "ai_summary": self.ai_summary,
+            "ai_summary_generated_at": self.ai_summary_generated_at.strftime("%Y-%m-%d %H:%M:%S") if self.ai_summary_generated_at else None,
         }
 
 
@@ -307,6 +312,26 @@ class TableauDatabase:
 
     def get_asset_datasources(self, asset_id: int) -> List[TableauAssetDatasource]:
         return self.session.query(TableauAssetDatasource).filter(TableauAssetDatasource.asset_id == asset_id).all()
+
+    def update_asset_summary(self, asset_id: int, summary: str) -> bool:
+        """更新资产 AI 摘要"""
+        asset = self.get_asset(asset_id)
+        if not asset:
+            return False
+        asset.ai_summary = summary
+        asset.ai_summary_generated_at = datetime.now()
+        asset.ai_summary_error = None
+        self.session.commit()
+        return True
+
+    def update_asset_error(self, asset_id: int, error: str) -> bool:
+        """记录资产 AI 生成错误"""
+        asset = self.get_asset(asset_id)
+        if not asset:
+            return False
+        asset.ai_summary_error = error
+        self.session.commit()
+        return True
 
     def close(self):
         self.session.close()
