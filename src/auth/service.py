@@ -26,7 +26,9 @@ class AuthService:
         "database_monitor",
         "rule_config",
         "scan_logs",
-        "user_management"
+        "user_management",
+        "tableau",
+        "llm"
     ]
 
     # 权限标签映射
@@ -37,6 +39,8 @@ class AuthService:
         "rule_config": "规则配置",
         "scan_logs": "扫描日志",
         "user_management": "用户管理",
+        "tableau": "Tableau 资产",
+        "llm": "LLM 管理",
     }
 
     # 角色定义
@@ -56,8 +60,8 @@ class AuthService:
     # 角色默认权限
     ROLE_DEFAULT_PERMISSIONS = {
         ROLE_ADMIN: ALL_PERMISSIONS,
-        ROLE_DATA_ADMIN: ["database_monitor", "ddl_check", "rule_config", "scan_logs"],
-        ROLE_ANALYST: ["scan_logs"],
+        ROLE_DATA_ADMIN: ["database_monitor", "ddl_check", "rule_config", "scan_logs", "tableau", "llm"],
+        ROLE_ANALYST: ["scan_logs", "tableau"],
         ROLE_USER: [],
     }
 

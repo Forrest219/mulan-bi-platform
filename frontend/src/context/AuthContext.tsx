@@ -13,18 +13,18 @@ export const ALL_PERMISSIONS = [
   { key: 'llm', label: 'LLM 管理' },
 ];
 
-export const ROLE_LABELS: Record<string, string> = {
-  admin: '管理员',
-  data_admin: '数据管理员',
-  analyst: '业务分析师',
-  user: '普通用户',
-};
-
 export const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
   admin: ALL_PERMISSIONS.map(p => p.key),
   data_admin: ['database_monitor', 'ddl_check', 'rule_config', 'scan_logs', 'tableau', 'llm'],
   analyst: ['scan_logs', 'tableau'],
   user: [],
+};
+
+export const ROLE_LABELS: Record<string, string> = {
+  admin: '管理员',
+  data_admin: '数据管理员',
+  analyst: '业务分析师',
+  user: '普通用户',
 };
 
 type UserRole = 'admin' | 'data_admin' | 'analyst' | 'user';

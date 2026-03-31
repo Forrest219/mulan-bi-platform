@@ -32,6 +32,12 @@ const adminMenuItems = [
     icon: 'ri-robot-line',
     desc: 'AI 能力配置'
   },
+  {
+    path: '/tableau/connections',
+    label: 'Tableau 连接',
+    icon: 'ri-bar-chart-box-line',
+    desc: 'Tableau Server 配置'
+  },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
