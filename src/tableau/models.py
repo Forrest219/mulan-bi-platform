@@ -23,6 +23,14 @@ class TableauConnection(Base):
     token_encrypted = Column(Text, nullable=False)
     owner_id = Column(Integer, nullable=False)
     is_active = Column(Boolean, default=True)
+    # 自动同步设置
+    auto_sync_enabled = Column(Boolean, default=False)
+    sync_interval_hours = Column(Integer, default=24)
+    # 连接健康状态
+    last_test_at = Column(DateTime, nullable=True)
+    last_test_success = Column(Boolean, nullable=True)
+    last_test_message = Column(Text, nullable=True)
+    # 同步状态
     last_sync_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.now, nullable=False)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
@@ -39,6 +47,11 @@ class TableauConnection(Base):
             "token_name": self.token_name,
             "owner_id": self.owner_id,
             "is_active": self.is_active,
+            "auto_sync_enabled": self.auto_sync_enabled,
+            "sync_interval_hours": self.sync_interval_hours,
+            "last_test_at": self.last_test_at.strftime("%Y-%m-%d %H:%M:%S") if self.last_test_at else None,
+            "last_test_success": self.last_test_success,
+            "last_test_message": self.last_test_message,
             "last_sync_at": self.last_sync_at.strftime("%Y-%m-%d %H:%M:%S") if self.last_sync_at else None,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
             "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
@@ -194,6 +207,17 @@ class TableauDatabase:
         if not conn:
             return False
         conn.last_sync_at = datetime.now()
+        self.session.commit()
+        return True
+
+    def update_connection_health(self, conn_id: int, success: bool, message: str) -> bool:
+        """更新连接健康状态（测试结果）"""
+        conn = self.get_connection(conn_id)
+        if not conn:
+            return False
+        conn.last_test_at = datetime.now()
+        conn.last_test_success = success
+        conn.last_test_message = message
         self.session.commit()
         return True
 

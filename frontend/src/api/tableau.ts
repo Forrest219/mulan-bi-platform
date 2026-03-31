@@ -9,6 +9,11 @@ export interface TableauConnection {
   token_name: string;
   owner_id: number;
   is_active: boolean;
+  auto_sync_enabled: boolean;
+  sync_interval_hours: number;
+  last_test_at: string | null;
+  last_test_success: boolean | null;
+  last_test_message: string | null;
   last_sync_at: string | null;
   created_at: string;
   updated_at: string;

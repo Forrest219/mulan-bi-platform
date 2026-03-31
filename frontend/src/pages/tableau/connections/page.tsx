@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   listConnections, createConnection, updateConnection, deleteConnection,
   testConnection, syncConnection, TableauConnection
@@ -13,13 +12,14 @@ export default function TableauConnectionsPage() {
   const [editingConn, setEditingConn] = useState<TableauConnection | null>(null);
   const [formData, setFormData] = useState({
     name: '', server_url: '', site: '', api_version: '3.21',
-    token_name: '', token_value: ''
+    token_name: '', token_value: '',
+    auto_sync_enabled: false, sync_interval_hours: 24
   });
   const [formError, setFormError] = useState('');
   const [testingId, setTestingId] = useState<number | null>(null);
   const [syncingId, setSyncingId] = useState<number | null>(null);
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
-  const navigate = useNavigate();
+  // 中央 Modal 通知状态
+  const [modalNotify, setModalNotify] = useState<{ success: boolean; message: string } | null>(null);
 
   const fetchConnections = async () => {
     try {
@@ -52,10 +52,17 @@ export default function TableauConnectionsPage() {
   const handleUpdate = async () => {
     if (!editingConn) return;
     try {
-      const updateData: any = { ...formData };
-      if (!updateData.token_value) {
-        delete updateData.token_value;
-        delete updateData.token_name;
+      const updateData: any = {
+        name: formData.name,
+        server_url: formData.server_url,
+        site: formData.site,
+        api_version: formData.api_version,
+        auto_sync_enabled: formData.auto_sync_enabled,
+        sync_interval_hours: formData.sync_interval_hours
+      };
+      if (formData.token_value) {
+        updateData.token_name = formData.token_name;
+        updateData.token_value = formData.token_value;
       }
       await updateConnection(editingConn.id, updateData);
       setEditingConn(null);
@@ -78,16 +85,17 @@ export default function TableauConnectionsPage() {
 
   const handleTest = async (id: number) => {
     setTestingId(id);
-    setTestResult(null);
+    setModalNotify(null);
     const result = await testConnection(id);
-    setTestResult(result);
+    setModalNotify(result);
     setTestingId(null);
+    fetchConnections(); // 刷新以更新健康状态
   };
 
   const handleSync = async (id: number) => {
     setSyncingId(id);
     const result = await syncConnection(id);
-    alert(result.message);
+    setModalNotify({ success: result.success, message: result.message });
     setSyncingId(null);
     fetchConnections();
   };
@@ -100,19 +108,32 @@ export default function TableauConnectionsPage() {
       site: conn.site,
       api_version: conn.api_version,
       token_name: conn.token_name,
-      token_value: ''
+      token_value: '',
+      auto_sync_enabled: (conn as any).auto_sync_enabled || false,
+      sync_interval_hours: (conn as any).sync_interval_hours || 24
     });
     setShowModal(true);
   };
 
   const resetForm = () => {
-    setFormData({ name: '', server_url: '', site: '', api_version: '3.21', token_name: '', token_value: '' });
+    setFormData({ name: '', server_url: '', site: '', api_version: '3.21', token_name: '', token_value: '', auto_sync_enabled: false, sync_interval_hours: 24 });
     setFormError('');
     setEditingConn(null);
-    setTestResult(null);
+    setModalNotify(null);
   };
 
   const formatDate = (str: string | null) => str ? new Date(str).toLocaleString() : '-';
+
+  // 获取连接状态显示
+  const getStatusBadge = (conn: TableauConnection) => {
+    if (!conn.is_active) {
+      return { text: '禁用', className: 'bg-red-50 text-red-600' };
+    }
+    if (conn.last_test_success === false && conn.last_test_message) {
+      return { text: '连接失败', className: 'bg-orange-50 text-orange-600' };
+    }
+    return { text: '启用', className: 'bg-emerald-50 text-emerald-600' };
+  };
 
   if (loading) return <div className="p-8 text-center text-slate-400">加载中...</div>;
   if (loadError) return <div className="p-8 text-center text-red-500">{loadError}</div>;
@@ -132,53 +153,57 @@ export default function TableauConnectionsPage() {
 
       {/* Connection Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {connections.map(conn => (
-          <div key={conn.id} className="bg-white border border-slate-200 rounded-xl p-5">
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <h3 className="font-semibold text-slate-800">{conn.name}</h3>
-                <p className="text-xs text-slate-400 mt-0.5">{conn.server_url}</p>
+        {connections.map(conn => {
+          const status = getStatusBadge(conn);
+          return (
+            <div key={conn.id} className="bg-white border border-slate-200 rounded-xl p-5">
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <h3 className="font-semibold text-slate-800">{conn.name}</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">{conn.server_url}</p>
+                </div>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${status.className}`}>
+                  {status.text}
+                </span>
               </div>
-              <span className={`text-xs px-2 py-0.5 rounded-full ${conn.is_active ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
-                {conn.is_active ? '活跃' : '禁用'}
-              </span>
+              <div className="space-y-1.5 text-xs text-slate-500 mb-4">
+                <div><span className="text-slate-400">站点:</span> {conn.site}</div>
+                <div><span className="text-slate-400">API版本:</span> {conn.api_version}</div>
+                <div><span className="text-slate-400">上次同步:</span> {formatDate(conn.last_sync_at)}</div>
+                {(conn as any).auto_sync_enabled && (
+                  <div><span className="text-slate-400">自动同步:</span> 每{(conn as any).sync_interval_hours || 24}小时</div>
+                )}
+                {conn.last_test_at && (
+                  <div><span className="text-slate-400">连接测试:</span> {formatDate(conn.last_test_at)}</div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => handleTest(conn.id)}
+                  disabled={testingId === conn.id}
+                  className="flex-1 px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center justify-center gap-1">
+                  {testingId === conn.id ? <i className="ri-loader-4-line animate-spin" /> : <i className="ri-plug-line" />}
+                  测试
+                </button>
+                <button onClick={() => handleSync(conn.id)}
+                  disabled={syncingId === conn.id}
+                  className="flex-1 px-3 py-1.5 text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center gap-1">
+                  {syncingId === conn.id ? <i className="ri-loader-4-line animate-spin" /> : <i className="ri-refresh-line" />}
+                  同步
+                </button>
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <button onClick={() => openEditModal(conn)}
+                  className="flex-1 px-3 py-1.5 text-xs text-slate-500 hover:text-slate-700">
+                  编辑
+                </button>
+                <button onClick={() => handleDelete(conn.id)}
+                  className="flex-1 px-3 py-1.5 text-xs text-red-500 hover:text-red-700">
+                  删除
+                </button>
+              </div>
             </div>
-            <div className="space-y-1.5 text-xs text-slate-500 mb-4">
-              <div><span className="text-slate-400">站点:</span> {conn.site}</div>
-              <div><span className="text-slate-400">API版本:</span> {conn.api_version}</div>
-              <div><span className="text-slate-400">上次同步:</span> {formatDate(conn.last_sync_at)}</div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => handleTest(conn.id)}
-                disabled={testingId === conn.id}
-                className="flex-1 px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center justify-center gap-1">
-                {testingId === conn.id ? <i className="ri-loader-4-line animate-spin" /> : <i className="ri-plug-line" />}
-                测试
-              </button>
-              <button onClick={() => handleSync(conn.id)}
-                disabled={syncingId === conn.id}
-                className="flex-1 px-3 py-1.5 text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center gap-1">
-                {syncingId === conn.id ? <i className="ri-loader-4-line animate-spin" /> : <i className="ri-refresh-line" />}
-                同步
-              </button>
-              <button onClick={() => navigate(`/tableau/assets?connection_id=${conn.id}`)}
-                className="flex-1 px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center justify-center gap-1">
-                <i className="ri-folder-line" />
-                资产
-              </button>
-            </div>
-            <div className="flex items-center gap-2 mt-2">
-              <button onClick={() => openEditModal(conn)}
-                className="flex-1 px-3 py-1.5 text-xs text-slate-500 hover:text-slate-700">
-                编辑
-              </button>
-              <button onClick={() => handleDelete(conn.id)}
-                className="flex-1 px-3 py-1.5 text-xs text-red-500 hover:text-red-700">
-                删除
-              </button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
         {connections.length === 0 && (
           <div className="col-span-full text-center py-12 text-slate-400">
             <i className="ri-links-line text-3xl mb-2 block" />
@@ -187,12 +212,30 @@ export default function TableauConnectionsPage() {
         )}
       </div>
 
-      {/* Test Result Toast */}
-      {testResult && (
-        <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl shadow-lg text-sm max-w-sm z-50 ${testResult.success ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-red-50 border border-red-200 text-red-700'}`}>
-          <div className="flex items-start gap-2">
-            <i className={`${testResult.success ? 'ri-check-line' : 'ri-error-warning-line'} mt-0.5`} />
-            <span>{testResult.message}</span>
+      {/* 中央 Modal 通知 */}
+      {modalNotify && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setModalNotify(null)}>
+          <div
+            className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${modalNotify.success ? 'bg-emerald-100' : 'bg-red-100'}`}>
+                <i className={`${modalNotify.success ? 'ri-check-line text-emerald-600' : 'ri-error-warning-line text-red-600'} text-xl`} />
+              </div>
+              <div className="flex-1">
+                <h3 className={`font-semibold ${modalNotify.success ? 'text-emerald-700' : 'text-red-700'}`}>
+                  {modalNotify.success ? '操作成功' : '操作失败'}
+                </h3>
+                <p className="text-sm text-slate-600 mt-1">{modalNotify.message}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setModalNotify(null)}
+              className="mt-4 w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg"
+            >
+              关闭
+            </button>
           </div>
         </div>
       )}
@@ -200,7 +243,7 @@ export default function TableauConnectionsPage() {
       {/* Create/Edit Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-lg shadow-xl">
+          <div className="bg-white rounded-xl p-6 w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
             <h2 className="text-lg font-semibold text-slate-800 mb-4">
               {editingConn ? '编辑连接' : '新建 Tableau 连接'}
             </h2>
@@ -252,6 +295,30 @@ export default function TableauConnectionsPage() {
                   onChange={e => setFormData({ ...formData, token_value: e.target.value })}
                   className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
                   placeholder={editingConn ? '******' : '7fryZb09QYuahmH648nEqA==:...'} />
+              </div>
+              {/* 自动同步设置 */}
+              <div className="border-t border-slate-200 pt-4 mt-4">
+                <div className="flex items-center gap-3 mb-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.auto_sync_enabled}
+                      onChange={e => setFormData({ ...formData, auto_sync_enabled: e.target.checked })}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-medium text-slate-600">启用自动同步</span>
+                  </label>
+                </div>
+                {formData.auto_sync_enabled && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-600 mb-1.5">同步间隔（小时）</label>
+                    <input type="number" min="1" max="168" value={formData.sync_interval_hours}
+                      onChange={e => setFormData({ ...formData, sync_interval_hours: parseInt(e.target.value) || 24 })}
+                      className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
+                      placeholder="24" />
+                    <p className="text-xs text-slate-400 mt-1">建议设置 24 小时，每天凌晨自动同步</p>
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex justify-end gap-3 mt-6">

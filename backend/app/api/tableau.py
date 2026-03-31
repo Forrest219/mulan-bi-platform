@@ -255,11 +255,16 @@ async def test_connection(conn_id: int, request: Request):
         )
         try:
             result = service.test_connection()
+            # 保存测试结果到数据库
+            _db.update_connection_health(conn_id, result.get("success", False), result.get("message", ""))
             return result
         finally:
             service.disconnect()
     except Exception as e:
-        return {"success": False, "message": f"测试失败: {str(e)}"}
+        error_msg = str(e)
+        # 保存测试失败结果到数据库
+        _db.update_connection_health(conn_id, False, f"测试失败: {error_msg}")
+        return {"success": False, "message": f"测试失败: {error_msg}"}
 
 
 @router.post("/connections/{conn_id}/sync")
