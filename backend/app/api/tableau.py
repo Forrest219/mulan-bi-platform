@@ -203,12 +203,14 @@ async def update_connection(conn_id: int, req: UpdateConnectionRequest, request:
 
     update_data = req.model_dump(exclude_unset=True)
     if "token_value" in update_data and update_data["token_value"]:
+        # 用户提供了新 token_value，同时更新 token_name 和加密后的 token
         update_data["token_encrypted"] = _encrypt(update_data.pop("token_value"))
-        if not req.token_name:
-            update_data.pop("token_name", None)
-    elif "token_name" in update_data:
-        update_data.pop("token_name", None)
+        if req.token_name:
+            update_data["token_name"] = req.token_name
+    elif "token_value" in update_data and not update_data["token_value"]:
+        # token_value 为空字符串，不更新 token 相关字段
         update_data.pop("token_value", None)
+        update_data.pop("token_name", None)
 
     _db.update_connection(conn_id, **update_data)
     return {"message": "连接更新成功"}
