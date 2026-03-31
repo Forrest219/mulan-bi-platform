@@ -4,6 +4,7 @@
 import json
 import os
 import sys
+import jwt
 from pathlib import Path
 from typing import Optional
 
@@ -14,6 +15,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 from datasources.models import DataSourceDatabase
 
 router = APIRouter()
+
+# Session 签名密钥
+_JWT_SECRET = os.environ.get("SESSION_SECRET")
+if not _JWT_SECRET:
+    raise RuntimeError("SESSION_SECRET environment variable must be set")
+_JWT_ALGORITHM = "HS256"
 
 # 加密密钥（生产环境必须通过环境变量设置，禁止硬编码 fallback）
 _ENCRYPTION_KEY = os.environ.get("DATASOURCE_ENCRYPTION_KEY")
@@ -77,15 +84,24 @@ def _db_path():
     return str(Path(__file__).parent.parent.parent.parent / "data" / "datasources.db")
 
 
+def _decode_session_token(token: str):
+    """验证并解码 session token"""
+    try:
+        payload = jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALGORITHM])
+        return {"id": int(payload["sub"]), "username": payload["username"], "role": payload["role"]}
+    except jwt.InvalidTokenError:
+        return None
+
+
 def get_current_user(request: Request) -> dict:
     """获取当前登录用户"""
-    session = request.cookies.get("session")
-    if not session:
+    token = request.cookies.get("session")
+    if not token:
         raise HTTPException(status_code=401, detail="未登录")
-    parts = session.split(":")
-    if len(parts) < 3:
+    user_info = _decode_session_token(token)
+    if not user_info:
         raise HTTPException(status_code=401, detail="无效的会话")
-    return {"id": int(parts[0]), "username": parts[1], "role": parts[2]}
+    return user_info
 
 
 def require_admin_or_data_admin(request: Request) -> dict:

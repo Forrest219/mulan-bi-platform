@@ -137,8 +137,10 @@ async def logout(request: Request, response: Response):
                     status="success",
                     operator=user_info["username"]
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                # 日志记录失败不影响登出流程
+                import logging
+                logging.getLogger(__name__).warning(f"登出日志记录失败: {e}")
 
     response.delete_cookie("session")
     return {"success": True, "message": "已登出"}

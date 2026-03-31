@@ -269,7 +269,7 @@ async def delete_custom_rule(rule_id: str, request: Request):
     global DEFAULT_RULES
     rule = next((r for r in DEFAULT_RULES if r.id == rule_id and not r.built_in), None)
     if not rule:
-        return {"error": "规则不存在或无法删除内置规则"}, 404
+        raise HTTPException(status_code=404, detail="规则不存在或无法删除内置规则")
 
     DEFAULT_RULES = [r for r in DEFAULT_RULES if r.id != rule_id]
     if rule_id in rules_storage:

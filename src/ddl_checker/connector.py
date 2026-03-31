@@ -1,8 +1,11 @@
 """数据库连接模块"""
+import logging
 import yaml
 from typing import Optional, Dict, Any
-from sqlalchemy import create_engine, inspect, Table, Column
+from sqlalchemy import create_engine, inspect, Table, Column, text
 from sqlalchemy.engine import Engine
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseConnector:
@@ -99,11 +102,13 @@ class DatabaseConnector:
             try:
                 with self.engine.connect() as conn:
                     result = conn.execute(
-                        f"SELECT TABLE_COMMENT FROM information_schema.TABLES WHERE TABLE_NAME = '{table_name}'"
+                        text("SELECT TABLE_COMMENT FROM information_schema.TABLES WHERE TABLE_NAME = :table_name"),
+                        {"table_name": table_name}
                     )
                     row = result.fetchone()
                     return row[0] if row else ""
-            except Exception:
+            except Exception as e:
+                logger.warning(f"获取表注释失败 (table={table_name}): {e}")
                 return ""
         return ""
 
@@ -116,12 +121,13 @@ class DatabaseConnector:
             try:
                 with self.engine.connect() as conn:
                     result = conn.execute(
-                        f"SELECT COLUMN_COMMENT FROM information_schema.COLUMNS "
-                        f"WHERE TABLE_NAME = '{table_name}' AND COLUMN_NAME = '{column_name}'"
+                        text("SELECT COLUMN_COMMENT FROM information_schema.COLUMNS WHERE TABLE_NAME = :table_name AND COLUMN_NAME = :column_name"),
+                        {"table_name": table_name, "column_name": column_name}
                     )
                     row = result.fetchone()
                     return row[0] if row else ""
-            except Exception:
+            except Exception as e:
+                logger.warning(f"获取列注释失败 (table={table_name}, column={column_name}): {e}")
                 return ""
         return ""
 

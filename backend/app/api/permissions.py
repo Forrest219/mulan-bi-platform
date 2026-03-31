@@ -1,28 +1,41 @@
 """
 权限配置 API - 仅管理员可访问
 """
+import os
+import jwt
 from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
 from typing import List
 
 router = APIRouter(tags=["权限配置"])
 
+# JWT 验签
+_JWT_SECRET = os.environ.get("SESSION_SECRET")
+if not _JWT_SECRET:
+    raise RuntimeError("SESSION_SECRET environment variable must be set")
+_JWT_ALGORITHM = "HS256"
+
+
+def _decode_session_token(token: str):
+    """验证并解码 session token"""
+    try:
+        payload = jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALGORITHM])
+        return {"id": int(payload["sub"]), "username": payload["username"], "role": payload["role"]}
+    except jwt.InvalidTokenError:
+        return None
+
 
 def get_current_admin(request: Request) -> dict:
     """依赖：获取当前登录管理员"""
-    session = request.cookies.get("session")
-    if not session:
+    token = request.cookies.get("session")
+    if not token:
         raise HTTPException(status_code=401, detail="未登录")
-
-    parts = session.split(":")
-    if len(parts) < 3:
+    user_info = _decode_session_token(token)
+    if not user_info:
         raise HTTPException(status_code=401, detail="无效的会话")
-
-    role = parts[2]
-    if role != "admin":
+    if user_info["role"] != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
-
-    return {"id": int(parts[0]), "role": role}
+    return user_info
 
 
 @router.get("/")
