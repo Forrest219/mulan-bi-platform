@@ -2,106 +2,27 @@
 数据源管理 API
 """
 import json
-import os
 import sys
-import jwt
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 from datasources.models import DataSourceDatabase
+from app.core.dependencies import get_current_user
+from app.core.crypto import get_datasource_crypto
 
 router = APIRouter()
 
-# Session 签名密钥
-_JWT_SECRET = os.environ.get("SESSION_SECRET")
-if not _JWT_SECRET:
-    raise RuntimeError("SESSION_SECRET environment variable must be set")
-_JWT_ALGORITHM = "HS256"
-
-# 加密密钥（生产环境必须通过环境变量设置，禁止硬编码 fallback）
-_ENCRYPTION_KEY = os.environ.get("DATASOURCE_ENCRYPTION_KEY")
-if not _ENCRYPTION_KEY:
-    raise RuntimeError("DATASOURCE_ENCRYPTION_KEY environment variable must be set")
-
-
-def _get_cipher(salt: bytes = None):
-    """根据 salt 派生 Fernet 密钥。salt=None 时生成随机 salt 用于新加密。"""
-    from cryptography.fernet import Fernet
-    from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.backends import default_backend
-    import base64
-
-    # 每个连接用不同 salt，避免批量破解
-    if salt is None:
-        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-        from cryptography.hazmat.backends import default_backend
-        salt = os.urandom(16)
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=100000,
-            backend=default_backend()
-        )
-        key = base64.urlsafe_b64encode(kdf.derive(_ENCRYPTION_KEY.encode()))
-        return salt, Fernet(key)
-
-    # 解密时从 token 前 16 字节提取 salt
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=100000,
-        backend=default_backend()
-    )
-    key = base64.urlsafe_b64encode(kdf.derive(_ENCRYPTION_KEY.encode()))
-    return Fernet(key)
-
-
-def _encrypt(text: str) -> str:
-    """加密：随机 salt（16B）+ Fernet(token)，salt 前置用于解密时提取"""
-    salt, cipher = _get_cipher()
-    encrypted = cipher.encrypt(text.encode())
-    # salt 前置，decode 方便存储
-    return base64.urlsafe_b64encode(salt + encrypted).decode()
-
-
-def _decrypt(token: str) -> str:
-    """解密：提取前 16 字节 salt，用同密钥派生解密"""
-    import base64
-    data = base64.urlsafe_b64decode(token.encode())
-    salt = data[:16]
-    ciphertext = data[16:]
-    cipher = _get_cipher(salt)
-    return cipher.decrypt(ciphertext).decode()
+_crypto = get_datasource_crypto()
+_encrypt = _crypto.encrypt
+_decrypt = _crypto.decrypt
 
 
 def _db_path():
     return str(Path(__file__).parent.parent.parent.parent / "data" / "datasources.db")
-
-
-def _decode_session_token(token: str):
-    """验证并解码 session token"""
-    try:
-        payload = jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALGORITHM])
-        return {"id": int(payload["sub"]), "username": payload["username"], "role": payload["role"]}
-    except jwt.InvalidTokenError:
-        return None
-
-
-def get_current_user(request: Request) -> dict:
-    """获取当前登录用户"""
-    token = request.cookies.get("session")
-    if not token:
-        raise HTTPException(status_code=401, detail="未登录")
-    user_info = _decode_session_token(token)
-    if not user_info:
-        raise HTTPException(status_code=401, detail="无效的会话")
-    return user_info
 
 
 def require_admin_or_data_admin(request: Request) -> dict:
@@ -204,7 +125,7 @@ async def update_datasource(ds_id: int, request: UpdateDataSourceRequest, req: R
     if user["role"] != "admin" and ds.owner_id != user["id"]:
         raise HTTPException(status_code=403, detail="无权修改该数据源")
 
-    update_data = request.dict(exclude_unset=True)
+    update_data = request.model_dump(exclude_unset=True)
     if "password" in update_data:
         update_data["password_encrypted"] = _encrypt(update_data.pop("password"))
     if "extra_config" in update_data and update_data["extra_config"]:

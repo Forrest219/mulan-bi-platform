@@ -1,4 +1,4 @@
-const API_BASE = '';
+import { API_BASE } from '../config';
 
 export interface TableauConnection {
   id: number;
@@ -6,6 +6,7 @@ export interface TableauConnection {
   server_url: string;
   site: string;
   api_version: string;
+  connection_type: 'mcp' | 'tsc';
   token_name: string;
   owner_id: number;
   is_active: boolean;
@@ -62,6 +63,7 @@ export async function createConnection(data: {
   server_url: string;
   site: string;
   api_version?: string;
+  connection_type?: 'mcp' | 'tsc';
   token_name: string;
   token_value: string;
 }): Promise<{ connection: TableauConnection; message: string }> {
@@ -83,6 +85,7 @@ export async function updateConnection(id: number, data: Partial<{
   server_url: string;
   site: string;
   api_version: string;
+  connection_type: 'mcp' | 'tsc';
   token_name: string;
   token_value: string;
   is_active: boolean;

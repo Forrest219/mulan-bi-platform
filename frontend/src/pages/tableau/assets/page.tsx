@@ -1,13 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { listAssets, searchAssets, getProjects, listConnections, TableauAsset, TableauConnection, ProjectNode } from '../../../api/tableau';
-
-const ASSET_TYPE_LABELS: Record<string, string> = {
-  workbook: '工作簿',
-  dashboard: '仪表板',
-  view: '视图',
-  datasource: '数据源'
-};
+import { ASSET_TYPE_LABELS } from '../../../config';
 
 const ASSET_TYPE_ICONS: Record<string, string> = {
   workbook: 'ri-file-chart-line',
@@ -40,7 +34,7 @@ export default function TableauAssetBrowserPage() {
       if (!connectionId && d.connections.length > 0) {
         setSearchParams({ connection_id: String(d.connections[0].id) });
       }
-    }).catch(console.error);
+    }).catch(() => { /* silently ignore */ });
   }, []);
 
   // 当连接切换时更新 selectedConn
@@ -63,7 +57,7 @@ export default function TableauAssetBrowserPage() {
       setAssets(assetsData.assets);
       setTotal(assetsData.total);
       setProjects(projectsData.projects || []);
-    }).catch(console.error).finally(() => setLoading(false));
+    }).catch(() => { /* silently ignore */ }).finally(() => setLoading(false));
   }, [connectionId, search, assetTypeFilter, page]);
 
   const handleAssetClick = (asset: TableauAsset) => {

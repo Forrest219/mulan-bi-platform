@@ -7,7 +7,7 @@ from datetime import datetime
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.ddl_checker import DDLSanner, DDLScanResult
+from src.ddl_checker import DDLScanner, DDLScanResult
 from src.ddl_generator import DDLGenerator, TableDefinition, ColumnDefinition, IndexDefinition
 from src.ddl_generator.templates import DDLTemplateGenerator, TableTemplate
 from src.logs import logger
@@ -201,7 +201,7 @@ def render_checker_page():
                 "database": database
             }
             st.session_state.db_config = db_config
-            st.session_state.scanner = DDLSanner()
+            st.session_state.scanner = DDLScanner()
 
             if st.session_state.scanner.connect_database(db_config):
                 st.success("数据库连接成功！")

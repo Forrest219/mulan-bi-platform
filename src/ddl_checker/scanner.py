@@ -1,4 +1,5 @@
 """DDL 扫描器 - 整合连接器、解析器和验证器"""
+import logging
 import time
 from typing import List, Dict, Any, Optional
 from pathlib import Path
@@ -7,6 +8,8 @@ from .connector import DatabaseConnector
 from .parser import TableInfo, ColumnInfo
 from .validator import DDLValidator, Violation
 from .reporter import ReportGenerator, CheckReport
+
+logger = logging.getLogger(__name__)
 
 
 class DDLScanResult:
@@ -17,7 +20,7 @@ class DDLScanResult:
         self.error = error
 
 
-class DDLSanner:
+class DDLScanner:
     """DDL 扫描器"""
 
     def __init__(self, rules_config_path: str = None, enable_logging: bool = True):
@@ -138,7 +141,7 @@ class DDLSanner:
                 results=results
             )
         except Exception as e:
-            print(f"记录扫描日志失败: {e}")
+            logger.warning("记录扫描日志失败: %s", e)
 
     def scan_table(self, table_name: str) -> DDLScanResult:
         """
@@ -257,7 +260,7 @@ class DDLSanner:
             )
 
         except Exception as e:
-            print(f"读取表 {table_name} 信息失败: {e}")
+            logger.error("读取表 %s 信息失败: %s", table_name, e)
             return None
 
     def export_report(self, report: CheckReport, output_path: str, format: str = "html"):

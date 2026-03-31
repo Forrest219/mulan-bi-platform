@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-
-const API_BASE = 'http://localhost:8000';
+import { API_BASE, getAvatarGradient } from '../../../config';
 
 interface User {
   id: number;
@@ -24,21 +23,6 @@ interface Log {
 
 type TimeRange = '7d' | '30d' | 'all';
 type OpType = 'all' | 'login' | 'logout' | 'other';
-
-// 头像渐变色
-const AVATAR_GRADIENTS = [
-  'from-blue-500 to-blue-600',
-  'from-emerald-500 to-emerald-600',
-  'from-purple-500 to-purple-600',
-  'from-orange-500 to-orange-600',
-  'from-pink-500 to-pink-600',
-  'from-cyan-500 to-cyan-600',
-];
-
-function getAvatarGradient(name: string) {
-  const index = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % AVATAR_GRADIENTS.length;
-  return AVATAR_GRADIENTS[index];
-}
 
 export default function ActivityPage() {
   const [users, setUsers] = useState<User[]>([]);

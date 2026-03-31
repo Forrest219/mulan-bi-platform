@@ -33,7 +33,7 @@ class AddMembersRequest(BaseModel):
     user_ids: List[int]
 
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(get_current_admin)])
 async def get_groups():
     """获取所有用户组"""
     import sys
@@ -45,7 +45,7 @@ async def get_groups():
     return {"groups": groups, "total": len(groups)}
 
 
-@router.get("/{group_id}")
+@router.get("/{group_id}", dependencies=[Depends(get_current_admin)])
 async def get_group(group_id: int):
     """获取用户组详情"""
     import sys
@@ -120,7 +120,7 @@ async def delete_group(group_id: int):
     return {"message": "用户组已删除"}
 
 
-@router.get("/{group_id}/members")
+@router.get("/{group_id}/members", dependencies=[Depends(get_current_admin)])
 async def get_group_members(group_id: int):
     """获取组成员"""
     import sys
@@ -162,7 +162,7 @@ async def remove_group_member(group_id: int, user_id: int):
     return {"message": "成员已移除"}
 
 
-@router.get("/{group_id}/permissions")
+@router.get("/{group_id}/permissions", dependencies=[Depends(get_current_admin)])
 async def get_group_permissions(group_id: int):
     """获取组权限"""
     import sys

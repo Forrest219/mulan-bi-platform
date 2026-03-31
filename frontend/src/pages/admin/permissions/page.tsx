@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
 import { ALL_PERMISSIONS } from '../../../context/AuthContext';
-
-const API_BASE = 'http://localhost:8000';
+import { API_BASE } from '../../../config';
 
 interface User {
   id: number;
   username: string;
   display_name: string;
+  role: string;
   permissions: string[];
   group_ids: number[];
   group_names: string[];

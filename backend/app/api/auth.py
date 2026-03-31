@@ -3,6 +3,7 @@
 """
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -13,31 +14,38 @@ from pydantic import BaseModel
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 
 from auth import auth_service
+from app.core.constants import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRE_SECONDS, MIN_PASSWORD_LENGTH
 
 router = APIRouter()
 
-# Session 签名密钥（从环境变量获取）
-_JWT_SECRET = os.environ.get("SESSION_SECRET")
-if not _JWT_SECRET:
-    raise RuntimeError("SESSION_SECRET environment variable must be set")
-_JWT_ALGORITHM = "HS256"
+_JWT_SECRET = JWT_SECRET
+_JWT_ALGORITHM = JWT_ALGORITHM
+_JWT_EXPIRE_SECONDS = JWT_EXPIRE_SECONDS
 
 
 def _create_session_token(user_id: int, username: str, role: str) -> str:
-    """创建带签名的 JWT session token"""
-    payload = {"sub": str(user_id), "username": username, "role": role}
+    """创建带签名和过期时间的 JWT session token"""
+    payload = {
+        "sub": str(user_id),
+        "username": username,
+        "role": role,
+        "exp": int(time.time()) + _JWT_EXPIRE_SECONDS,
+        "iat": int(time.time()),
+    }
     return jwt.encode(payload, _JWT_SECRET, algorithm=_JWT_ALGORITHM)
 
 
 def _decode_session_token(token: str) -> Optional[dict]:
-    """验证并解码 session token"""
+    """验证并解码 session token（含过期校验）"""
     try:
-        payload = jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALGORITHM])
+        payload = jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALGORITHM], options={"require": ["exp"]})
         return {
             "id": int(payload["sub"]),
             "username": payload["username"],
             "role": payload["role"]
         }
+    except jwt.ExpiredSignatureError:
+        return None
     except jwt.InvalidTokenError:
         return None
 
@@ -79,12 +87,14 @@ async def login(request: LoginRequest, response: Response):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     token = _create_session_token(user["id"], user["username"], user["role"])
+    _is_secure = os.environ.get("SECURE_COOKIES", "false").lower() == "true"
     response.set_cookie(
         key="session",
         value=token,
         httponly=True,
         samesite="lax",
-        max_age=86400 * 7  # 7 days
+        secure=_is_secure,
+        max_age=_JWT_EXPIRE_SECONDS
     )
 
     return LoginResponse(
@@ -97,7 +107,7 @@ async def login(request: LoginRequest, response: Response):
 @router.post("/register", response_model=LoginResponse)
 async def register(request: RegisterRequest, response: Response):
     """用户注册"""
-    if len(request.password) < 6:
+    if len(request.password) < MIN_PASSWORD_LENGTH:
         raise HTTPException(status_code=400, detail="密码长度至少为6位")
 
     user = auth_service.register(request.email, request.password, request.display_name)
@@ -107,12 +117,14 @@ async def register(request: RegisterRequest, response: Response):
 
     # 自动登录（使用 JWT）
     token = _create_session_token(user["id"], user["username"], user["role"])
+    _is_secure = os.environ.get("SECURE_COOKIES", "false").lower() == "true"
     response.set_cookie(
         key="session",
         value=token,
         httponly=True,
         samesite="lax",
-        max_age=86400 * 7  # 7 days
+        secure=_is_secure,
+        max_age=_JWT_EXPIRE_SECONDS
     )
 
     return LoginResponse(

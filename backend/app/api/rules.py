@@ -2,37 +2,12 @@
 规则配置 API
 """
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException, Request
-from typing import Optional, List
-from datetime import datetime
-import os
-import jwt
+from fastapi import APIRouter, HTTPException, Request
+from typing import Optional
+
+from app.core.dependencies import get_current_user
 
 router = APIRouter()
-
-# JWT 验签
-_JWT_SECRET = os.environ.get("SESSION_SECRET")
-_JWT_ALGORITHM = "HS256"
-
-
-def _decode_session_token(token: str):
-    """验证并解码 session token"""
-    try:
-        payload = jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALGORITHM])
-        return {"id": int(payload["sub"]), "username": payload["username"], "role": payload["role"]}
-    except jwt.InvalidTokenError:
-        return None
-
-
-def get_current_user(request: Request) -> dict:
-    """获取当前登录用户"""
-    token = request.cookies.get("session")
-    if not token:
-        raise HTTPException(status_code=401, detail="未登录")
-    user_info = _decode_session_token(token)
-    if not user_info:
-        raise HTTPException(status_code=401, detail="无效的会话")
-    return user_info
 
 
 # 内存存储规则状态（实际应持久化到数据库）
@@ -226,7 +201,7 @@ async def get_rules(
     disabled_count = sum(1 for r in rules if r.status == "disabled")
 
     return {
-        "rules": [r.dict() for r in rules],
+        "rules": [r.model_dump() for r in rules],
         "total": len(rules),
         "enabled_count": enabled_count,
         "disabled_count": disabled_count
@@ -259,7 +234,7 @@ async def create_custom_rule(rule: ValidationRule, request: Request):
     rule.status = "enabled"
     DEFAULT_RULES.append(rule)
     rules_storage[rule.id] = {"status": "enabled"}
-    return {"rule": rule.dict(), "message": "自定义规则创建成功"}
+    return {"rule": rule.model_dump(), "message": "自定义规则创建成功"}
 
 
 @router.delete("/{rule_id}")

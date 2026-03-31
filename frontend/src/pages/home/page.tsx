@@ -4,13 +4,14 @@ import { useAuth } from '../../context/AuthContext';
 
 export default function HomePage() {
   const [input, setInput] = useState('');
+  const [message, setMessage] = useState('');
   const navigate = useNavigate();
   const { user, isAdmin, hasPermission } = useAuth();
 
   const handleSend = () => {
     if (!input.trim()) return;
     // TODO: AI 搜索功能开发中
-    alert('功能开发中');
+    setMessage('功能开发中');
   };
 
   // Get greeting based on time of day
@@ -33,6 +34,7 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-blue-50">
       <div className="max-w-4xl mx-auto px-8 pt-16">
+        {message && <div className="mb-4 px-4 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-sm">{message}</div>}
         {/* Welcome */}
         <div className="text-center mb-6">
           <h1 className="text-4xl font-bold text-slate-600">
@@ -58,7 +60,7 @@ export default function HomePage() {
           />
           <button
             onClick={handleSend}
-            className="absolute right-3 top-1/2 -translate-y-1/2 p-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-full transition-colors"
+            className="absolute right-3 top-1/2 -translate-y-1/2 p-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-full transition-colors"
           >
             <i className="ri-send-plane-fill text-base" />
           </button>

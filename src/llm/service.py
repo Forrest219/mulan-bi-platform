@@ -1,9 +1,10 @@
 """LLM 调用服务"""
 import os
 import logging
-from typing import Generator, Optional
+from typing import Optional
 
 from .models import LLMConfigDatabase
+from common.crypto import CryptoHelper
 
 logger = logging.getLogger(__name__)
 
@@ -12,50 +13,9 @@ _ENCRYPTION_KEY = os.environ.get("DATASOURCE_ENCRYPTION_KEY")
 if not _ENCRYPTION_KEY:
     raise RuntimeError("DATASOURCE_ENCRYPTION_KEY must be set")
 
-
-def _get_cipher(salt: bytes = None):
-    from cryptography.fernet import Fernet
-    from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.backends import default_backend
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-    import base64
-
-    if salt is None:
-        salt = os.urandom(16)
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=100000,
-            backend=default_backend()
-        )
-        key = base64.urlsafe_b64encode(kdf.derive(_ENCRYPTION_KEY.encode()))
-        return salt, Fernet(key)
-
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=100000,
-        backend=default_backend()
-    )
-    key = base64.urlsafe_b64encode(kdf.derive(_ENCRYPTION_KEY.encode()))
-    return Fernet(key)
-
-
-def _encrypt(text: str) -> str:
-    import base64
-    salt, cipher = _get_cipher()
-    return base64.urlsafe_b64encode(salt + cipher.encrypt(text.encode())).decode()
-
-
-def _decrypt(token: str) -> str:
-    import base64
-    data = base64.urlsafe_b64decode(token.encode())
-    salt = data[:16]
-    ciphertext = data[16:]
-    cipher = _get_cipher(salt)
-    return cipher.decrypt(ciphertext).decode()
+_crypto = CryptoHelper(_ENCRYPTION_KEY)
+_encrypt = _crypto.encrypt
+_decrypt = _crypto.decrypt
 
 
 class LLMService:
@@ -114,7 +74,6 @@ class LLMService:
 
     def _anthropic_complete(self, api_key: str, config, prompt: str, system: str, timeout: int) -> dict:
         from anthropic import Anthropic
-        from anthropic.lib.streaming import _types as anthropic_types
         base_url = config.base_url or "https://api.minimaxi.com/anthropic"
         client = Anthropic(api_key=api_key, base_url=base_url, timeout=timeout)
         messages = []

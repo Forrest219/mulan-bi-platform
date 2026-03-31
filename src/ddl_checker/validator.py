@@ -291,15 +291,14 @@ class ColumnValidator:
 
         # 检查保留字
         if col_name.lower() in [w.lower() for w in reserved_words]:
-            if not any(col_name.lower() == w.lower() for w in reserved_words):
-                violations.append(Violation(
-                    level=ViolationLevel.INFO,
-                    rule_name="column_naming",
-                    message=f"列名 '{col_name}' 是保留字",
-                    table_name=table.name,
-                    column_name=col_name,
-                    suggestion="考虑使用更明确的列名"
-                ))
+            violations.append(Violation(
+                level=ViolationLevel.INFO,
+                rule_name="column_naming",
+                message=f"列名 '{col_name}' 是保留字",
+                table_name=table.name,
+                column_name=col_name,
+                suggestion="考虑使用更明确的列名"
+            ))
 
         return violations
 

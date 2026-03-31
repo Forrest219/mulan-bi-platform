@@ -3,9 +3,7 @@
 """
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Request
-from typing import Optional, List
-import os
-import jwt
+from typing import Optional
 
 # 导入需求模块
 import sys
@@ -13,32 +11,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 
 from requirements import requirement_service
+from app.core.dependencies import get_current_user
 
 router = APIRouter()
-
-# JWT 验签
-_JWT_SECRET = os.environ.get("SESSION_SECRET")
-_JWT_ALGORITHM = "HS256"
-
-
-def _decode_session_token(token: str):
-    """验证并解码 session token"""
-    try:
-        payload = jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALGORITHM])
-        return {"id": int(payload["sub"]), "username": payload["username"], "role": payload["role"]}
-    except jwt.InvalidTokenError:
-        return None
-
-
-def get_current_user(request: Request) -> dict:
-    """获取当前登录用户"""
-    token = request.cookies.get("session")
-    if not token:
-        raise HTTPException(status_code=401, detail="未登录")
-    user_info = _decode_session_token(token)
-    if not user_info:
-        raise HTTPException(status_code=401, detail="无效的会话")
-    return user_info
 
 
 class CreateRequirementRequest(BaseModel):
@@ -116,19 +91,25 @@ async def get_statistics(request: Request):
 
 
 @router.post("/{req_id}/approve")
-async def approve_requirement(req_id: int, request: Request, approver: str = "admin", comment: Optional[str] = None):
+async def approve_requirement(req_id: int, request: Request, comment: Optional[str] = None):
     """审批需求"""
-    get_current_user(request)
+    user = get_current_user(request)
+    approver = user["username"]
     success = requirement_service.approve_requirement(req_id, approver=approver, comment=comment, approved=True)
-    return {"success": success, "message": "已通过审批" if success else "需求不存在"}
+    if not success:
+        raise HTTPException(status_code=404, detail="需求不存在")
+    return {"message": "已通过审批"}
 
 
 @router.post("/{req_id}/reject")
-async def reject_requirement(req_id: int, request: Request, approver: str = "admin", comment: Optional[str] = None):
+async def reject_requirement(req_id: int, request: Request, comment: Optional[str] = None):
     """拒绝需求"""
-    get_current_user(request)
+    user = get_current_user(request)
+    approver = user["username"]
     success = requirement_service.approve_requirement(req_id, approver=approver, comment=comment, approved=False)
-    return {"success": success, "message": "已拒绝" if success else "需求不存在"}
+    if not success:
+        raise HTTPException(status_code=404, detail="需求不存在")
+    return {"message": "已拒绝"}
 
 
 @router.post("/{req_id}/done")
@@ -136,7 +117,9 @@ async def mark_done(req_id: int, request: Request):
     """标记完成"""
     get_current_user(request)
     success = requirement_service.mark_as_done(req_id)
-    return {"success": success, "message": "已标记完成" if success else "需求不存在"}
+    if not success:
+        raise HTTPException(status_code=404, detail="需求不存在")
+    return {"message": "已标记完成"}
 
 
 @router.delete("/{req_id}")
@@ -144,4 +127,6 @@ async def delete_requirement(req_id: int, request: Request):
     """删除需求"""
     get_current_user(request)
     success = requirement_service.delete_requirement(req_id)
-    return {"success": success, "message": "已删除" if success else "需求不存在"}
+    if not success:
+        raise HTTPException(status_code=404, detail="需求不存在")
+    return {"message": "已删除"}

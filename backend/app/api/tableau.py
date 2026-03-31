@@ -1,8 +1,6 @@
 """
 Tableau 管理 API
 """
-import json
-import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -13,103 +11,18 @@ from pydantic import BaseModel
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 from tableau.models import TableauDatabase
 from tableau.sync_service import TableauSyncService
+from app.core.dependencies import get_current_user
+from app.core.crypto import get_tableau_crypto
 
 router = APIRouter()
 
-# 加密密钥：必须设置 TABLEAU_ENCRYPTION_KEY（生产环境禁止与 DATASOURCE_ENCRYPTION_KEY 共用）
-_ENCRYPTION_KEY = os.environ.get("TABLEAU_ENCRYPTION_KEY")
-if not _ENCRYPTION_KEY:
-    raise RuntimeError("TABLEAU_ENCRYPTION_KEY environment variable must be set")
-
-
-def _get_cipher(salt: bytes = None):
-    """根据 salt 派生 Fernet 密钥。salt=None 时生成随机 salt 用于新加密。"""
-    from cryptography.fernet import Fernet
-    from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.backends import default_backend
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-    import base64
-
-    if salt is None:
-        salt = os.urandom(16)
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=100000,
-            backend=default_backend()
-        )
-        key = base64.urlsafe_b64encode(kdf.derive(_ENCRYPTION_KEY.encode()))
-        return salt, Fernet(key)
-
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=100000,
-        backend=default_backend()
-    )
-    key = base64.urlsafe_b64encode(kdf.derive(_ENCRYPTION_KEY.encode()))
-    return Fernet(key)
-
-
-def _create_session_token(user_id: int, username: str, role: str) -> str:
-    """创建带签名的 JWT session token"""
-    import jwt
-    _secret = os.environ.get("SESSION_SECRET")
-    if not _secret:
-        raise RuntimeError("SESSION_SECRET environment variable must be set")
-    payload = {"sub": str(user_id), "username": username, "role": role}
-    return jwt.encode(payload, _secret, algorithm="HS256")
-
-
-def _decode_session_token(token: str) -> Optional[dict]:
-    """验证并解码 session token"""
-    import jwt
-    _secret = os.environ.get("SESSION_SECRET")
-    if not _secret:
-        return None
-    try:
-        payload = jwt.decode(token, _secret, algorithms=["HS256"])
-        return {
-            "id": int(payload["sub"]),
-            "username": payload["username"],
-            "role": payload["role"]
-        }
-    except jwt.InvalidTokenError:
-        return None
-
-
-def _encrypt(text: str) -> str:
-    """加密：随机 salt（16B）+ Fernet(token)，salt 前置"""
-    salt, cipher = _get_cipher()
-    encrypted = cipher.encrypt(text.encode())
-    return base64.urlsafe_b64encode(salt + encrypted).decode()
-
-
-def _decrypt(token: str) -> str:
-    """解密：提取前 16 字节 salt"""
-    import base64
-    data = base64.urlsafe_b64decode(token.encode())
-    salt = data[:16]
-    ciphertext = data[16:]
-    cipher = _get_cipher(salt)
-    return cipher.decrypt(ciphertext).decode()
+_crypto = get_tableau_crypto()
+_encrypt = _crypto.encrypt
+_decrypt = _crypto.decrypt
 
 
 def _db_path():
     return str(Path(__file__).parent.parent.parent.parent / "data" / "tableau.db")
-
-
-def get_current_user(request: Request) -> dict:
-    """获取当前登录用户（JWT 验签）"""
-    token = request.cookies.get("session")
-    if not token:
-        raise HTTPException(status_code=401, detail="未登录")
-    user_info = _decode_session_token(token)
-    if not user_info:
-        raise HTTPException(status_code=401, detail="无效的会话")
-    return user_info
 
 
 def require_admin_or_data_admin(request: Request) -> dict:
@@ -137,6 +50,7 @@ class CreateConnectionRequest(BaseModel):
     server_url: str
     site: str
     api_version: str = "3.21"
+    connection_type: str = "mcp"  # 'mcp' or 'tsc'
     token_name: str
     token_value: str
 
@@ -146,11 +60,55 @@ class UpdateConnectionRequest(BaseModel):
     server_url: Optional[str] = None
     site: Optional[str] = None
     api_version: Optional[str] = None
+    connection_type: Optional[str] = None
     token_name: Optional[str] = None
     token_value: Optional[str] = None
     is_active: Optional[bool] = None
     auto_sync_enabled: Optional[bool] = None
     sync_interval_hours: Optional[int] = None
+
+
+# --- REST API 直连测试（MCP 模式） ---
+
+def _test_connection_rest(server_url: str, site: str, token_name: str,
+                          token_value: str, api_version: str = "3.21") -> dict:
+    """通过 REST API 直接测试 Tableau 连接（不依赖 TSC 库）"""
+    import requests
+    url = f"{server_url.rstrip('/')}/api/{api_version}/auth/signin"
+    payload = {
+        "credentials": {
+            "personalAccessTokenName": token_name,
+            "personalAccessTokenSecret": token_value,
+            "site": {"contentUrl": site}
+        }
+    }
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            token = data.get("credentials", {}).get("token", "")
+            site_id = data.get("credentials", {}).get("site", {}).get("id", "")
+            # Sign out 清理 session
+            if token:
+                try:
+                    requests.post(
+                        f"{server_url.rstrip('/')}/api/{api_version}/auth/signout",
+                        headers={"X-Tableau-Auth": token},
+                        timeout=5
+                    )
+                except Exception:
+                    pass
+            return {"success": True, "message": f"REST API 连接成功 (site: {site_id})"}
+        else:
+            detail = resp.text[:200]
+            return {"success": False, "message": f"REST API 认证失败 (HTTP {resp.status_code}): {detail}"}
+    except Exception as e:
+        if "Timeout" in type(e).__name__:
+            return {"success": False, "message": "连接超时，请检查 Server URL 是否可达"}
+        if "ConnectionError" in type(e).__name__:
+            return {"success": False, "message": "无法连接到服务器，请检查 URL"}
+        return {"success": False, "message": f"REST API 测试失败: {str(e)}"}
 
 
 # --- Endpoints ---
@@ -175,6 +133,9 @@ async def create_connection(req: CreateConnectionRequest, request: Request):
     user = require_admin_or_data_admin(request)
     _db = TableauDatabase(db_path=_db_path())
 
+    if req.connection_type not in ("mcp", "tsc"):
+        raise HTTPException(status_code=400, detail="connection_type 必须为 'mcp' 或 'tsc'")
+
     encrypted_token = _encrypt(req.token_value)
 
     conn = _db.create_connection(
@@ -184,7 +145,8 @@ async def create_connection(req: CreateConnectionRequest, request: Request):
         token_name=req.token_name,
         token_encrypted=encrypted_token,
         owner_id=user["id"],
-        api_version=req.api_version
+        api_version=req.api_version,
+        connection_type=req.connection_type
     )
 
     return {"connection": conn.to_dict(), "message": "连接创建成功"}
@@ -257,6 +219,20 @@ async def test_connection(conn_id: int, request: Request):
             _db.update_connection_health(conn_id, False, msg)
             return {"success": False, "message": msg}
         raise
+
+    # MCP 模式：通过 REST API 直连测试
+    if getattr(conn, "connection_type", "mcp") == "mcp":
+        result = _test_connection_rest(
+            server_url=conn.server_url,
+            site=conn.site,
+            token_name=conn.token_name,
+            token_value=decrypted_token,
+            api_version=conn.api_version
+        )
+        _db.update_connection_health(conn_id, result["success"], result["message"])
+        return result
+
+    # TSC 模式：通过 tableauserverclient 库测试
     try:
         service = TableauSyncService(
             server_url=conn.server_url,
@@ -367,33 +343,6 @@ async def list_assets(
     }
 
 
-@router.get("/assets/{asset_id}")
-async def get_asset(asset_id: int, request: Request):
-    """获取资产详情"""
-    user = get_current_user(request)
-    _db = TableauDatabase(db_path=_db_path())
-
-    asset = _db.get_asset(asset_id)
-    if not asset or asset.is_deleted:
-        raise HTTPException(status_code=404, detail="资产不存在")
-
-    # 验证用户有权访问该资产所属的连接
-    _verify_connection_access(asset.connection_id, user, _db)
-
-    result = asset.to_dict()
-
-    # 获取关联的数据源
-    datasources = _db.get_asset_datasources(asset_id)
-    result["datasources"] = [ds.to_dict() for ds in datasources]
-
-    # 获取连接信息（含 server_url 用于跳转链接）
-    conn = _db.get_connection(asset.connection_id)
-    if conn:
-        result["server_url"] = conn.server_url
-
-    return result
-
-
 @router.get("/assets/search")
 async def search_assets(
     request: Request,
@@ -427,6 +376,33 @@ async def search_assets(
     }
 
 
+@router.get("/assets/{asset_id}")
+async def get_asset(asset_id: int, request: Request):
+    """获取资产详情"""
+    user = get_current_user(request)
+    _db = TableauDatabase(db_path=_db_path())
+
+    asset = _db.get_asset(asset_id)
+    if not asset or asset.is_deleted:
+        raise HTTPException(status_code=404, detail="资产不存在")
+
+    # 验证用户有权访问该资产所属的连接
+    _verify_connection_access(asset.connection_id, user, _db)
+
+    result = asset.to_dict()
+
+    # 获取关联的数据源
+    datasources = _db.get_asset_datasources(asset_id)
+    result["datasources"] = [ds.to_dict() for ds in datasources]
+
+    # 获取连接信息（含 server_url 用于跳转链接）
+    conn = _db.get_connection(asset.connection_id)
+    if conn:
+        result["server_url"] = conn.server_url
+
+    return result
+
+
 @router.get("/projects")
 async def get_projects(
     request: Request,
@@ -441,11 +417,3 @@ async def get_projects(
 
     projects = _db.get_project_tree(connection_id)
     return {"projects": projects}
-
-
-# --- Dev: 初始化测试连接 ---
-
-try:
-    import tableauserverclient  # noqa: F401
-except ImportError:
-    pass

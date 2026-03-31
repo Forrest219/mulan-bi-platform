@@ -1,6 +1,9 @@
 """Tableau 资产同步服务"""
 import json
+import logging
 from typing import List, Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class TableauSyncService:
@@ -30,7 +33,7 @@ class TableauSyncService:
             self.server = server
             return True
         except Exception as e:
-            print(f"Tableau connection failed: {e}")
+            logger.error("Tableau connection failed: %s", e)
             return False
 
     def disconnect(self):
@@ -96,9 +99,9 @@ class TableauSyncService:
                             datasource_type=getattr(ds, 'datasource_type', None) or getattr(ds, 'type_', None)
                         )
                 except Exception as ds_err:
-                    print(f"Datasource sync for workbook {wb.id} error: {ds_err}")
+                    logger.warning("Datasource sync for workbook %s error: %s", wb.id, ds_err)
         except Exception as e:
-            print(f"Workbook sync error: {e}")
+            logger.error("Workbook sync error: %s", e)
 
         # Views (including Dashboards)
         try:
@@ -123,7 +126,7 @@ class TableauSyncService:
                 )
                 synced_ids[asset_type].append(view.id)
         except Exception as e:
-            print(f"View sync error: {e}")
+            logger.error("View sync error: %s", e)
 
         # Datasources
         try:
@@ -143,7 +146,7 @@ class TableauSyncService:
                 )
                 synced_ids["datasource"].append(ds.id)
         except Exception as e:
-            print(f"Datasource sync error: {e}")
+            logger.error("Datasource sync error: %s", e)
 
         # 软删除：标记不再存在的资产
         all_ids = synced_ids["workbook"] + synced_ids["dashboard"] + synced_ids["view"] + synced_ids["datasource"]

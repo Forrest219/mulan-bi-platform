@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-
-const API_BASE = '';
+import { API_BASE } from '../config';
 
 export const ALL_PERMISSIONS = [
   { key: 'ddl_check', label: 'DDL 规范检查' },

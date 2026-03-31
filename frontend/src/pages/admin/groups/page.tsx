@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ALL_PERMISSIONS } from '../../../context/AuthContext';
-
-const API_BASE = 'http://localhost:8000';
+import { API_BASE, getAvatarGradient } from '../../../config';
 
 interface Group {
   id: number;
@@ -23,21 +22,6 @@ interface PendingPermissionChange {
   permissions: string[];
 }
 
-// 头像渐变色
-const AVATAR_GRADIENTS = [
-  'from-blue-500 to-blue-600',
-  'from-emerald-500 to-emerald-600',
-  'from-purple-500 to-purple-600',
-  'from-orange-500 to-orange-600',
-  'from-pink-500 to-pink-600',
-  'from-cyan-500 to-cyan-600',
-];
-
-function getAvatarGradient(name: string) {
-  const index = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % AVATAR_GRADIENTS.length;
-  return AVATAR_GRADIENTS[index];
-}
-
 export default function GroupsPage() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -50,10 +34,12 @@ export default function GroupsPage() {
   const [pendingChanges, setPendingChanges] = useState<Map<number, string[]>>(new Map());
   const [hasPendingChanges, setHasPendingChanges] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [message, setMessage] = useState('');
 
   const fetchGroups = async () => {
     try {
       const resp = await fetch(`${API_BASE}/api/groups/`, { credentials: 'include' });
+      if (!resp.ok) throw new Error('获取用户组列表失败');
       const data = await resp.json();
       setGroups(data.groups || []);
     } finally {
@@ -64,9 +50,10 @@ export default function GroupsPage() {
   const fetchUsers = async () => {
     try {
       const resp = await fetch(`${API_BASE}/api/permissions/users`, { credentials: 'include' });
+      if (!resp.ok) throw new Error('获取用户列表失败');
       const data = await resp.json();
       setUsers(data.users || []);
-    } catch (e) { console.error(e); }
+    } catch (e) { /* silently ignore */ }
   };
 
   useEffect(() => { fetchGroups(); fetchUsers(); }, []);
@@ -94,12 +81,13 @@ export default function GroupsPage() {
   // 保存所有修改
   const saveChanges = async () => {
     for (const [groupId, permissions] of pendingChanges) {
-      await fetch(`${API_BASE}/api/groups/${groupId}/permissions`, {
+      const resp = await fetch(`${API_BASE}/api/groups/${groupId}/permissions`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ permissions })
       });
+      if (!resp.ok) throw new Error(`更新用户组 ${groupId} 权限失败`);
     }
     setPendingChanges(new Map());
     setHasPendingChanges(false);
@@ -115,23 +103,25 @@ export default function GroupsPage() {
   };
 
   const handleCreateGroup = async () => {
-    if (!newGroup.name.trim()) { alert('请输入组名称'); return; }
+    if (!newGroup.name.trim()) { setMessage('请输入组名称'); return; }
     const resp = await fetch(`${API_BASE}/api/groups/`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(newGroup)
     });
     if (resp.ok) { setShowCreateModal(false); setNewGroup({ name: '', description: '', permissions: [] }); fetchGroups(); }
-    else { alert('创建失败'); }
+    else { setMessage('创建失败'); }
   };
 
   const handleDeleteGroup = async (groupId: number) => {
     if (!confirm('确定要删除该用户组吗？')) return;
-    await fetch(`${API_BASE}/api/groups/${groupId}`, { method: 'DELETE', credentials: 'include' });
+    const resp = await fetch(`${API_BASE}/api/groups/${groupId}`, { method: 'DELETE', credentials: 'include' });
+    if (!resp.ok) throw new Error('删除用户组失败');
     fetchGroups();
   };
 
   const handleOpenMembers = async (group: Group) => {
     setEditingGroup(group);
     const resp = await fetch(`${API_BASE}/api/groups/${group.id}/members`, { credentials: 'include' });
+    if (!resp.ok) throw new Error('获取组成员失败');
     const data = await resp.json();
     setGroupMembers(data.members || []);
     setShowMembersModal(true);
@@ -145,7 +135,8 @@ export default function GroupsPage() {
   };
 
   const handleRemoveMember = async (groupId: number, userId: number) => {
-    await fetch(`${API_BASE}/api/groups/${groupId}/members/${userId}`, { method: 'DELETE', credentials: 'include' });
+    await fetch(`${API_BASE}/api/groups/${groupId}/members/${userId}`, { method: 'DELETE', credentials: 'include' })
+      .then(resp => { if (!resp.ok) throw new Error('移除成员失败'); });
     setGroupMembers(groupMembers.filter(m => m.id !== userId));
     fetchGroups();
   };
@@ -180,6 +171,7 @@ export default function GroupsPage() {
 
   return (
     <div className="p-6">
+      {message && <div className="mb-4 px-4 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-sm">{message}</div>}
       {/* 页面标题栏 */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -187,7 +179,7 @@ export default function GroupsPage() {
           <p className="text-sm text-slate-400 mt-0.5">创建用户组，批量配置权限</p>
         </div>
         <button onClick={() => setShowCreateModal(true)}
-          className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 flex items-center gap-1.5">
+          className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 flex items-center gap-1.5">
           <i className="ri-add-line" /> 创建用户组
         </button>
       </div>
@@ -219,7 +211,7 @@ export default function GroupsPage() {
               取消更改
             </button>
             <button onClick={saveChanges}
-              className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              className="px-3 py-1.5 text-xs bg-slate-900 text-white rounded-lg hover:bg-slate-800">
               保存更改
             </button>
           </div>
@@ -316,7 +308,7 @@ export default function GroupsPage() {
             <p className="text-slate-500 mb-4">{searchQuery ? '未找到匹配的用户组' : '暂无用户组'}</p>
             {!searchQuery && (
               <button onClick={() => setShowCreateModal(true)}
-                className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
+                className="px-4 py-2 bg-slate-900 text-white text-sm rounded-lg hover:bg-slate-800">
                 创建第一个用户组
               </button>
             )}
@@ -361,7 +353,7 @@ export default function GroupsPage() {
               <button onClick={() => { setShowCreateModal(false); setNewGroup({ name: '', description: '', permissions: [] }); }}
                 className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700">取消</button>
               <button onClick={handleCreateGroup}
-                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">创建</button>
+                className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800">创建</button>
             </div>
           </div>
         </div>

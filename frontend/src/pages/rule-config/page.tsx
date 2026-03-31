@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import SeverityBadge from '../ddl-validator/components/SeverityBadge';
+import { API_BASE } from '../../config';
 
 interface ValidationRule {
   id: string;
@@ -12,8 +13,6 @@ interface ValidationRule {
   built_in: boolean;
   status: string;
 }
-
-const API_BASE = 'http://localhost:8000';
 
 const categoryColors: Record<string, string> = {
   Naming: 'bg-violet-50 text-violet-600 border-violet-200',
@@ -54,11 +53,11 @@ export default function RuleConfigPage() {
   const fetchRules = async () => {
     setLoading(true);
     try {
-      const resp = await fetch(`${API_BASE}/api/rules/`);
+      const resp = await fetch(`${API_BASE}/api/rules/`, { credentials: 'include' });
+      if (!resp.ok) throw new Error('获取规则列表失败');
       const data = await resp.json();
       setRules(data.rules);
     } catch (error) {
-      console.error('Failed to fetch rules:', error);
       showToast('获取规则列表失败');
     }
     setLoading(false);
@@ -72,14 +71,15 @@ export default function RuleConfigPage() {
     try {
       const resp = await fetch(`${API_BASE}/api/rules/${id}/toggle`, {
         method: 'PUT',
+        credentials: 'include',
       });
+      if (!resp.ok) throw new Error('切换规则状态失败');
       const data = await resp.json();
       setRules((prev) =>
         prev.map((r) => (r.id === id ? { ...r, status: data.status } : r))
       );
       showToast(data.message);
     } catch (error) {
-      console.error('Failed to toggle rule:', error);
       showToast('切换规则状态失败');
     }
   };
@@ -94,8 +94,10 @@ export default function RuleConfigPage() {
       const resp = await fetch(`${API_BASE}/api/rules/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(newRule),
       });
+      if (!resp.ok) throw new Error('创建规则失败');
       const data = await resp.json();
       if (data.error) {
         showToast(data.error);
@@ -114,7 +116,6 @@ export default function RuleConfigPage() {
       });
       fetchRules();
     } catch (error) {
-      console.error('Failed to create rule:', error);
       showToast('创建规则失败');
     }
   };

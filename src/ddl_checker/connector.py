@@ -2,7 +2,7 @@
 import logging
 import yaml
 from typing import Optional, Dict, Any
-from sqlalchemy import create_engine, inspect, Table, Column, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class DatabaseConnector:
             self.inspector = inspect(self.engine)
             return True
         except Exception as e:
-            print(f"数据库连接失败: {e}")
+            logger.error("数据库连接失败: %s", e)
             return False
 
     def disconnect(self):

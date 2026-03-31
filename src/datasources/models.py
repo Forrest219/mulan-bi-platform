@@ -60,7 +60,8 @@ class DataSourceDatabase:
                 if cls._instance is None:  # 二次检查
                     cls._instance = super().__new__(cls)
                     if db_path is None:
-                        db_path = "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/data/datasources.db"
+                        import os as _os
+                        db_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "data", "datasources.db")
                     cls._instance._init_db(db_path)
         return cls._instance
 

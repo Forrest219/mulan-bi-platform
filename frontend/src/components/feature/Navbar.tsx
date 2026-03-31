@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { LOGO_URL } from '../../config';
 
 const navItems = [
   { label: '数据库监控', path: '/database-monitor' },
@@ -23,7 +24,7 @@ export default function Navbar() {
       <div className="px-6 flex items-center h-14">
         <Link to="/" className="flex items-center gap-2.5 mr-10 shrink-0">
           <img
-            src="https://public.readdy.ai/ai/img_res/d9bf8fa2-dfff-4c50-98cf-7b635309e7d6.png"
+            src={LOGO_URL}
             alt="Mulan Platform Logo"
             className="w-7 h-7 object-contain"
           />

@@ -13,6 +13,7 @@ export default function TableauConnectionsPage() {
   const [showInactive, setShowInactive] = useState(false);
   const [formData, setFormData] = useState({
     name: '', server_url: '', site: '', api_version: '3.21',
+    connection_type: 'mcp' as 'mcp' | 'tsc',
     token_name: '', token_value: '',
     auto_sync_enabled: false, sync_interval_hours: 24
   });
@@ -58,6 +59,7 @@ export default function TableauConnectionsPage() {
         server_url: formData.server_url,
         site: formData.site,
         api_version: formData.api_version,
+        connection_type: formData.connection_type,
         auto_sync_enabled: formData.auto_sync_enabled,
         sync_interval_hours: formData.sync_interval_hours
       };
@@ -66,7 +68,7 @@ export default function TableauConnectionsPage() {
         updateData.token_value = formData.token_value;
       }
       await updateConnection(editingConn.id, updateData);
-      setEditingConn(null);
+      setShowModal(false);
       resetForm();
       fetchConnections();
     } catch (e: any) {
@@ -80,7 +82,7 @@ export default function TableauConnectionsPage() {
       await deleteConnection(id);
       fetchConnections();
     } catch (e: any) {
-      alert(e.message);
+      setModalNotify({ success: false, message: e.message || '删除失败' });
     }
   };
 
@@ -108,16 +110,17 @@ export default function TableauConnectionsPage() {
       server_url: conn.server_url,
       site: conn.site,
       api_version: conn.api_version,
+      connection_type: conn.connection_type || 'mcp',
       token_name: conn.token_name,
       token_value: '',
-      auto_sync_enabled: (conn as any).auto_sync_enabled || false,
-      sync_interval_hours: (conn as any).sync_interval_hours || 24
+      auto_sync_enabled: conn.auto_sync_enabled || false,
+      sync_interval_hours: conn.sync_interval_hours || 24
     });
     setShowModal(true);
   };
 
   const resetForm = () => {
-    setFormData({ name: '', server_url: '', site: '', api_version: '3.21', token_name: '', token_value: '', auto_sync_enabled: false, sync_interval_hours: 24 });
+    setFormData({ name: '', server_url: '', site: '', api_version: '3.21', connection_type: 'mcp', token_name: '', token_value: '', auto_sync_enabled: false, sync_interval_hours: 24 });
     setFormError('');
     setEditingConn(null);
     setModalNotify(null);
@@ -147,7 +150,7 @@ export default function TableauConnectionsPage() {
           <p className="text-sm text-slate-400 mt-0.5">配置 Tableau Server 连接并同步资产</p>
         </div>
         <button onClick={() => { resetForm(); setShowModal(true); }}
-          className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 flex items-center gap-1.5">
+          className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 flex items-center gap-1.5">
           <i className="ri-add-line" /> 新建连接
         </button>
       </div>
@@ -176,16 +179,25 @@ export default function TableauConnectionsPage() {
                   <h3 className="font-semibold text-slate-800">{conn.name}</h3>
                   <p className="text-xs text-slate-400 mt-0.5">{conn.server_url}</p>
                 </div>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${status.className}`}>
-                  {status.text}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${
+                    conn.connection_type === 'tsc'
+                      ? 'bg-amber-50 text-amber-600 border border-amber-200'
+                      : 'bg-blue-50 text-blue-600 border border-blue-200'
+                  }`}>
+                    {conn.connection_type === 'tsc' ? 'TSC 直连' : 'MCP/REST'}
+                  </span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${status.className}`}>
+                    {status.text}
+                  </span>
+                </div>
               </div>
               <div className="space-y-1.5 text-xs text-slate-500 mb-4">
                 <div><span className="text-slate-400">站点:</span> {conn.site}</div>
                 <div><span className="text-slate-400">API版本:</span> {conn.api_version}</div>
                 <div><span className="text-slate-400">上次同步:</span> {formatDate(conn.last_sync_at)}</div>
-                {(conn as any).auto_sync_enabled && (
-                  <div><span className="text-slate-400">自动同步:</span> 每{(conn as any).sync_interval_hours || 24}小时</div>
+                {conn.auto_sync_enabled && (
+                  <div><span className="text-slate-400">自动同步:</span> 每{conn.sync_interval_hours || 24}小时</div>
                 )}
                 {conn.last_test_at && (
                   <div><span className="text-slate-400">连接测试:</span> {formatDate(conn.last_test_at)}</div>
@@ -209,6 +221,13 @@ export default function TableauConnectionsPage() {
                 <button onClick={() => openEditModal(conn)}
                   className="flex-1 px-3 py-1.5 text-xs text-slate-500 hover:text-slate-700">
                   编辑
+                </button>
+                <button onClick={async () => {
+                    await updateConnection(conn.id, { is_active: !conn.is_active });
+                    fetchConnections();
+                  }}
+                  className={`flex-1 px-3 py-1.5 text-xs ${conn.is_active ? 'text-orange-500 hover:text-orange-700' : 'text-emerald-500 hover:text-emerald-700'}`}>
+                  {conn.is_active ? '禁用' : '启用'}
                 </button>
                 <button onClick={() => handleDelete(conn.id)}
                   className="flex-1 px-3 py-1.5 text-xs text-red-500 hover:text-red-700">
@@ -263,6 +282,41 @@ export default function TableauConnectionsPage() {
             </h2>
             <div className="space-y-4">
               {formError && <div className="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-lg">{formError}</div>}
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1.5">连接类型</label>
+                <div className="flex gap-3">
+                  <label className={`flex-1 flex items-center gap-2 px-4 py-2.5 border rounded-lg cursor-pointer transition-colors ${
+                    formData.connection_type === 'mcp'
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}>
+                    <input type="radio" name="connection_type" value="mcp"
+                      checked={formData.connection_type === 'mcp'}
+                      onChange={() => setFormData({ ...formData, connection_type: 'mcp' })}
+                      className="sr-only" />
+                    <i className="ri-cloud-line" />
+                    <div>
+                      <div className="text-sm font-medium">MCP/REST</div>
+                      <div className="text-xs opacity-60">REST API 直连（推荐）</div>
+                    </div>
+                  </label>
+                  <label className={`flex-1 flex items-center gap-2 px-4 py-2.5 border rounded-lg cursor-pointer transition-colors ${
+                    formData.connection_type === 'tsc'
+                      ? 'border-amber-500 bg-amber-50 text-amber-700'
+                      : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}>
+                    <input type="radio" name="connection_type" value="tsc"
+                      checked={formData.connection_type === 'tsc'}
+                      onChange={() => setFormData({ ...formData, connection_type: 'tsc' })}
+                      className="sr-only" />
+                    <i className="ri-terminal-line" />
+                    <div>
+                      <div className="text-sm font-medium">TSC 直连</div>
+                      <div className="text-xs opacity-60">Python TSC 库连接</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
               <div>
                 <label className="block text-sm font-medium text-slate-600 mb-1.5">连接名称 <span className="text-red-500">*</span></label>
                 <input type="text" value={formData.name}
@@ -339,7 +393,7 @@ export default function TableauConnectionsPage() {
               <button onClick={() => { setShowModal(false); resetForm(); }}
                 className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700">取消</button>
               <button onClick={editingConn ? handleUpdate : handleCreate}
-                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">
+                className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800">
                 {editingConn ? '保存' : '创建'}
               </button>
             </div>

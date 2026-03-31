@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-
-const API_BASE = 'http://localhost:8000';
+import { API_BASE, LOGO_URL } from '../../config';
 
 export default function RegisterPage() {
   const [email, setEmail] = useState('');
@@ -52,7 +51,7 @@ export default function RegisterPage() {
       <div className="bg-white rounded-xl border border-slate-200 p-8 w-full max-w-md">
         <div className="text-center mb-8">
           <img
-            src="https://public.readdy.ai/ai/img_res/d9bf8fa2-dfff-4c50-98cf-7b635309e7d6.png"
+            src={LOGO_URL}
             alt="Mulan Platform Logo"
             className="w-12 h-12 object-contain mx-auto mb-3"
           />
@@ -75,7 +74,7 @@ export default function RegisterPage() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
               placeholder="your@email.com"
               required
             />
@@ -89,7 +88,7 @@ export default function RegisterPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
               placeholder="至少6位"
               required
             />
@@ -103,7 +102,7 @@ export default function RegisterPage() {
               type="password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
               placeholder="再次输入密码"
               required
             />
@@ -115,7 +114,7 @@ export default function RegisterPage() {
             className={`w-full py-2.5 rounded-lg text-sm font-semibold transition-all ${
               loading
                 ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                : 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-slate-900 text-white hover:bg-slate-800'
             }`}
           >
             {loading ? '注册中...' : '注册'}

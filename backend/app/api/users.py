@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 from app.core.dependencies import get_current_user, get_current_admin
+from app.core.constants import VALID_ROLES
 
 router = APIRouter()
 
@@ -49,7 +50,6 @@ async def create_user(request: CreateUserRequest):
     sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
     from auth import auth_service
 
-    VALID_ROLES = ["admin", "data_admin", "analyst", "user"]
     if request.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail="无效的角色")
 
@@ -75,7 +75,6 @@ async def update_user_role(user_id: int, request: UpdateUserRoleRequest, http_re
     sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
     from auth import auth_service
 
-    VALID_ROLES = ["admin", "data_admin", "analyst", "user"]
     if request.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail="无效的角色")
 

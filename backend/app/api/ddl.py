@@ -2,7 +2,7 @@
 DDL 检查 API
 """
 from pydantic import BaseModel
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from typing import Optional, List
 
 import sys
@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 
 from ddl_checker.parser import DDLParser
 from ddl_checker.validator import DDLValidator
+from app.core.dependencies import get_current_user
 
 router = APIRouter()
 
@@ -69,7 +70,7 @@ def _calculate_score(violations) -> tuple:
     return score, summary
 
 
-@router.post("/check", response_model=DDLCheckResponse)
+@router.post("/check", response_model=DDLCheckResponse, dependencies=[Depends(get_current_user)])
 async def check_ddl(request: DDLCheckRequest):
     """
     检查 DDL 语句
@@ -111,7 +112,7 @@ async def check_ddl(request: DDLCheckRequest):
     )
 
 
-@router.get("/rules")
+@router.get("/rules", dependencies=[Depends(get_current_user)])
 async def get_rules():
     """获取当前启用的规则列表（从 rules.yaml）"""
     import yaml

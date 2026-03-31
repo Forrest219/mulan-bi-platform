@@ -3,7 +3,7 @@ from .connector import DatabaseConnector
 from .parser import TableInfo, ColumnInfo, IndexInfo, DDLParser
 from .validator import DDLValidator, Violation, ViolationLevel, RulesConfig
 from .reporter import ReportGenerator, CheckReport
-from .scanner import DDLSanner, DDLScanResult
+from .scanner import DDLScanner, DDLScanResult
 
 __all__ = [
     "DatabaseConnector",
@@ -17,6 +17,6 @@ __all__ = [
     "RulesConfig",
     "ReportGenerator",
     "CheckReport",
-    "DDLSanner",
+    "DDLScanner",
     "DDLScanResult",
 ]

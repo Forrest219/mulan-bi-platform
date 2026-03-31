@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { ALL_PERMISSIONS, ROLE_LABELS, ROLE_DEFAULT_PERMISSIONS } from '../../../context/AuthContext';
-
-const API_BASE = 'http://localhost:8000';
+import { ALL_PERMISSIONS, ROLE_DEFAULT_PERMISSIONS } from '../../../context/AuthContext';
+import { API_BASE, getAvatarGradient } from '../../../config';
 
 type UserRole = 'admin' | 'data_admin' | 'analyst' | 'user';
 
@@ -25,21 +24,6 @@ const ROLES: { key: UserRole; label: string }[] = [
   { key: 'analyst', label: '业务分析师' },
   { key: 'user', label: '普通用户' },
 ];
-
-// 头像颜色配置
-const AVATAR_GRADIENTS = [
-  'from-blue-500 to-blue-600',
-  'from-emerald-500 to-emerald-600',
-  'from-purple-500 to-purple-600',
-  'from-orange-500 to-orange-600',
-  'from-pink-500 to-pink-600',
-  'from-cyan-500 to-cyan-600',
-];
-
-function getAvatarGradient(name: string) {
-  const index = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % AVATAR_GRADIENTS.length;
-  return AVATAR_GRADIENTS[index];
-}
 
 function formatRelativeTime(dateStr: string | null): string {
   if (!dateStr) return '从未登录';
@@ -87,6 +71,7 @@ export default function UserManagementPage() {
   });
   const [editUserData, setEditUserData] = useState({ display_name: '', email: '' });
   const [formError, setFormError] = useState('');
+  const [message, setMessage] = useState('');
 
   const fetchUsers = async () => {
     try {
@@ -132,7 +117,11 @@ export default function UserManagementPage() {
   // 批量启用
   const handleBulkEnable = async () => {
     for (const id of selectedUsers) {
-      await fetch(`${API_BASE}/api/users/${id}/toggle-active`, { method: 'PUT', credentials: 'include' });
+      const user = users.find(u => u.id === id);
+      if (user && !user.is_active) {
+        const resp = await fetch(`${API_BASE}/api/users/${id}/toggle-active`, { method: 'PUT', credentials: 'include' });
+        if (!resp.ok) throw new Error(`启用用户 ${id} 失败`);
+      }
     }
     setSelectedUsers(new Set());
     fetchUsers();
@@ -141,7 +130,11 @@ export default function UserManagementPage() {
   // 批量禁用
   const handleBulkDisable = async () => {
     for (const id of selectedUsers) {
-      await fetch(`${API_BASE}/api/users/${id}/toggle-active`, { method: 'PUT', credentials: 'include' });
+      const user = users.find(u => u.id === id);
+      if (user && user.is_active) {
+        const resp = await fetch(`${API_BASE}/api/users/${id}/toggle-active`, { method: 'PUT', credentials: 'include' });
+        if (!resp.ok) throw new Error(`禁用用户 ${id} 失败`);
+      }
     }
     setSelectedUsers(new Set());
     fetchUsers();
@@ -151,7 +144,8 @@ export default function UserManagementPage() {
   const handleBulkDelete = async () => {
     if (!confirm(`确定要删除 ${selectedUsers.size} 个用户吗？`)) return;
     for (const id of selectedUsers) {
-      await fetch(`${API_BASE}/api/users/${id}`, { method: 'DELETE', credentials: 'include' });
+      const resp = await fetch(`${API_BASE}/api/users/${id}`, { method: 'DELETE', credentials: 'include' });
+      if (!resp.ok) throw new Error(`删除用户 ${id} 失败`);
     }
     setSelectedUsers(new Set());
     fetchUsers();
@@ -187,18 +181,21 @@ export default function UserManagementPage() {
   };
 
   const handleToggleActive = async (userId: number) => {
-    await fetch(`${API_BASE}/api/users/${userId}/toggle-active`, { method: 'PUT', credentials: 'include' });
+    const response = await fetch(`${API_BASE}/api/users/${userId}/toggle-active`, { method: 'PUT', credentials: 'include' });
+    if (!response.ok) throw new Error('切换用户状态失败');
     fetchUsers();
   };
 
   const handleUpdateRole = async (userId: number, role: string) => {
-    await fetch(`${API_BASE}/api/users/${userId}/role`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ role }) });
+    const response = await fetch(`${API_BASE}/api/users/${userId}/role`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ role }) });
+    if (!response.ok) throw new Error('更新用户角色失败');
     fetchUsers();
   };
 
   const handleDeleteUser = async (userId: number) => {
     if (!confirm('确定要删除该用户吗？')) return;
-    await fetch(`${API_BASE}/api/users/${userId}`, { method: 'DELETE', credentials: 'include' });
+    const response = await fetch(`${API_BASE}/api/users/${userId}`, { method: 'DELETE', credentials: 'include' });
+    if (!response.ok) throw new Error('删除用户失败');
     fetchUsers();
   };
 
@@ -223,12 +220,12 @@ export default function UserManagementPage() {
       setEditingUser(null);
       fetchUsers();
     } else {
-      alert('更新失败');
+      setMessage('更新失败');
     }
   };
 
   const openPermissionModal = (user: User) => {
-    if (user.role === 'admin') { alert('管理员拥有所有权限，无需编辑'); return; }
+    if (user.role === 'admin') { setMessage('管理员拥有所有权限，无需编辑'); return; }
     setEditingUser(user);
     setShowPermModal(true);
   };
@@ -239,7 +236,7 @@ export default function UserManagementPage() {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ permissions })
     });
     if (response.ok) { setShowPermModal(false); setEditingUser(null); fetchUsers(); }
-    else { alert('更新失败'); }
+    else { setMessage('更新失败'); }
   };
 
   const handleTogglePermission = (permKey: string, currentPerms: string[]) =>
@@ -249,6 +246,7 @@ export default function UserManagementPage() {
 
   return (
     <div className="p-6">
+      {message && <div className="mb-4 px-4 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-sm">{message}</div>}
       {/* 页面标题栏 */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -256,7 +254,7 @@ export default function UserManagementPage() {
           <p className="text-sm text-slate-400 mt-0.5">管理平台用户账号和权限</p>
         </div>
         <button onClick={() => { resetForm(); setShowModal(true); }}
-          className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 flex items-center gap-1.5">
+          className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 flex items-center gap-1.5">
           <i className="ri-add-line" /> 创建用户
         </button>
       </div>
@@ -447,7 +445,7 @@ export default function UserManagementPage() {
             </div>
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700">取消</button>
-              <button onClick={handleCreateUser} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">创建</button>
+              <button onClick={handleCreateUser} className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800">创建</button>
             </div>
           </div>
         </div>
@@ -477,7 +475,7 @@ export default function UserManagementPage() {
               <button onClick={() => { setShowEditModal(false); setEditingUser(null); }}
                 className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700">取消</button>
               <button onClick={handleSaveEdit}
-                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">保存</button>
+                className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800">保存</button>
             </div>
           </div>
         </div>
@@ -512,7 +510,7 @@ export default function UserManagementPage() {
               <button onClick={() => { setShowPermModal(false); setEditingUser(null); }}
                 className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700">取消</button>
               <button onClick={() => handleUpdatePermissions(editingUser.permissions || [])}
-                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">保存</button>
+                className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800">保存</button>
             </div>
           </div>
         </div>

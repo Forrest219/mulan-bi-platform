@@ -139,10 +139,6 @@ class DDLParser:
         """提取列定义"""
         columns = []
 
-        # 移除表名和首尾括号
-        sql_body = re.sub(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`\"']?\w+[`\"']?\s*\([^)]*\).*",
-                          "", sql, flags=re.IGNORECASE | re.DOTALL)
-
         # 提取列定义部分
         paren_depth = 0
         col_start = -1

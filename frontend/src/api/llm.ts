@@ -1,4 +1,4 @@
-const API_BASE = '/api';
+import { API_BASE } from '../config';
 
 export interface LLMConfig {
   id: number;
@@ -35,7 +35,7 @@ export interface AssetSummaryResult {
 }
 
 export async function getLLMConfig(): Promise<{ config: LLMConfig | null; message?: string }> {
-  const res = await fetch(`${API_BASE}/llm/config`, { credentials: 'include' });
+  const res = await fetch(`${API_BASE}/api/llm/config`, { credentials: 'include' });
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail || '获取 LLM 配置失败');
@@ -44,7 +44,7 @@ export async function getLLMConfig(): Promise<{ config: LLMConfig | null; messag
 }
 
 export async function saveLLMConfig(data: LLMConfigInput): Promise<{ message: string }> {
-  const res = await fetch(`${API_BASE}/llm/config`, {
+  const res = await fetch(`${API_BASE}/api/llm/config`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
@@ -58,7 +58,7 @@ export async function saveLLMConfig(data: LLMConfigInput): Promise<{ message: st
 }
 
 export async function testLLMConnection(prompt?: string): Promise<LLMTestResult> {
-  const res = await fetch(`${API_BASE}/llm/config/test`, {
+  const res = await fetch(`${API_BASE}/api/llm/config/test`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
@@ -72,7 +72,7 @@ export async function testLLMConnection(prompt?: string): Promise<LLMTestResult>
 }
 
 export async function deleteLLMConfig(): Promise<{ message: string }> {
-  const res = await fetch(`${API_BASE}/llm/config`, { method: 'DELETE', credentials: 'include' });
+  const res = await fetch(`${API_BASE}/api/llm/config`, { method: 'DELETE', credentials: 'include' });
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail || '删除失败');
@@ -82,7 +82,7 @@ export async function deleteLLMConfig(): Promise<{ message: string }> {
 
 export async function getAssetSummary(assetId: number, refresh = false): Promise<AssetSummaryResult> {
   const params = new URLSearchParams({ refresh: String(refresh) });
-  const res = await fetch(`${API_BASE}/llm/assets/${assetId}/summary?${params}`, { credentials: 'include' });
+  const res = await fetch(`${API_BASE}/api/llm/assets/${assetId}/summary?${params}`, { credentials: 'include' });
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail || '获取摘要失败');

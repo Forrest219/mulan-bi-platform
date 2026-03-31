@@ -2,13 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getAsset, TableauAsset } from '../../../api/tableau';
 import { getAssetSummary, getLLMConfig } from '../../../api/llm';
-
-const ASSET_TYPE_LABELS: Record<string, string> = {
-  workbook: '工作簿',
-  dashboard: '仪表板',
-  view: '视图',
-  datasource: '数据源'
-};
+import { ASSET_TYPE_LABELS } from '../../../config';
 
 export default function TableauAssetDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -26,7 +20,7 @@ export default function TableauAssetDetailPage() {
     if (!id) return;
     getAsset(Number(id))
       .then(setAsset)
-      .catch(console.error)
+      .catch(() => { /* silently ignore */ })
       .finally(() => setLoading(false));
     // 检查 LLM 是否已配置
     getLLMConfig().then(d => {
@@ -247,7 +241,7 @@ export default function TableauAssetDetailPage() {
                   <div className="text-slate-400 text-sm mb-3">暂无解读内容</div>
                   <button
                     onClick={() => loadAISummary()}
-                    className="px-4 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                    className="px-4 py-2 text-sm bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors"
                   >
                     生成 AI 解读
                   </button>

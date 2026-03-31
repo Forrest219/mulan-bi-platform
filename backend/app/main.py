@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm
+from app.core.constants import JWT_SECRET, JWT_EXPIRE_SECONDS
 
 app = FastAPI(
     title="Mulan BI Platform API",
@@ -15,17 +16,12 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Session secret key - must be set via environment variable in production
-SESSION_SECRET = os.environ.get("SESSION_SECRET")
-if not SESSION_SECRET:
-    raise RuntimeError("SESSION_SECRET environment variable must be set")
-
 # 添加 SessionMiddleware
 app.add_middleware(
     SessionMiddleware,
-    secret_key=SESSION_SECRET,
+    secret_key=JWT_SECRET,
     session_cookie="session",
-    max_age=86400 * 7  # 7 days
+    max_age=JWT_EXPIRE_SECONDS
 )
 
 # CORS 配置 - 仅允许明确的前端域名

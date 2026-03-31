@@ -19,6 +19,7 @@ class TableauConnection(Base):
     server_url = Column(String(512), nullable=False)
     site = Column(String(128), nullable=False)
     api_version = Column(String(16), default="3.21")
+    connection_type = Column(String(16), default="mcp", nullable=False)  # 'mcp' or 'tsc'
     token_name = Column(String(256), nullable=False)
     token_encrypted = Column(Text, nullable=False)
     owner_id = Column(Integer, nullable=False)
@@ -44,6 +45,7 @@ class TableauConnection(Base):
             "server_url": self.server_url,
             "site": self.site,
             "api_version": self.api_version,
+            "connection_type": self.connection_type,
             "token_name": self.token_name,
             "owner_id": self.owner_id,
             "is_active": self.is_active,
@@ -133,7 +135,8 @@ class TableauDatabase:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
                     if db_path is None:
-                        db_path = "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/data/tableau.db"
+                        import os as _os
+                        db_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "data", "tableau.db")
                     cls._instance._init_db(db_path)
         return cls._instance
 
@@ -143,9 +146,25 @@ class TableauDatabase:
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self.engine = create_engine(f"sqlite:///{db_path}", echo=False, pool_pre_ping=True)
         Base.metadata.create_all(self.engine)
+        self._ensure_columns()
         Session = sessionmaker(bind=self.engine, expire_on_commit=False)
         from sqlalchemy.orm import scoped_session
         self._scoped_session = scoped_session(Session)
+
+    def _ensure_columns(self):
+        """SQLite 迁移：为已有表补充新列"""
+        import sqlite3
+        raw_path = str(self.engine.url).replace("sqlite:///", "")
+        conn = sqlite3.connect(raw_path)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(tableau_connections)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        if "connection_type" not in existing_cols:
+            cursor.execute(
+                "ALTER TABLE tableau_connections ADD COLUMN connection_type VARCHAR(16) NOT NULL DEFAULT 'mcp'"
+            )
+            conn.commit()
+        conn.close()
 
     @property
     def session(self):
@@ -158,12 +177,14 @@ class TableauDatabase:
 
     def create_connection(self, name: str, server_url: str, site: str,
                           token_name: str, token_encrypted: str,
-                          owner_id: int, api_version: str = "3.21") -> TableauConnection:
+                          owner_id: int, api_version: str = "3.21",
+                          connection_type: str = "mcp") -> TableauConnection:
         conn = TableauConnection(
             name=name,
             server_url=server_url,
             site=site,
             api_version=api_version,
+            connection_type=connection_type,
             token_name=token_name,
             token_encrypted=token_encrypted,
             owner_id=owner_id,

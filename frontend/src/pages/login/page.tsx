@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { LOGO_URL } from '../../config';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
@@ -30,7 +31,7 @@ export default function LoginPage() {
       <div className="bg-white rounded-xl border border-slate-200 p-8 w-full max-w-md">
         <div className="text-center mb-8">
           <img
-            src="https://public.readdy.ai/ai/img_res/d9bf8fa2-dfff-4c50-98cf-7b635309e7d6.png"
+            src={LOGO_URL}
             alt="Mulan Platform Logo"
             className="w-12 h-12 object-contain mx-auto mb-3"
           />
@@ -86,11 +87,10 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="mt-6 text-center space-y-2">
+        <div className="mt-6 text-center">
           <Link to="/register" className="block text-sm text-blue-600 hover:text-blue-700">
             注册新账号
           </Link>
-          <p className="text-xs text-slate-400">默认管理员: admin / admin123</p>
         </div>
       </div>
     </div>
