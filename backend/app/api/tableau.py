@@ -253,9 +253,11 @@ async def test_connection(conn_id: int, request: Request):
             token_value=decrypted_token,
             api_version=conn.api_version
         )
-        result = service.test_connection()
-        service.disconnect()
-        return result
+        try:
+            result = service.test_connection()
+            return result
+        finally:
+            service.disconnect()
     except Exception as e:
         return {"success": False, "message": f"测试失败: {str(e)}"}
 
@@ -283,16 +285,18 @@ async def sync_connection(conn_id: int, request: Request):
             api_version=conn.api_version
         )
 
-        if not service.connect():
-            return {"success": False, "message": "无法连接到 Tableau Server"}
+        try:
+            if not service.connect():
+                return {"success": False, "message": "无法连接到 Tableau Server"}
 
-        result = service.sync_all_assets(_db, conn_id)
-        service.disconnect()
+            result = service.sync_all_assets(_db, conn_id)
 
-        return {
-            "success": True,
-            "message": f"同步完成，共 {result['total']} 个资产，标记 {result['deleted']} 个已删除"
-        }
+            return {
+                "success": True,
+                "message": f"同步完成，共 {result['total']} 个资产，标记 {result['deleted']} 个已删除"
+            }
+        finally:
+            service.disconnect()
 
     except Exception as e:
         return {"success": False, "message": f"同步失败: {str(e)}"}

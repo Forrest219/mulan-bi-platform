@@ -1,41 +1,13 @@
 """
 用户组管理 API - 仅管理员可访问
 """
-import os
-import jwt
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 
+from backend.app.core.dependencies import get_current_admin
+
 router = APIRouter(tags=["用户组管理"])
-
-# JWT 验签
-_JWT_SECRET = os.environ.get("SESSION_SECRET")
-if not _JWT_SECRET:
-    raise RuntimeError("SESSION_SECRET environment variable must be set")
-_JWT_ALGORITHM = "HS256"
-
-
-def _decode_session_token(token: str):
-    """验证并解码 session token"""
-    try:
-        payload = jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALGORITHM])
-        return {"id": int(payload["sub"]), "username": payload["username"], "role": payload["role"]}
-    except jwt.InvalidTokenError:
-        return None
-
-
-def get_current_admin(request: Request) -> dict:
-    """依赖：获取当前登录管理员"""
-    token = request.cookies.get("session")
-    if not token:
-        raise HTTPException(status_code=401, detail="未登录")
-    user_info = _decode_session_token(token)
-    if not user_info:
-        raise HTTPException(status_code=401, detail="无效的会话")
-    if user_info["role"] != "admin":
-        raise HTTPException(status_code=403, detail="需要管理员权限")
-    return user_info
 
 
 class CreateGroupRequest(BaseModel):

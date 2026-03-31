@@ -1,52 +1,13 @@
 """
 用户管理 API - 仅管理员可访问
 """
-import os
-import jwt
 from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
-from typing import Optional, List, Callable
+from typing import Optional, List
+
+from backend.app.core.dependencies import get_current_user, get_current_admin
 
 router = APIRouter()
-
-# JWT 验签
-_JWT_SECRET = os.environ.get("SESSION_SECRET")
-if not _JWT_SECRET:
-    raise RuntimeError("SESSION_SECRET environment variable must be set")
-_JWT_ALGORITHM = "HS256"
-
-
-def _decode_session_token(token: str):
-    """验证并解码 session token"""
-    try:
-        payload = jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALGORITHM])
-        return {"id": int(payload["sub"]), "username": payload["username"], "role": payload["role"]}
-    except jwt.InvalidTokenError:
-        return None
-
-
-def get_current_admin(request: Request) -> dict:
-    """依赖：获取当前登录管理员"""
-    token = request.cookies.get("session")
-    if not token:
-        raise HTTPException(status_code=401, detail="未登录")
-    user_info = _decode_session_token(token)
-    if not user_info:
-        raise HTTPException(status_code=401, detail="无效的会话")
-    if user_info["role"] != "admin":
-        raise HTTPException(status_code=403, detail="需要管理员权限")
-    return user_info
-
-
-def get_current_user(request: Request) -> dict:
-    """依赖：获取当前登录用户"""
-    token = request.cookies.get("session")
-    if not token:
-        raise HTTPException(status_code=401, detail="未登录")
-    user_info = _decode_session_token(token)
-    if not user_info:
-        raise HTTPException(status_code=401, detail="无效的会话")
-    return user_info
 
 
 class CreateUserRequest(BaseModel):
@@ -107,7 +68,7 @@ async def create_user(request: CreateUserRequest):
 
 
 @router.put("/{user_id}/role", dependencies=[Depends(get_current_admin)])
-async def update_user_role(user_id: int, request: UpdateUserRoleRequest):
+async def update_user_role(user_id: int, request: UpdateUserRoleRequest, http_request: Request):
     """更新用户角色（管理员）"""
     import sys
     from pathlib import Path
@@ -119,12 +80,9 @@ async def update_user_role(user_id: int, request: UpdateUserRoleRequest):
         raise HTTPException(status_code=400, detail="无效的角色")
 
     # 防止把自己降级
-    session = request.cookies.get("session")
-    if session:
-        parts = session.split(":")
-        current_user_id = int(parts[0])
-        if current_user_id == user_id and request.role != "admin":
-            raise HTTPException(status_code=400, detail="不能将自己的角色降级")
+    current_user = get_current_user(http_request)
+    if current_user["id"] == user_id and request.role != "admin":
+        raise HTTPException(status_code=400, detail="不能将自己的角色降级")
 
     success = auth_service.update_user_role(user_id, request.role)
     if not success:
@@ -208,7 +166,7 @@ async def get_all_roles():
 
 
 @router.delete("/{user_id}", dependencies=[Depends(get_current_admin)])
-async def delete_user(user_id: int, request: Request):
+async def delete_user(user_id: int, http_request: Request):
     """删除用户（管理员）"""
     import sys
     from pathlib import Path
@@ -216,12 +174,9 @@ async def delete_user(user_id: int, request: Request):
     from auth import auth_service
 
     # 防止删除自己
-    session = request.cookies.get("session")
-    if session:
-        parts = session.split(":")
-        current_user_id = int(parts[0])
-        if current_user_id == user_id:
-            raise HTTPException(status_code=400, detail="不能删除自己")
+    current_user = get_current_user(http_request)
+    if current_user["id"] == user_id:
+        raise HTTPException(status_code=400, detail="不能删除自己")
 
     success = auth_service.delete_user(user_id)
     if not success:
