@@ -10,6 +10,7 @@ export default function TableauConnectionsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [editingConn, setEditingConn] = useState<TableauConnection | null>(null);
+  const [showInactive, setShowInactive] = useState(false);
   const [formData, setFormData] = useState({
     name: '', server_url: '', site: '', api_version: '3.21',
     token_name: '', token_value: '',
@@ -23,7 +24,7 @@ export default function TableauConnectionsPage() {
 
   const fetchConnections = async () => {
     try {
-      const data = await listConnections();
+      const data = await listConnections(showInactive);
       setConnections(data.connections);
     } catch (e: any) {
       setLoadError(e.message || '加载失败，请检查是否已登录');
@@ -32,7 +33,7 @@ export default function TableauConnectionsPage() {
     }
   };
 
-  useEffect(() => { fetchConnections(); }, []);
+  useEffect(() => { fetchConnections(); }, [showInactive]);
 
   const handleCreate = async () => {
     if (!formData.name || !formData.server_url || !formData.site || !formData.token_name || !formData.token_value) {
@@ -149,6 +150,19 @@ export default function TableauConnectionsPage() {
           className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 flex items-center gap-1.5">
           <i className="ri-add-line" /> 新建连接
         </button>
+      </div>
+
+      {/* 过滤选项 */}
+      <div className="flex items-center gap-4 mb-4">
+        <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={showInactive}
+            onChange={e => setShowInactive(e.target.checked)}
+            className="w-4 h-4 rounded border-slate-300 text-blue-600"
+          />
+          显示已禁用的连接
+        </label>
       </div>
 
       {/* Connection Cards */}

@@ -86,6 +86,17 @@ class TableauSyncService:
                     }) if hasattr(wb, 'created_at') else None
                 )
                 synced_ids["workbook"].append(wb.id)
+                # 同步关联数据源
+                try:
+                    self.server.workbooks.populate_datasources(wb)
+                    for ds in wb.datasources:
+                        db.add_asset_datasource(
+                            asset_id=asset.id,
+                            datasource_name=ds.name,
+                            datasource_type=getattr(ds, 'datasource_type', None) or getattr(ds, 'type_', None)
+                        )
+                except Exception as ds_err:
+                    print(f"Datasource sync for workbook {wb.id} error: {ds_err}")
         except Exception as e:
             print(f"Workbook sync error: {e}")
 

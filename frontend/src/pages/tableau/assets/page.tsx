@@ -22,6 +22,7 @@ export default function TableauAssetBrowserPage() {
   const connectionId = Number(searchParams.get('connection_id') || '0');
 
   const [connections, setConnections] = useState<TableauConnection[]>([]);
+  const [selectedConn, setSelectedConn] = useState<TableauConnection | null>(null);
   const [assets, setAssets] = useState<TableauAsset[]>([]);
   const [projects, setProjects] = useState<ProjectNode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,11 +35,19 @@ export default function TableauAssetBrowserPage() {
   useEffect(() => {
     listConnections().then(d => {
       setConnections(d.connections);
+      const found = d.connections.find(c => c.id === connectionId);
+      setSelectedConn(found || null);
       if (!connectionId && d.connections.length > 0) {
         setSearchParams({ connection_id: String(d.connections[0].id) });
       }
     }).catch(console.error);
   }, []);
+
+  // 当连接切换时更新 selectedConn
+  useEffect(() => {
+    const found = connections.find(c => c.id === connectionId);
+    setSelectedConn(found || null);
+  }, [connectionId, connections]);
 
   useEffect(() => {
     if (!connectionId) return;
@@ -75,10 +84,23 @@ export default function TableauAssetBrowserPage() {
             </div>
             <div className="flex items-center gap-3">
               {connections.length > 0 && (
-                <select value={connectionId} onChange={e => { setSearchParams({ connection_id: e.target.value }); setPage(1); }}
-                  className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white">
-                  {connections.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+                <>
+                  <select value={connectionId} onChange={e => { setSearchParams({ connection_id: e.target.value }); setPage(1); }}
+                    className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white">
+                    {connections.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  {selectedConn && (
+                    <span className={`text-xs px-2 py-1 rounded-full ${
+                      !selectedConn.is_active ? 'bg-red-50 text-red-600' :
+                      selectedConn.last_test_success === false ? 'bg-orange-50 text-orange-600' :
+                      'bg-emerald-50 text-emerald-600'
+                    }`}>
+                      {!selectedConn.is_active ? '已禁用' :
+                       selectedConn.last_test_success === false ? '连接异常' :
+                       '连接正常'}
+                    </span>
+                  )}
+                </>
               )}
               <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
                 <button onClick={() => setViewMode('grid')}
@@ -165,14 +187,23 @@ export default function TableauAssetBrowserPage() {
                     onClick={() => handleAssetClick(asset)}
                     className="bg-white border border-slate-200 rounded-xl p-4 cursor-pointer hover:border-blue-300 hover:shadow-sm transition-all">
                     <div className="flex items-start justify-between mb-3">
-                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                        asset.asset_type === 'workbook' ? 'bg-blue-50 text-blue-500' :
-                        asset.asset_type === 'dashboard' ? 'bg-purple-50 text-purple-500' :
-                        asset.asset_type === 'view' ? 'bg-emerald-50 text-emerald-500' :
-                        'bg-orange-50 text-orange-500'
-                      }`}>
-                        <i className={`${ASSET_TYPE_ICONS[asset.asset_type]} text-lg`} />
-                      </div>
+                      {asset.thumbnail_url ? (
+                        <img
+                          src={asset.thumbnail_url}
+                          alt={asset.name}
+                          className="w-10 h-10 rounded-lg object-cover"
+                          onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                        />
+                      ) : (
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                          asset.asset_type === 'workbook' ? 'bg-blue-50 text-blue-500' :
+                          asset.asset_type === 'dashboard' ? 'bg-purple-50 text-purple-500' :
+                          asset.asset_type === 'view' ? 'bg-emerald-50 text-emerald-500' :
+                          'bg-orange-50 text-orange-500'
+                        }`}>
+                          <i className={`${ASSET_TYPE_ICONS[asset.asset_type]} text-lg`} />
+                        </div>
+                      )}
                       <span className="text-[10px] text-slate-400">{ASSET_TYPE_LABELS[asset.asset_type]}</span>
                     </div>
                     <h4 className="font-medium text-slate-800 text-sm truncate">{asset.name}</h4>

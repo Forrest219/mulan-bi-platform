@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getAsset, TableauAsset } from '../../../api/tableau';
-import { getAssetSummary } from '../../../api/llm';
+import { getAssetSummary, getLLMConfig } from '../../../api/llm';
 
 const ASSET_TYPE_LABELS: Record<string, string> = {
   workbook: '工作簿',
@@ -20,6 +20,7 @@ export default function TableauAssetDetailPage() {
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiCached, setAiCached] = useState(false);
+  const [llmConfigured, setLlmConfigured] = useState(true);
 
   useEffect(() => {
     if (!id) return;
@@ -27,6 +28,10 @@ export default function TableauAssetDetailPage() {
       .then(setAsset)
       .catch(console.error)
       .finally(() => setLoading(false));
+    // 检查 LLM 是否已配置
+    getLLMConfig().then(d => {
+      setLlmConfigured(!!d.config && d.config.is_active);
+    }).catch(() => setLlmConfigured(false));
   }, [id]);
 
   async function loadAISummary(refresh = false) {
@@ -95,7 +100,7 @@ export default function TableauAssetDetailPage() {
           {[
             { key: 'info', label: '基本信息' },
             { key: 'datasources', label: '关联数据源' },
-            { key: 'ai', label: 'AI 解读' },
+            { key: 'ai', label: 'AI 解读', warn: !llmConfigured },
           ].map(tab => (
             <button
               key={tab.key}
@@ -109,6 +114,7 @@ export default function TableauAssetDetailPage() {
                 activeTab === tab.key ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
               }`}
             >
+              {(tab as any).warn && <span className="mr-1 text-orange-400">⚠️</span>}
               {tab.label}
             </button>
           ))}
@@ -206,6 +212,14 @@ export default function TableauAssetDetailPage() {
                     <span className="text-sm">正在生成解读...</span>
                   </div>
                 </div>
+              ) : !llmConfigured ? (
+                <div className="text-center py-8">
+                  <div className="text-orange-500 text-sm mb-2">⚠️ LLM 未配置</div>
+                  <p className="text-slate-500 text-xs mb-3">请联系管理员配置 LLM 后再试</p>
+                  <a href="/admin/llm" className="text-sm text-blue-500 hover:underline">
+                    去配置 LLM →
+                  </a>
+                </div>
               ) : aiError ? (
                 <div className="text-center py-8">
                   <div className="text-red-500 text-sm mb-2">⚠️ {aiError}</div>
@@ -247,7 +261,16 @@ export default function TableauAssetDetailPage() {
         <aside className="space-y-6">
           <div className="bg-white border border-slate-200 rounded-xl p-5">
             <h3 className="text-sm font-semibold text-slate-700 mb-4">链接信息</h3>
-            {asset.content_url ? (
+            {asset.content_url && asset.server_url ? (
+              <a
+                href={`${asset.server_url}/#/views${asset.content_url.replace('/views', '')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-500 hover:underline break-all"
+              >
+                在 Tableau Server 查看 →
+              </a>
+            ) : asset.content_url ? (
               <p className="text-xs text-slate-400 break-all">{asset.content_url}</p>
             ) : (
               <p className="text-xs text-slate-400">-</p>

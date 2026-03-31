@@ -156,15 +156,15 @@ class UpdateConnectionRequest(BaseModel):
 # --- Endpoints ---
 
 @router.get("/connections")
-async def list_connections(request: Request):
+async def list_connections(request: Request, include_inactive: bool = False):
     """获取 Tableau 连接列表"""
     user = get_current_user(request)
     _db = TableauDatabase(db_path=_db_path())
 
     if user["role"] == "admin":
-        connections = _db.get_all_connections(include_inactive=False)
+        connections = _db.get_all_connections(include_inactive=include_inactive)
     else:
-        connections = _db.get_all_connections(owner_id=user["id"], include_inactive=False)
+        connections = _db.get_all_connections(owner_id=user["id"], include_inactive=include_inactive)
 
     return {"connections": [c.to_dict() for c in connections], "total": len(connections)}
 
@@ -250,6 +250,14 @@ async def test_connection(conn_id: int, request: Request):
 
     try:
         decrypted_token = _decrypt(conn.token_encrypted)
+    except Exception as decrypt_err:
+        err_str = str(decrypt_err)
+        if "InvalidToken" in err_str or "decrypt" in err_str.lower():
+            msg = "Token 解密失败：加密密钥可能已变更，请重新保存 PAT Token"
+            _db.update_connection_health(conn_id, False, msg)
+            return {"success": False, "message": msg}
+        raise
+    try:
         service = TableauSyncService(
             server_url=conn.server_url,
             site=conn.site,
@@ -286,6 +294,14 @@ async def sync_connection(conn_id: int, request: Request):
 
     try:
         decrypted_token = _decrypt(conn.token_encrypted)
+    except Exception as decrypt_err:
+        err_str = str(decrypt_err)
+        if "InvalidToken" in err_str or "decrypt" in err_str.lower():
+            msg = "Token 解密失败：加密密钥可能已变更，请重新保存 PAT Token"
+            _db.update_connection_health(conn_id, False, msg)
+            return {"success": False, "message": msg}
+        raise
+    try:
         service = TableauSyncService(
             server_url=conn.server_url,
             site=conn.site,
@@ -300,15 +316,24 @@ async def sync_connection(conn_id: int, request: Request):
 
             result = service.sync_all_assets(_db, conn_id)
 
+            wb_ids = result['synced'].get("workbook", [])
+            db_ids = result['synced'].get("dashboard", [])
+            view_ids = result['synced'].get("view", [])
+            ds_ids = result['synced'].get("datasource", [])
+            details = f"工作簿:{len(wb_ids)} 仪表板:{len(db_ids)} 视图:{len(view_ids)} 数据源:{len(ds_ids)}"
+            # 保存同步成功状态和详情（复用健康状态字段）
+            _db.update_connection_health(conn_id, True, f"同步成功，{details}，标记{result['deleted']}个已删除")
             return {
                 "success": True,
-                "message": f"同步完成，共 {result['total']} 个资产，标记 {result['deleted']} 个已删除"
+                "message": f"同步完成，共 {result['total']} 个资产，标记 {result['deleted']} 个已删除，{details}"
             }
         finally:
             service.disconnect()
 
     except Exception as e:
-        return {"success": False, "message": f"同步失败: {str(e)}"}
+        error_msg = str(e)
+        _db.update_connection_health(conn_id, False, f"同步失败: {error_msg}")
+        return {"success": False, "message": f"同步失败: {error_msg}"}
 
 
 @router.get("/assets")
@@ -360,6 +385,11 @@ async def get_asset(asset_id: int, request: Request):
     # 获取关联的数据源
     datasources = _db.get_asset_datasources(asset_id)
     result["datasources"] = [ds.to_dict() for ds in datasources]
+
+    # 获取连接信息（含 server_url 用于跳转链接）
+    conn = _db.get_connection(asset.connection_id)
+    if conn:
+        result["server_url"] = conn.server_url
 
     return result
 

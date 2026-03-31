@@ -33,6 +33,7 @@ export interface TableauAsset {
   is_deleted: boolean;
   synced_at: string;
   datasources?: TableauAssetDatasource[];
+  server_url?: string;
 }
 
 export interface TableauAssetDatasource {
@@ -49,8 +50,9 @@ export interface ProjectNode {
 
 // Connections API
 
-export async function listConnections(): Promise<{ connections: TableauConnection[]; total: number }> {
-  const res = await fetch(`${API_BASE}/api/tableau/connections`, { credentials: 'include' });
+export async function listConnections(includeInactive = false): Promise<{ connections: TableauConnection[]; total: number }> {
+  const sp = new URLSearchParams({ include_inactive: String(includeInactive) });
+  const res = await fetch(`${API_BASE}/api/tableau/connections?${sp}`, { credentials: 'include' });
   if (!res.ok) throw new Error('Failed to fetch connections');
   return res.json();
 }
