@@ -2,10 +2,10 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 
 const navItems = [
-  { label: 'DDL Validator', path: '/ddl-validator' },
   { label: '数据库监控', path: '/database-monitor' },
   { label: '规则配置', path: '/rule-config' },
   { label: 'Tableau', path: '/tableau/assets' },
+  { label: 'DDL 预览', path: '/ddl-validator' },
 ];
 
 export default function Navbar() {

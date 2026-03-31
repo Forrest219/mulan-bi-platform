@@ -87,28 +87,63 @@ class LLMService:
             return {"error": "LLM 认证配置错误"}
 
         try:
-            from openai import OpenAI
-            client = OpenAI(api_key=api_key, base_url=config.base_url, timeout=timeout)
+            if config.provider == "anthropic":
+                return self._anthropic_complete(api_key, config, prompt, system, timeout)
+            else:
+                return self._openai_complete(api_key, config, prompt, system, timeout)
+        except Exception as e:
+            logger.error(f"LLM 调用失败: {e}")
+            return {"error": str(e)}
 
-            messages = []
-            if system:
-                messages.append({"role": "system", "content": system})
+    def _openai_complete(self, api_key: str, config, prompt: str, system: str, timeout: int) -> dict:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url=config.base_url, timeout=timeout)
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        logger.info(f"LLM 调用（OpenAI）：model={config.model}, timeout={timeout}s")
+        response = client.chat.completions.create(
+            model=config.model,
+            messages=messages,
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
+        )
+        content = response.choices[0].message.content.strip()
+        return {"content": content}
+
+    def _anthropic_complete(self, api_key: str, config, prompt: str, system: str, timeout: int) -> dict:
+        from anthropic import Anthropic
+        from anthropic.lib.streaming import _types as anthropic_types
+        base_url = config.base_url or "https://api.minimaxi.com/anthropic"
+        client = Anthropic(api_key=api_key, base_url=base_url, timeout=timeout)
+        messages = []
+        if system:
+            messages.append({"role": "user", "content": f"<system>{system}</system>\n\n{prompt}"})
+        else:
             messages.append({"role": "user", "content": prompt})
-
-            logger.info(f"LLM 调用：model={config.model}, timeout={timeout}s")
-
-            response = client.chat.completions.create(
+        logger.info(f"LLM 调用（Anthropic）：model={config.model}, base_url={base_url}, timeout={timeout}s")
+        try:
+            response = client.messages.create(
                 model=config.model,
                 messages=messages,
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
             )
-            content = response.choices[0].message.content.strip()
-            return {"content": content}
-
         except Exception as e:
-            logger.error(f"LLM 调用失败: {e}")
-            return {"error": str(e)}
+            error_type = type(e).__name__
+            error_msg = str(e)
+            logger.error(f"MiniMax API 调用失败: {error_type} - {error_msg}")
+            return {"error": f"MiniMax API 错误: {error_msg}"}
+
+        # 兼容 MiniMax 的 ThinkingBlock（思维链），提取第一个 TextBlock
+        from anthropic.types import TextBlock, Message
+        text_blocks = [block for block in response.content if isinstance(block, TextBlock)]
+        if not text_blocks:
+            logger.error(f"MiniMax 响应中无 TextBlock: {response.content}")
+            return {"error": f"MiniMax 响应格式异常：未找到文本内容"}
+        content = text_blocks[0].text.strip()
+        return {"content": content}
 
     def generate_asset_summary(self, asset) -> dict:
         """

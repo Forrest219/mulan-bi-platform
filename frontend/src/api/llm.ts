@@ -64,6 +64,10 @@ export async function testLLMConnection(prompt?: string): Promise<LLMTestResult>
     credentials: 'include',
     body: JSON.stringify({ prompt: prompt || "Hello, respond with 'OK'" }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: '请求失败，请检查网络' }));
+    throw new Error(err.detail || err.message || '测试连接失败');
+  }
   return res.json();
 }
 

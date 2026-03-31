@@ -62,23 +62,20 @@ export default function DDLValidatorPage() {
           <div>
             <div className="flex items-center gap-2 mb-0.5">
               <span className="w-5 h-5 flex items-center justify-center">
-                <i className="ri-code-box-line text-orange-500 text-base" />
+                <i className="ri-code-box-line text-slate-400 text-base" />
               </span>
-              <h1 className="text-lg font-semibold text-slate-800">DDL Validator</h1>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-600 uppercase tracking-wide ml-1">
-                Active
+              <h1 className="text-lg font-semibold text-slate-500">DDL 预览</h1>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 uppercase tracking-wide ml-1">
+                Preview
               </span>
             </div>
             <p className="text-[13px] text-slate-400 ml-7">
-              粘贴 CREATE TABLE SQL，即时校验是否符合团队建模规范
+              参考工具 — 建议使用统一的 DDL 生成器进行建表
             </p>
           </div>
-          <div className="flex items-center gap-2 text-[12px] text-slate-500">
-            <i className="ri-book-2-line" />
-            <span>12 条规则已启用</span>
-            <span className="text-slate-300 mx-1">|</span>
-            <i className="ri-history-line" />
-            <span>本周执行 84 次</span>
+          <div className="flex items-center gap-2 text-[12px] text-slate-400">
+            <i className="ri-information-line" />
+            <span>预览工具，仅供参考</span>
           </div>
         </div>
       </div>
