@@ -64,7 +64,7 @@ class TableauSyncService:
         if not self.server:
             raise Exception("未连接，请先调用 connect()")
 
-        synced_ids = {"workbook": [], "view": [], "datasource": []}
+        synced_ids = {"workbook": [], "dashboard": [], "view": [], "datasource": []}
 
         # Workbooks
         try:
@@ -89,13 +89,16 @@ class TableauSyncService:
         except Exception as e:
             print(f"Workbook sync error: {e}")
 
-        # Views
+        # Views (including Dashboards)
         try:
             for view in TSC.Pager(self.server.views):
                 content_url = f"/views/{view.id}"
+                # Tableau views with sheetType='dashboard' are dashboards
+                sheet_type = getattr(view, 'sheet_type', None) or getattr(view, 'sheetType', None)
+                asset_type = "dashboard" if sheet_type == "dashboard" else "view"
                 asset = db.upsert_asset(
                     connection_id=connection_id,
-                    asset_type="view",
+                    asset_type=asset_type,
                     tableau_id=view.id,
                     name=view.name,
                     project_name=getattr(view, 'project_name', None),
@@ -103,9 +106,11 @@ class TableauSyncService:
                     owner_name=None,
                     thumbnail_url=None,
                     content_url=content_url,
-                    raw_metadata=None
+                    raw_metadata=json.dumps({
+                        "sheet_type": sheet_type
+                    }) if sheet_type else None
                 )
-                synced_ids["view"].append(view.id)
+                synced_ids[asset_type].append(view.id)
         except Exception as e:
             print(f"View sync error: {e}")
 
@@ -130,7 +135,7 @@ class TableauSyncService:
             print(f"Datasource sync error: {e}")
 
         # 软删除：标记不再存在的资产
-        all_ids = synced_ids["workbook"] + synced_ids["view"] + synced_ids["datasource"]
+        all_ids = synced_ids["workbook"] + synced_ids["dashboard"] + synced_ids["view"] + synced_ids["datasource"]
         deleted_count = db.mark_assets_deleted(connection_id, all_ids)
 
         # 更新同步时间

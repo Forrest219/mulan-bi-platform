@@ -5,6 +5,7 @@ import { getAssetSummary } from '../../../api/llm';
 
 const ASSET_TYPE_LABELS: Record<string, string> = {
   workbook: '工作簿',
+  dashboard: '仪表板',
   view: '视图',
   datasource: '数据源'
 };
@@ -70,6 +71,7 @@ export default function TableauAssetDetailPage() {
               <div className="flex items-center gap-3 mt-2">
                 <span className={`px-2 py-0.5 rounded text-xs ${
                   asset.asset_type === 'workbook' ? 'bg-blue-50 text-blue-600' :
+                  asset.asset_type === 'dashboard' ? 'bg-purple-50 text-purple-600' :
                   asset.asset_type === 'view' ? 'bg-emerald-50 text-emerald-600' :
                   'bg-orange-50 text-orange-600'
                 }`}>

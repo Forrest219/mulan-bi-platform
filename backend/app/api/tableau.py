@@ -149,6 +149,8 @@ class UpdateConnectionRequest(BaseModel):
     token_name: Optional[str] = None
     token_value: Optional[str] = None
     is_active: Optional[bool] = None
+    auto_sync_enabled: Optional[bool] = None
+    sync_interval_hours: Optional[int] = None
 
 
 # --- Endpoints ---

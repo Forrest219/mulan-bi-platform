@@ -4,12 +4,14 @@ import { listAssets, searchAssets, getProjects, listConnections, TableauAsset, T
 
 const ASSET_TYPE_LABELS: Record<string, string> = {
   workbook: '工作簿',
+  dashboard: '仪表板',
   view: '视图',
   datasource: '数据源'
 };
 
 const ASSET_TYPE_ICONS: Record<string, string> = {
   workbook: 'ri-file-chart-line',
+  dashboard: 'ri-dashboard-line',
   view: 'ri-bar-chart-box-line',
   datasource: 'ri-database-2-line',
 };
@@ -165,6 +167,7 @@ export default function TableauAssetBrowserPage() {
                     <div className="flex items-start justify-between mb-3">
                       <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
                         asset.asset_type === 'workbook' ? 'bg-blue-50 text-blue-500' :
+                        asset.asset_type === 'dashboard' ? 'bg-purple-50 text-purple-500' :
                         asset.asset_type === 'view' ? 'bg-emerald-50 text-emerald-500' :
                         'bg-orange-50 text-orange-500'
                       }`}>
@@ -199,6 +202,7 @@ export default function TableauAssetBrowserPage() {
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs ${
                             asset.asset_type === 'workbook' ? 'bg-blue-50 text-blue-600' :
+                            asset.asset_type === 'dashboard' ? 'bg-purple-50 text-purple-600' :
                             asset.asset_type === 'view' ? 'bg-emerald-50 text-emerald-600' :
                             'bg-orange-50 text-orange-600'
                           }`}>

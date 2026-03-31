@@ -22,7 +22,7 @@ export interface TableauConnection {
 export interface TableauAsset {
   id: number;
   connection_id: number;
-  asset_type: 'workbook' | 'view' | 'datasource';
+  asset_type: 'workbook' | 'dashboard' | 'view' | 'datasource';
   tableau_id: string;
   name: string;
   project_name: string | null;
@@ -84,6 +84,8 @@ export async function updateConnection(id: number, data: Partial<{
   token_name: string;
   token_value: string;
   is_active: boolean;
+  auto_sync_enabled: boolean;
+  sync_interval_hours: number;
 }>): Promise<{ message: string }> {
   const res = await fetch(`${API_BASE}/api/tableau/connections/${id}`, {
     method: 'PUT',
@@ -115,6 +117,10 @@ export async function testConnection(id: number): Promise<{ success: boolean; me
     method: 'POST',
     credentials: 'include',
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: '测试请求失败' }));
+    throw new Error(err.detail || '测试连接失败');
+  }
   return res.json();
 }
 
@@ -123,6 +129,10 @@ export async function syncConnection(id: number): Promise<{ success: boolean; me
     method: 'POST',
     credentials: 'include',
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: '同步请求失败' }));
+    throw new Error(err.detail || '同步失败');
+  }
   return res.json();
 }
 
