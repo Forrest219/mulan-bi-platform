@@ -3,7 +3,7 @@
 """
 from fastapi import APIRouter, Depends
 
-from backend.app.core.dependencies import get_current_admin
+from app.core.dependencies import get_current_admin
 
 router = APIRouter(tags=["权限配置"])
 

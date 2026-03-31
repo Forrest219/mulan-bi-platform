@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 
-from backend.app.core.dependencies import get_current_admin
+from app.core.dependencies import get_current_admin
 
 router = APIRouter(tags=["用户组管理"])
 
