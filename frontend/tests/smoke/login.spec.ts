@@ -57,8 +57,8 @@ test.describe('登录页', () => {
     await page.locator('input[type="text"]').fill(ADMIN_USERNAME);
     await page.locator('input[type="password"]').fill(TEST_USER_PASSWORD);
     await page.locator('button[type="submit"]').click();
-    // 等待错误提示出现
-    await expect(page.locator('text=登录失败')).toBeVisible({ timeout: 5000 });
+    // 等待错误提示出现（后端返回"用户名或密码错误"）
+    await expect(page.locator('text=用户名或密码错误')).toBeVisible({ timeout: 5000 });
   });
 
   test('正确凭据登录成功后跳转首页', async ({ page }) => {
