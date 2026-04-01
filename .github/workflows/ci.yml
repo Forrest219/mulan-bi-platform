@@ -24,6 +24,9 @@ jobs:
       - name: Type check
         run: cd frontend && npm run type-check
 
+      - name: Lint
+        run: cd frontend && npm run lint
+
       - name: Build
         run: cd frontend && npm run build
 
@@ -43,5 +46,9 @@ jobs:
       - name: Python syntax check
         run: python3 -m py_compile $(find backend -name "*.py")
 
-      - name: Check auth models
-        run: python3 -c "import sys; sys.path.insert(0,'src'); from auth.models import User; from auth.service import AuthService; print('Auth models OK')"
+      - name: Verify backend app imports
+        env:
+          SESSION_SECRET: test-secret
+          DATASOURCE_ENCRYPTION_KEY: test-encryption-key-32-bytes-ok
+          TABLEAU_ENCRYPTION_KEY: test-tableau-key-32-bytes-ok
+        run: cd backend && python3 -c "from app.main import app; print('Backend app OK')"
