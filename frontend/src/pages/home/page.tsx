@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { LOGO_URL } from '../../config';
 
 export default function HomePage() {
   const [input, setInput] = useState('');
@@ -10,11 +11,9 @@ export default function HomePage() {
 
   const handleSend = () => {
     if (!input.trim()) return;
-    // TODO: AI 搜索功能开发中
     setMessage('功能开发中');
   };
 
-  // Get greeting based on time of day
   const getGreeting = () => {
     const hour = new Date().getHours();
     if (hour < 12) return '☀️ 早上好';
@@ -22,7 +21,6 @@ export default function HomePage() {
     return '🌙 晚上好';
   };
 
-  // Feature icons based on user role/permissions
   const features = [
     { icon: 'ri-database-2-line', label: '数据库', path: '/database-monitor', show: hasPermission('database_monitor') || isAdmin },
     { icon: 'ri-shield-check-line', label: 'DDL检查', path: '/ddl-validator', show: hasPermission('ddl_check') || isAdmin },
@@ -31,14 +29,49 @@ export default function HomePage() {
     { icon: 'ri-group-line', label: '用户组', path: '/admin/groups', show: isAdmin },
   ].filter(f => f.show);
 
+  // ===== 未登录：显示简洁登录引导 ===== //
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-blue-50 flex items-center justify-center">
+        <div className="bg-white rounded-xl border border-slate-200 p-10 w-full max-w-md text-center">
+          <img
+            src={LOGO_URL}
+            alt="Mulan Platform Logo"
+            className="w-14 h-14 object-contain mx-auto mb-4"
+          />
+          <h1 className="text-2xl font-bold text-slate-800 mb-2">Mulan Platform</h1>
+          <p className="text-sm text-slate-400 mb-8">数据建模与治理平台</p>
+          <p className="text-slate-500 mb-6">请先登录以访问平台功能</p>
+          <Link
+            to="/login"
+            className="inline-block w-full py-2.5 bg-slate-900 text-white rounded-lg text-sm font-semibold hover:bg-slate-700 transition-colors"
+          >
+            登录
+          </Link>
+          <div className="mt-4">
+            <Link to="/register" className="text-sm text-blue-600 hover:text-blue-700">
+              没有账号？去注册
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ===== 已登录：显示 AI 搜索首页 ===== //
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-blue-50">
       <div className="max-w-4xl mx-auto px-8 pt-16">
-        {message && <div className="mb-4 px-4 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-sm">{message}</div>}
+        {message && (
+          <div className="mb-4 px-4 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-sm">
+            {message}
+          </div>
+        )}
+
         {/* Welcome */}
         <div className="text-center mb-6">
           <h1 className="text-4xl font-bold text-slate-600">
-            {getGreeting()}，{user?.display_name || '访客'}
+            {getGreeting()}，{user?.display_name}
           </h1>
         </div>
 
