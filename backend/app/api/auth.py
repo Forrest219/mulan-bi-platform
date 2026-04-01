@@ -11,7 +11,7 @@ import jwt
 from fastapi import APIRouter, HTTPException, Response, Request
 from pydantic import BaseModel
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
 
 from auth import auth_service
 from app.core.constants import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRE_SECONDS, MIN_PASSWORD_LENGTH

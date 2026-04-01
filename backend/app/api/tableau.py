@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
 from tableau.models import TableauDatabase
 from tableau.sync_service import TableauSyncService, TableauRestSyncService
 from app.core.dependencies import get_current_user

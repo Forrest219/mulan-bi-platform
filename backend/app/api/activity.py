@@ -20,7 +20,7 @@ async def get_access_logs(
     get_current_user(request)
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
 
     from logs import LogDatabase
 
@@ -37,7 +37,7 @@ async def get_activity_stats(request: Request):
     get_current_user(request)
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     users = auth_service.get_users_with_tags()

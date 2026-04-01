@@ -36,6 +36,7 @@ export default function SemanticFieldListPage() {
   const [selectedFields, setSelectedFields] = useState<Set<number>>(new Set());
   const [batchLoading, setBatchLoading] = useState(false);
 
+  /* eslint-disable react-hooks/exhaustive-deps -- listConnections 稳定引用，故意不放入 deps */
   useEffect(() => {
     listConnections(true).then(data => {
       setConnections(data.connections);
@@ -44,11 +45,14 @@ export default function SemanticFieldListPage() {
       }
     }).catch(() => {});
   }, []);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
+  /* eslint-disable react-hooks/exhaustive-deps -- loadFields 在 selectedConnId 等变化时调用，故意不放入 deps */
   useEffect(() => {
     if (!selectedConnId) return;
     loadFields();
   }, [selectedConnId, statusFilter, dsFilter, page]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const loadFields = async () => {
     setLoading(true);

@@ -8,7 +8,7 @@ from typing import Optional
 # 导入需求模块
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
 
 from requirements import requirement_service
 from app.core.dependencies import get_current_user

@@ -39,7 +39,9 @@ export default function TableauConnectionsPage() {
     }
   };
 
+  /* eslint-disable react-hooks/exhaustive-deps -- fetchConnections 故意只在 showInactive 变化时重新加载 */
   useEffect(() => { fetchConnections(); }, [showInactive]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const handleCreate = async () => {
     if (!formData.name || !formData.server_url || !formData.site || !formData.token_name || !formData.token_value) {

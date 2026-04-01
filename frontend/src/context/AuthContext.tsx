@@ -26,7 +26,7 @@ export const ROLE_LABELS: Record<string, string> = {
   user: '普通用户',
 };
 
-type UserRole = 'admin' | 'data_admin' | 'analyst' | 'user';
+export type UserRole = 'admin' | 'data_admin' | 'analyst' | 'user';
 
 interface User {
   id: number;

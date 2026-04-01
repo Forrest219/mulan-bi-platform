@@ -455,7 +455,7 @@ export default function UserManagementPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-600 mb-1.5">角色</label>
-                <select value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+                <select value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value as UserRole })}
                   className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500">
                   {ROLES.map(r => (
                     <option key={r.key} value={r.key}>{r.label}</option>

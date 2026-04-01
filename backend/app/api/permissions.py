@@ -13,7 +13,7 @@ async def get_all_permissions():
     """获取所有可用权限定义"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     permissions = auth_service.get_all_available_permissions()
@@ -25,7 +25,7 @@ async def get_user_permissions(user_id: int):
     """获取用户的完整权限（个人+组继承）"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     perms = auth_service.get_user_permissions_with_groups(user_id)
@@ -37,7 +37,7 @@ async def get_users_with_tags():
     """获取所有用户（带标签）"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     users = auth_service.get_users_with_tags()
@@ -49,7 +49,7 @@ async def get_groups_with_permissions():
     """获取所有用户组（带权限）"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     groups = auth_service.get_groups()

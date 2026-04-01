@@ -38,7 +38,7 @@ async def get_groups():
     """获取所有用户组"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     groups = auth_service.get_groups()
@@ -50,7 +50,7 @@ async def get_group(group_id: int):
     """获取用户组详情"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     group = auth_service.get_group(group_id)
@@ -65,7 +65,7 @@ async def create_group(request: CreateGroupRequest):
     """创建用户组（管理员）"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     # 验证权限
@@ -90,7 +90,7 @@ async def update_group(group_id: int, request: UpdateGroupRequest):
     """更新用户组（管理员）"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     success = auth_service.update_group(
@@ -110,7 +110,7 @@ async def delete_group(group_id: int):
     """删除用户组（管理员）"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     success = auth_service.delete_group(group_id)
@@ -125,7 +125,7 @@ async def get_group_members(group_id: int):
     """获取组成员"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     members = auth_service.get_group_members(group_id)
@@ -137,7 +137,7 @@ async def add_group_members(group_id: int, request: AddMembersRequest):
     """添加成员到组（管理员）"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     for user_id in request.user_ids:
@@ -152,7 +152,7 @@ async def remove_group_member(group_id: int, user_id: int):
     """从组移除成员（管理员）"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     success = auth_service.remove_user_from_group(user_id, group_id)
@@ -167,7 +167,7 @@ async def get_group_permissions(group_id: int):
     """获取组权限"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     permissions = auth_service.get_group_permissions(group_id)
@@ -179,7 +179,7 @@ async def set_group_permissions(group_id: int, request: SetPermissionsRequest):
     """设置组权限（管理员）"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     # 验证权限

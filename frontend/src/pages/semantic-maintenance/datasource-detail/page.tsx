@@ -37,10 +37,12 @@ export default function SemanticDatasourceDetailPage() {
 
   const dsId = parseInt(id || '0', 10);
 
+  /* eslint-disable react-hooks/exhaustive-deps -- loadData 在 dsId 变化时调用，故意不放入 deps */
   useEffect(() => {
     if (!dsId) return;
     loadData();
   }, [dsId]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const loadData = async () => {
     setLoading(true);
@@ -85,11 +87,13 @@ export default function SemanticDatasourceDetailPage() {
     }
   };
 
+  /* eslint-disable react-hooks/exhaustive-deps -- loadPublishLogs 依赖 ds，故意不放入 deps */
   useEffect(() => {
     if (activeTab === 'publish' && ds) {
       loadPublishLogs();
     }
   }, [activeTab, ds]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const handleAction = async (action: string, fn: (id: number) => Promise<any>, successMsg: string) => {
     setActionLoading(true);

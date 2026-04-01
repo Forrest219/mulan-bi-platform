@@ -34,6 +34,7 @@ export default function SemanticDatasourceListPage() {
   const [showDiff, setShowDiff] = useState<{ open: boolean; diff: any; ds: SemanticDatasource } | null>(null);
 
   // Load connections on mount
+  /* eslint-disable react-hooks/exhaustive-deps -- listConnections 稳定引用，故意不放入 deps */
   useEffect(() => {
     listConnections(true).then(data => {
       setConnections(data.connections);
@@ -42,12 +43,15 @@ export default function SemanticDatasourceListPage() {
       }
     }).catch(() => {});
   }, []);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   // Load datasources when connection or filters change
+  /* eslint-disable react-hooks/exhaustive-deps -- loadDatasources 在 selectedConnId 等变化时调用，故意不放入 deps */
   useEffect(() => {
     if (!selectedConnId) return;
     loadDatasources();
   }, [selectedConnId, statusFilter, page]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const loadDatasources = async () => {
     setLoading(true);

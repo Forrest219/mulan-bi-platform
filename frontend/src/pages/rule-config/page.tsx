@@ -63,9 +63,11 @@ export default function RuleConfigPage() {
     setLoading(false);
   };
 
+  /* eslint-disable react-hooks/exhaustive-deps -- fetchRules 在组件挂载时运行，故意不放入 deps */
   useEffect(() => {
     fetchRules();
   }, []);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const toggleRule = async (id: string) => {
     try {
@@ -247,7 +249,7 @@ export default function RuleConfigPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
-                      <SeverityBadge level={rule.level} size="sm" />
+                      <SeverityBadge level={rule.level as 'HIGH' | 'MEDIUM' | 'LOW'} size="sm" />
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span className={`text-[13px] font-medium ${rule.status === 'disabled' ? 'text-slate-400 line-through' : 'text-slate-700'}`}>

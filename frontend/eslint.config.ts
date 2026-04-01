@@ -45,10 +45,70 @@ const autoImportGlobals = {
   Trans: 'readonly',
 }
 
+// =====================================================================
+// P0 质量门（必须通过，error 级别）
+// =====================================================================
+const P0_ERROR_RULES = {
+  // 未定义变量 — 立即发现引用错误
+  'no-undef': 'error',
+
+  // TypeScript 硬错误
+  '@typescript-eslint/no-namespace': 'error',
+  '@typescript-eslint/ban-ts-comment': 'error',
+  '@typescript-eslint/prefer-ts-expect-error': 'error',
+
+  // React Hooks 缺失依赖（硬错误）
+  'react-hooks/exhaustive-deps': 'error',
+}
+
+// =====================================================================
+// P1 风格门（warn 级别，--max-warnings 容忍）
+// =====================================================================
+const P1_WARN_RULES = {
+  // 减少 let 滥用
+  'prefer-const': 'warn',
+  'prefer-rest-params': 'warn',
+  'prefer-spread': 'warn',
+
+  // 减少 any
+  '@typescript-eslint/no-explicit-any': 'warn',
+
+  // 未使用变量（warn，允许用 _ 前缀绕过）
+  '@typescript-eslint/no-unused-vars': ['warn', {
+    argsIgnorePattern: '^_',
+    varsIgnorePattern: '^_',
+    caughtErrorsIgnorePattern: '^_',
+  }],
+  'no-unused-vars': 'off',
+
+  // 表达式副作用
+  'no-unused-expressions': 'warn',
+  '@typescript-eslint/no-unused-expressions': 'off',
+
+  // 规避 JS 奇怪行为
+  'no-useless-escape': 'warn',
+  'no-useless-catch': 'warn',
+
+  // 空格/缩进等格式问题（已在 prettier 处理，仅作 warn 提示）
+  'no-irregular-whitespace': 'warn',
+  'no-case-declarations': 'warn',
+}
+
+// =====================================================================
+// React Hooks 分级治理规则
+// 说明：exhaustive-deps 有两种级别：
+//   - error：缺少真实意义的依赖（会导致 stale closure bug）
+//   - warn：理论上可忽略但不符合规范（eslint-disable 需注明原因）
+// =====================================================================
+// 注：error 已在 P0_ERROR_RULES 中声明
+// P1 阶段考虑进一步区分：callback+useCallback 场景允许 warn
+
 export default [
-  { ignores: ['dist', 'node_modules'] },
+  { ignores: ['dist', 'node_modules', 'out'] },
+
   js.configs.recommended,
   ...tseslint.configs.recommended,
+
   {
     files: ['src/**/*.{ts,tsx}'],
     languageOptions: {
@@ -71,28 +131,24 @@ export default [
       'react-refresh': reactRefresh,
     },
     rules: {
-      ...reactHooks.configs.recommended.rules,
+      // ---- P0 质量门 ----
+      ...P0_ERROR_RULES,
+
+      // ---- P1 风格门 ----
+      ...P1_WARN_RULES,
+
+      // ---- React Refresh（仅 warn，不强制）----
       'react-refresh/only-export-components': [
         'warn',
         { allowConstantExport: true },
       ],
-      '@typescript-eslint/no-namespace': 'off',
-      '@typescript-eslint/no-explicit-any': 'off',
-      '@typescript-eslint/no-unused-vars': 'off',
-      'no-unused-vars': 'off',
-      'no-useless-escape': 'off',
-      'prefer-const': 'off',
-      'prefer-rest-params': 'off',
-      'prefer-spread': 'off',
-      'no-unused-expressions': 'off',
-      'no-case-declarations': 'off',
-      '@typescript-eslint/no-unused-expressions': 'off',
-      'no-useless-catch': 'off',
-      'no-irregular-whitespace': 'off',
-      'no-undef': 'error',
+
+      // ---- 项目特有规则（error）----
+      // 注：local-route/route-element-jsx 在下方的 router config 专用块中启用
     },
   },
-  // Only enforce this rule for the router config file to avoid false positives elsewhere.
+
+  // 仅对 router config 文件启用路由 JSX 元素检查
   {
     files: ['src/router/config.tsx'],
     plugins: {
@@ -103,4 +159,3 @@ export default [
     },
   },
 ]
-

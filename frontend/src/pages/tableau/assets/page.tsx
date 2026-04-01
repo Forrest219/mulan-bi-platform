@@ -26,6 +26,7 @@ export default function TableauAssetBrowserPage() {
   const [total, setTotal] = useState(0);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
 
+  /* eslint-disable react-hooks/exhaustive-deps -- connectionId/setSearchParams 故意不放入 deps */
   useEffect(() => {
     listConnections().then(d => {
       setConnections(d.connections);
@@ -36,6 +37,7 @@ export default function TableauAssetBrowserPage() {
       }
     }).catch(() => { /* silently ignore */ });
   }, []);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   // 当连接切换时更新 selectedConn
   useEffect(() => {

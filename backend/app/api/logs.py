@@ -7,7 +7,7 @@ from typing import Optional
 # 导入日志模块
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
 
 from logs import logger
 from app.core.dependencies import get_current_user

@@ -7,7 +7,7 @@ from typing import Optional, List
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
 
 from ddl_checker.parser import DDLParser
 from ddl_checker.validator import DDLValidator

@@ -65,7 +65,7 @@ async def _run_scheduled_sync(conn_id: int, conn_name: str):
     """执行单个连接的定时同步"""
     from pathlib import Path
     import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend" / "services"))
     from tableau.models import TableauDatabase
     from tableau.sync_service import TableauSyncService, TableauRestSyncService
     from app.core.crypto import get_tableau_crypto
@@ -125,7 +125,7 @@ async def _sync_scheduler():
         try:
             from pathlib import Path
             import sys
-            sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+            sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend" / "services"))
             from tableau.models import TableauDatabase
             from datetime import datetime, timedelta
 

@@ -35,7 +35,7 @@ async def get_users(role: Optional[str] = None):
     """获取用户列表（管理员）"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     users = auth_service.get_users(role=role)
@@ -47,7 +47,7 @@ async def create_user(request: CreateUserRequest):
     """创建用户（管理员）"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     if request.role not in VALID_ROLES:
@@ -72,7 +72,7 @@ async def update_user_role(user_id: int, request: UpdateUserRoleRequest, http_re
     """更新用户角色（管理员）"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     if request.role not in VALID_ROLES:
@@ -95,7 +95,7 @@ async def toggle_user_active(user_id: int):
     """切换用户激活状态（管理员）"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     success = auth_service.toggle_user_active(user_id)
@@ -110,7 +110,7 @@ async def update_user_permissions(user_id: int, request: UpdatePermissionsReques
     """更新用户权限（管理员）"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     # 验证权限
@@ -130,7 +130,7 @@ async def get_all_permissions():
     """获取所有可用权限（管理员）"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     PERMISSION_LABELS = {
@@ -154,7 +154,7 @@ async def get_all_roles():
     """获取所有可用角色（管理员）"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     roles = [
@@ -169,7 +169,7 @@ async def delete_user(user_id: int, http_request: Request):
     """删除用户（管理员）"""
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
     from auth import auth_service
 
     # 防止删除自己
