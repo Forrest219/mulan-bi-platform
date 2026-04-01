@@ -103,7 +103,8 @@ class LogDatabase:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             if db_path is None:
-                db_path = "/Users/zhangxingchen/projects/mulan/data/logs.db"
+                import os
+                db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "logs.db")
             cls._instance._init_db(db_path)
         return cls._instance
 

@@ -7,10 +7,8 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.sessions import SessionMiddleware
 
 from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm
-from app.core.constants import JWT_SECRET, JWT_EXPIRE_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -18,14 +16,6 @@ app = FastAPI(
     title="Mulan BI Platform API",
     description="DDL 规范管理平台后端 API",
     version="1.0.0",
-)
-
-# 添加 SessionMiddleware
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=JWT_SECRET,
-    session_cookie="session",
-    max_age=JWT_EXPIRE_SECONDS
 )
 
 # CORS 配置 - 仅允许明确的前端域名
@@ -71,7 +61,7 @@ async def _run_scheduled_sync(conn_id: int, conn_name: str):
     import sys
     sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
     from tableau.models import TableauDatabase
-    from tableau.sync_service import TableauSyncService
+    from tableau.sync_service import TableauSyncService, TableauRestSyncService
     from app.core.crypto import get_tableau_crypto
 
     db_path = str(Path(__file__).parent.parent.parent / "data" / "tableau.db")
@@ -88,15 +78,24 @@ async def _run_scheduled_sync(conn_id: int, conn_name: str):
     try:
         crypto = get_tableau_crypto()
         token = crypto.decrypt(conn.token_encrypted)
-        service = TableauSyncService(
-            server_url=conn.server_url,
-            site=conn.site,
-            token_name=conn.token_name,
-            token_value=token,
-            api_version=conn.api_version,
-        )
+        if getattr(conn, "connection_type", "mcp") == "mcp":
+            service = TableauRestSyncService(
+                server_url=conn.server_url,
+                site=conn.site,
+                token_name=conn.token_name,
+                token_value=token,
+                api_version=conn.api_version,
+            )
+        else:
+            service = TableauSyncService(
+                server_url=conn.server_url,
+                site=conn.site,
+                token_name=conn.token_name,
+                token_value=token,
+                api_version=conn.api_version,
+            )
         if not service.connect():
-            logger.error("Scheduled sync failed for '%s': connection failed", conn_name)
+            logger.error("Scheduled sync failed for '%s': connection failed", conn_name, exc_info=True)
             _db.set_sync_status(conn_id, "failed")
             return
 
@@ -109,7 +108,7 @@ async def _run_scheduled_sync(conn_id: int, conn_name: str):
         finally:
             service.disconnect()
     except Exception as e:
-        logger.error("Scheduled sync error for '%s': %s", conn_name, e)
+        logger.error("Scheduled sync error for '%s': %s", conn_name, e, exc_info=True)
         _db.set_sync_status(conn_id, "failed")
 
 
@@ -138,7 +137,7 @@ async def _sync_scheduler():
                 logger.info("Triggering scheduled sync for '%s'", conn.name)
                 await _run_scheduled_sync(conn.id, conn.name)
         except Exception as e:
-            logger.error("Sync scheduler error: %s", e)
+            logger.error("Sync scheduler error: %s", e, exc_info=True)
 
         await asyncio.sleep(60)
 

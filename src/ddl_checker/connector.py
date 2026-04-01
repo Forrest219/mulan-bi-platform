@@ -35,7 +35,7 @@ class DatabaseConnector:
             self.inspector = inspect(self.engine)
             return True
         except Exception as e:
-            logger.error("数据库连接失败: %s", e)
+            logger.error("数据库连接失败: %s", e, exc_info=True)
             return False
 
     def disconnect(self):

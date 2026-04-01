@@ -2,8 +2,9 @@
 import json
 import logging
 import time
+import requests
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Iterator
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ class TableauSyncService:
             self.server = server
             return True
         except Exception as e:
-            logger.error("Tableau connection failed: %s", e)
+            logger.error("Tableau connection failed: %s", e, exc_info=True)
             return False
 
     def disconnect(self):
@@ -127,7 +128,7 @@ class TableauSyncService:
                     logger.warning("Datasource sync for workbook %s error: %s", wb.id, ds_err)
                     errors.append(f"Workbook {wb.name} datasource: {ds_err}")
         except Exception as e:
-            logger.error("Workbook sync error: %s", e)
+            logger.error("Workbook sync error: %s", e, exc_info=True)
             errors.append(f"Workbook sync: {e}")
 
         # --- Views (including Dashboards) ---
@@ -171,7 +172,7 @@ class TableauSyncService:
                 )
                 synced_ids[asset_type].append(view.id)
         except Exception as e:
-            logger.error("View sync error: %s", e)
+            logger.error("View sync error: %s", e, exc_info=True)
             errors.append(f"View sync: {e}")
 
         # --- Datasources ---
@@ -197,7 +198,7 @@ class TableauSyncService:
                 )
                 synced_ids["datasource"].append(ds.id)
         except Exception as e:
-            logger.error("Datasource sync error: %s", e)
+            logger.error("Datasource sync error: %s", e, exc_info=True)
             errors.append(f"Datasource sync: {e}")
 
         # 软删除：标记不再存在的资产
@@ -223,6 +224,288 @@ class TableauSyncService:
         )
 
         # 更新连接状态
+        db.update_last_sync(connection_id)
+        db.set_sync_status(connection_id, "idle" if status != "failed" else "failed", duration_sec)
+
+        return {
+            "synced": synced_ids,
+            "deleted": deleted_count,
+            "total": total,
+            "duration_sec": duration_sec,
+            "status": status,
+            "errors": errors,
+            "sync_log_id": sync_log.id,
+        }
+
+
+# --- REST API 同步服务（MCP 模式，不依赖 TSC 库）---
+
+class TableauRestSyncService:
+    """通过原生 REST API 同步 Tableau 资产（MCP 模式）"""
+
+    def __init__(self, server_url: str, site: str, token_name: str,
+                 token_value: str, api_version: str = "3.21"):
+        self.server_url = server_url.rstrip("/")
+        self.site = site
+        self.token_name = token_name
+        self.token_value = token_value
+        self.api_version = api_version
+        self._auth_token: Optional[str] = None
+        self._site_id: Optional[str] = None
+        self._session = requests.Session()
+
+    def _headers(self) -> Dict[str, str]:
+        """带认证头的请求 headers"""
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if self._auth_token:
+            headers["X-Tableau-Auth"] = self._auth_token
+        return headers
+
+    def connect(self) -> bool:
+        """通过 REST API 认证"""
+        try:
+            resp = self._session.post(
+                f"{self.server_url}/api/{self.api_version}/auth/signin",
+                json={
+                    "credentials": {
+                        "personalAccessTokenName": self.token_name,
+                        "personalAccessTokenSecret": self.token_value,
+                        "site": {"contentUrl": self.site}
+                    }
+                },
+                headers={"Content-Type": "application/json", "Accept": "application/json"},
+                timeout=20,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                self._auth_token = data.get("credentials", {}).get("token", "")
+                self._site_id = data.get("credentials", {}).get("site", {}).get("id", "")
+                return True
+            return False
+        except Exception as e:
+            logger.error("REST auth failed: %s", e, exc_info=True)
+            return False
+
+    def disconnect(self):
+        """登出清理"""
+        if self._auth_token:
+            try:
+                self._session.post(
+                    f"{self.server_url}/api/{self.api_version}/auth/signout",
+                    headers={"X-Tableau-Auth": self._auth_token},
+                    timeout=5,
+                )
+            except Exception:
+                pass
+            self._auth_token = None
+
+    def test_connection(self) -> Dict[str, Any]:
+        """测试连接"""
+        try:
+            if not self.connect():
+                return {"success": False, "message": "REST API 认证失败，请检查 URL、Site 和 PAT 凭证"}
+            self.disconnect()
+            return {"success": True, "message": "REST API 连接成功"}
+        except Exception as e:
+            return {"success": False, "message": f"连接失败: {e}"}
+
+    def _get_all_items(self, endpoint: str, page_size: int = 100) -> Iterator[Dict]:
+        """REST 分页拉取，自动处理 continuation token"""
+        url = f"{self.server_url}/api/{self.api_version}/{endpoint}"
+        params = {"pageSize": page_size}
+        while True:
+            resp = self._session.get(url, headers=self._headers(), params=params, timeout=30)
+            if resp.status_code != 200:
+                logger.warning("REST %s returned %s: %s", endpoint, resp.status_code, resp.text[:200])
+                break
+            data = resp.json()
+            # REST API 返回格式: {"workbooks": {"workbook": [...]}} 或 {"views": {"view": [...]}}
+            for key in data:
+                items = data[key]
+                if isinstance(items, dict):
+                    for item in items.get("workbook", []) or items.get("view", []) or items.get("datasource", []) or []:
+                        yield item
+                elif isinstance(items, list):
+                    for item in items:
+                        yield item
+            # 检查分页 continuation
+            pagination = data.get("pagination", {}) or data.get("pagingInfo", {})
+            if isinstance(pagination, dict):
+                next_page = pagination.get("pageNumber", 1)
+                total_pages = pagination.get("pageSize", 1)
+                if next_page >= total_pages:
+                    break
+                params["pageNumber"] = next_page + 1
+            else:
+                break
+
+    def _get_workbooks(self) -> List[Dict]:
+        return list(self._get_all_items("sites/{site_id}/workbooks", page_size=100))
+
+    def _get_views(self) -> List[Dict]:
+        return list(self._get_all_items("sites/{site_id}/views", page_size=100))
+
+    def _get_datasources(self) -> List[Dict]:
+        return list(self._get_all_items("sites/{site_id}/datasources", page_size=100))
+
+    def _build_url(self, base: str = None) -> str:
+        if base:
+            return f"{self.server_url}/api/{self.api_version}/{base.replace('{site_id}', self._site_id or '')}"
+        return f"{self.server_url}/api/{self.api_version}"
+
+    def _parse_iso_datetime(self, value) -> Optional[datetime]:
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
+
+    def _get_workbook_datasources(self, workbook_id: str) -> List[Dict]:
+        """获取工作簿关联的数据源"""
+        try:
+            url = f"{self.server_url}/api/{self.api_version}/sites/{self._site_id}/workbooks/{workbook_id}/datasources"
+            resp = self._session.get(url, headers=self._headers(), timeout=15)
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            ds_list = data.get("datasources", {}).get("datasource", []) or data.get("datasources", []) or []
+            return ds_list
+        except Exception:
+            return []
+
+    def sync_all_assets(self, db, connection_id: int,
+                        trigger_type: str = "manual") -> Dict[str, Any]:
+        """同步所有资产类型到数据库（MCP REST 模式）"""
+        if not self._auth_token:
+            raise Exception("未连接，请先调用 connect()")
+
+        sync_log = db.create_sync_log(connection_id, trigger_type)
+        db.set_sync_status(connection_id, "running")
+        start_time = time.time()
+
+        synced_ids = {"workbook": [], "dashboard": [], "view": [], "datasource": []}
+        errors = []
+
+        # --- Workbooks ---
+        try:
+            workbooks = self._get_workbooks()
+            workbook_name_map: Dict[str, str] = {}
+            for wb in workbooks:
+                wb_id = wb.get("id", {}).get("id", "") or wb.get("_id", "") or str(wb.get("id", ""))
+                wb_name = wb.get("name", "Unknown")
+                workbook_name_map[wb_id] = wb_name
+
+                content_url = f"/workbooks/{wb_id}"
+                asset = db.upsert_asset(
+                    connection_id=connection_id,
+                    asset_type="workbook",
+                    tableau_id=wb_id,
+                    name=wb_name,
+                    project_name=wb.get("project", {}).get("name") if isinstance(wb.get("project"), dict) else wb.get("projectName"),
+                    description=wb.get("description"),
+                    owner_name=wb.get("owner", {}).get("name") if isinstance(wb.get("owner"), dict) else wb.get("ownerName"),
+                    thumbnail_url=None,
+                    content_url=content_url,
+                    raw_metadata=json.dumps({"created_at": wb.get("createdAt"), "updated_at": wb.get("updatedAt")}),
+                    created_on_server=self._parse_iso_datetime(wb.get("createdAt")),
+                    updated_on_server=self._parse_iso_datetime(wb.get("updatedAt")),
+                    tags=json.dumps([t.get("label", t) for t in wb.get("tags", [])]) if wb.get("tags") else None,
+                )
+                synced_ids["workbook"].append(wb_id)
+
+                # 同步工作簿关联数据源
+                for ds in self._get_workbook_datasources(wb_id):
+                    ds_name = ds.get("name", "")
+                    ds_type = ds.get("datasourceType") or ds.get("type")
+                    if ds_name:
+                        db.add_asset_datasource(asset_id=asset.id, datasource_name=ds_name, datasource_type=ds_type)
+        except Exception as e:
+            logger.error("REST workbook sync error: %s", e, exc_info=True)
+            errors.append(f"Workbook sync: {e}")
+
+        # --- Views (including Dashboards) ---
+        try:
+            views = self._get_views()
+            for view in views:
+                view_id = view.get("id", {}).get("id", "") or view.get("_id", "") or str(view.get("id", ""))
+                sheet_type = view.get("sheetType") or view.get("sheet_type") or ""
+                asset_type = "dashboard" if sheet_type.lower() == "dashboard" else "view"
+
+                workbook_id = view.get("workbook", {}).get("id", "") if isinstance(view.get("workbook"), dict) else (view.get("workbookId", "") or view.get("workbook_id", ""))
+                workbook_name = workbook_name_map.get(workbook_id)
+
+                content_url = f"/views/{view_id}"
+                asset = db.upsert_asset(
+                    connection_id=connection_id,
+                    asset_type=asset_type,
+                    tableau_id=view_id,
+                    name=view.get("name", "Unknown"),
+                    project_name=view.get("project", {}).get("name") if isinstance(view.get("project"), dict) else view.get("projectName"),
+                    description=None,
+                    owner_name=view.get("owner", {}).get("name") if isinstance(view.get("owner"), dict) else view.get("ownerName"),
+                    thumbnail_url=None,
+                    content_url=content_url,
+                    raw_metadata=json.dumps({"sheet_type": sheet_type, "workbook_id": workbook_id}),
+                    sheet_type=sheet_type or None,
+                    parent_workbook_id=workbook_id or None,
+                    parent_workbook_name=workbook_name,
+                    created_on_server=self._parse_iso_datetime(view.get("createdAt")),
+                    updated_on_server=self._parse_iso_datetime(view.get("updatedAt")),
+                )
+                synced_ids[asset_type].append(view_id)
+        except Exception as e:
+            logger.error("REST view sync error: %s", e, exc_info=True)
+            errors.append(f"View sync: {e}")
+
+        # --- Datasources ---
+        try:
+            datasources = self._get_datasources()
+            for ds in datasources:
+                ds_id = ds.get("id", {}).get("id", "") or ds.get("_id", "") or str(ds.get("id", ""))
+                content_url = f"/datasources/{ds_id}"
+                asset = db.upsert_asset(
+                    connection_id=connection_id,
+                    asset_type="datasource",
+                    tableau_id=ds_id,
+                    name=ds.get("name", "Unknown"),
+                    project_name=ds.get("project", {}).get("name") if isinstance(ds.get("project"), dict) else ds.get("projectName"),
+                    description=ds.get("description"),
+                    owner_name=ds.get("owner", {}).get("name") if isinstance(ds.get("owner"), dict) else ds.get("ownerName"),
+                    thumbnail_url=None,
+                    content_url=content_url,
+                    raw_metadata=None,
+                    created_on_server=self._parse_iso_datetime(ds.get("createdAt")),
+                    updated_on_server=self._parse_iso_datetime(ds.get("updatedAt")),
+                    is_certified=bool(ds.get("isCertified") or ds.get("certified")) if ds.get("isCertified") is not None or ds.get("certified") is not None else None,
+                    tags=json.dumps([t.get("label", t) for t in ds.get("tags", [])]) if ds.get("tags") else None,
+                )
+                synced_ids["datasource"].append(ds_id)
+        except Exception as e:
+            logger.error("REST datasource sync error: %s", e, exc_info=True)
+            errors.append(f"Datasource sync: {e}")
+
+        # 软删除
+        all_ids = synced_ids["workbook"] + synced_ids["dashboard"] + synced_ids["view"] + synced_ids["datasource"]
+        deleted_count = db.mark_assets_deleted(connection_id, all_ids)
+
+        duration_sec = int(time.time() - start_time)
+        total = len(all_ids)
+        status = "success" if not errors else ("partial" if total > 0 else "failed")
+        error_msg = "\n".join(errors) if errors else None
+
+        db.finish_sync_log(
+            sync_log.id,
+            status=status,
+            workbooks_synced=len(synced_ids["workbook"]),
+            views_synced=len(synced_ids["view"]),
+            dashboards_synced=len(synced_ids["dashboard"]),
+            datasources_synced=len(synced_ids["datasource"]),
+            assets_deleted=deleted_count,
+            error_message=error_msg,
+        )
         db.update_last_sync(connection_id)
         db.set_sync_status(connection_id, "idle" if status != "failed" else "failed", duration_sec)
 

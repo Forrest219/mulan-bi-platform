@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ALL_PERMISSIONS, ROLE_DEFAULT_PERMISSIONS } from '../../../context/AuthContext';
 import { API_BASE, getAvatarGradient } from '../../../config';
+import { ConfirmModal } from '../../../components/ConfirmModal';
 
 type UserRole = 'admin' | 'data_admin' | 'analyst' | 'user';
 
@@ -72,6 +73,7 @@ export default function UserManagementPage() {
   const [editUserData, setEditUserData] = useState({ display_name: '', email: '' });
   const [formError, setFormError] = useState('');
   const [message, setMessage] = useState('');
+  const [confirmModal, setConfirmModal] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void } | null>(null);
 
   const fetchUsers = async () => {
     try {
@@ -116,37 +118,45 @@ export default function UserManagementPage() {
 
   // 批量启用
   const handleBulkEnable = async () => {
-    for (const id of selectedUsers) {
-      const user = users.find(u => u.id === id);
-      if (user && !user.is_active) {
-        const resp = await fetch(`${API_BASE}/api/users/${id}/toggle-active`, { method: 'PUT', credentials: 'include' });
-        if (!resp.ok) throw new Error(`启用用户 ${id} 失败`);
-      }
-    }
+    const targets = [...selectedUsers].filter(id => {
+      const u = users.find(u => u.id === id);
+      return u && !u.is_active;
+    });
+    if (targets.length === 0) return;
+    const results = await Promise.allSettled(
+      targets.map(id => fetch(`${API_BASE}/api/users/${id}/toggle-active`, { method: 'PUT', credentials: 'include' }).then(r => { if (!r.ok) throw new Error(); }))
+    );
+    const failed = results.filter(r => r.status === 'rejected').length;
+    if (failed > 0) setMessage(`启用完成，${targets.length - failed} 成功，${failed} 失败`);
     setSelectedUsers(new Set());
     fetchUsers();
   };
 
   // 批量禁用
   const handleBulkDisable = async () => {
-    for (const id of selectedUsers) {
-      const user = users.find(u => u.id === id);
-      if (user && user.is_active) {
-        const resp = await fetch(`${API_BASE}/api/users/${id}/toggle-active`, { method: 'PUT', credentials: 'include' });
-        if (!resp.ok) throw new Error(`禁用用户 ${id} 失败`);
-      }
-    }
+    const targets = [...selectedUsers].filter(id => {
+      const u = users.find(u => u.id === id);
+      return u && u.is_active;
+    });
+    if (targets.length === 0) return;
+    const results = await Promise.allSettled(
+      targets.map(id => fetch(`${API_BASE}/api/users/${id}/toggle-active`, { method: 'PUT', credentials: 'include' }).then(r => { if (!r.ok) throw new Error(); }))
+    );
+    const failed = results.filter(r => r.status === 'rejected').length;
+    if (failed > 0) setMessage(`禁用完成，${targets.length - failed} 成功，${failed} 失败`);
     setSelectedUsers(new Set());
     fetchUsers();
   };
 
   // 批量删除
   const handleBulkDelete = async () => {
-    if (!confirm(`确定要删除 ${selectedUsers.size} 个用户吗？`)) return;
-    for (const id of selectedUsers) {
-      const resp = await fetch(`${API_BASE}/api/users/${id}`, { method: 'DELETE', credentials: 'include' });
-      if (!resp.ok) throw new Error(`删除用户 ${id} 失败`);
-    }
+    const targets = [...selectedUsers];
+    const results = await Promise.allSettled(
+      targets.map(id => fetch(`${API_BASE}/api/users/${id}`, { method: 'DELETE', credentials: 'include' }).then(r => { if (!r.ok) throw new Error(); }))
+    );
+    const failed = results.filter(r => r.status === 'rejected').length;
+    if (failed > 0) setMessage(`删除完成，${targets.length - failed} 成功，${failed} 失败`);
+    else setMessage(`成功删除 ${targets.length} 个用户`);
     setSelectedUsers(new Set());
     fetchUsers();
   };
@@ -182,20 +192,20 @@ export default function UserManagementPage() {
 
   const handleToggleActive = async (userId: number) => {
     const response = await fetch(`${API_BASE}/api/users/${userId}/toggle-active`, { method: 'PUT', credentials: 'include' });
-    if (!response.ok) throw new Error('切换用户状态失败');
+    if (!response.ok) { setMessage('切换用户状态失败'); return; }
     fetchUsers();
   };
 
   const handleUpdateRole = async (userId: number, role: string) => {
     const response = await fetch(`${API_BASE}/api/users/${userId}/role`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ role }) });
-    if (!response.ok) throw new Error('更新用户角色失败');
+    if (!response.ok) { setMessage('更新用户角色失败'); return; }
     fetchUsers();
   };
 
   const handleDeleteUser = async (userId: number) => {
-    if (!confirm('确定要删除该用户吗？')) return;
     const response = await fetch(`${API_BASE}/api/users/${userId}`, { method: 'DELETE', credentials: 'include' });
-    if (!response.ok) throw new Error('删除用户失败');
+    if (!response.ok) { setMessage('删除用户失败'); return; }
+    setMessage('用户已删除');
     fetchUsers();
   };
 
@@ -293,7 +303,14 @@ export default function UserManagementPage() {
               <button onClick={handleBulkDisable} className="px-3 py-1.5 text-xs bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200">
                 批量禁用
               </button>
-              <button onClick={handleBulkDelete} className="px-3 py-1.5 text-xs bg-red-100 text-red-700 rounded-lg hover:bg-red-200">
+              <button onClick={() => {
+                setConfirmModal({
+                  open: true,
+                  title: '批量删除用户',
+                  message: `确定要删除选中的 ${selectedUsers.size} 个用户吗？此操作不可撤销。`,
+                  onConfirm: () => { setConfirmModal(null); handleBulkDelete(); },
+                });
+              }} className="px-3 py-1.5 text-xs bg-red-100 text-red-700 rounded-lg hover:bg-red-200">
                 批量删除
               </button>
             </div>
@@ -378,7 +395,15 @@ export default function UserManagementPage() {
                   <button onClick={() => handleToggleActive(user.id)} className="text-xs text-orange-600 hover:text-orange-800 mr-2">
                     {user.is_active ? '禁用' : '启用'}
                   </button>
-                  <button onClick={() => handleDeleteUser(user.id)} className="text-xs text-red-600 hover:text-red-800">
+                  <button onClick={() => {
+                    const u = users.find(x => x.id === user.id);
+                    setConfirmModal({
+                      open: true,
+                      title: '删除用户',
+                      message: `确定要删除用户 "${u?.display_name || user.username}" 吗？此操作不可撤销。`,
+                      onConfirm: () => { setConfirmModal(null); handleDeleteUser(user.id); },
+                    });
+                  }} className="text-xs text-red-600 hover:text-red-800">
                     删除
                   </button>
                 </td>
@@ -514,6 +539,18 @@ export default function UserManagementPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 通用确认弹窗 */}
+      {confirmModal && (
+        <ConfirmModal
+          open={confirmModal.open}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          confirmLabel="删除"
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(null)}
+        />
       )}
     </div>
   );

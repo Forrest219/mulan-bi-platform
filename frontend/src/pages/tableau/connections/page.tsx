@@ -4,6 +4,7 @@ import {
   listConnections, createConnection, updateConnection, deleteConnection,
   testConnection, syncConnection, TableauConnection
 } from '../../../api/tableau';
+import { ConfirmModal } from '../../../components/ConfirmModal';
 
 export default function TableauConnectionsPage() {
   const navigate = useNavigate();
@@ -24,6 +25,8 @@ export default function TableauConnectionsPage() {
   const [syncingId, setSyncingId] = useState<number | null>(null);
   // 中央 Modal 通知状态
   const [modalNotify, setModalNotify] = useState<{ success: boolean; message: string } | null>(null);
+  // 确认弹窗状态
+  const [confirmModal, setConfirmModal] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void } | null>(null);
 
   const fetchConnections = async () => {
     try {
@@ -79,9 +82,9 @@ export default function TableauConnectionsPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('确定要删除该连接吗？')) return;
     try {
       await deleteConnection(id);
+      setModalNotify({ success: true, message: '连接已删除' });
       fetchConnections();
     } catch (e: any) {
       setModalNotify({ success: false, message: e.message || '删除失败' });
@@ -246,7 +249,14 @@ export default function TableauConnectionsPage() {
                   className={`flex-1 px-3 py-1.5 text-xs ${conn.is_active ? 'text-orange-500 hover:text-orange-700' : 'text-emerald-500 hover:text-emerald-700'}`}>
                   {conn.is_active ? '禁用' : '启用'}
                 </button>
-                <button onClick={() => handleDelete(conn.id)}
+                <button onClick={() => {
+                  setConfirmModal({
+                    open: true,
+                    title: '删除连接',
+                    message: `确定要删除连接 "${conn.name}" 吗？该操作将同时删除所有已同步的资产数据。`,
+                    onConfirm: () => { setConfirmModal(null); handleDelete(conn.id); },
+                  });
+                }}
                   className="flex-1 px-3 py-1.5 text-xs text-red-500 hover:text-red-700">
                   删除
                 </button>
@@ -416,6 +426,18 @@ export default function TableauConnectionsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 通用确认弹窗 */}
+      {confirmModal && (
+        <ConfirmModal
+          open={confirmModal.open}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          confirmLabel="删除"
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(null)}
+        />
       )}
     </div>
   );

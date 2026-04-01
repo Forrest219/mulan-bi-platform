@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ALL_PERMISSIONS } from '../../../context/AuthContext';
 import { API_BASE, getAvatarGradient } from '../../../config';
+import { ConfirmModal } from '../../../components/ConfirmModal';
 
 interface Group {
   id: number;
@@ -35,6 +36,7 @@ export default function GroupsPage() {
   const [hasPendingChanges, setHasPendingChanges] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [message, setMessage] = useState('');
+  const [confirmModal, setConfirmModal] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void } | null>(null);
 
   const fetchGroups = async () => {
     try {
@@ -78,19 +80,26 @@ export default function GroupsPage() {
     setHasPendingChanges(false);
   };
 
-  // 保存所有修改
+  // 保存所有修改（并行请求）
   const saveChanges = async () => {
-    for (const [groupId, permissions] of pendingChanges) {
-      const resp = await fetch(`${API_BASE}/api/groups/${groupId}/permissions`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ permissions })
-      });
-      if (!resp.ok) throw new Error(`更新用户组 ${groupId} 权限失败`);
-    }
+    const results = await Promise.allSettled(
+      [...pendingChanges.entries()].map(([groupId, permissions]) =>
+        fetch(`${API_BASE}/api/groups/${groupId}/permissions`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ permissions }),
+        }).then(r => { if (!r.ok) throw new Error(`更新用户组 ${groupId} 失败`); })
+      )
+    );
+    const failed = results.filter(r => r.status === 'rejected').length;
     setPendingChanges(new Map());
     setHasPendingChanges(false);
+    if (failed > 0) {
+      setMessage(`保存完成，${results.length - failed} 个成功，${failed} 个失败`);
+    } else {
+      setMessage(`已保存 ${results.length} 个用户组的权限`);
+    }
     fetchGroups();
   };
 
@@ -112,9 +121,9 @@ export default function GroupsPage() {
   };
 
   const handleDeleteGroup = async (groupId: number) => {
-    if (!confirm('确定要删除该用户组吗？')) return;
     const resp = await fetch(`${API_BASE}/api/groups/${groupId}`, { method: 'DELETE', credentials: 'include' });
-    if (!resp.ok) throw new Error('删除用户组失败');
+    if (!resp.ok) { setMessage('删除用户组失败'); return; }
+    setMessage('用户组已删除');
     fetchGroups();
   };
 
@@ -242,7 +251,14 @@ export default function GroupsPage() {
                     className="px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center gap-1">
                     <i className="ri-user-line" /> 成员 ({group.member_count})
                   </button>
-                  <button onClick={() => handleDeleteGroup(group.id)}
+                  <button onClick={() => {
+                    setConfirmModal({
+                      open: true,
+                      title: '删除用户组',
+                      message: `确定要删除用户组 "${group.name}" 吗？此操作不可撤销。`,
+                      onConfirm: () => { setConfirmModal(null); handleDeleteGroup(group.id); },
+                    });
+                  }}
                     className="px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 rounded-lg transition-colors flex items-center gap-1">
                     <i className="ri-delete-bin-line" /> 删除
                   </button>
@@ -251,18 +267,10 @@ export default function GroupsPage() {
 
               {/* 成员预览 */}
               {group.member_count > 0 ? (
-                <div className="mb-4">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs text-slate-500">成员：</span>
-                    {groupMembers.filter(m => true).slice(0, 5).map(member => (
-                      <span key={member.id} className="inline-flex items-center px-2 py-0.5 bg-slate-100 rounded-full text-xs text-slate-600">
-                        {member.display_name}
-                      </span>
-                    ))}
-                    {group.member_count > 5 && (
-                      <span className="text-xs text-slate-400">+{group.member_count - 5} 人</span>
-                    )}
-                  </div>
+                <div className="mb-4 text-xs text-slate-500">
+                  <i className="ri-user-line mr-1" />{group.member_count} 名成员
+                  <button onClick={() => handleOpenMembers(group)}
+                    className="ml-2 text-blue-500 hover:text-blue-700">查看</button>
                 </div>
               ) : (
                 <div className="mb-4 text-xs text-slate-400">暂无成员</div>
@@ -405,6 +413,18 @@ export default function GroupsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 通用确认弹窗 */}
+      {confirmModal && (
+        <ConfirmModal
+          open={confirmModal.open}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          confirmLabel="删除"
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(null)}
+        />
       )}
     </div>
   );

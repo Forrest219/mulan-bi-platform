@@ -3,7 +3,7 @@ import threading
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 
@@ -67,6 +67,11 @@ class TableauConnection(Base):
 class TableauAsset(Base):
     """Tableau 资产表（Workbooks, Views, Dashboards, DataSources）"""
     __tablename__ = "tableau_assets"
+    __table_args__ = (
+        UniqueConstraint("connection_id", "tableau_id", name="uq_asset_conn_tid"),
+        Index("ix_asset_conn_deleted_type", "connection_id", "is_deleted", "asset_type"),
+        Index("ix_asset_conn_parent", "connection_id", "parent_workbook_id"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     connection_id = Column(Integer, ForeignKey("tableau_connections.id", ondelete="CASCADE"), nullable=False)
@@ -141,6 +146,9 @@ class TableauAsset(Base):
 class TableauAssetDatasource(Base):
     """Tableau 资产的数据源关联表"""
     __tablename__ = "tableau_asset_datasources"
+    __table_args__ = (
+        UniqueConstraint("asset_id", "datasource_name", name="uq_asset_ds_name"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     asset_id = Column(Integer, ForeignKey("tableau_assets.id", ondelete="CASCADE"), nullable=False)
@@ -161,6 +169,9 @@ class TableauAssetDatasource(Base):
 class TableauSyncLog(Base):
     """同步日志表"""
     __tablename__ = "tableau_sync_logs"
+    __table_args__ = (
+        Index("ix_synclog_conn_started", "connection_id", "started_at"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     connection_id = Column(Integer, ForeignKey("tableau_connections.id", ondelete="CASCADE"), nullable=False)
@@ -202,6 +213,9 @@ class TableauSyncLog(Base):
 class TableauDatasourceField(Base):
     """数据源字段缓存表"""
     __tablename__ = "tableau_datasource_fields"
+    __table_args__ = (
+        Index("ix_dsfield_asset_luid", "asset_id", "datasource_luid"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     asset_id = Column(Integer, ForeignKey("tableau_assets.id", ondelete="CASCADE"), nullable=False)
@@ -315,6 +329,21 @@ class TableauDatabase:
         for col, col_def in asset_migrations.items():
             if col not in asset_cols:
                 cursor.execute(f"ALTER TABLE tableau_assets ADD COLUMN {col} {col_def}")
+
+        # --- 索引迁移（IF NOT EXISTS 兼容已有库）---
+        index_stmts = [
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_asset_conn_tid ON tableau_assets(connection_id, tableau_id)",
+            "CREATE INDEX IF NOT EXISTS ix_asset_conn_deleted_type ON tableau_assets(connection_id, is_deleted, asset_type)",
+            "CREATE INDEX IF NOT EXISTS ix_asset_conn_parent ON tableau_assets(connection_id, parent_workbook_id)",
+            "CREATE INDEX IF NOT EXISTS ix_synclog_conn_started ON tableau_sync_logs(connection_id, started_at)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_asset_ds_name ON tableau_asset_datasources(asset_id, datasource_name)",
+            "CREATE INDEX IF NOT EXISTS ix_dsfield_asset_luid ON tableau_datasource_fields(asset_id, datasource_luid)",
+        ]
+        for stmt in index_stmts:
+            try:
+                cursor.execute(stmt)
+            except Exception:
+                pass  # 表可能尚未创建，忽略
 
         conn.commit()
         conn.close()
@@ -499,6 +528,16 @@ class TableauDatabase:
         return list(project_map.values())
 
     def add_asset_datasource(self, asset_id: int, datasource_name: str, datasource_type: str = None) -> TableauAssetDatasource:
+        """Upsert 资产数据源关联，避免重复插入"""
+        existing = self.session.query(TableauAssetDatasource).filter(
+            TableauAssetDatasource.asset_id == asset_id,
+            TableauAssetDatasource.datasource_name == datasource_name
+        ).first()
+        if existing:
+            if datasource_type is not None:
+                existing.datasource_type = datasource_type
+            self.session.commit()
+            return existing
         ds = TableauAssetDatasource(
             asset_id=asset_id,
             datasource_name=datasource_name,

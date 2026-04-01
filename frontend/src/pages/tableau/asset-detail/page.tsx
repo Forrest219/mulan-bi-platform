@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getAsset, getAssetChildren, getAssetParent, explainAsset, TableauAsset } from '../../../api/tableau';
 import { getAssetSummary, getLLMConfig } from '../../../api/llm';
 import { ASSET_TYPE_LABELS } from '../../../config';
+import { ConfirmModal } from '../../../components/ConfirmModal';
 
 const ASSET_TYPE_ICONS: Record<string, string> = {
   workbook: 'ri-file-chart-line',
@@ -30,6 +31,7 @@ export default function TableauAssetDetailPage() {
   const [parentAsset, setParentAsset] = useState<TableauAsset | null>(null);
   const [children, setChildren] = useState<TableauAsset[]>([]);
   const [childrenLoading, setChildrenLoading] = useState(false);
+  const [confirmModal, setConfirmModal] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void } | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -88,9 +90,12 @@ export default function TableauAssetDetailPage() {
 
   function handleRefreshAI() {
     if (aiExplain || aiSummary) {
-      if (confirm('确定要重新生成解读吗？')) {
-        loadAIExplain(true);
-      }
+      setConfirmModal({
+        open: true,
+        title: '重新生成解读',
+        message: '确定要重新生成 AI 深度解读吗？之前的解读将被覆盖。',
+        onConfirm: () => { setConfirmModal(null); loadAIExplain(true); },
+      });
     } else {
       loadAIExplain(false);
     }
@@ -517,6 +522,18 @@ export default function TableauAssetDetailPage() {
           </aside>
         </div>
       </div>
+
+      {/* 通用确认弹窗 */}
+      {confirmModal && (
+        <ConfirmModal
+          open={confirmModal.open}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          confirmLabel="重新生成"
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(null)}
+        />
+      )}
     </div>
   );
 }

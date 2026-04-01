@@ -260,7 +260,7 @@ class DDLScanner:
             )
 
         except Exception as e:
-            logger.error("读取表 %s 信息失败: %s", table_name, e)
+            logger.error("读取表 %s 信息失败: %s", table_name, e, exc_info=True)
             return None
 
     def export_report(self, report: CheckReport, output_path: str, format: str = "html"):

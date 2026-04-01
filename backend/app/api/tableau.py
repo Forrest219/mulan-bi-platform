@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 from tableau.models import TableauDatabase
-from tableau.sync_service import TableauSyncService
+from tableau.sync_service import TableauSyncService, TableauRestSyncService
 from app.core.dependencies import get_current_user
 from app.core.crypto import get_tableau_crypto
 
@@ -99,8 +99,7 @@ def _test_connection_rest(server_url: str, site: str, token_name: str,
                         timeout=5
                     )
                 except Exception:
-                    pass
-            return {"success": True, "message": f"REST API 连接成功 (site: {site_id})"}
+                    pass  # signout 清理失败可忽略
         else:
             detail = resp.text[:200]
             return {"success": False, "message": f"REST API 认证失败 (HTTP {resp.status_code}): {detail}"}
@@ -269,6 +268,63 @@ async def sync_connection(conn_id: int, request: Request):
     if user["role"] != "admin" and conn.owner_id != user["id"]:
         raise HTTPException(status_code=403, detail="无权操作该连接")
 
+    # MCP/REST 连接使用原生 REST API 同步，TSC 连接使用 tableauserverclient
+    if getattr(conn, "connection_type", "mcp") == "mcp":
+        return await _sync_mcp_rest(conn, conn_id, _db, _decrypt)
+    else:
+        return await _sync_tsc(conn, conn_id, _db, _decrypt)
+
+
+async def _sync_mcp_rest(conn, conn_id: int, _db, _decrypt):
+    """MCP REST 同步路径（不依赖 TSC 库）"""
+    try:
+        decrypted_token = _decrypt(conn.token_encrypted)
+    except Exception as decrypt_err:
+        err_str = str(decrypt_err)
+        if "InvalidToken" in err_str or "decrypt" in err_str.lower():
+            msg = "Token 解密失败：加密密钥可能已变更，请重新保存 PAT Token"
+            _db.update_connection_health(conn_id, False, msg)
+            return {"success": False, "message": msg}
+        raise
+
+    try:
+        service = TableauRestSyncService(
+            server_url=conn.server_url,
+            site=conn.site,
+            token_name=conn.token_name,
+            token_value=decrypted_token,
+            api_version=conn.api_version,
+        )
+        try:
+            if not service.connect():
+                return {"success": False, "message": "无法连接到 Tableau Server"}
+
+            result = service.sync_all_assets(_db, conn_id)
+
+            wb_count = len(result['synced'].get("workbook", []))
+            db_count = len(result['synced'].get("dashboard", []))
+            view_count = len(result['synced'].get("view", []))
+            ds_count = len(result['synced'].get("datasource", []))
+            details = f"工作簿:{wb_count} 仪表板:{db_count} 视图:{view_count} 数据源:{ds_count}"
+
+            return {
+                "success": result["status"] != "failed",
+                "message": f"同步{result['status']}，共 {result['total']} 个资产，标记 {result['deleted']} 个已删除，{details}",
+                "sync_log_id": result.get("sync_log_id"),
+                "duration_sec": result.get("duration_sec"),
+                "errors": result.get("errors", []),
+            }
+        finally:
+            service.disconnect()
+    except Exception as e:
+        import traceback
+        logger.error("MCP REST sync error for conn %s: %s", conn_id, e, exc_info=True)
+        _db.set_sync_status(conn_id, "failed")
+        return {"success": False, "message": f"同步失败: {e}"}
+
+
+async def _sync_tsc(conn, conn_id: int, _db, _decrypt):
+    """TSC 直连同步路径"""
     try:
         decrypted_token = _decrypt(conn.token_encrypted)
     except Exception as decrypt_err:

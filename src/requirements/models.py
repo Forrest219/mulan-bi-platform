@@ -75,7 +75,8 @@ class RequirementDatabase:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             if db_path is None:
-                db_path = "/Users/zhangxingchen/projects/mulan-bi-platform/data/requirements.db"
+                import os
+                db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "requirements.db")
             cls._instance._init_db(db_path)
         return cls._instance
 

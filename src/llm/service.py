@@ -42,8 +42,8 @@ class LLMService:
 
         try:
             api_key = _decrypt(config.api_key_encrypted)
-        except Exception:
-            logger.error("LLM API Key 解密失败")
+        except Exception as e:
+            logger.error("LLM API Key 解密失败: %s", e, exc_info=True)
             return {"error": "LLM 认证配置错误"}
 
         try:
@@ -52,7 +52,7 @@ class LLMService:
             else:
                 return self._openai_complete(api_key, config, prompt, system, timeout)
         except Exception as e:
-            logger.error(f"LLM 调用失败: {e}")
+            logger.error("LLM 调用失败: %s", e, exc_info=True)
             return {"error": str(e)}
 
     def _openai_complete(self, api_key: str, config, prompt: str, system: str, timeout: int) -> dict:
@@ -92,14 +92,14 @@ class LLMService:
         except Exception as e:
             error_type = type(e).__name__
             error_msg = str(e)
-            logger.error(f"MiniMax API 调用失败: {error_type} - {error_msg}")
-            return {"error": f"MiniMax API 错误: {error_msg}"}
+            logger.error("Anthropic API 调用失败 [%s]: %s", error_type, error_msg, exc_info=True)
+            return {"error": f"Anthropic API 错误: {error_msg}"}
 
         # 兼容 MiniMax 的 ThinkingBlock（思维链），提取第一个 TextBlock
         from anthropic.types import TextBlock, Message
         text_blocks = [block for block in response.content if isinstance(block, TextBlock)]
         if not text_blocks:
-            logger.error(f"MiniMax 响应中无 TextBlock: {response.content}")
+            logger.error("Anthropic 响应中无 TextBlock: %s", response.content)
             return {"error": f"MiniMax 响应格式异常：未找到文本内容"}
         content = text_blocks[0].text.strip()
         return {"content": content}

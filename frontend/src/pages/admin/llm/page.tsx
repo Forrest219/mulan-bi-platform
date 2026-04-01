@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../../context/AuthContext';
 import { getLLMConfig, saveLLMConfig, testLLMConnection, deleteLLMConfig, LLMConfig } from '../../../api/llm';
+import { ConfirmModal } from '../../../components/ConfirmModal';
 
 export default function LLMAdminPage() {
   const { user, hasPermission } = useAuth();
@@ -8,6 +9,7 @@ export default function LLMAdminPage() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void } | null>(null);
   const [testResult, setTestResult] = useState<string>('');
   const [showApiKey, setShowApiKey] = useState(false);
 
@@ -95,7 +97,6 @@ export default function LLMAdminPage() {
   }
 
   async function handleDelete() {
-    if (!confirm('确定要删除 LLM 配置吗？')) return;
     try {
       await deleteLLMConfig();
       setForm({
@@ -279,7 +280,14 @@ export default function LLMAdminPage() {
               {saving ? '保存中...' : '保存配置'}
             </button>
             <button
-              onClick={handleDelete}
+              onClick={() => {
+                setConfirmModal({
+                  open: true,
+                  title: '删除 LLM 配置',
+                  message: '确定要删除当前的 LLM 配置吗？此操作不可撤销。',
+                  onConfirm: () => { setConfirmModal(null); handleDelete(); },
+                });
+              }}
               className="px-4 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
             >
               删除配置
@@ -296,6 +304,18 @@ export default function LLMAdminPage() {
           )}
         </div>
       </div>
+
+      {/* 通用确认弹窗 */}
+      {confirmModal && (
+        <ConfirmModal
+          open={confirmModal.open}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          confirmLabel="删除"
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(null)}
+        />
+      )}
     </div>
   );
 }
