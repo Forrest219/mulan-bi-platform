@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm
+from app.api.semantic_maintenance import datasources as sm_datasources, fields as sm_fields, review as sm_review, sync as sm_sync, publish as sm_publish
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,11 @@ app.include_router(activity.router, prefix="/api/activity", tags=["访问日志"
 app.include_router(datasources.router, prefix="/api/datasources", tags=["数据源管理"])
 app.include_router(tableau.router, prefix="/api/tableau", tags=["Tableau 管理"])
 app.include_router(llm.router, prefix="/api/llm", tags=["LLM 管理"])
+app.include_router(sm_datasources.router, prefix="/api/semantic-maintenance", tags=["语义维护"])
+app.include_router(sm_fields.router, prefix="/api/semantic-maintenance", tags=["语义维护"])
+app.include_router(sm_review.router, prefix="/api/semantic-maintenance", tags=["语义维护"])
+app.include_router(sm_sync.router, prefix="/api/semantic-maintenance", tags=["语义维护"])
+app.include_router(sm_publish.router, prefix="/api/semantic-maintenance", tags=["语义维护"])
 
 
 @app.get("/")

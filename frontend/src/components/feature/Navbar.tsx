@@ -6,6 +6,7 @@ const navItems = [
   { label: '数据库监控', path: '/database-monitor' },
   { label: '规则配置', path: '/rule-config' },
   { label: 'Tableau', path: '/tableau/assets' },
+  { label: '语义维护', path: '/semantic-maintenance/datasources' },
   { label: 'DDL 预览', path: '/ddl-validator' },
 ];
 

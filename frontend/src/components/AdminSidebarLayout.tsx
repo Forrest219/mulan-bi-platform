@@ -4,55 +4,49 @@ import { useAuth } from '../context/AuthContext';
 const adminMenuItems = [
   {
     path: '/admin/users',
-    label: '用户管理',
+    label: '用户与权限',
     icon: 'ri-user-settings-line',
-    desc: '用户账号和权限'
+    desc: '用户账号和权限',
   },
   {
-    path: '/admin/groups',
-    label: '用户组管理',
-    icon: 'ri-group-line',
-    desc: '用户组和权限配置'
+    path: '/admin/datasources',
+    label: '数据源管理',
+    icon: 'ri-database-2-line',
+    desc: '数据库连接配置',
   },
   {
-    path: '/admin/permissions',
-    label: '权限配置',
-    icon: 'ri-shield-check-line',
-    desc: '模块权限总览'
+    path: '/admin/tableau/connections',
+    label: 'Tableau 连接',
+    icon: 'ri-bar-chart-box-line',
+    desc: 'Tableau Server 配置',
+  },
+  {
+    path: '/admin/llm',
+    label: '系统配置',
+    icon: 'ri-robot-line',
+    desc: 'AI 能力配置',
   },
   {
     path: '/admin/activity',
     label: '访问日志',
     icon: 'ri-history-line',
-    desc: '用户活动统计'
+    desc: '操作日志查看',
   },
   {
-    path: '/admin/llm',
-    label: 'LLM 配置',
-    icon: 'ri-robot-line',
-    desc: 'AI 能力配置'
-  },
-  {
-    path: '/tableau/connections',
-    label: 'Tableau 连接',
-    icon: 'ri-bar-chart-box-line',
-    desc: 'Tableau Server 配置'
-  },
-  {
-    path: '/semantic-maintenance/datasources',
-    label: '语义维护',
-    icon: 'ri-ai-generate',
-    desc: '数据源语义治理'
+    path: '/admin/tasks',
+    label: '任务管理',
+    icon: 'ri-task-line',
+    desc: '定时任务配置',
   },
 ];
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
+export default function AdminSidebarLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const { user } = useAuth();
 
   return (
     <div className="flex min-h-screen bg-slate-50">
-      {/* 侧边栏 - 浅色主题 */}
+      {/* 侧边栏 */}
       <aside className="w-56 bg-white border-r border-slate-200 text-slate-700 flex flex-col">
 
         {/* 标题 */}
@@ -65,7 +59,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         {/* 菜单 */}
         <nav className="flex-1 px-3">
           {adminMenuItems.map((item) => {
-            const isActive = location.pathname === item.path;
+            const isActive = location.pathname === item.path || location.pathname.startsWith(item.path + '/');
             return (
               <Link
                 key={item.path}
@@ -88,10 +82,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           })}
         </nav>
 
+        {/* 返回首页 */}
+        <div className="px-3 py-3 border-t border-slate-100">
+          <Link
+            to="/"
+            className="flex items-center gap-2.5 px-3 py-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
+          >
+            <i className="ri-arrow-left-line text-base" />
+            <span className="text-[12px]">返回首页</span>
+          </Link>
+        </div>
+
         {/* 用户信息 */}
         <div className="px-3 py-3 border-t border-slate-100">
           <div className="flex items-center gap-2.5 px-3 py-2 bg-slate-50 rounded-lg">
-            <div className="w-7 h-7 flex items-center justify-center bg-blue-100 text-blue-600 rounded-full">
+            <div className="w-7 h-7 flex items-center justify-center bg-blue-100 text-blue-600 rounded-full shrink-0">
               <span className="text-xs font-semibold">
                 {user?.display_name?.charAt(0) || 'A'}
               </span>
