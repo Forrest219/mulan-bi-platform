@@ -16,6 +16,8 @@ export interface TableauConnection {
   last_test_success: boolean | null;
   last_test_message: string | null;
   last_sync_at: string | null;
+  last_sync_duration_sec: number | null;
+  sync_status: 'idle' | 'running' | 'failed';
   created_at: string;
   updated_at: string;
 }
@@ -33,6 +35,24 @@ export interface TableauAsset {
   content_url: string | null;
   is_deleted: boolean;
   synced_at: string;
+  // Phase 2a: hierarchy
+  parent_workbook_id: string | null;
+  parent_workbook_name: string | null;
+  tags: string | null;
+  sheet_type: string | null;
+  created_on_server: string | null;
+  updated_on_server: string | null;
+  view_count: number | null;
+  // AI
+  ai_summary: string | null;
+  ai_summary_generated_at: string | null;
+  ai_explain: string | null;
+  ai_explain_at: string | null;
+  // Health
+  health_score: number | null;
+  field_count: number | null;
+  is_certified: boolean | null;
+  // Detail enrichment
   datasources?: TableauAssetDatasource[];
   server_url?: string;
 }
@@ -42,6 +62,22 @@ export interface TableauAssetDatasource {
   asset_id: number;
   datasource_name: string;
   datasource_type: string | null;
+}
+
+export interface TableauSyncLog {
+  id: number;
+  connection_id: number;
+  trigger_type: 'manual' | 'scheduled';
+  started_at: string;
+  finished_at: string | null;
+  status: 'running' | 'success' | 'partial' | 'failed';
+  workbooks_synced: number;
+  views_synced: number;
+  dashboards_synced: number;
+  datasources_synced: number;
+  assets_deleted: number;
+  error_message: string | null;
+  duration_sec: number | null;
 }
 
 export interface ProjectNode {
@@ -188,5 +224,70 @@ export async function searchAssets(params: {
 export async function getProjects(connection_id: number): Promise<{ projects: ProjectNode[] }> {
   const res = await fetch(`${API_BASE}/api/tableau/projects?connection_id=${connection_id}`, { credentials: 'include' });
   if (!res.ok) throw new Error('Failed to fetch projects');
+  return res.json();
+}
+
+// Sync Logs API (Phase 2a)
+
+export async function listSyncLogs(connId: number, params?: {
+  page?: number;
+  page_size?: number;
+}): Promise<{ logs: TableauSyncLog[]; total: number; page: number; page_size: number; pages: number }> {
+  const sp = new URLSearchParams({
+    ...(params?.page && { page: String(params.page) }),
+    ...(params?.page_size && { page_size: String(params.page_size) }),
+  });
+  const res = await fetch(`${API_BASE}/api/tableau/connections/${connId}/sync-logs?${sp}`, { credentials: 'include' });
+  if (!res.ok) throw new Error('Failed to fetch sync logs');
+  return res.json();
+}
+
+export async function getSyncLog(connId: number, logId: number): Promise<TableauSyncLog> {
+  const res = await fetch(`${API_BASE}/api/tableau/connections/${connId}/sync-logs/${logId}`, { credentials: 'include' });
+  if (!res.ok) throw new Error('Failed to fetch sync log');
+  return res.json();
+}
+
+export async function getSyncStatus(connId: number): Promise<{
+  status: string;
+  last_sync_at: string | null;
+  last_sync_duration_sec: number | null;
+  auto_sync_enabled: boolean;
+  sync_interval_hours: number;
+}> {
+  const res = await fetch(`${API_BASE}/api/tableau/connections/${connId}/sync-status`, { credentials: 'include' });
+  if (!res.ok) throw new Error('Failed to fetch sync status');
+  return res.json();
+}
+
+// Asset Hierarchy API (Phase 2a)
+
+export async function getAssetChildren(assetId: number): Promise<{ children: TableauAsset[] }> {
+  const res = await fetch(`${API_BASE}/api/tableau/assets/${assetId}/children`, { credentials: 'include' });
+  if (!res.ok) throw new Error('Failed to fetch children');
+  return res.json();
+}
+
+export async function getAssetParent(assetId: number): Promise<{ parent: TableauAsset | null }> {
+  const res = await fetch(`${API_BASE}/api/tableau/assets/${assetId}/parent`, { credentials: 'include' });
+  if (!res.ok) throw new Error('Failed to fetch parent');
+  return res.json();
+}
+
+// Deep AI Explain API (Phase 2a)
+
+export async function explainAsset(assetId: number, refresh = false): Promise<{
+  explain: string | null;
+  cached: boolean;
+  generated_at: string | null;
+  error?: string;
+}> {
+  const res = await fetch(`${API_BASE}/api/tableau/assets/${assetId}/explain`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ refresh }),
+  });
+  if (!res.ok) throw new Error('Failed to explain asset');
   return res.json();
 }

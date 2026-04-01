@@ -3,7 +3,7 @@ import threading
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 
@@ -33,6 +33,8 @@ class TableauConnection(Base):
     last_test_message = Column(Text, nullable=True)
     # 同步状态
     last_sync_at = Column(DateTime, nullable=True)
+    last_sync_duration_sec = Column(Integer, nullable=True)
+    sync_status = Column(String(16), default="idle")  # idle / running / failed
     created_at = Column(DateTime, default=datetime.now, nullable=False)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -55,6 +57,8 @@ class TableauConnection(Base):
             "last_test_success": self.last_test_success,
             "last_test_message": self.last_test_message,
             "last_sync_at": self.last_sync_at.strftime("%Y-%m-%d %H:%M:%S") if self.last_sync_at else None,
+            "last_sync_duration_sec": self.last_sync_duration_sec,
+            "sync_status": self.sync_status or "idle",
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
             "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
         }
@@ -77,9 +81,28 @@ class TableauAsset(Base):
     raw_metadata = Column(Text, nullable=True)
     is_deleted = Column(Boolean, default=False)
     synced_at = Column(DateTime, default=datetime.now, nullable=False)
+    # Phase 1 AI 摘要
     ai_summary = Column(Text, nullable=True)
     ai_summary_generated_at = Column(DateTime, nullable=True)
     ai_summary_error = Column(Text, nullable=True)
+    # Phase 2a: 资产层级
+    parent_workbook_id = Column(String(256), nullable=True)
+    parent_workbook_name = Column(String(256), nullable=True)
+    # Phase 2a: 扩展元数据
+    tags = Column(Text, nullable=True)  # JSON 数组
+    sheet_type = Column(String(32), nullable=True)
+    created_on_server = Column(DateTime, nullable=True)
+    updated_on_server = Column(DateTime, nullable=True)
+    view_count = Column(Integer, nullable=True)
+    # Phase 2a: 深度 AI 解读
+    ai_explain = Column(Text, nullable=True)
+    ai_explain_at = Column(DateTime, nullable=True)
+    # Phase 2b: 健康度
+    health_score = Column(Float, nullable=True)
+    health_details = Column(Text, nullable=True)  # JSON
+    # Phase 2b: 数据源扩展
+    field_count = Column(Integer, nullable=True)
+    is_certified = Column(Boolean, nullable=True)
 
     connection = relationship("TableauConnection", back_populates="assets")
     datasources = relationship("TableauAssetDatasource", back_populates="asset", cascade="all, delete-orphan")
@@ -100,6 +123,18 @@ class TableauAsset(Base):
             "synced_at": self.synced_at.strftime("%Y-%m-%d %H:%M:%S") if self.synced_at else None,
             "ai_summary": self.ai_summary,
             "ai_summary_generated_at": self.ai_summary_generated_at.strftime("%Y-%m-%d %H:%M:%S") if self.ai_summary_generated_at else None,
+            "parent_workbook_id": self.parent_workbook_id,
+            "parent_workbook_name": self.parent_workbook_name,
+            "tags": self.tags,
+            "sheet_type": self.sheet_type,
+            "created_on_server": self.created_on_server.strftime("%Y-%m-%d %H:%M:%S") if self.created_on_server else None,
+            "updated_on_server": self.updated_on_server.strftime("%Y-%m-%d %H:%M:%S") if self.updated_on_server else None,
+            "view_count": self.view_count,
+            "ai_explain": self.ai_explain,
+            "ai_explain_at": self.ai_explain_at.strftime("%Y-%m-%d %H:%M:%S") if self.ai_explain_at else None,
+            "health_score": self.health_score,
+            "field_count": self.field_count,
+            "is_certified": self.is_certified,
         }
 
 
@@ -120,6 +155,95 @@ class TableauAssetDatasource(Base):
             "asset_id": self.asset_id,
             "datasource_name": self.datasource_name,
             "datasource_type": self.datasource_type,
+        }
+
+
+class TableauSyncLog(Base):
+    """同步日志表"""
+    __tablename__ = "tableau_sync_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    connection_id = Column(Integer, ForeignKey("tableau_connections.id", ondelete="CASCADE"), nullable=False)
+    trigger_type = Column(String(16), nullable=False)  # 'manual' | 'scheduled'
+    started_at = Column(DateTime, nullable=False, default=datetime.now)
+    finished_at = Column(DateTime, nullable=True)
+    status = Column(String(16), nullable=False, default="running")  # running / success / partial / failed
+    workbooks_synced = Column(Integer, default=0)
+    views_synced = Column(Integer, default=0)
+    dashboards_synced = Column(Integer, default=0)
+    datasources_synced = Column(Integer, default=0)
+    assets_deleted = Column(Integer, default=0)
+    error_message = Column(Text, nullable=True)
+    details = Column(Text, nullable=True)  # JSON
+
+    connection = relationship("TableauConnection")
+
+    def to_dict(self) -> Dict[str, Any]:
+        duration = None
+        if self.started_at and self.finished_at:
+            duration = int((self.finished_at - self.started_at).total_seconds())
+        return {
+            "id": self.id,
+            "connection_id": self.connection_id,
+            "trigger_type": self.trigger_type,
+            "started_at": self.started_at.strftime("%Y-%m-%d %H:%M:%S") if self.started_at else None,
+            "finished_at": self.finished_at.strftime("%Y-%m-%d %H:%M:%S") if self.finished_at else None,
+            "status": self.status,
+            "workbooks_synced": self.workbooks_synced,
+            "views_synced": self.views_synced,
+            "dashboards_synced": self.dashboards_synced,
+            "datasources_synced": self.datasources_synced,
+            "assets_deleted": self.assets_deleted,
+            "error_message": self.error_message,
+            "duration_sec": duration,
+        }
+
+
+class TableauDatasourceField(Base):
+    """数据源字段缓存表"""
+    __tablename__ = "tableau_datasource_fields"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    asset_id = Column(Integer, ForeignKey("tableau_assets.id", ondelete="CASCADE"), nullable=False)
+    datasource_luid = Column(String(256), nullable=False)
+    field_name = Column(String(256), nullable=False)
+    field_caption = Column(String(256), nullable=True)
+    data_type = Column(String(64), nullable=True)
+    role = Column(String(32), nullable=True)  # dimension / measure
+    description = Column(Text, nullable=True)
+    formula = Column(Text, nullable=True)
+    aggregation = Column(String(32), nullable=True)
+    is_calculated = Column(Boolean, default=False)
+    metadata_json = Column(Text, nullable=True)
+    fetched_at = Column(DateTime, nullable=False, default=datetime.now)
+    # AI 标注
+    ai_caption = Column(String(256), nullable=True)
+    ai_description = Column(Text, nullable=True)
+    ai_role = Column(String(32), nullable=True)
+    ai_confidence = Column(Float, nullable=True)
+    ai_annotated_at = Column(DateTime, nullable=True)
+
+    asset = relationship("TableauAsset")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "asset_id": self.asset_id,
+            "datasource_luid": self.datasource_luid,
+            "field_name": self.field_name,
+            "field_caption": self.field_caption,
+            "data_type": self.data_type,
+            "role": self.role,
+            "description": self.description,
+            "formula": self.formula,
+            "aggregation": self.aggregation,
+            "is_calculated": self.is_calculated,
+            "fetched_at": self.fetched_at.strftime("%Y-%m-%d %H:%M:%S") if self.fetched_at else None,
+            "ai_caption": self.ai_caption,
+            "ai_description": self.ai_description,
+            "ai_role": self.ai_role,
+            "ai_confidence": self.ai_confidence,
+            "ai_annotated_at": self.ai_annotated_at.strftime("%Y-%m-%d %H:%M:%S") if self.ai_annotated_at else None,
         }
 
 
@@ -157,13 +281,42 @@ class TableauDatabase:
         raw_path = str(self.engine.url).replace("sqlite:///", "")
         conn = sqlite3.connect(raw_path)
         cursor = conn.cursor()
+
+        # --- tableau_connections 迁移 ---
         cursor.execute("PRAGMA table_info(tableau_connections)")
-        existing_cols = {row[1] for row in cursor.fetchall()}
-        if "connection_type" not in existing_cols:
-            cursor.execute(
-                "ALTER TABLE tableau_connections ADD COLUMN connection_type VARCHAR(16) NOT NULL DEFAULT 'mcp'"
-            )
-            conn.commit()
+        conn_cols = {row[1] for row in cursor.fetchall()}
+        conn_migrations = {
+            "connection_type": "VARCHAR(16) NOT NULL DEFAULT 'mcp'",
+            "last_sync_duration_sec": "INTEGER",
+            "sync_status": "VARCHAR(16) DEFAULT 'idle'",
+        }
+        for col, col_def in conn_migrations.items():
+            if col not in conn_cols:
+                cursor.execute(f"ALTER TABLE tableau_connections ADD COLUMN {col} {col_def}")
+
+        # --- tableau_assets 迁移 ---
+        cursor.execute("PRAGMA table_info(tableau_assets)")
+        asset_cols = {row[1] for row in cursor.fetchall()}
+        asset_migrations = {
+            "parent_workbook_id": "VARCHAR(256)",
+            "parent_workbook_name": "VARCHAR(256)",
+            "tags": "TEXT",
+            "sheet_type": "VARCHAR(32)",
+            "created_on_server": "DATETIME",
+            "updated_on_server": "DATETIME",
+            "view_count": "INTEGER",
+            "ai_explain": "TEXT",
+            "ai_explain_at": "DATETIME",
+            "health_score": "FLOAT",
+            "health_details": "TEXT",
+            "field_count": "INTEGER",
+            "is_certified": "BOOLEAN",
+        }
+        for col, col_def in asset_migrations.items():
+            if col not in asset_cols:
+                cursor.execute(f"ALTER TABLE tableau_assets ADD COLUMN {col} {col_def}")
+
+        conn.commit()
         conn.close()
 
     @property
@@ -375,6 +528,146 @@ class TableauDatabase:
         if not asset:
             return False
         asset.ai_summary_error = error
+        self.session.commit()
+        return True
+
+    def update_asset_explain(self, asset_id: int, explain: str) -> bool:
+        """更新资产深度 AI 解读"""
+        asset = self.get_asset(asset_id)
+        if not asset:
+            return False
+        asset.ai_explain = explain
+        asset.ai_explain_at = datetime.now()
+        self.session.commit()
+        return True
+
+    def get_children_assets(self, parent_tableau_id: str, connection_id: int) -> List[TableauAsset]:
+        """获取 workbook 下属的 view/dashboard"""
+        return self.session.query(TableauAsset).filter(
+            TableauAsset.connection_id == connection_id,
+            TableauAsset.parent_workbook_id == parent_tableau_id,
+            TableauAsset.is_deleted == False,
+        ).all()
+
+    def get_parent_asset(self, asset_id: int) -> Optional[TableauAsset]:
+        """获取 view/dashboard 的父 workbook"""
+        asset = self.get_asset(asset_id)
+        if not asset or not asset.parent_workbook_id:
+            return None
+        return self.session.query(TableauAsset).filter(
+            TableauAsset.connection_id == asset.connection_id,
+            TableauAsset.tableau_id == asset.parent_workbook_id,
+            TableauAsset.is_deleted == False,
+        ).first()
+
+    # --- Sync Log ---
+
+    def create_sync_log(self, connection_id: int, trigger_type: str = "manual") -> TableauSyncLog:
+        """创建同步日志（同步开始时调用）"""
+        log = TableauSyncLog(
+            connection_id=connection_id,
+            trigger_type=trigger_type,
+            started_at=datetime.now(),
+            status="running",
+        )
+        self.session.add(log)
+        self.session.commit()
+        return log
+
+    def finish_sync_log(self, log_id: int, status: str, **counts) -> bool:
+        """完成同步日志（同步结束时调用）"""
+        log = self.session.query(TableauSyncLog).filter(TableauSyncLog.id == log_id).first()
+        if not log:
+            return False
+        log.finished_at = datetime.now()
+        log.status = status
+        for key, value in counts.items():
+            if hasattr(log, key) and value is not None:
+                setattr(log, key, value)
+        self.session.commit()
+        return True
+
+    def get_sync_logs(self, connection_id: int, page: int = 1, page_size: int = 20) -> tuple:
+        """分页获取同步日志"""
+        query = self.session.query(TableauSyncLog).filter(
+            TableauSyncLog.connection_id == connection_id
+        )
+        total = query.count()
+        logs = query.order_by(TableauSyncLog.started_at.desc()).offset(
+            (page - 1) * page_size
+        ).limit(page_size).all()
+        return logs, total
+
+    def get_sync_log(self, log_id: int) -> Optional[TableauSyncLog]:
+        return self.session.query(TableauSyncLog).filter(TableauSyncLog.id == log_id).first()
+
+    # --- Datasource Fields ---
+
+    def upsert_datasource_fields(self, asset_id: int, datasource_luid: str,
+                                  fields: List[Dict[str, Any]]) -> int:
+        """批量 upsert 数据源字段（先清除旧数据再插入）"""
+        self.session.query(TableauDatasourceField).filter(
+            TableauDatasourceField.asset_id == asset_id,
+            TableauDatasourceField.datasource_luid == datasource_luid,
+        ).delete()
+
+        now = datetime.now()
+        for f in fields:
+            field = TableauDatasourceField(
+                asset_id=asset_id,
+                datasource_luid=datasource_luid,
+                field_name=f.get("field_name", ""),
+                field_caption=f.get("field_caption"),
+                data_type=f.get("data_type"),
+                role=f.get("role"),
+                description=f.get("description"),
+                formula=f.get("formula"),
+                aggregation=f.get("aggregation"),
+                is_calculated=f.get("is_calculated", False),
+                metadata_json=f.get("metadata_json"),
+                fetched_at=now,
+            )
+            self.session.add(field)
+        self.session.commit()
+        return len(fields)
+
+    def get_datasource_fields(self, asset_id: int) -> List[TableauDatasourceField]:
+        """获取数据源字段列表"""
+        return self.session.query(TableauDatasourceField).filter(
+            TableauDatasourceField.asset_id == asset_id
+        ).order_by(TableauDatasourceField.role, TableauDatasourceField.field_name).all()
+
+    def update_field_annotation(self, field_id: int, ai_caption: str = None,
+                                 ai_description: str = None, ai_role: str = None,
+                                 ai_confidence: float = None) -> bool:
+        """更新字段 AI 标注"""
+        field = self.session.query(TableauDatasourceField).filter(
+            TableauDatasourceField.id == field_id
+        ).first()
+        if not field:
+            return False
+        if ai_caption is not None:
+            field.ai_caption = ai_caption
+        if ai_description is not None:
+            field.ai_description = ai_description
+        if ai_role is not None:
+            field.ai_role = ai_role
+        if ai_confidence is not None:
+            field.ai_confidence = ai_confidence
+        field.ai_annotated_at = datetime.now()
+        self.session.commit()
+        return True
+
+    # --- Connection sync status ---
+
+    def set_sync_status(self, conn_id: int, status: str, duration_sec: int = None) -> bool:
+        """更新连接同步状态"""
+        conn = self.get_connection(conn_id)
+        if not conn:
+            return False
+        conn.sync_status = status
+        if duration_sec is not None:
+            conn.last_sync_duration_sec = duration_sec
         self.session.commit()
         return True
 

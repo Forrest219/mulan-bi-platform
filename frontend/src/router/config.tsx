@@ -16,6 +16,7 @@ import LLMAdminPage from "../pages/admin/llm/page";
 import TableauConnectionsPage from "../pages/tableau/connections/page";
 import TableauAssetBrowserPage from "../pages/tableau/assets/page";
 import TableauAssetDetailPage from "../pages/tableau/asset-detail/page";
+import SyncLogsPage from "../pages/tableau/sync-logs/page";
 
 const routes: RouteObject[] = [
   {
@@ -115,6 +116,14 @@ const routes: RouteObject[] = [
     element: (
       <ProtectedRoute requiredPermission="tableau">
         <TableauAssetDetailPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/tableau/connections/:connId/sync-logs",
+    element: (
+      <ProtectedRoute requiredPermission="tableau">
+        <AdminLayout><SyncLogsPage /></AdminLayout>
       </ProtectedRoute>
     ),
   },

@@ -202,9 +202,30 @@ export default function TableauAssetBrowserPage() {
                     </div>
                     <h4 className="font-medium text-slate-800 text-sm truncate">{asset.name}</h4>
                     <p className="text-xs text-slate-400 mt-1 truncate">{asset.project_name || '未分类'}</p>
-                    {asset.owner_name && (
-                      <p className="text-xs text-slate-400 mt-1">所有者: {asset.owner_name}</p>
+                    {asset.parent_workbook_name && (asset.asset_type === 'view' || asset.asset_type === 'dashboard') && (
+                      <p className="text-xs text-slate-400 mt-1 truncate flex items-center gap-1">
+                        <i className="ri-file-chart-line" />{asset.parent_workbook_name}
+                      </p>
                     )}
+                    <div className="flex items-center gap-2 mt-1.5">
+                      {asset.owner_name && (
+                        <span className="text-xs text-slate-400 truncate">{asset.owner_name}</span>
+                      )}
+                      {asset.view_count != null && asset.view_count > 0 && (
+                        <span className="text-xs text-slate-400 flex items-center gap-0.5">
+                          <i className="ri-eye-line" />{asset.view_count}
+                        </span>
+                      )}
+                      {asset.health_score != null && (
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                          asset.health_score >= 80 ? 'bg-emerald-50 text-emerald-600' :
+                          asset.health_score >= 50 ? 'bg-yellow-50 text-yellow-600' :
+                          'bg-red-50 text-red-600'
+                        }`}>
+                          {asset.health_score}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -217,6 +238,7 @@ export default function TableauAssetBrowserPage() {
                       <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">名称</th>
                       <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">项目</th>
                       <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">所有者</th>
+                      <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">浏览量</th>
                       <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">同步时间</th>
                     </tr>
                   </thead>
@@ -238,6 +260,9 @@ export default function TableauAssetBrowserPage() {
                         <td className="px-4 py-3 text-sm text-slate-800">{asset.name}</td>
                         <td className="px-4 py-3 text-sm text-slate-500">{asset.project_name || '-'}</td>
                         <td className="px-4 py-3 text-sm text-slate-500">{asset.owner_name || '-'}</td>
+                        <td className="px-4 py-3 text-sm text-slate-500 text-right">
+                          {asset.view_count != null ? asset.view_count.toLocaleString() : '-'}
+                        </td>
                         <td className="px-4 py-3 text-xs text-slate-400">{asset.synced_at}</td>
                       </tr>
                     ))}

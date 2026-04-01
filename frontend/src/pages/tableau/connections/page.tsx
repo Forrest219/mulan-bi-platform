@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   listConnections, createConnection, updateConnection, deleteConnection,
   testConnection, syncConnection, TableauConnection
 } from '../../../api/tableau';
 
 export default function TableauConnectionsPage() {
+  const navigate = useNavigate();
   const [connections, setConnections] = useState<TableauConnection[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -196,6 +198,17 @@ export default function TableauConnectionsPage() {
                 <div><span className="text-slate-400">站点:</span> {conn.site}</div>
                 <div><span className="text-slate-400">API版本:</span> {conn.api_version}</div>
                 <div><span className="text-slate-400">上次同步:</span> {formatDate(conn.last_sync_at)}</div>
+                {conn.last_sync_duration_sec != null && (
+                  <div><span className="text-slate-400">同步耗时:</span> {conn.last_sync_duration_sec}s</div>
+                )}
+                {conn.sync_status && conn.sync_status !== 'idle' && (
+                  <div>
+                    <span className="text-slate-400">同步状态:</span>{' '}
+                    <span className={conn.sync_status === 'running' ? 'text-blue-600' : 'text-red-600'}>
+                      {conn.sync_status === 'running' ? '同步中...' : '同步失败'}
+                    </span>
+                  </div>
+                )}
                 {conn.auto_sync_enabled && (
                   <div><span className="text-slate-400">自动同步:</span> 每{conn.sync_interval_hours || 24}小时</div>
                 )}
@@ -215,6 +228,10 @@ export default function TableauConnectionsPage() {
                   className="flex-1 px-3 py-1.5 text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center gap-1">
                   {syncingId === conn.id ? <i className="ri-loader-4-line animate-spin" /> : <i className="ri-refresh-line" />}
                   同步
+                </button>
+                <button onClick={() => navigate(`/tableau/connections/${conn.id}/sync-logs`)}
+                  className="flex-1 px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center justify-center gap-1">
+                  <i className="ri-file-list-3-line" /> 日志
                 </button>
               </div>
               <div className="flex items-center gap-2 mt-2">
