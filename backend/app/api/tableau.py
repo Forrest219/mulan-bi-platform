@@ -1,6 +1,7 @@
 """
 Tableau 管理 API
 """
+import logging
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -16,6 +17,8 @@ from app.core.dependencies import get_current_user
 from app.core.crypto import get_tableau_crypto
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 _crypto = get_tableau_crypto()
 _encrypt = _crypto.encrypt
@@ -90,16 +93,18 @@ def _test_connection_rest(server_url: str, site: str, token_name: str,
             data = resp.json()
             token = data.get("credentials", {}).get("token", "")
             site_id = data.get("credentials", {}).get("site", {}).get("id", "")
+            if not token:
+                return {"success": False, "message": "REST API 认证失败：未获取到 token"}
             # Sign out 清理 session
-            if token:
-                try:
-                    requests.post(
-                        f"{server_url.rstrip('/')}/api/{api_version}/auth/signout",
-                        headers={"X-Tableau-Auth": token},
-                        timeout=5
-                    )
-                except Exception:
-                    pass  # signout 清理失败可忽略
+            try:
+                requests.post(
+                    f"{server_url.rstrip('/')}/api/{api_version}/auth/signout",
+                    headers={"X-Tableau-Auth": token},
+                    timeout=5
+                )
+            except Exception:
+                pass  # signout 清理失败可忽略
+            return {"success": True, "message": f"REST API 连接成功 (site_id={site_id})"}
         else:
             detail = resp.text[:200]
             return {"success": False, "message": f"REST API 认证失败 (HTTP {resp.status_code}): {detail}"}
@@ -210,15 +215,17 @@ async def test_connection(conn_id: int, request: Request):
     if user["role"] != "admin" and conn.owner_id != user["id"]:
         raise HTTPException(status_code=403, detail="无权操作该连接")
 
+    from cryptography.fernet import InvalidToken as FernetInvalidToken
     try:
         decrypted_token = _decrypt(conn.token_encrypted)
-    except Exception as decrypt_err:
-        err_str = str(decrypt_err)
-        if "InvalidToken" in err_str or "decrypt" in err_str.lower():
-            msg = "Token 解密失败：加密密钥可能已变更，请重新保存 PAT Token"
-            _db.update_connection_health(conn_id, False, msg)
-            return {"success": False, "message": msg}
-        raise
+    except FernetInvalidToken:
+        msg = "Token 解密失败：加密密钥可能已变更，请重新保存 PAT Token"
+        _db.update_connection_health(conn_id, False, msg)
+        return {"success": False, "message": msg}
+    except Exception as e:
+        msg = f"Token 解密失败：{e}"
+        _db.update_connection_health(conn_id, False, msg)
+        return {"success": False, "message": msg}
 
     # MCP 模式：通过 REST API 直连测试
     if getattr(conn, "connection_type", "mcp") == "mcp":
@@ -277,15 +284,17 @@ async def sync_connection(conn_id: int, request: Request):
 
 async def _sync_mcp_rest(conn, conn_id: int, _db, _decrypt):
     """MCP REST 同步路径（不依赖 TSC 库）"""
+    from cryptography.fernet import InvalidToken as FernetInvalidToken
     try:
         decrypted_token = _decrypt(conn.token_encrypted)
-    except Exception as decrypt_err:
-        err_str = str(decrypt_err)
-        if "InvalidToken" in err_str or "decrypt" in err_str.lower():
-            msg = "Token 解密失败：加密密钥可能已变更，请重新保存 PAT Token"
-            _db.update_connection_health(conn_id, False, msg)
-            return {"success": False, "message": msg}
-        raise
+    except FernetInvalidToken:
+        msg = "Token 解密失败：加密密钥可能已变更，请重新保存 PAT Token"
+        _db.update_connection_health(conn_id, False, msg)
+        return {"success": False, "message": msg}
+    except Exception as e:
+        msg = f"Token 解密失败：{e}"
+        _db.update_connection_health(conn_id, False, msg)
+        return {"success": False, "message": msg}
 
     try:
         service = TableauRestSyncService(
@@ -325,15 +334,17 @@ async def _sync_mcp_rest(conn, conn_id: int, _db, _decrypt):
 
 async def _sync_tsc(conn, conn_id: int, _db, _decrypt):
     """TSC 直连同步路径"""
+    from cryptography.fernet import InvalidToken as FernetInvalidToken
     try:
         decrypted_token = _decrypt(conn.token_encrypted)
-    except Exception as decrypt_err:
-        err_str = str(decrypt_err)
-        if "InvalidToken" in err_str or "decrypt" in err_str.lower():
-            msg = "Token 解密失败：加密密钥可能已变更，请重新保存 PAT Token"
-            _db.update_connection_health(conn_id, False, msg)
-            return {"success": False, "message": msg}
-        raise
+    except FernetInvalidToken:
+        msg = "Token 解密失败：加密密钥可能已变更，请重新保存 PAT Token"
+        _db.update_connection_health(conn_id, False, msg)
+        return {"success": False, "message": msg}
+    except Exception as e:
+        msg = f"Token 解密失败：{e}"
+        _db.update_connection_health(conn_id, False, msg)
+        return {"success": False, "message": msg}
     try:
         service = TableauSyncService(
             server_url=conn.server_url,

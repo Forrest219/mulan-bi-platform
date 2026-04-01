@@ -251,7 +251,8 @@ class TableauRestSyncService:
         self.token_value = token_value
         self.api_version = api_version
         self._auth_token: Optional[str] = None
-        self._site_id: Optional[str] = None
+        self._site_id: Optional[str] = None      # 数字 ID
+        self._site_content_url: Optional[str] = None  # URL 中使用的 contentUrl
         self._session = requests.Session()
 
     def _headers(self) -> Dict[str, str]:
@@ -279,7 +280,12 @@ class TableauRestSyncService:
             if resp.status_code == 200:
                 data = resp.json()
                 self._auth_token = data.get("credentials", {}).get("token", "")
-                self._site_id = data.get("credentials", {}).get("site", {}).get("id", "")
+                creds_site = data.get("credentials", {}).get("site", {})
+                self._site_id = creds_site.get("id", "")   # 数字 ID（用于日志）
+                self._site_content_url = creds_site.get("contentUrl", "")  # URL 中使用的 contentUrl
+                logger.info("REST auth success: token=%s, site_id=%s, site_content_url=%s",
+                    self._auth_token[:20] + "..." if self._auth_token else "EMPTY",
+                    self._site_id, self._site_content_url)
                 return True
             return False
         except Exception as e:
@@ -298,6 +304,8 @@ class TableauRestSyncService:
             except Exception:
                 pass
             self._auth_token = None
+            self._site_id = None
+            self._site_content_url = None
 
     def test_connection(self) -> Dict[str, Any]:
         """测试连接"""
@@ -310,43 +318,67 @@ class TableauRestSyncService:
             return {"success": False, "message": f"连接失败: {e}"}
 
     def _get_all_items(self, endpoint: str, page_size: int = 100) -> Iterator[Dict]:
-        """REST 分页拉取，自动处理 continuation token"""
+        """REST 分页拉取，自动翻页"""
         url = f"{self.server_url}/api/{self.api_version}/{endpoint}"
         params = {"pageSize": page_size}
+        page = 1
         while True:
-            resp = self._session.get(url, headers=self._headers(), params=params, timeout=30)
+            resp = self._session.get(url, headers=self._headers(), params={**params, "pageNumber": page}, timeout=30)
             if resp.status_code != 200:
-                logger.warning("REST %s returned %s: %s", endpoint, resp.status_code, resp.text[:200])
+                logger.warning("REST %s returned %s: %s", endpoint, resp.status_code, resp.text[:300])
                 break
-            data = resp.json()
-            # REST API 返回格式: {"workbooks": {"workbook": [...]}} 或 {"views": {"view": [...]}}
+            # resp.json() 只能调用一次，避免重复消费响应流
+            try:
+                data = resp.json()
+            except Exception as e:
+                logger.error("REST %s JSON 解析失败（响应可能是 XML）: %s", endpoint, e)
+                break
+            logger.info("REST %s HTTP %s data_keys=%s", endpoint, resp.status_code, list(data.keys()))
+
+            # 尝试提取 items（支持多种返回格式）
+            items_extracted = False
             for key in data:
-                items = data[key]
-                if isinstance(items, dict):
-                    for item in items.get("workbook", []) or items.get("view", []) or items.get("datasource", []) or []:
+                val = data[key]
+                if isinstance(val, dict):
+                    # {"workbooks": {"workbook": [...]}} 或 {"views": {"view": [...]}}
+                    for item_key in ("workbook", "view", "datasource"):
+                        items = val.get(item_key, [])
+                        if items:
+                            for item in items:
+                                yield item
+                            items_extracted = True
+                            logger.info("REST %s: extracted %d %s(s)", endpoint, len(items), item_key)
+                elif isinstance(val, list):
+                    # 直接是数组
+                    for item in val:
                         yield item
-                elif isinstance(items, list):
-                    for item in items:
-                        yield item
-            # 检查分页 continuation
-            pagination = data.get("pagination", {}) or data.get("pagingInfo", {})
+                    items_extracted = True
+                    logger.info("REST %s: extracted %d items from list", endpoint, len(val))
+
+            if not items_extracted:
+                logger.warning("REST %s: no items found in response keys=%s", endpoint, list(data.keys()))
+
+            # Tableau REST API 分页：pagination.pageNumber / pagination.totalPages
+            pagination = data.get("pagination", {})
             if isinstance(pagination, dict):
-                next_page = pagination.get("pageNumber", 1)
-                total_pages = pagination.get("pageSize", 1)
-                if next_page >= total_pages:
+                current_page = int(pagination.get("pageNumber", 1))
+                total_pages = int(pagination.get("totalPages", 1))
+                logger.info("REST %s: page %s/%s", endpoint, current_page, total_pages)
+                if current_page >= total_pages:
                     break
-                params["pageNumber"] = next_page + 1
+                page = current_page + 1
             else:
                 break
 
     def _get_workbooks(self) -> List[Dict]:
-        return list(self._get_all_items("sites/{site_id}/workbooks", page_size=100))
+        # Tableau REST API /sites/{site-id}/workbooks 需要数字 site ID
+        return list(self._get_all_items(f"sites/{self._site_id}/workbooks", page_size=100))
 
     def _get_views(self) -> List[Dict]:
-        return list(self._get_all_items("sites/{site_id}/views", page_size=100))
+        return list(self._get_all_items(f"sites/{self._site_id}/views", page_size=100))
 
     def _get_datasources(self) -> List[Dict]:
-        return list(self._get_all_items("sites/{site_id}/datasources", page_size=100))
+        return list(self._get_all_items(f"sites/{self._site_id}/datasources", page_size=100))
 
     def _build_url(self, base: str = None) -> str:
         if base:
@@ -362,6 +394,15 @@ class TableauRestSyncService:
             return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         except (ValueError, TypeError):
             return None
+
+    def _extract_id(self, item: Dict, field: str = "id") -> str:
+        """安全提取 ID，支持 'id' 是直接字符串或嵌套 dict {'id': '...'} 的情况"""
+        val = item.get(field)
+        if isinstance(val, str):
+            return val
+        if isinstance(val, dict):
+            return val.get("id", "") or ""
+        return str(val) if val else ""
 
     def _get_workbook_datasources(self, workbook_id: str) -> List[Dict]:
         """获取工作簿关联的数据源"""
@@ -392,9 +433,10 @@ class TableauRestSyncService:
         # --- Workbooks ---
         try:
             workbooks = self._get_workbooks()
+            logger.info("REST MCP sync: fetched %d workbooks (site_id=%s)", len(workbooks), self._site_id)
             workbook_name_map: Dict[str, str] = {}
             for wb in workbooks:
-                wb_id = wb.get("id", {}).get("id", "") or wb.get("_id", "") or str(wb.get("id", ""))
+                wb_id = self._extract_id(wb) or wb.get("_id", "") or str(wb.get("id", ""))
                 wb_name = wb.get("name", "Unknown")
                 workbook_name_map[wb_id] = wb_name
 
@@ -429,8 +471,9 @@ class TableauRestSyncService:
         # --- Views (including Dashboards) ---
         try:
             views = self._get_views()
+            logger.info("REST MCP sync: fetched %d views", len(views))
             for view in views:
-                view_id = view.get("id", {}).get("id", "") or view.get("_id", "") or str(view.get("id", ""))
+                view_id = self._extract_id(view) or view.get("_id", "") or str(view.get("id", ""))
                 sheet_type = view.get("sheetType") or view.get("sheet_type") or ""
                 asset_type = "dashboard" if sheet_type.lower() == "dashboard" else "view"
 
@@ -464,7 +507,7 @@ class TableauRestSyncService:
         try:
             datasources = self._get_datasources()
             for ds in datasources:
-                ds_id = ds.get("id", {}).get("id", "") or ds.get("_id", "") or str(ds.get("id", ""))
+                ds_id = self._extract_id(ds) or ds.get("_id", "") or str(ds.get("id", ""))
                 content_url = f"/datasources/{ds_id}"
                 asset = db.upsert_asset(
                     connection_id=connection_id,
