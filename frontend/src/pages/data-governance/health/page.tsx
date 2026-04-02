@@ -1,60 +1,7 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-
-const mockHealthData = {
-  score: 78,
-  totalTables: 156,
-  totalDatabases: 4,
-  passCount: 122,
-  failCount: 34,
-  lastScan: '2026-04-01 09:15',
-  issueStats: {
-    naming: 8,
-    comment: 15,
-    primaryKey: 5,
-    updateField: 12,
-    dataType: 2,
-  },
-};
-
-const mockIssues = [
-  {
-    severity: 'high',
-    objectType: 'table',
-    objectName: 'orders',
-    issueType: 'primary_key',
-    description: '表 orders 缺少主键',
-    suggestion: '建议添加自增主键 id',
-    database: 'ecommerce_db',
-  },
-  {
-    severity: 'high',
-    objectType: 'field',
-    objectName: 'user_id',
-    issueType: 'comment',
-    description: '字段 user_id 缺少 COMMENT',
-    suggestion: '添加 COMMENT "用户ID"',
-    database: 'ecommerce_db',
-  },
-  {
-    severity: 'medium',
-    objectType: 'table',
-    objectName: 'dim_product',
-    issueType: 'naming',
-    description: '表名 dim_product 符合命名规范',
-    suggestion: '-',
-    database: 'dw_db',
-  },
-  {
-    severity: 'low',
-    objectType: 'field',
-    objectName: 'updated_at',
-    issueType: 'update_field',
-    description: '表 products 缺少 update_time 字段',
-    suggestion: '建议添加 update_time 字段跟踪数据变更',
-    database: 'ecommerce_db',
-  },
-];
+import { useState, useEffect, useRef } from 'react';
+import { triggerScan, getHealthSummary, getScan, getScanIssues, listScans } from '@/api/health-scan';
+import type { HealthScan, HealthIssue } from '@/api/health-scan';
+import { listDataSources } from '@/api/datasources';
 
 const severityConfig = {
   high: { label: '高风险', bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200', dot: 'bg-red-500' },
@@ -68,6 +15,12 @@ const issueTypeLabels: Record<string, string> = {
   primary_key: '缺失主键',
   update_field: '缺失更新字段',
   data_type: '数据类型问题',
+  table_naming: '表命名规范',
+  column_naming: '字段命名规范',
+  table_comment: '表缺少注释',
+  column_comment: '字段缺少注释',
+  missing_pk: '缺失主键',
+  missing_update_time: '缺失更新字段',
 };
 
 function ScoreBar({ score }: { score: number }) {
@@ -83,17 +36,106 @@ function ScoreBar({ score }: { score: number }) {
 }
 
 export default function DataHealthPage() {
-  const navigate = useNavigate();
-  const [filterSeverity, setFilterSeverity] = useState<string>('');
-  const [filterDb, setFilterDb] = useState<string>('');
+  const [summaryScans, setSummaryScans] = useState<HealthScan[]>([]);
+  const [activeScan, setActiveScan] = useState<HealthScan | null>(null);
+  const [issues, setIssues] = useState<HealthIssue[]>([]);
+  const [issueTotal, setIssueTotal] = useState(0);
+  const [filterSeverity, setFilterSeverity] = useState('');
+  const [issuePage, setIssuePage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [scanning, setScanning] = useState(false);
+  const [error, setError] = useState('');
 
-  const filteredIssues = mockIssues.filter((issue) => {
-    if (filterSeverity && issue.severity !== filterSeverity) return false;
-    if (filterDb && issue.database !== filterDb) return false;
-    return true;
-  });
+  // Datasource picker
+  const [datasources, setDatasources] = useState<any[]>([]);
+  const [showDsPicker, setShowDsPicker] = useState(false);
+  const [selectedDsId, setSelectedDsId] = useState<number | null>(null);
 
-  const databases = [...new Set(mockIssues.map((i) => i.database))];
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Load summary on mount
+  useEffect(() => {
+    loadSummary();
+    loadDatasources();
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
+  // Load issues when activeScan or filters change
+  useEffect(() => {
+    if (activeScan && activeScan.status === 'success') {
+      loadIssues(activeScan.id);
+    }
+  }, [activeScan?.id, filterSeverity, issuePage]);
+
+  async function loadSummary() {
+    setLoading(true);
+    try {
+      const data = await getHealthSummary();
+      setSummaryScans(data.scans);
+      if (data.scans.length > 0) {
+        const latest = data.scans.reduce((a, b) => (a.id > b.id ? a : b));
+        setActiveScan(latest);
+      }
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadDatasources() {
+    try {
+      const res = await listDataSources();
+      setDatasources(Array.isArray(res) ? res : res.datasources || []);
+    } catch {}
+  }
+
+  async function loadIssues(scanId: number) {
+    try {
+      const data = await getScanIssues(scanId, {
+        severity: filterSeverity || undefined,
+        page: issuePage,
+        page_size: 50,
+      });
+      setIssues(data.issues);
+      setIssueTotal(data.total);
+    } catch {}
+  }
+
+  async function handleTriggerScan() {
+    if (!selectedDsId) return;
+    setShowDsPicker(false);
+    setScanning(true);
+    setError('');
+    try {
+      const { scan_id } = await triggerScan(selectedDsId);
+      // Poll for completion
+      pollRef.current = setInterval(async () => {
+        try {
+          const scan = await getScan(scan_id);
+          if (scan.status !== 'running' && scan.status !== 'pending') {
+            if (pollRef.current) clearInterval(pollRef.current);
+            pollRef.current = null;
+            setScanning(false);
+            setActiveScan(scan);
+            loadSummary();
+          }
+        } catch {}
+      }, 3000);
+    } catch (e: any) {
+      setScanning(false);
+      setError(e.message);
+    }
+  }
+
+  // Aggregate stats from active scan
+  const score = activeScan?.health_score ?? 0;
+  const totalTables = activeScan?.total_tables ?? 0;
+  const totalIssues = activeScan?.total_issues ?? 0;
+  const highCount = activeScan?.high_count ?? 0;
+  const mediumCount = activeScan?.medium_count ?? 0;
+  const lowCount = activeScan?.low_count ?? 0;
+  const lastScan = activeScan?.finished_at || activeScan?.started_at || '-';
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -109,143 +151,200 @@ export default function DataHealthPage() {
             </div>
             <p className="text-[13px] text-slate-400 ml-7">Schema 级健康检查 · 问题识别与建议</p>
           </div>
-          <button className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-900 text-white text-[12px] font-medium rounded-lg hover:bg-slate-700 transition-colors cursor-pointer">
-            <i className="ri-play-line" />
-            发起扫描
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setShowDsPicker(!showDsPicker)}
+              disabled={scanning}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-900 text-white text-[12px] font-medium rounded-lg hover:bg-slate-700 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {scanning ? (
+                <><i className="ri-loader-4-line animate-spin" /> 扫描中...</>
+              ) : (
+                <><i className="ri-play-line" /> 发起扫描</>
+              )}
+            </button>
+            {showDsPicker && (
+              <div className="absolute right-0 top-full mt-2 w-72 bg-white border border-slate-200 rounded-xl shadow-lg z-10 p-4">
+                <p className="text-xs text-slate-500 mb-2">选择数据源</p>
+                {datasources.length === 0 ? (
+                  <p className="text-xs text-slate-400">暂无数据源，请先在管理后台添加</p>
+                ) : (
+                  <div className="space-y-1 max-h-48 overflow-auto">
+                    {datasources.map((ds: any) => (
+                      <button
+                        key={ds.id}
+                        onClick={() => setSelectedDsId(ds.id)}
+                        className={`w-full text-left px-3 py-2 rounded-lg text-xs hover:bg-slate-50 ${
+                          selectedDsId === ds.id ? 'bg-blue-50 text-blue-600' : 'text-slate-700'
+                        }`}
+                      >
+                        <div className="font-medium">{ds.name}</div>
+                        <div className="text-slate-400">{ds.db_type} · {ds.database_name}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="flex justify-end gap-2 mt-3 pt-3 border-t border-slate-100">
+                  <button onClick={() => setShowDsPicker(false)} className="px-3 py-1 text-xs text-slate-500 hover:bg-slate-100 rounded-lg">取消</button>
+                  <button
+                    onClick={handleTriggerScan}
+                    disabled={!selectedDsId}
+                    className="px-3 py-1 text-xs bg-slate-900 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50"
+                  >确认扫描</button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
+      {error && (
+        <div className="max-w-6xl mx-auto px-8 mt-4">
+          <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-lg px-4 py-2">{error}</div>
+        </div>
+      )}
+
       <div className="max-w-6xl mx-auto px-8 py-7">
-        {/* Stats row */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
-          {[
-            {
-              label: '体检评分',
-              value: mockHealthData.score,
-              sub: `问题数 ${mockHealthData.failCount} 个`,
-              icon: 'ri-award-line',
-              special: true,
-            },
-            {
-              label: '监控表数量',
-              value: mockHealthData.totalTables,
-              sub: `跨 ${mockHealthData.totalDatabases} 个数据库`,
-              icon: 'ri-table-line',
-            },
-            {
-              label: '合规率',
-              value: `${Math.round((mockHealthData.passCount / mockHealthData.totalTables) * 100)}%`,
-              sub: `${mockHealthData.passCount} 通过 / ${mockHealthData.failCount} 未通过`,
-              icon: 'ri-checkbox-circle-line',
-            },
-            {
-              label: '最近扫描',
-              value: mockHealthData.lastScan.split(' ')[1],
-              sub: mockHealthData.lastScan.split(' ')[0],
-              icon: 'ri-time-line',
-            },
-          ].map((s) => (
-            <div key={s.label} className="bg-white border border-slate-200 rounded-xl p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] text-slate-500">{s.label}</span>
-                <div className="w-6 h-6 flex items-center justify-center">
-                  <i className={`${s.icon} text-slate-400`} />
+        {loading ? (
+          <div className="text-center py-20 text-slate-400 text-sm">加载中...</div>
+        ) : !activeScan ? (
+          <div className="text-center py-20 text-slate-400 text-sm">暂无扫描记录，点击"发起扫描"开始</div>
+        ) : (
+          <>
+            {/* Stats row */}
+            <div className="grid grid-cols-4 gap-4 mb-6">
+              {[
+                { label: '体检评分', value: score, sub: `问题数 ${totalIssues} 个`, icon: 'ri-award-line', special: true },
+                { label: '监控表数量', value: totalTables, sub: `数据源: ${activeScan.datasource_name}`, icon: 'ri-table-line' },
+                { label: '风险分布', value: `${highCount}/${mediumCount}/${lowCount}`, sub: '高/中/低', icon: 'ri-pie-chart-line' },
+                { label: '最近扫描', value: lastScan.split(' ')[1] || '-', sub: lastScan.split(' ')[0] || '-', icon: 'ri-time-line' },
+              ].map((s) => (
+                <div key={s.label} className="bg-white border border-slate-200 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] text-slate-500">{s.label}</span>
+                    <div className="w-6 h-6 flex items-center justify-center">
+                      <i className={`${s.icon} text-slate-400`} />
+                    </div>
+                  </div>
+                  {s.special ? (
+                    <div className="mb-2"><ScoreBar score={s.value as number} /></div>
+                  ) : (
+                    <div className="text-2xl font-bold text-slate-800">{s.value}</div>
+                  )}
+                  <div className="text-[11px] text-slate-400 mt-0.5">{s.sub}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Multi-datasource summary */}
+            {summaryScans.length > 1 && (
+              <div className="bg-white border border-slate-200 rounded-xl p-5 mb-5">
+                <h3 className="text-[13px] font-semibold text-slate-700 mb-3">数据源健康总览</h3>
+                <div className="grid grid-cols-3 gap-3">
+                  {summaryScans.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => { setActiveScan(s); setIssuePage(1); setFilterSeverity(''); }}
+                      className={`text-left p-3 rounded-lg border transition-colors ${
+                        activeScan?.id === s.id ? 'border-blue-300 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="text-xs font-medium text-slate-700">{s.datasource_name}</div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-[11px] text-slate-400">{s.db_type} · {s.database_name}</span>
+                        <span className={`text-xs font-bold ${
+                          (s.health_score ?? 0) >= 90 ? 'text-emerald-600' : (s.health_score ?? 0) >= 75 ? 'text-amber-600' : 'text-red-600'
+                        }`}>{s.health_score ?? '-'}</span>
+                      </div>
+                    </button>
+                  ))}
                 </div>
               </div>
-              {s.special ? (
-                <div className="mb-2">
-                  <ScoreBar score={s.value as number} />
+            )}
+
+            {/* Issue list */}
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+                <h3 className="text-[13px] font-semibold text-slate-700">
+                  问题列表 <span className="text-slate-400 font-normal ml-1">({issueTotal})</span>
+                </h3>
+                <div className="flex items-center gap-3">
+                  <select
+                    value={filterSeverity}
+                    onChange={(e) => { setFilterSeverity(e.target.value); setIssuePage(1); }}
+                    className="text-xs px-3 py-1.5 border border-slate-200 rounded-lg text-slate-600 bg-white"
+                  >
+                    <option value="">全部风险</option>
+                    <option value="high">高风险</option>
+                    <option value="medium">中风险</option>
+                    <option value="low">低风险</option>
+                  </select>
+                </div>
+              </div>
+
+              {issues.length === 0 ? (
+                <div className="text-center py-10 text-slate-400 text-xs">
+                  {activeScan.status === 'success' ? '未发现问题' : '扫描未完成'}
                 </div>
               ) : (
-                <div className="text-2xl font-bold text-slate-800">{s.value}</div>
+                <table className="w-full">
+                  <thead>
+                    <tr className="bg-slate-50">
+                      {['风险', '对象类型', '对象名称', '问题类型', '描述', '建议'].map((h) => (
+                        <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5 whitespace-nowrap">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {issues.map((issue) => {
+                      const sc = severityConfig[issue.severity] || severityConfig.low;
+                      return (
+                        <tr key={issue.id} className="border-t border-slate-100 hover:bg-slate-50">
+                          <td className="px-4 py-3">
+                            <span className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${sc.bg} ${sc.text} ${sc.border}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />
+                              {sc.label}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-[12px] text-slate-500">
+                            {issue.object_type === 'table' ? <i className="ri-table-line mr-1" /> : <i className="ri-function-line mr-1" />}
+                            {issue.object_type === 'table' ? '表' : '字段'}
+                          </td>
+                          <td className="px-4 py-3 text-[12px] font-medium text-slate-700 font-mono">{issue.object_name}</td>
+                          <td className="px-4 py-3 text-[12px] text-slate-600">{issueTypeLabels[issue.issue_type] || issue.issue_type}</td>
+                          <td className="px-4 py-3 text-[12px] text-slate-600 max-w-xs truncate">{issue.description}</td>
+                          <td className="px-4 py-3 text-[12px] text-slate-500 max-w-xs truncate">{issue.suggestion}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               )}
-              <div className="text-[11px] text-slate-400 mt-0.5">{s.sub}</div>
+
+              {/* Pagination */}
+              {issueTotal > 50 && (
+                <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between">
+                  <span className="text-[11px] text-slate-400">共 {issueTotal} 条</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setIssuePage(Math.max(1, issuePage - 1))}
+                      disabled={issuePage <= 1}
+                      className="px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 rounded disabled:opacity-50"
+                    >上一页</button>
+                    <span className="text-xs text-slate-500">{issuePage}</span>
+                    <button
+                      onClick={() => setIssuePage(issuePage + 1)}
+                      disabled={issuePage * 50 >= issueTotal}
+                      className="px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 rounded disabled:opacity-50"
+                    >下一页</button>
+                  </div>
+                </div>
+              )}
             </div>
-          ))}
-        </div>
-
-        {/* Issue breakdown */}
-        <div className="bg-white border border-slate-200 rounded-xl p-5 mb-5">
-          <h3 className="text-[13px] font-semibold text-slate-700 mb-4">问题类型分布</h3>
-          <div className="grid grid-cols-5 gap-3">
-            {Object.entries(mockHealthData.issueStats).map(([type, count]) => (
-              <div key={type} className="text-center p-3 bg-slate-50 rounded-lg">
-                <div className="text-2xl font-bold text-slate-700">{count}</div>
-                <div className="text-[11px] text-slate-500 mt-1">{issueTypeLabels[type]}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Issue list */}
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="text-[13px] font-semibold text-slate-700">问题列表</h3>
-            <div className="flex items-center gap-3">
-              <select
-                value={filterSeverity}
-                onChange={(e) => setFilterSeverity(e.target.value)}
-                className="text-xs px-3 py-1.5 border border-slate-200 rounded-lg text-slate-600 bg-white"
-              >
-                <option value="">全部风险</option>
-                <option value="high">高风险</option>
-                <option value="medium">中风险</option>
-                <option value="low">低风险</option>
-              </select>
-              <select
-                value={filterDb}
-                onChange={(e) => setFilterDb(e.target.value)}
-                className="text-xs px-3 py-1.5 border border-slate-200 rounded-lg text-slate-600 bg-white"
-              >
-                <option value="">全部数据库</option>
-                {databases.map((db) => (
-                  <option key={db} value={db}>{db}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <table className="w-full">
-            <thead>
-              <tr className="bg-slate-50">
-                {['风险', '对象类型', '对象名称', '数据库', '问题类型', '描述', '建议'].map((h) => (
-                  <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5 whitespace-nowrap">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filteredIssues.map((issue, i) => {
-                const sc = severityConfig[issue.severity as keyof typeof severityConfig];
-                return (
-                  <tr key={i} className="border-t border-slate-100 hover:bg-slate-50">
-                    <td className="px-4 py-3">
-                      <span className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${sc.bg} ${sc.text} ${sc.border}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />
-                        {sc.label}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-[12px] text-slate-500">
-                      {issue.objectType === 'table' ? (
-                        <i className="ri-table-line mr-1" />
-                      ) : (
-                        <i className="ri-function-line mr-1" />
-                      )}
-                      {issue.objectType === 'table' ? '表' : '字段'}
-                    </td>
-                    <td className="px-4 py-3 text-[12px] font-medium text-slate-700 font-mono">{issue.objectName}</td>
-                    <td className="px-4 py-3 text-[12px] text-slate-500 font-mono">{issue.database}</td>
-                    <td className="px-4 py-3 text-[12px] text-slate-600">{issueTypeLabels[issue.issueType]}</td>
-                    <td className="px-4 py-3 text-[12px] text-slate-600 max-w-xs truncate">{issue.description}</td>
-                    <td className="px-4 py-3 text-[12px] text-slate-500 max-w-xs truncate">{issue.suggestion}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+          </>
+        )}
       </div>
     </div>
   );

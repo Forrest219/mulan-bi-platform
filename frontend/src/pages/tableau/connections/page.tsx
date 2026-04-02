@@ -217,6 +217,9 @@ export default function TableauConnectionsPage() {
                 {conn.auto_sync_enabled && (
                   <div><span className="text-slate-400">自动同步:</span> 每{conn.sync_interval_hours || 24}小时</div>
                 )}
+                {conn.auto_sync_enabled && conn.next_sync_at && (
+                  <div><span className="text-slate-400">下次同步:</span> {conn.next_sync_at}</div>
+                )}
                 {conn.last_test_at && (
                   <div><span className="text-slate-400">连接测试:</span> {formatDate(conn.last_test_at)}</div>
                 )}

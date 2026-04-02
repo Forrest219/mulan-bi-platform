@@ -40,6 +40,15 @@ class TableauConnection(Base):
     assets = relationship("TableauAsset", back_populates="connection", cascade="all, delete-orphan")
 
     def to_dict(self) -> Dict[str, Any]:
+        next_sync_at = None
+        if self.auto_sync_enabled:
+            if self.last_sync_at:
+                from datetime import timedelta
+                next_dt = self.last_sync_at + timedelta(hours=self.sync_interval_hours or 24)
+                next_sync_at = next_dt.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                next_sync_at = "即将执行"
+
         return {
             "id": self.id,
             "name": self.name,
@@ -58,6 +67,7 @@ class TableauConnection(Base):
             "last_sync_at": self.last_sync_at.strftime("%Y-%m-%d %H:%M:%S") if self.last_sync_at else None,
             "last_sync_duration_sec": self.last_sync_duration_sec,
             "sync_status": self.sync_status or "idle",
+            "next_sync_at": next_sync_at,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
             "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
         }

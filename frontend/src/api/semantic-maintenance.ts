@@ -1,8 +1,8 @@
 import { API_BASE } from '../config';
 
 // Types
-export type SemanticStatus = 'draft' | 'ai_generated' | 'pending_review' | 'approved' | 'rejected' | 'published';
-export type SensitivityLevel = 'public' | 'internal' | 'confidential' | 'high';
+export type SemanticStatus = 'draft' | 'ai_generated' | 'reviewed' | 'approved' | 'rejected' | 'published';
+export type SensitivityLevel = 'low' | 'medium' | 'high' | 'confidential';
 export type PublishStatus = 'pending' | 'success' | 'failed' | 'rolled_back';
 
 export interface SemanticDatasource {
@@ -528,6 +528,7 @@ export function getStatusBadge(status: SemanticStatus): { text: string; classNam
     draft: { text: '草稿', className: 'bg-slate-100 text-slate-600' },
     ai_generated: { text: 'AI 已生成', className: 'bg-violet-50 text-violet-600' },
     pending_review: { text: '待审核', className: 'bg-amber-50 text-amber-600' },
+    reviewed: { text: '待审核', className: 'bg-amber-50 text-amber-600' },
     approved: { text: '已审核', className: 'bg-emerald-50 text-emerald-600' },
     rejected: { text: '已驳回', className: 'bg-red-50 text-red-600' },
     published: { text: '已发布', className: 'bg-blue-50 text-blue-600' },
@@ -538,10 +539,10 @@ export function getStatusBadge(status: SemanticStatus): { text: string; classNam
 export function getSensitivityBadge(level: SensitivityLevel | null): { text: string; className: string } {
   if (!level) return { text: '-', className: 'bg-slate-50 text-slate-400' };
   const map: Record<SensitivityLevel, { text: string; className: string }> = {
-    public: { text: '公开', className: 'bg-emerald-50 text-emerald-600' },
-    internal: { text: '内部', className: 'bg-blue-50 text-blue-600' },
-    confidential: { text: '机密', className: 'bg-amber-50 text-amber-600' },
-    high: { text: '高度机密', className: 'bg-red-50 text-red-600' },
+    low: { text: '低', className: 'bg-emerald-50 text-emerald-600' },
+    medium: { text: '中', className: 'bg-blue-50 text-blue-600' },
+    high: { text: '高', className: 'bg-amber-50 text-amber-600' },
+    confidential: { text: '机密', className: 'bg-red-50 text-red-600' },
   };
   return map[level] || { text: level, className: 'bg-slate-100 text-slate-600' };
 }

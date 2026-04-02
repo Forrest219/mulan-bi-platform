@@ -168,7 +168,7 @@ export default function SemanticFieldListPage() {
     { value: '', label: '全部' },
     { value: 'draft', label: '草稿' },
     { value: 'ai_generated', label: 'AI 已生成' },
-    { value: 'pending_review', label: '待审核' },
+    { value: 'reviewed', label: '待审核' },
     { value: 'approved', label: '已审核' },
     { value: 'rejected', label: '已驳回' },
     { value: 'published', label: '已发布' },
@@ -337,7 +337,7 @@ export default function SemanticFieldListPage() {
                               提交
                             </button>
                           ) : null}
-                          {field.status === 'pending_review' ? (
+                          {field.status === 'reviewed' ? (
                             <>
                               <button
                                 onClick={() => handleAction(field.id, approveField, '已审核通过')}

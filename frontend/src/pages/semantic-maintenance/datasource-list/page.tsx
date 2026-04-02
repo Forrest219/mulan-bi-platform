@@ -138,7 +138,7 @@ export default function SemanticDatasourceListPage() {
     { value: '', label: '全部' },
     { value: 'draft', label: '草稿' },
     { value: 'ai_generated', label: 'AI 已生成' },
-    { value: 'pending_review', label: '待审核' },
+    { value: 'reviewed', label: '待审核' },
     { value: 'approved', label: '已审核' },
     { value: 'rejected', label: '已驳回' },
     { value: 'published', label: '已发布' },
@@ -262,7 +262,7 @@ export default function SemanticDatasourceListPage() {
                             提交
                           </button>
                         ) : null}
-                        {ds.status === 'pending_review' ? (
+                        {ds.status === 'reviewed' ? (
                           <>
                             <button
                               onClick={() => handleAction(ds.id, 'approve', approveDatasource, '已审核通过')}

@@ -254,6 +254,7 @@ export async function getSyncStatus(connId: number): Promise<{
   last_sync_duration_sec: number | null;
   auto_sync_enabled: boolean;
   sync_interval_hours: number;
+  next_sync_at: string | null;
 }> {
   const res = await fetch(`${API_BASE}/api/tableau/connections/${connId}/sync-status`, { credentials: 'include' });
   if (!res.ok) throw new Error('Failed to fetch sync status');

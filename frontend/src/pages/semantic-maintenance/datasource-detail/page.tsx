@@ -215,7 +215,7 @@ export default function SemanticDatasourceDetailPage() {
               <i className="ri-send-plane-line" /> 提交审核
             </button>
           ) : null}
-          {ds.status === 'pending_review' ? (
+          {ds.status === 'reviewed' ? (
             <>
               <button onClick={() => handleAction('approve', approveDatasource, '已审核通过')}
                 disabled={actionLoading}
@@ -366,10 +366,10 @@ export default function SemanticDatasourceDetailPage() {
                     onChange={e => setEditForm({ ...editForm, sensitivity_level: e.target.value as SensitivityLevel })}
                     className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500">
                     <option value="">未设置</option>
-                    <option value="public">公开</option>
-                    <option value="internal">内部</option>
+                    <option value="low">低</option>
+                    <option value="medium">中</option>
+                    <option value="high">高</option>
                     <option value="confidential">机密</option>
-                    <option value="high">高度机密</option>
                   </select>
                 </div>
               </div>

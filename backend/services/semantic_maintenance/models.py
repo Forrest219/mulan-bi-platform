@@ -23,7 +23,7 @@ class SemanticStatus:
 
     # 允许的状态流转
     TRANSITIONS = {
-        DRAFT: [AI_GENERATED],
+        DRAFT: [AI_GENERATED, REVIEWED],
         AI_GENERATED: [DRAFT, REVIEWED],
         REVIEWED: [APPROVED, REJECTED, DRAFT],
         APPROVED: [PUBLISHED, REVIEWED],

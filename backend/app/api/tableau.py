@@ -534,12 +534,23 @@ async def get_sync_status(conn_id: int, request: Request):
     _verify_connection_access(conn_id, user, _db)
 
     conn = _db.get_connection(conn_id)
+
+    next_sync_at = None
+    if conn.auto_sync_enabled:
+        if conn.last_sync_at:
+            from datetime import timedelta
+            next_dt = conn.last_sync_at + timedelta(hours=conn.sync_interval_hours or 24)
+            next_sync_at = next_dt.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            next_sync_at = "即将执行"
+
     return {
         "status": conn.sync_status or "idle",
         "last_sync_at": conn.last_sync_at.strftime("%Y-%m-%d %H:%M:%S") if conn.last_sync_at else None,
         "last_sync_duration_sec": conn.last_sync_duration_sec,
         "auto_sync_enabled": conn.auto_sync_enabled,
         "sync_interval_hours": conn.sync_interval_hours,
+        "next_sync_at": next_sync_at,
     }
 
 

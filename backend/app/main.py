@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm
+from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm, health_scan
 from app.api.semantic_maintenance import datasources as sm_datasources, fields as sm_fields, review as sm_review, sync as sm_sync, publish as sm_publish
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,7 @@ app.include_router(permissions.router, prefix="/api/permissions", tags=["权限�
 app.include_router(activity.router, prefix="/api/activity", tags=["访问日志"])
 app.include_router(datasources.router, prefix="/api/datasources", tags=["数据源管理"])
 app.include_router(tableau.router, prefix="/api/tableau", tags=["Tableau 管理"])
+app.include_router(health_scan.router, prefix="/api/governance/health", tags=["数仓健康检查"])
 app.include_router(llm.router, prefix="/api/llm", tags=["LLM 管理"])
 app.include_router(sm_datasources.router, prefix="/api/semantic-maintenance", tags=["语义维护"])
 app.include_router(sm_fields.router, prefix="/api/semantic-maintenance", tags=["语义维护"])
@@ -80,7 +81,7 @@ if _services_path not in sys.path:
 
 
 async def _run_scheduled_sync(conn_id: int, conn_name: str):
-    """执行单个连接的定时同步"""
+    """执行单个连接的定时同步（含重试）"""
     from tableau.models import TableauDatabase
     from tableau.sync_service import TableauSyncService, TableauRestSyncService
     from app.core.crypto import get_tableau_crypto
@@ -96,41 +97,52 @@ async def _run_scheduled_sync(conn_id: int, conn_name: str):
         logger.info("Scheduled sync skipped for '%s' (already running)", conn_name)
         return
 
-    try:
-        crypto = get_tableau_crypto()
-        token = crypto.decrypt(conn.token_encrypted)
-        if getattr(conn, "connection_type", "mcp") == "mcp":
-            service = TableauRestSyncService(
-                server_url=conn.server_url,
-                site=conn.site,
-                token_name=conn.token_name,
-                token_value=token,
-                api_version=conn.api_version,
-            )
-        else:
-            service = TableauSyncService(
-                server_url=conn.server_url,
-                site=conn.site,
-                token_name=conn.token_name,
-                token_value=token,
-                api_version=conn.api_version,
-            )
-        if not service.connect():
-            logger.error("Scheduled sync failed for '%s': connection failed", conn_name, exc_info=True)
-            _db.set_sync_status(conn_id, "failed")
-            return
-
+    max_retries = 2
+    for attempt in range(max_retries):
         try:
-            result = service.sync_all_assets(_db, conn_id, trigger_type="scheduled")
-            logger.info(
-                "Scheduled sync for '%s': %s (%d assets, %ds)",
-                conn_name, result["status"], result["total"], result.get("duration_sec", 0)
-            )
-        finally:
-            service.disconnect()
-    except Exception as e:
-        logger.error("Scheduled sync error for '%s': %s", conn_name, e, exc_info=True)
-        _db.set_sync_status(conn_id, "failed")
+            crypto = get_tableau_crypto()
+            token = crypto.decrypt(conn.token_encrypted)
+            if getattr(conn, "connection_type", "mcp") == "mcp":
+                service = TableauRestSyncService(
+                    server_url=conn.server_url,
+                    site=conn.site,
+                    token_name=conn.token_name,
+                    token_value=token,
+                    api_version=conn.api_version,
+                )
+            else:
+                service = TableauSyncService(
+                    server_url=conn.server_url,
+                    site=conn.site,
+                    token_name=conn.token_name,
+                    token_value=token,
+                    api_version=conn.api_version,
+                )
+            if not service.connect():
+                if attempt < max_retries - 1:
+                    logger.warning("Scheduled sync connect failed for '%s', retrying in 30s (attempt %d)", conn_name, attempt + 1)
+                    await asyncio.sleep(30)
+                    continue
+                logger.error("Scheduled sync failed for '%s': connection failed after %d attempts", conn_name, max_retries)
+                _db.set_sync_status(conn_id, "failed")
+                return
+
+            try:
+                result = service.sync_all_assets(_db, conn_id, trigger_type="scheduled")
+                logger.info(
+                    "Scheduled sync for '%s': %s (%d assets, %ds)",
+                    conn_name, result["status"], result["total"], result.get("duration_sec", 0)
+                )
+                return  # 成功则退出
+            finally:
+                service.disconnect()
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning("Scheduled sync error for '%s' (attempt %d): %s, retrying in 30s", conn_name, attempt + 1, e)
+                await asyncio.sleep(30)
+            else:
+                logger.error("Scheduled sync error for '%s' after %d attempts: %s", conn_name, max_retries, e, exc_info=True)
+                _db.set_sync_status(conn_id, "failed")
 
 
 async def _sync_scheduler():
