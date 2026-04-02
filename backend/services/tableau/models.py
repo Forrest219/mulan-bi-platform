@@ -589,6 +589,16 @@ class TableauDatabase:
         self.session.commit()
         return True
 
+    def update_asset_health(self, asset_id: int, score: float, details_json: str) -> bool:
+        """更新资产健康评分"""
+        asset = self.get_asset(asset_id)
+        if not asset:
+            return False
+        asset.health_score = score
+        asset.health_details = details_json
+        self.session.commit()
+        return True
+
     def get_children_assets(self, parent_tableau_id: str, connection_id: int) -> List[TableauAsset]:
         """获取 workbook 下属的 view/dashboard"""
         return self.session.query(TableauAsset).filter(

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { getAsset, getAssetChildren, getAssetParent, explainAsset, TableauAsset } from '../../../api/tableau';
+import { getAsset, getAssetChildren, getAssetParent, explainAsset, getAssetHealth, TableauAsset } from '../../../api/tableau';
+import type { HealthCheck } from '../../../api/tableau';
 import { getAssetSummary, getLLMConfig } from '../../../api/llm';
 import { ASSET_TYPE_LABELS } from '../../../config';
 import { ConfirmModal } from '../../../components/ConfirmModal';
@@ -17,7 +18,7 @@ export default function TableauAssetDetailPage() {
   const navigate = useNavigate();
   const [asset, setAsset] = useState<TableauAsset | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'info' | 'datasources' | 'ai' | 'children'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'datasources' | 'ai' | 'children' | 'fields' | 'health'>('info');
 
   // AI state
   const [aiExplain, setAiExplain] = useState<string | null>(null);
@@ -26,6 +27,11 @@ export default function TableauAssetDetailPage() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiCached, setAiCached] = useState(false);
   const [llmConfigured, setLlmConfigured] = useState(true);
+  const [fieldSemantics, setFieldSemantics] = useState<any[]>([]);
+
+  // Health state
+  const [healthData, setHealthData] = useState<{ score: number; level: string; checks: HealthCheck[] } | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
 
   // Hierarchy state
   const [parentAsset, setParentAsset] = useState<TableauAsset | null>(null);
@@ -73,6 +79,7 @@ export default function TableauAssetDetailPage() {
       setAiExplain(result.explain);
       setAiCached(result.cached);
       setAiError(result.error || null);
+      if (result.field_semantics) setFieldSemantics(result.field_semantics);
     } catch {
       // Fallback to basic summary if explain fails
       try {
@@ -103,6 +110,30 @@ export default function TableauAssetDetailPage() {
 
   const aiContent = aiExplain || aiSummary;
 
+  // Simple markdown renderer (bold, headers, lists)
+  function renderMarkdown(text: string): string {
+    return text
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/^### (.+)$/gm, '<h4 class="font-semibold text-slate-800 mt-4 mb-1">$1</h4>')
+      .replace(/^## (.+)$/gm, '<h3 class="font-semibold text-slate-800 mt-5 mb-2 text-base">$1</h3>')
+      .replace(/^# (.+)$/gm, '<h2 class="font-bold text-slate-800 mt-5 mb-2 text-lg">$1</h2>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/^\- (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
+      .replace(/^\d+\. (.+)$/gm, '<li class="ml-4 list-decimal">$1</li>')
+      .replace(/\n\n/g, '<br/><br/>');
+  }
+
+  // Load health data
+  async function loadHealth() {
+    if (!id) return;
+    setHealthLoading(true);
+    try {
+      const data = await getAssetHealth(Number(id));
+      setHealthData(data);
+    } catch {}
+    setHealthLoading(false);
+  }
+
   if (loading) return <div className="p-8 text-center text-slate-400">加载中...</div>;
   if (!asset) return <div className="p-8 text-center text-slate-400">资产不存在</div>;
 
@@ -114,6 +145,8 @@ export default function TableauAssetDetailPage() {
     { key: 'info', label: '基本信息' },
     { key: 'datasources', label: '关联数据源' },
     ...(isWorkbook ? [{ key: 'children', label: `子视图 (${children.length})` }] : []),
+    { key: 'fields', label: '字段元数据' },
+    { key: 'health', label: '健康度' },
     { key: 'ai', label: 'AI 深度解读', warn: !llmConfigured },
   ];
 
@@ -374,6 +407,117 @@ export default function TableauAssetDetailPage() {
               </div>
             )}
 
+            {/* Tab: Field Metadata */}
+            {activeTab === 'fields' && (
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                <div className="px-5 py-4 border-b border-slate-100">
+                  <h3 className="text-sm font-semibold text-slate-700">字段元数据</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">数据源字段信息（需先生成 AI 解读以加载字段）</p>
+                </div>
+                {fieldSemantics.length === 0 ? (
+                  <div className="text-center py-10 text-slate-400 text-xs">
+                    暂无字段数据，请先在 AI 解读 Tab 生成解读
+                  </div>
+                ) : (
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-slate-50">
+                        {['字段名', '中文名', '数据类型', '角色', '描述'].map(h => (
+                          <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fieldSemantics.map((f: any, i: number) => (
+                        <tr key={i} className="border-t border-slate-100 hover:bg-slate-50">
+                          <td className="px-4 py-2.5 text-xs font-mono text-slate-700">{f.field}</td>
+                          <td className="px-4 py-2.5 text-xs text-slate-600">{f.caption || '-'}</td>
+                          <td className="px-4 py-2.5 text-xs text-slate-500">{f.data_type || '-'}</td>
+                          <td className="px-4 py-2.5">
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                              f.role === 'measure' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-600'
+                            }`}>{f.role || '-'}</span>
+                          </td>
+                          <td className="px-4 py-2.5 text-xs text-slate-500 max-w-xs truncate">{f.meaning || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+
+            {/* Tab: Health */}
+            {activeTab === 'health' && (
+              <div className="space-y-4">
+                <div className="bg-white border border-slate-200 rounded-xl p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-semibold text-slate-700">健康度评估</h3>
+                    <button
+                      onClick={loadHealth}
+                      disabled={healthLoading}
+                      className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      <i className={healthLoading ? "ri-loader-2-line animate-spin mr-1" : "ri-refresh-line mr-1"} />
+                      {healthData ? '重新评估' : '开始评估'}
+                    </button>
+                  </div>
+
+                  {healthLoading ? (
+                    <div className="text-center py-10 text-slate-400 text-sm">
+                      <i className="ri-loader-2-line animate-spin text-xl block mb-2" />
+                      评估中...
+                    </div>
+                  ) : !healthData ? (
+                    <div className="text-center py-10">
+                      <i className="ri-heart-pulse-line text-3xl text-slate-300 block mb-3" />
+                      <div className="text-slate-400 text-sm mb-4">点击"开始评估"检查资产健康度</div>
+                      <button onClick={loadHealth} className="px-5 py-2.5 text-sm bg-slate-900 text-white rounded-lg hover:bg-slate-800">
+                        <i className="ri-heart-pulse-line mr-1" /> 开始评估
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Score header */}
+                      <div className="flex items-center gap-6 mb-6 p-4 bg-slate-50 rounded-xl">
+                        <div className={`text-4xl font-bold ${
+                          healthData.score >= 80 ? 'text-emerald-600' :
+                          healthData.score >= 60 ? 'text-amber-600' :
+                          healthData.score >= 40 ? 'text-orange-600' : 'text-red-600'
+                        }`}>{healthData.score}</div>
+                        <div>
+                          <div className="text-sm font-medium text-slate-700">
+                            {healthData.level === 'excellent' ? '优秀' :
+                             healthData.level === 'good' ? '良好' :
+                             healthData.level === 'warning' ? '需改进' : '较差'}
+                          </div>
+                          <div className="text-xs text-slate-400">满分 100 · 基于 {healthData.checks.length} 项检查</div>
+                        </div>
+                      </div>
+
+                      {/* Check items */}
+                      <div className="space-y-2">
+                        {healthData.checks.map((check) => (
+                          <div key={check.key} className={`flex items-center justify-between p-3 rounded-lg border ${
+                            check.passed ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'
+                          }`}>
+                            <div className="flex items-center gap-3">
+                              <i className={check.passed ? 'ri-checkbox-circle-fill text-emerald-500' : 'ri-close-circle-fill text-red-500'} />
+                              <div>
+                                <div className="text-xs font-medium text-slate-700">{check.label}</div>
+                                <div className="text-[11px] text-slate-500">{check.detail}</div>
+                              </div>
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-medium">{check.weight}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Tab: AI Deep Explain */}
             {activeTab === 'ai' && (
               <div className="space-y-4">
@@ -418,9 +562,10 @@ export default function TableauAssetDetailPage() {
                     </div>
                   ) : aiContent ? (
                     <div>
-                      <div className="prose prose-sm prose-slate max-w-none bg-slate-50 rounded-lg p-5 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
-                        {aiContent}
-                      </div>
+                      <div
+                        className="prose prose-sm prose-slate max-w-none bg-slate-50 rounded-lg p-5 text-sm text-slate-700 leading-relaxed"
+                        dangerouslySetInnerHTML={{ __html: renderMarkdown(aiContent) }}
+                      />
                       {aiCached && (
                         <div className="mt-2 text-xs text-slate-400">
                           <i className="ri-checkbox-circle-line mr-1" />

@@ -282,6 +282,7 @@ export async function explainAsset(assetId: number, refresh = false): Promise<{
   cached: boolean;
   generated_at: string | null;
   error?: string;
+  field_semantics?: { field: string; caption: string; role: string; data_type: string; meaning: string }[];
 }> {
   const res = await fetch(`${API_BASE}/api/tableau/assets/${assetId}/explain`, {
     method: 'POST',
@@ -290,5 +291,44 @@ export async function explainAsset(assetId: number, refresh = false): Promise<{
     body: JSON.stringify({ refresh }),
   });
   if (!res.ok) throw new Error('Failed to explain asset');
+  return res.json();
+}
+
+// Health Score API (Phase 2b)
+
+export interface HealthCheck {
+  key: string;
+  label: string;
+  weight: number;
+  passed: boolean;
+  detail: string;
+}
+
+export interface AssetHealth {
+  score: number;
+  level: 'excellent' | 'good' | 'warning' | 'poor';
+  checks: HealthCheck[];
+}
+
+export interface HealthOverview {
+  connection_id: number;
+  connection_name: string;
+  total_assets: number;
+  avg_score: number;
+  avg_level: string;
+  level_distribution: { excellent: number; good: number; warning: number; poor: number };
+  top_issues: { check: string; count: number }[];
+  assets: { asset_id: number; name: string; asset_type: string; score: number; level: string }[];
+}
+
+export async function getAssetHealth(assetId: number): Promise<AssetHealth> {
+  const res = await fetch(`${API_BASE}/api/tableau/assets/${assetId}/health`, { credentials: 'include' });
+  if (!res.ok) throw new Error('Failed to fetch health');
+  return res.json();
+}
+
+export async function getConnectionHealthOverview(connId: number): Promise<HealthOverview> {
+  const res = await fetch(`${API_BASE}/api/tableau/connections/${connId}/health-overview`, { credentials: 'include' });
+  if (!res.ok) throw new Error('Failed to fetch health overview');
   return res.json();
 }

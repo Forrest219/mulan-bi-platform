@@ -20,6 +20,7 @@ import TableauConnectionsPage from "../pages/tableau/connections/page";
 import TableauAssetBrowserPage from "../pages/tableau/assets/page";
 import TableauAssetDetailPage from "../pages/tableau/asset-detail/page";
 import SyncLogsPage from "../pages/tableau/sync-logs/page";
+import TableauHealthPage from "../pages/tableau/health/page";
 import SemanticDatasourceListPage from "../pages/semantic-maintenance/datasource-list/page";
 import SemanticDatasourceDetailPage from "../pages/semantic-maintenance/datasource-detail/page";
 import SemanticFieldListPage from "../pages/semantic-maintenance/field-list/page";
@@ -104,6 +105,14 @@ const routes: RouteObject[] = [
     element: (
       <ProtectedRoute requiredPermission="tableau">
         <MainLayout><TableauAssetDetailPage /></MainLayout>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/tableau/health",
+    element: (
+      <ProtectedRoute requiredPermission="tableau">
+        <MainLayout><TableauHealthPage /></MainLayout>
       </ProtectedRoute>
     ),
   },

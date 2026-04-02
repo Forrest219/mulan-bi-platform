@@ -606,6 +606,19 @@ async def explain_asset(asset_id: int, req: ExplainRequest, request: Request):
         raise HTTPException(status_code=404, detail="资产不存在")
     _verify_connection_access(asset.connection_id, user, _db)
 
+    # 获取数据源字段元数据（用于 field_semantics，无论是否缓存都需要）
+    fields = _db.get_datasource_fields(asset_id)
+    field_semantics = []
+    if fields:
+        for f in fields:
+            field_semantics.append({
+                "field": f.field_name,
+                "caption": f.ai_caption or f.field_caption or "",
+                "role": f.role or "",
+                "data_type": f.data_type or "",
+                "meaning": f.ai_description or f.description or "",
+            })
+
     # 缓存：1 小时内不重新生成（除非强制刷新）
     if not req.refresh and asset.ai_explain and asset.ai_explain_at:
         if datetime.now() - asset.ai_explain_at < timedelta(hours=1):
@@ -613,15 +626,15 @@ async def explain_asset(asset_id: int, req: ExplainRequest, request: Request):
                 "explain": asset.ai_explain,
                 "cached": True,
                 "generated_at": asset.ai_explain_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "field_semantics": field_semantics,
             }
 
     # 获取关联数据源信息
     datasources = _db.get_asset_datasources(asset_id)
     ds_text = "\n".join([f"- {ds.datasource_name} ({ds.datasource_type or '未知类型'})" for ds in datasources]) or "无"
 
-    # 获取数据源字段元数据（如果有缓存）
+    # 构建字段文本用于 prompt
     field_text = "暂无字段元数据"
-    fields = _db.get_datasource_fields(asset_id)
     if fields:
         field_lines = []
         for f in fields:
@@ -647,41 +660,23 @@ async def explain_asset(asset_id: int, req: ExplainRequest, request: Request):
     # 调用 LLM 生成深度解读
     try:
         from llm.service import LLMService
+        from llm.prompts import ASSET_EXPLAIN_TEMPLATE
         llm = LLMService()
 
-        prompt = f"""你是一个 BI 报表解读专家。请根据以下报表信息，用通俗易懂的语言向业务用户解释这个报表。
-
-## 报表基本信息
-名称：{asset.name}
-类型：{asset.asset_type}
-项目：{asset.project_name or '未分类'}
-描述：{asset.description or '无'}
-所有者：{asset.owner_name or '未知'}
-
-## 所属工作簿
-{parent_info}
-
-## 关联数据源
-{ds_text}
-
-## 数据源字段元数据
-{field_text}
-
-请提供以下内容:
-1. **报表概述**: 用 2~3 句话说明这个报表的核心用途
-2. **关键指标**: 列出报表涉及的主要指标，并用业务语言解释其含义
-3. **维度说明**: 说明报表的主要分析维度
-4. **数据关注点**: 指出使用此报表时需要注意的要点
-5. **适用场景**: 建议在什么场景下使用此报表
-
-要求:
-- 面向非技术业务人员
-- 使用中文
-- 如果字段元数据中有计算字段公式，要解释其业务含义而非技术实现"""
+        prompt = ASSET_EXPLAIN_TEMPLATE.format(
+            name=asset.name,
+            asset_type=asset.asset_type,
+            project_name=asset.project_name or "未分类",
+            description=asset.description or "无",
+            owner_name=asset.owner_name or "未知",
+            parent_workbook_info=parent_info,
+            datasources=ds_text,
+            field_metadata=field_text,
+        )
 
         result = llm.complete(prompt, system="你是一个专业的 BI 报表解读专家。", timeout=30)
         if isinstance(result, dict) and "error" in result:
-            return {"explain": None, "error": result["error"], "cached": False}
+            return {"explain": None, "error": result["error"], "cached": False, "field_semantics": field_semantics}
 
         explain_text = result if isinstance(result, str) else result.get("content", str(result))
         _db.update_asset_explain(asset_id, explain_text)
@@ -690,9 +685,89 @@ async def explain_asset(asset_id: int, req: ExplainRequest, request: Request):
             "explain": explain_text,
             "cached": False,
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "field_semantics": field_semantics,
         }
 
     except ImportError:
-        return {"explain": None, "error": "LLM 服务未配置", "cached": False}
+        return {"explain": None, "error": "LLM 服务未配置", "cached": False, "field_semantics": field_semantics}
     except Exception as e:
-        return {"explain": None, "error": f"生成失败: {str(e)}", "cached": False}
+        return {"explain": None, "error": f"生成失败: {str(e)}", "cached": False, "field_semantics": field_semantics}
+
+
+# --- Asset Health Score (Phase 2b) ---
+
+@router.get("/assets/{asset_id}/health")
+async def get_asset_health(asset_id: int, request: Request):
+    """获取资产健康评分"""
+    user = get_current_user(request)
+    _db = TableauDatabase(db_path=_db_path())
+    asset = _db.get_asset(asset_id)
+    if not asset or asset.is_deleted:
+        raise HTTPException(status_code=404, detail="资产不存在")
+    _verify_connection_access(asset.connection_id, user, _db)
+
+    from tableau.health import compute_asset_health
+    import json as _json
+
+    datasources = _db.get_asset_datasources(asset_id)
+    fields = _db.get_datasource_fields(asset_id)
+    result = compute_asset_health(asset.to_dict(), datasources, fields)
+
+    _db.update_asset_health(asset_id, result["score"], _json.dumps(result, ensure_ascii=False))
+
+    return result
+
+
+@router.get("/connections/{conn_id}/health-overview")
+async def get_connection_health_overview(conn_id: int, request: Request):
+    """连接级健康总览"""
+    user = get_current_user(request)
+    _db = TableauDatabase(db_path=_db_path())
+    conn = _db.get_connection(conn_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="连接不存在")
+    _verify_connection_access(conn_id, user, _db)
+
+    from tableau.health import compute_asset_health, get_health_level
+    import json as _json
+
+    assets, total = _db.get_assets(conn_id, include_deleted=False, page=1, page_size=9999)
+    results = []
+    total_score = 0.0
+    level_counts = {"excellent": 0, "good": 0, "warning": 0, "poor": 0}
+    top_issues = {}
+
+    for asset in assets:
+        datasources = _db.get_asset_datasources(asset.id)
+        fields = _db.get_datasource_fields(asset.id)
+        health = compute_asset_health(asset.to_dict(), datasources, fields)
+        total_score += health["score"]
+        level_counts[health["level"]] += 1
+
+        for check in health["checks"]:
+            if not check["passed"]:
+                top_issues[check["key"]] = top_issues.get(check["key"], 0) + 1
+
+        results.append({
+            "asset_id": asset.id,
+            "name": asset.name,
+            "asset_type": asset.asset_type,
+            "score": health["score"],
+            "level": health["level"],
+        })
+
+        _db.update_asset_health(asset.id, health["score"], _json.dumps(health, ensure_ascii=False))
+
+    avg_score = round(total_score / len(assets), 1) if assets else 0
+    sorted_issues = sorted(top_issues.items(), key=lambda x: x[1], reverse=True)
+
+    return {
+        "connection_id": conn_id,
+        "connection_name": conn.name,
+        "total_assets": len(assets),
+        "avg_score": avg_score,
+        "avg_level": get_health_level(avg_score),
+        "level_distribution": level_counts,
+        "top_issues": [{"check": k, "count": v} for k, v in sorted_issues[:5]],
+        "assets": sorted(results, key=lambda x: x["score"]),
+    }
