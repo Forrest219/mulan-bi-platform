@@ -110,7 +110,7 @@ export default function AdminDatasourcesPage() {
       fetchDataSources();
     } catch (e: any) {
       setConfirmModal(null);
-      alert(e.message);
+      setLoadError(e.message);
     }
   };
 

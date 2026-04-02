@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Request
 from typing import Optional
 
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_roles
 
 router = APIRouter()
 
@@ -211,7 +211,7 @@ async def get_rules(
 @router.put("/{rule_id}/toggle")
 async def toggle_rule(rule_id: str, request: Request):
     """切换规则启用/禁用状态"""
-    get_current_user(request)
+    require_roles(request, ["admin", "data_admin"])
     if rule_id not in rules_storage:
         rules_storage[rule_id] = {"status": "enabled"}
 
@@ -229,7 +229,7 @@ async def toggle_rule(rule_id: str, request: Request):
 @router.post("/")
 async def create_custom_rule(rule: ValidationRule, request: Request):
     """创建自定义规则"""
-    get_current_user(request)
+    require_roles(request, ["admin", "data_admin"])
     rule.built_in = False
     rule.status = "enabled"
     DEFAULT_RULES.append(rule)
@@ -240,7 +240,7 @@ async def create_custom_rule(rule: ValidationRule, request: Request):
 @router.delete("/{rule_id}")
 async def delete_custom_rule(rule_id: str, request: Request):
     """删除自定义规则"""
-    get_current_user(request)
+    require_roles(request, ["admin", "data_admin"])
     global DEFAULT_RULES
     rule = next((r for r in DEFAULT_RULES if r.id == rule_id and not r.built_in), None)
     if not rule:

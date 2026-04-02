@@ -3,8 +3,8 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Table
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import sessionmaker, relationship, scoped_session
 
 Base = declarative_base()
 
@@ -122,8 +122,15 @@ class UserDatabase:
 
         self.engine = create_engine(f"sqlite:///{db_path}", echo=False)
         Base.metadata.create_all(self.engine)
-        Session = sessionmaker(bind=self.engine)
-        self.session = Session()
+        session_factory = sessionmaker(bind=self.engine)
+        self.Session = scoped_session(session_factory)
+
+    @property
+    def session(self):
+        """每次访问获取当前线程的 session，并刷新缓存避免脏读"""
+        s = self.Session()
+        s.expire_all()
+        return s
 
     def create_user(self, username: str, password_hash: str, role: str = "user", display_name: str = None, email: str = None, permissions: list = None) -> User:
         """创建用户"""

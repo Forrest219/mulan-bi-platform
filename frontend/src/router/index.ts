@@ -21,6 +21,6 @@ export function AppRoutes() {
   useEffect(() => {
     window.REACT_APP_NAVIGATE = navigate;
     navigateResolver(window.REACT_APP_NAVIGATE);
-  });
+  }, [navigate]);
   return element;
 }

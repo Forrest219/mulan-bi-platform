@@ -8,7 +8,7 @@
 |------|------|
 | 前端 | React + TypeScript + Vite + Tailwind CSS + React Router v7 |
 | 后端 | FastAPI + SQLAlchemy + SQLite |
-| 认证 | Session/Cookie (HTTP Only) + bcrypt 密码哈希 |
+| 认证 | Session/Cookie (HTTP Only) + PBKDF2-SHA256 密码哈希 |
 
 ## 常用命令
 

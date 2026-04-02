@@ -83,7 +83,11 @@ const routes: RouteObject[] = [
   // 知识库（V1 占位）
   {
     path: "/knowledge/:sub",
-    element: <MainLayout><KnowledgePage /></MainLayout>,
+    element: (
+      <ProtectedRoute>
+        <MainLayout><KnowledgePage /></MainLayout>
+      </ProtectedRoute>
+    ),
   },
 
   // Tableau 资产浏览
@@ -193,7 +197,7 @@ const routes: RouteObject[] = [
   {
     path: "/admin/tableau/connections",
     element: (
-      <ProtectedRoute requiredPermission="tableau">
+      <ProtectedRoute adminOnly>
         <AdminSidebarLayout><TableauConnectionsPage /></AdminSidebarLayout>
       </ProtectedRoute>
     ),

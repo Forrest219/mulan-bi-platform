@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 import json
 
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, JSON
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import sessionmaker, scoped_session
 
 Base = declarative_base()
 
@@ -115,8 +115,15 @@ class LogDatabase:
 
         self.engine = create_engine(f"sqlite:///{db_path}", echo=False)
         Base.metadata.create_all(self.engine)
-        Session = sessionmaker(bind=self.engine)
-        self.session = Session()
+        session_factory = sessionmaker(bind=self.engine)
+        self.Session = scoped_session(session_factory)
+
+    @property
+    def session(self):
+        """每次访问获取当前线程的 session，并刷新缓存避免脏读"""
+        s = self.Session()
+        s.expire_all()
+        return s
 
     def add_scan_log(self, log: ScanLog):
         """添加扫描日志"""

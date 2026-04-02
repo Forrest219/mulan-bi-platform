@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
 
 from requirements import requirement_service
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_roles
 
 router = APIRouter()
 
@@ -66,13 +66,14 @@ async def create_requirement(req: CreateRequirementRequest, request: Request):
 @router.get("/", response_model=dict)
 async def get_requirements(
     request: Request,
-    limit: int = 100,
+    limit: int = 100,  # max 1000
     status: Optional[str] = None,
     requirement_type: Optional[str] = None,
     priority: Optional[str] = None
 ):
     """获取需求列表"""
     get_current_user(request)
+    limit = min(limit, 1000)
     requirements = requirement_service.get_requirements(
         limit=limit,
         status=status,
@@ -93,7 +94,7 @@ async def get_statistics(request: Request):
 @router.post("/{req_id}/approve")
 async def approve_requirement(req_id: int, request: Request, comment: Optional[str] = None):
     """审批需求"""
-    user = get_current_user(request)
+    user = require_roles(request, ["admin", "data_admin"])
     approver = user["username"]
     success = requirement_service.approve_requirement(req_id, approver=approver, comment=comment, approved=True)
     if not success:
@@ -104,7 +105,7 @@ async def approve_requirement(req_id: int, request: Request, comment: Optional[s
 @router.post("/{req_id}/reject")
 async def reject_requirement(req_id: int, request: Request, comment: Optional[str] = None):
     """拒绝需求"""
-    user = get_current_user(request)
+    user = require_roles(request, ["admin", "data_admin"])
     approver = user["username"]
     success = requirement_service.approve_requirement(req_id, approver=approver, comment=comment, approved=False)
     if not success:
@@ -115,7 +116,7 @@ async def reject_requirement(req_id: int, request: Request, comment: Optional[st
 @router.post("/{req_id}/done")
 async def mark_done(req_id: int, request: Request):
     """标记完成"""
-    get_current_user(request)
+    require_roles(request, ["admin", "data_admin"])
     success = requirement_service.mark_as_done(req_id)
     if not success:
         raise HTTPException(status_code=404, detail="需求不存在")
@@ -125,7 +126,7 @@ async def mark_done(req_id: int, request: Request):
 @router.delete("/{req_id}")
 async def delete_requirement(req_id: int, request: Request):
     """删除需求"""
-    get_current_user(request)
+    require_roles(request, ["admin", "data_admin"])
     success = requirement_service.delete_requirement(req_id)
     if not success:
         raise HTTPException(status_code=404, detail="需求不存在")

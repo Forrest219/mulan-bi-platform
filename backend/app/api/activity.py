@@ -18,6 +18,7 @@ async def get_access_logs(
 ):
     """获取访问日志"""
     get_current_user(request)
+    limit = min(limit, 1000)
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))

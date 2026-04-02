@@ -113,7 +113,7 @@ async def sync_datasource_fields(
     )
 
     # 在线程池中执行（避免阻塞事件循环）
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, job.run)
 
     return {

@@ -4,6 +4,7 @@ Mulan BI Platform - FastAPI Backend
 import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,10 +14,19 @@ from app.api.semantic_maintenance import datasources as sm_datasources, fields a
 
 logger = logging.getLogger(__name__)
 
+@asynccontextmanager
+async def lifespan(app):
+    """应用生命周期管理"""
+    asyncio.create_task(_sync_scheduler())
+    logger.info("Tableau sync scheduler started")
+    yield
+
+
 app = FastAPI(
     title="Mulan BI Platform API",
     description="DDL 规范管理平台后端 API",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS 配置 - 仅允许明确的前端域名
@@ -61,11 +71,16 @@ async def health():
 
 # --- 定时同步调度器 (Phase 2a) ---
 
+# 预先设置 services 路径（避免在循环中重复 sys.path.insert）
+import sys
+from pathlib import Path as _Path
+_services_path = str(_Path(__file__).parent.parent.parent / "backend" / "services")
+if _services_path not in sys.path:
+    sys.path.insert(0, _services_path)
+
+
 async def _run_scheduled_sync(conn_id: int, conn_name: str):
     """执行单个连接的定时同步"""
-    from pathlib import Path
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend" / "services"))
     from tableau.models import TableauDatabase
     from tableau.sync_service import TableauSyncService, TableauRestSyncService
     from app.core.crypto import get_tableau_crypto
@@ -123,9 +138,6 @@ async def _sync_scheduler():
     await asyncio.sleep(30)  # 启动后等 30 秒再开始检查
     while True:
         try:
-            from pathlib import Path
-            import sys
-            sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend" / "services"))
             from tableau.models import TableauDatabase
             from datetime import datetime, timedelta
 
@@ -146,10 +158,3 @@ async def _sync_scheduler():
             logger.error("Sync scheduler error: %s", e, exc_info=True)
 
         await asyncio.sleep(60)
-
-
-@app.on_event("startup")
-async def start_sync_scheduler():
-    """启动定时同步调度器"""
-    asyncio.create_task(_sync_scheduler())
-    logger.info("Tableau sync scheduler started")

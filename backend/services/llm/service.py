@@ -8,10 +8,10 @@ from common.crypto import CryptoHelper
 
 logger = logging.getLogger(__name__)
 
-# 加密密钥
-_ENCRYPTION_KEY = os.environ.get("DATASOURCE_ENCRYPTION_KEY")
+# 加密密钥（优先 LLM_ENCRYPTION_KEY，回退 DATASOURCE_ENCRYPTION_KEY）
+_ENCRYPTION_KEY = os.environ.get("LLM_ENCRYPTION_KEY") or os.environ.get("DATASOURCE_ENCRYPTION_KEY")
 if not _ENCRYPTION_KEY:
-    raise RuntimeError("DATASOURCE_ENCRYPTION_KEY must be set")
+    raise RuntimeError("LLM_ENCRYPTION_KEY or DATASOURCE_ENCRYPTION_KEY must be set")
 
 _crypto = CryptoHelper(_ENCRYPTION_KEY)
 _encrypt = _crypto.encrypt
@@ -62,7 +62,7 @@ class LLMService:
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        logger.info(f"LLM 调用（OpenAI）：model={config.model}, timeout={timeout}s")
+        logger.info("LLM 调用（OpenAI）：model=%s, timeout=%ds", config.model, timeout)
         response = client.chat.completions.create(
             model=config.model,
             messages=messages,
@@ -81,7 +81,7 @@ class LLMService:
             messages.append({"role": "user", "content": f"<system>{system}</system>\n\n{prompt}"})
         else:
             messages.append({"role": "user", "content": prompt})
-        logger.info(f"LLM 调用（Anthropic）：model={config.model}, base_url={base_url}, timeout={timeout}s")
+        logger.info("LLM 调用（Anthropic）：model=%s, base_url=%s, timeout=%ds", config.model, base_url, timeout)
         try:
             response = client.messages.create(
                 model=config.model,

@@ -19,6 +19,7 @@ router = APIRouter()
 async def get_scan_logs(request: Request, limit: int = 100, database_name: Optional[str] = None):
     """获取扫描日志"""
     get_current_user(request)
+    limit = min(limit, 1000)
     logs = logger.get_scan_history(limit=limit, database_name=database_name)
     return {"logs": logs, "total": len(logs)}
 
@@ -35,5 +36,6 @@ async def get_statistics(request: Request):
 async def get_operation_logs(request: Request, limit: int = 100, operation_type: Optional[str] = None):
     """获取操作日志"""
     get_current_user(request)
+    limit = min(limit, 1000)
     logs = logger.get_operation_history(limit=limit, operation_type=operation_type)
     return {"logs": logs, "total": len(logs)}

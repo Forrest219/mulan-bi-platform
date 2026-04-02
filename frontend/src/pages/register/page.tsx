@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { API_BASE, LOGO_URL } from '../../config';
 
 export default function RegisterPage() {
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
@@ -14,7 +14,7 @@ export default function RegisterPage() {
     e.preventDefault();
     setError('');
 
-    if (!email.trim()) { setError('请输入邮箱'); return; }
+    if (!username.trim()) { setError('请输入用户名'); return; }
     if (!password) { setError('请输入密码'); return; }
     if (password !== confirmPassword) { setError('两次输入的密码不一致'); return; }
     if (password.length < 6) { setError('密码长度至少为6位'); return; }
@@ -27,9 +27,9 @@ export default function RegisterPage() {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          email,
+          username,
           password,
-          display_name: email.split('@')[0]
+          display_name: username
         })
       });
 
@@ -68,14 +68,14 @@ export default function RegisterPage() {
 
           <div>
             <label className="block text-sm font-medium text-slate-600 mb-1.5">
-              邮箱
+              用户名
             </label>
             <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
               className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
-              placeholder="your@email.com"
+              placeholder="请输入用户名"
               required
             />
           </div>

@@ -678,7 +678,7 @@ async def explain_asset(asset_id: int, req: ExplainRequest, request: Request):
         return {
             "explain": explain_text,
             "cached": False,
-            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S") if True else None,
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
     except ImportError:

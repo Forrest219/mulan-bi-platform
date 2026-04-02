@@ -55,7 +55,9 @@ export default function GroupsPage() {
       if (!resp.ok) throw new Error('获取用户列表失败');
       const data = await resp.json();
       setUsers(data.users || []);
-    } catch (e) { /* silently ignore */ }
+    } catch (e) {
+      console.error('获取用户列表失败:', e);
+    }
   };
 
   useEffect(() => { fetchGroups(); fetchUsers(); }, []);

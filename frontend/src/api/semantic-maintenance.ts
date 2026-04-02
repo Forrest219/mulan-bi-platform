@@ -96,13 +96,13 @@ export async function listDatasourceSemantics(params: {
     ...(params.page_size && { page_size: String(params.page_size) }),
   });
   const res = await fetch(`${API_BASE}/api/semantic-maintenance/datasources?${sp}`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch datasource semantics');
+  if (!res.ok) throw new Error('获取数据源语义失败');
   return res.json();
 }
 
 export async function getDatasourceSemantics(id: number): Promise<SemanticDatasource> {
   const res = await fetch(`${API_BASE}/api/semantic-maintenance/datasources/${id}`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch datasource semantics');
+  if (!res.ok) throw new Error('获取数据源语义失败');
   return res.json();
 }
 
@@ -126,7 +126,7 @@ export async function createDatasourceSemantics(data: {
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to create datasource semantics');
+    throw new Error(err.detail || '创建数据源语义失败');
   }
   return res.json();
 }
@@ -148,7 +148,7 @@ export async function updateDatasourceSemantics(id: number, data: Partial<{
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to update datasource semantics');
+    throw new Error(err.detail || '更新数据源语义失败');
   }
   return res.json();
 }
@@ -160,7 +160,7 @@ export async function submitDatasourceForReview(id: number): Promise<{ item: Sem
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to submit for review');
+    throw new Error(err.detail || '提交审核失败');
   }
   return res.json();
 }
@@ -172,7 +172,7 @@ export async function approveDatasource(id: number): Promise<{ item: SemanticDat
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to approve');
+    throw new Error(err.detail || '审批失败');
   }
   return res.json();
 }
@@ -184,14 +184,14 @@ export async function rejectDatasource(id: number): Promise<{ item: SemanticData
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to reject');
+    throw new Error(err.detail || '驳回失败');
   }
   return res.json();
 }
 
 export async function getDatasourceVersions(id: number): Promise<{ versions: SemanticVersion[] }> {
   const res = await fetch(`${API_BASE}/api/semantic-maintenance/datasources/${id}/versions`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch versions');
+  if (!res.ok) throw new Error('获取版本历史失败');
   return res.json();
 }
 
@@ -202,7 +202,7 @@ export async function rollbackDatasource(id: number, versionId: number): Promise
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to rollback');
+    throw new Error(err.detail || '回滚失败');
   }
   return res.json();
 }
@@ -219,7 +219,7 @@ export async function generateDatasourceAI(id: number, data?: {
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to generate AI draft');
+    throw new Error(err.detail || 'AI 生成失败');
   }
   return res.json();
 }
@@ -241,13 +241,13 @@ export async function listFieldSemantics(params: {
     ...(params.page_size && { page_size: String(params.page_size) }),
   });
   const res = await fetch(`${API_BASE}/api/semantic-maintenance/fields?${sp}`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch field semantics');
+  if (!res.ok) throw new Error('获取字段语义失败');
   return res.json();
 }
 
 export async function getFieldSemantics(id: number): Promise<SemanticField> {
   const res = await fetch(`${API_BASE}/api/semantic-maintenance/fields/${id}`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch field semantics');
+  if (!res.ok) throw new Error('获取字段语义失败');
   return res.json();
 }
 
@@ -275,7 +275,7 @@ export async function createFieldSemantics(data: {
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to create field semantics');
+    throw new Error(err.detail || '创建字段语义失败');
   }
   return res.json();
 }
@@ -301,7 +301,7 @@ export async function updateFieldSemantics(id: number, data: Partial<{
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to update field semantics');
+    throw new Error(err.detail || '更新字段语义失败');
   }
   return res.json();
 }
@@ -313,7 +313,7 @@ export async function submitFieldForReview(id: number): Promise<{ item: Semantic
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to submit for review');
+    throw new Error(err.detail || '提交审核失败');
   }
   return res.json();
 }
@@ -325,7 +325,7 @@ export async function approveField(id: number): Promise<{ item: SemanticField; m
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to approve');
+    throw new Error(err.detail || '审批失败');
   }
   return res.json();
 }
@@ -337,14 +337,14 @@ export async function rejectField(id: number): Promise<{ item: SemanticField; me
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to reject');
+    throw new Error(err.detail || '驳回失败');
   }
   return res.json();
 }
 
 export async function getFieldVersions(id: number): Promise<{ versions: SemanticVersion[] }> {
   const res = await fetch(`${API_BASE}/api/semantic-maintenance/fields/${id}/versions`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch versions');
+  if (!res.ok) throw new Error('获取版本历史失败');
   return res.json();
 }
 
@@ -355,7 +355,7 @@ export async function rollbackField(id: number, versionId: number): Promise<{ it
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to rollback');
+    throw new Error(err.detail || '回滚失败');
   }
   return res.json();
 }
@@ -375,7 +375,7 @@ export async function generateFieldAI(id: number, data?: {
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to generate AI draft');
+    throw new Error(err.detail || 'AI 生成失败');
   }
   return res.json();
 }
@@ -402,7 +402,7 @@ export async function previewDatasourceDiff(connectionId: number, dsId: number):
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to preview diff');
+    throw new Error(err.detail || '差异预览失败');
   }
   return res.json();
 }
@@ -416,7 +416,7 @@ export async function previewFieldDiff(connectionId: number, fieldId: number): P
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to preview diff');
+    throw new Error(err.detail || '差异预览失败');
   }
   return res.json();
 }
@@ -430,7 +430,7 @@ export async function publishDatasource(connectionId: number, dsId: number, simu
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to publish datasource');
+    throw new Error(err.detail || '发布数据源失败');
   }
   return res.json();
 }
@@ -444,7 +444,7 @@ export async function publishFields(connectionId: number, fieldIds: number[], si
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to publish fields');
+    throw new Error(err.detail || '发布字段失败');
   }
   return res.json();
 }
@@ -458,7 +458,7 @@ export async function retryPublish(logId: number, connectionId: number): Promise
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to retry publish');
+    throw new Error(err.detail || '重试发布失败');
   }
   return res.json();
 }
@@ -472,7 +472,7 @@ export async function rollbackPublish(logId: number, connectionId: number): Prom
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to rollback publish');
+    throw new Error(err.detail || '回滚发布失败');
   }
   return res.json();
 }
@@ -493,7 +493,7 @@ export async function listPublishLogs(connectionId: number, params?: {
     ...(params?.page_size && { page_size: String(params.page_size) }),
   });
   const res = await fetch(`${API_BASE}/api/semantic-maintenance/review/publish/logs?${sp}`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch publish logs');
+  if (!res.ok) throw new Error('获取发布日志失败');
   return res.json();
 }
 
@@ -517,7 +517,7 @@ export async function syncFields(connectionId: number, tableauDatasourceId: stri
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to sync fields');
+    throw new Error(err.detail || '同步字段失败');
   }
   return res.json();
 }

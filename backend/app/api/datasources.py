@@ -2,6 +2,7 @@
 数据源管理 API
 """
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Optional
@@ -191,4 +192,5 @@ async def test_connection(ds_id: int, request: Request):
     except asyncio.TimeoutError:
         return {"success": False, "message": "连接超时（10秒），请检查主机和网络"}
     except Exception as e:
-        return {"success": False, "message": f"连接失败: {str(e)}"}
+        logging.getLogger(__name__).warning("数据源连接测试失败: %s", e, exc_info=True)
+        return {"success": False, "message": "连接失败，请检查配置"}

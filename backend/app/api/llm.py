@@ -69,8 +69,9 @@ async def save_llm_config(req: LLMConfigRequest, request: Request):
             operator=user["username"],
             detail=f"更新 LLM 配置: provider={req.provider}, model={req.model}"
         )
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("日志记录失败: %s", e)
 
     return {"message": "LLM 配置保存成功"}
 
