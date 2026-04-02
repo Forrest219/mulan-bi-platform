@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app):
     """应用生命周期管理"""
+    # 初始化数据库 schema
+    from app.core.database import init_db
+    init_db()
+
     asyncio.create_task(_sync_scheduler())
     logger.info("Tableau sync scheduler started")
     yield
@@ -86,8 +90,7 @@ async def _run_scheduled_sync(conn_id: int, conn_name: str):
     from tableau.sync_service import TableauSyncService, TableauRestSyncService
     from app.core.crypto import get_tableau_crypto
 
-    db_path = str(Path(__file__).parent.parent.parent / "data" / "tableau.db")
-    _db = TableauDatabase(db_path=db_path)
+    _db = TableauDatabase()
     conn = _db.get_connection(conn_id)
     if not conn or not conn.is_active or not conn.auto_sync_enabled:
         return
@@ -153,8 +156,7 @@ async def _sync_scheduler():
             from tableau.models import TableauDatabase
             from datetime import datetime, timedelta
 
-            db_path = str(Path(__file__).parent.parent.parent / "data" / "tableau.db")
-            _db = TableauDatabase(db_path=db_path)
+            _db = TableauDatabase()
             connections = _db.get_all_connections(include_inactive=False)
 
             for conn in connections:

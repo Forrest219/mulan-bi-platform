@@ -4,41 +4,47 @@
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi import APIRouter, HTTPException, Request, Query, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
-sys_path = str(Path(__file__).parent.parent.parent.parent.parent / "src")
-import sys
-sys.path.insert(0, sys_path)
+# 导入中央数据库依赖和统一的权限验证函数
+from app.core.database import get_db
+from app.utils.auth import verify_connection_access
+from app.core.dependencies import get_current_user, require_roles
 
-from semantic_maintenance.service import SemanticMaintenanceService
-from semantic_maintenance.models import SemanticStatus, SensitivityLevel, SemanticSource
-from app.core.dependencies import get_current_user
+# 导入语义维护服务和模型
+from services.semantic_maintenance.service import SemanticMaintenanceService
+from services.semantic_maintenance.models import SemanticStatus, SensitivityLevel, SemanticSource
+from services.semantic_maintenance.database import SemanticMaintenanceDatabase # 导入 SemanticMaintenanceDatabase
 
 router = APIRouter()
 
 
-def _db_path():
-    return str(Path(__file__).parent.parent.parent.parent.parent / "data" / "semantic_maintenance.db")
+# _db_path 不再需要
+# def _db_path():
+#     return str(Path(__file__).parent.parent.parent.parent.parent / "data" / "semantic_maintenance.db")
 
 
 def _sm_service():
-    return SemanticMaintenanceService(db_path=_db_path())
+    # SemanticMaintenanceService 内部会实例化 SemanticMaintenanceDatabase，不再需要 db_path
+    return SemanticMaintenanceService()
 
 
-def _verify_connection_access(connection_id: int, user: dict) -> None:
-    """验证用户有权访问指定连接"""
-    import sqlite3
-    from ..tableau import _db_path as tableau_db_path
-    conn = sqlite3.connect(tableau_db_path())
-    cursor = conn.cursor()
-    cursor.execute("SELECT owner_id FROM tableau_connections WHERE id = ?", (connection_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if not row:
-        raise HTTPException(status_code=404, detail="连接不存在")
-    if user["role"] != "admin" and row[0] != user["id"]:
-        raise HTTPException(status_code=403, detail="无权访问该连接")
+# _verify_connection_access 已经提取到 app.utils.auth.py
+# def _verify_connection_access(connection_id: int, user: dict) -> None:
+#     """验证用户有权访问指定连接"""
+#     import sqlite3
+#     from ..tableau import _db_path as tableau_db_path
+#     conn = sqlite3.connect(tableau_db_path())
+#     cursor = conn.cursor()
+#     cursor.execute("SELECT owner_id FROM tableau_connections WHERE id = ?", (connection_id,))
+#     row = cursor.fetchone()
+#     conn.close()
+#     if not row:
+#         raise HTTPException(status_code=404, detail="连接不存在")
+#     if user["role"] != "admin" and row[0] != user["id"]:
+#         raise HTTPException(status_code=403, detail="无权访问该连接")
 
 
 # --- Pydantic Schemas ---
@@ -53,9 +59,9 @@ class CreateFieldSemanticsRequest(BaseModel):
     metric_definition: Optional[str] = None
     dimension_definition: Optional[str] = None
     unit: Optional[str] = None
-    enum_desc_json: Optional[str] = None
-    tags_json: Optional[str] = None
-    synonyms_json: Optional[str] = None
+    enum_desc_json: Optional[dict] = None # JSONB 字段直接是 dict
+    tags_json: Optional[list] = None # JSONB 字段直接是 list
+    synonyms_json: Optional[list] = None # JSONB 字段直接是 list
     sensitivity_level: Optional[str] = None
     is_core_field: Optional[bool] = None
 
@@ -67,9 +73,9 @@ class UpdateFieldSemanticsRequest(BaseModel):
     metric_definition: Optional[str] = None
     dimension_definition: Optional[str] = None
     unit: Optional[str] = None
-    enum_desc_json: Optional[str] = None
-    tags_json: Optional[str] = None
-    synonyms_json: Optional[str] = None
+    enum_desc_json: Optional[dict] = None # JSONB 字段直接是 dict
+    tags_json: Optional[list] = None # JSONB 字段直接是 list
+    synonyms_json: Optional[list] = None # JSONB 字段直接是 list
     sensitivity_level: Optional[str] = None
     is_core_field: Optional[bool] = None
 
@@ -84,10 +90,11 @@ async def list_field_semantics(
     status: Optional[str] = Query(None, description="语义状态过滤"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db) # 注入 db
 ):
     """获取字段语义列表"""
-    user = get_current_user(request)
-    _verify_connection_access(connection_id, user)
+    user = get_current_user(request, db) # 传递 db
+    verify_connection_access(connection_id, user, db) # 使用统一的权限验证函数
 
     sm = _sm_service()
     items, total = sm.list_field_semantics(
@@ -98,7 +105,7 @@ async def list_field_semantics(
         page_size=page_size,
     )
     return {
-        "items": items,
+        "items": [item.to_dict() for item in items], # 确保返回 dict
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -107,22 +114,22 @@ async def list_field_semantics(
 
 
 @router.get("/fields/{field_id}")
-async def get_field_semantics(field_id: int, request: Request):
+async def get_field_semantics(field_id: int, request: Request, db: Session = Depends(get_db)):
     """获取字段语义详情"""
-    user = get_current_user(request)
+    user = get_current_user(request, db) # 传递 db
     sm = _sm_service()
     field = sm.db.get_field_semantics_by_id(field_id)
     if not field:
         raise HTTPException(status_code=404, detail="记录不存在")
-    _verify_connection_access(field.connection_id, user)
+    verify_connection_access(field.connection_id, user, db) # 使用统一的权限验证函数
     return field.to_dict()
 
 
 @router.post("/fields")
-async def create_field_semantics(req: CreateFieldSemanticsRequest, request: Request):
+async def create_field_semantics(req: CreateFieldSemanticsRequest, request: Request, db: Session = Depends(get_db)):
     """创建字段语义"""
-    user = get_current_user(request)
-    _verify_connection_access(req.connection_id, user)
+    user = get_current_user(request, db) # 传递 db
+    verify_connection_access(req.connection_id, user, db) # 使用统一的权限验证函数
 
     if req.sensitivity_level and req.sensitivity_level not in SensitivityLevel.ALL:
         raise HTTPException(status_code=400, detail=f"sensitivity_level 必须是 {SensitivityLevel.ALL} 之一")
@@ -139,7 +146,7 @@ async def create_field_semantics(req: CreateFieldSemanticsRequest, request: Requ
         user_id=user["id"],
         initial_data=initial,
     )
-    return {"item": obj, "message": "创建成功"}
+    return {"item": obj.to_dict(), "message": "创建成功"} # 确保返回 dict
 
 
 @router.put("/fields/{field_id}")
@@ -147,14 +154,15 @@ async def update_field_semantics(
     field_id: int,
     req: UpdateFieldSemanticsRequest,
     request: Request,
+    db: Session = Depends(get_db) # 注入 db
 ):
     """更新字段语义"""
-    user = get_current_user(request)
+    user = get_current_user(request, db) # 传递 db
     sm = _sm_service()
     field = sm.db.get_field_semantics_by_id(field_id)
     if not field:
         raise HTTPException(status_code=404, detail="记录不存在")
-    _verify_connection_access(field.connection_id, user)
+    verify_connection_access(field.connection_id, user, db) # 使用统一的权限验证函数
 
     if req.sensitivity_level and req.sensitivity_level not in SensitivityLevel.ALL:
         raise HTTPException(status_code=400, detail=f"sensitivity_level 必须是 {SensitivityLevel.ALL} 之一")
@@ -163,18 +171,18 @@ async def update_field_semantics(
     success, result = sm.update_field_semantics(field_id, user_id=user["id"], **fields)
     if not success:
         raise HTTPException(status_code=400, detail=result)
-    return {"item": result, "message": "更新成功"}
+    return {"item": result.to_dict(), "message": "更新成功"} # 确保返回 dict
 
 
 @router.post("/fields/{field_id}/submit-review")
-async def submit_field_for_review(field_id: int, request: Request):
+async def submit_field_for_review(field_id: int, request: Request, db: Session = Depends(get_db)):
     """提交字段语义审核"""
-    user = get_current_user(request)
+    user = get_current_user(request, db) # 传递 db
     sm = _sm_service()
     field = sm.db.get_field_semantics_by_id(field_id)
     if not field:
         raise HTTPException(status_code=404, detail="记录不存在")
-    _verify_connection_access(field.connection_id, user)
+    verify_connection_access(field.connection_id, user, db) # 使用统一的权限验证函数
 
     success, err = sm.submit_field_for_review(field_id, user_id=user["id"])
     if not success:
@@ -184,16 +192,16 @@ async def submit_field_for_review(field_id: int, request: Request):
 
 
 @router.post("/fields/{field_id}/approve")
-async def approve_field(field_id: int, request: Request):
+async def approve_field(field_id: int, request: Request, db: Session = Depends(get_db)):
     """审核通过字段语义"""
-    user = get_current_user(request)
+    user = get_current_user(request, db) # 传递 db
     if user["role"] not in ("admin", "reviewer"):
         raise HTTPException(status_code=403, detail="需要 reviewer 或 admin 权限")
     sm = _sm_service()
     field = sm.db.get_field_semantics_by_id(field_id)
     if not field:
         raise HTTPException(status_code=404, detail="记录不存在")
-    _verify_connection_access(field.connection_id, user)
+    verify_connection_access(field.connection_id, user, db) # 使用统一的权限验证函数
 
     success, err = sm.approve_field(field_id, user_id=user["id"])
     if not success:
@@ -203,16 +211,16 @@ async def approve_field(field_id: int, request: Request):
 
 
 @router.post("/fields/{field_id}/reject")
-async def reject_field(field_id: int, request: Request):
+async def reject_field(field_id: int, request: Request, db: Session = Depends(get_db)):
     """驳回字段语义"""
-    user = get_current_user(request)
+    user = get_current_user(request, db) # 传递 db
     if user["role"] not in ("admin", "reviewer"):
         raise HTTPException(status_code=403, detail="需要 reviewer 或 admin 权限")
     sm = _sm_service()
     field = sm.db.get_field_semantics_by_id(field_id)
     if not field:
         raise HTTPException(status_code=404, detail="记录不存在")
-    _verify_connection_access(field.connection_id, user)
+    verify_connection_access(field.connection_id, user, db) # 使用统一的权限验证函数
 
     success, err = sm.reject_field(field_id, user_id=user["id"])
     if not success:
@@ -222,30 +230,30 @@ async def reject_field(field_id: int, request: Request):
 
 
 @router.get("/fields/{field_id}/versions")
-async def get_field_versions(field_id: int, request: Request):
+async def get_field_versions(field_id: int, request: Request, db: Session = Depends(get_db)):
     """获取字段语义版本历史"""
-    user = get_current_user(request)
+    user = get_current_user(request, db) # 传递 db
     sm = _sm_service()
     field = sm.db.get_field_semantics_by_id(field_id)
     if not field:
         raise HTTPException(status_code=404, detail="记录不存在")
-    _verify_connection_access(field.connection_id, user)
+    verify_connection_access(field.connection_id, user, db) # 使用统一的权限验证函数
 
     versions = sm.get_field_semantic_history(field_id)
-    return {"versions": versions}
+    return {"versions": [v.to_dict() for v in versions]} # 确保返回 dict
 
 
 @router.post("/fields/{field_id}/rollback/{version_id}")
-async def rollback_field(field_id: int, version_id: int, request: Request):
+async def rollback_field(field_id: int, version_id: int, request: Request, db: Session = Depends(get_db)):
     """回滚字段语义到指定版本"""
-    user = get_current_user(request)
+    user = get_current_user(request, db) # 传递 db
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="需要 admin 权限")
     sm = _sm_service()
     field = sm.db.get_field_semantics_by_id(field_id)
     if not field:
         raise HTTPException(status_code=404, detail="记录不存在")
-    _verify_connection_access(field.connection_id, user)
+    verify_connection_access(field.connection_id, user, db) # 使用统一的权限验证函数
 
     success, err = sm.rollback_field_semantic(field_id, version_id, user_id=user["id"])
     if not success:
@@ -265,14 +273,14 @@ class GenerateFieldAIRequest(BaseModel):
 
 
 @router.post("/fields/{field_id}/generate-ai")
-async def generate_field_ai(field_id: int, req: GenerateFieldAIRequest, request: Request):
+async def generate_field_ai(field_id: int, req: GenerateFieldAIRequest, request: Request, db: Session = Depends(get_db)):
     """AI 生成字段语义草稿"""
-    user = get_current_user(request)
+    user = get_current_user(request, db) # 传递 db
     sm = _sm_service()
     field = sm.db.get_field_semantics_by_id(field_id)
     if not field:
         raise HTTPException(status_code=404, detail="记录不存在")
-    _verify_connection_access(field.connection_id, user)
+    verify_connection_access(field.connection_id, user, db) # 使用统一的权限验证函数
 
     success, result = sm.generate_ai_draft_field(
         field_id=field_id,
@@ -285,4 +293,5 @@ async def generate_field_ai(field_id: int, req: GenerateFieldAIRequest, request:
     )
     if not success:
         raise HTTPException(status_code=400, detail=result)
-    return {"item": result, "message": "AI 语义草稿已生成"}
+    return {"item": result.to_dict(), "message": "AI 语义草稿已生成"} # 确保返回 dict
+

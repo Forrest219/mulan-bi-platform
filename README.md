@@ -1,136 +1,69 @@
 # Mulan BI Platform
 
-> 数据建模与治理平台 — 面向 BI 团队的数据质量、DDL 规范、Tableau 资产及语义维护工具。
+## Project Overview
 
-## 包管理器约定
+Mulan BI Platform is a comprehensive data modeling and governance solution designed for BI teams to ensure data quality, consistency, and semantic integrity across the enterprise.
 
-**前端统一使用 npm**（`package-lock.json` 是唯一锁文件，勿混用 yarn）。
+## Key Features
 
-## 核心功能
+*   **DDL Specification Checks**: Enforce data definition language standards and best practices for database objects.
+*   **Data Warehouse Health Scanning**: Proactively identify and report on potential issues within your data warehouse environment.
+*   **Tableau Asset Governance**: Manage and maintain Tableau assets, ensuring semantic consistency and data lineage.
+*   **LLM AI-Assisted Interpretation**: Leverage large language models to provide intelligent insights and explanations for data assets.
+*   **Role-Based Access Control (RBAC)**: Implement granular permissions to secure data assets and platform functionalities.
 
-| 模块 | 说明 |
-|------|------|
-| DDL 规范检查 | MySQL/PostgreSQL/SQLite 数据库扫描，规则可配置 |
-| DDL 生成器 | 预置维度表、事实表、ODS、DWD 模板 |
-| Tableau 集成 | MCP/REST 双协议支持，资产浏览、工作簿/视图元数据查询 |
-| 语义维护 | Tableau 资产语义标注、数据源管理、字段级维护 |
-| LLM 配置 | Anthropic/MiniMax 等模型接入，API Key 加密存储 |
-| 用户权限 | Session/Cookie 认证，角色+权限组（admin/data_admin/analyst/user） |
-| 操作日志 | 完整记录平台操作历史 |
+## Quick Start
 
-## 技术栈
+Follow these steps to get the Mulan BI Platform backend and its dependencies running quickly using Docker Compose.
 
-| 层级 | 技术 |
-|------|------|
-| 前端 | React + TypeScript + Vite + Tailwind CSS + React Router v7 |
-| 后端 | Python 3.11+ / FastAPI + SQLAlchemy |
-| 数据库 | SQLite（本地日志）、MySQL/PostgreSQL（目标数据库） |
-| 规范规则 | YAML 配置文件 |
-| 测试 | Playwright 冒烟测试 + GitHub Actions CI |
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/your-org/mulan-bi-platform.git
+    cd mulan-bi-platform
+    ```
 
-## 快速启动
+2.  **Start the PostgreSQL database:**
+    ```bash
+    cp .env.example .env
+    docker-compose up -d
+    ```
 
-```bash
-# 克隆项目
-git clone https://github.com/Forrest219/mulan-bi-platform.git
-cd mulan-bi-platform
+3.  **Install dependencies and run the backend application:**
+    ```bash
+    cd backend
+    pip install -r requirements.txt
+    alembic upgrade head
+    uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ```
+    The backend API will be accessible at `http://localhost:8000`.
 
-# 后端依赖
-pip install -r backend/requirements.txt
+## Architecture
 
-# 环境变量（参考 .env.example）
-export SESSION_SECRET=dev-secret-key-change-in-production
-export DATASOURCE_ENCRYPTION_KEY=your-32-byte-key
-export TABLEAU_ENCRYPTION_KEY=your-32-byte-key
+Mulan BI Platform adopts a **Modular Monolith** architecture, providing a balance between development simplicity and maintainability for complex systems. The frontend and backend are decoupled, communicating via RESTful APIs.
 
-# 启动后端
-cd backend && uvicorn app.main:app --reload --port 8000
+The backend follows a **layered architecture** (API → Service → Data Access) to ensure clear separation of concerns and testability.
 
-# 前端（新终端）
-cd frontend && npm install
-cd frontend && npm run dev
-```
+**Core Service Modules:**
 
-访问 http://localhost:3001 ，默认管理员账号：`admin` / `admin123`
+*   `auth`: Handles user authentication, authorization, and session management.
+*   `bi_core`: Manages core BI platform functionalities, including DDL checks and data warehouse health.
+*   `ai_llm`: Integrates Large Language Models for AI-assisted data interpretation and insights.
+*   `tableau_governance`: Provides specific functionalities for Tableau asset management and semantic maintenance.
 
-## 项目结构
+## Tech Stack
 
-```
-mulan-bi-platform/
-├── backend/
-│   ├── app/                    # FastAPI 应用（路由 + 依赖注入）
-│   │   ├── api/               # 路由定义
-│   │   ├── core/              # 核心模块（加密、依赖注入、常量）
-│   │   └── main.py            # 应用入口
-│   └── services/              # 纯业务逻辑层（无 Web 框架依赖）
-│       ├── auth/
-│       ├── llm/
-│       ├── semantic_maintenance/
-│       ├── ddl_checker/
-│       ├── ddl_generator/
-│       ├── datasources/
-│       ├── tableau/
-│       ├── logs/
-│       └── common/
-├── frontend/
-│   ├── src/
-│   │   ├── pages/              # 页面组件
-│   │   ├── components/          # 公共组件
-│   │   ├── context/            # AuthContext 等全局状态
-│   │   └── api/                # 前端 API 调用层
-│   └── tests/smoke/            # Playwright 冒烟测试
-├── config/
-│   └── rules.yaml              # DDL 规范规则
-├── docs/
-│   ├── ARCHITECTURE.md         # 架构规范
-│   ├── SPEC.md                 # SPEC/Task 模板
-│   ├── specs/                  # 模块 SPEC 文档
-│   └── tasks/                  # 模块 Task 拆解
-├── data/                       # SQLite 数据文件
-│   ├── users.db
-│   └── logs.db
-└── .github/workflows/ci.yml    # GitHub Actions CI
-```
+### Frontend
 
-## 常用命令
+*   **React 19**: A declarative, component-based JavaScript library for building user interfaces.
+*   **TypeScript**: A strongly typed superset of JavaScript that enhances code quality and maintainability.
+*   **Vite**: A next-generation frontend tooling that provides an extremely fast development experience.
+*   **Tailwind CSS**: A utility-first CSS framework for rapidly building custom designs.
 
-```bash
-# 后端
-cd backend && uvicorn app.main:app --reload --port 8000
+### Backend
 
-# 前端
-cd frontend && npm run dev        # 开发服务器
-cd frontend && npm run build     # 生产构建
-cd frontend && npm run lint      # ESLint 检查（P0 质量门 + P1 风格门）
-cd frontend && npm run type-check # TypeScript 类型检查
-
-# 冒烟测试
-cd frontend && npx playwright test
-```
-
-## Lint 策略（两层门禁）
-
-| 层级 | 规则 | 级别 | 说明 |
-|------|------|------|------|
-| P0 质量门 | `no-undef` | error | 未定义变量引用 |
-| P0 质量门 | TypeScript 硬错误 | error | `ban-ts-comment` 等 |
-| P0 质量门 | `react-hooks/exhaustive-deps` | error | 缺失真实依赖 |
-| P1 风格门 | `prefer-const` | warn | 风格提示 |
-| P1 风格门 | `no-explicit-any` | warn | 类型安全提示 |
-| P1 风格门 | `no-unused-vars` | warn | 未使用变量 |
-
-`--max-warnings 50` 容忍 P1 警告存量，P0 硬错误必定失败。
-
-## 规范规则
-
-`config/rules.yaml` 支持配置：
-
-- 表命名规范、字段命名规范
-- 数据类型规范、主键/索引规范
-- 注释规范、时间戳字段规范
-- 软删除字段规范
-
-## 团队
-
-- 项目负责人：Forrest219
-- BI 团队
+*   **FastAPI**: A modern, fast (high-performance) web framework for building APIs with Python 3.7+ based on standard Python type hints.
+*   **SQLAlchemy 2.x**: A powerful and flexible SQL toolkit and Object-Relational Mapper (ORM) for Python. Utilizes PostgreSQL 16 with JSONB fields and a robust connection pool (`pool_size=10, max_overflow=20`).
+*   **PostgreSQL 16**: A powerful, open-source object-relational database system, serving as the primary data store.
+*   **Alembic**: A lightweight database migration tool for usage with SQLAlchemy.
+*   **Playwright**: A reliable end-to-end testing framework for modern web apps, used for robust integration tests.
+*   **Authentication**: Implemented using Session/Cookie-based authentication, PBKDF2-SHA256 for password hashing, and JWT for secure token management.

@@ -1,49 +1,45 @@
 """用户认证数据模型"""
-from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Table
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship, scoped_session
-
-Base = declarative_base()
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Table
+from sqlalchemy.orm import relationship
+from app.core.database import Base, JSONB, sa_func, sa_text # 导入中央配置的 Base, JSONB, func, text
 
 # 关联表：用户-组
 user_group_members = Table(
-    'user_group_members',
+    'auth_user_group_members', # 表名前缀规范化
     Base.metadata,
-    Column('user_id', Integer, ForeignKey('users.id'), primary_key=True),
-    Column('group_id', Integer, ForeignKey('user_groups.id'), primary_key=True),
-    Column('created_at', DateTime, default=datetime.now)
+    Column('user_id', Integer, ForeignKey('auth_users.id'), primary_key=True),
+    Column('group_id', Integer, ForeignKey('auth_user_groups.id'), primary_key=True),
+    Column('created_at', DateTime, server_default=sa_func.now()) # DateTime 默认值
 )
 
 class User(Base):
     """用户表"""
-    __tablename__ = "users"
+    __tablename__ = "auth_users" # 表名前缀规范化
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     username = Column(String(64), unique=True, nullable=False, index=True)
     display_name = Column(String(128), nullable=False)
     password_hash = Column(String(256), nullable=False)
     email = Column(String(128), unique=True, nullable=False, index=True)  # 邮箱作为登录账号
-    role = Column(String(32), default="user")  # admin, user
-    permissions = Column(Text, nullable=True)  # JSON array: 用户单独权限
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    role = Column(String(32), default="user", server_default=sa_text("'user'"))  # admin, user
+    permissions = Column(JSONB, nullable=True)  # JSON array: 用户单独权限, 改为 JSONB
+    is_active = Column(Boolean, default=True, server_default=sa_text('true')) # Boolean 默认值
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
     last_login = Column(DateTime, nullable=True)
 
     # 关联
     groups = relationship('UserGroup', secondary=user_group_members, back_populates='members')
 
     def to_dict(self, include_sensitive: bool = False) -> Dict[str, Any]:
-        import json
         result = {
             "id": self.id,
             "username": self.username,
             "display_name": self.display_name,
             "email": self.email,
             "role": self.role,
-            "permissions": json.loads(self.permissions) if self.permissions else [],
+            "permissions": self.permissions if self.permissions else [], # JSONB 字段直接是 Python 对象
             "group_ids": [g.id for g in self.groups] if self.groups else [],
             "group_names": [g.name for g in self.groups] if self.groups else [],
             "is_active": self.is_active,
@@ -55,12 +51,12 @@ class User(Base):
 
 class UserGroup(Base):
     """用户组表"""
-    __tablename__ = "user_groups"
+    __tablename__ = "auth_user_groups" # 表名前缀规范化
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(64), unique=True, nullable=False, index=True)
     description = Column(String(256), nullable=True)
-    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
 
     # 关联
     members = relationship('User', secondary=user_group_members, back_populates='groups')
@@ -91,57 +87,43 @@ class UserGroup(Base):
 
 class GroupPermission(Base):
     """组-权限关联表"""
-    __tablename__ = "group_permissions"
+    __tablename__ = "auth_group_permissions" # 表名前缀规范化
 
-    group_id = Column(Integer, ForeignKey('user_groups.id'), primary_key=True)
+    group_id = Column(Integer, ForeignKey('auth_user_groups.id'), primary_key=True)
     permission_key = Column(String(64), primary_key=True)
-    created_at = Column(DateTime, default=datetime.now)
+    created_at = Column(DateTime, server_default=sa_func.now()) # DateTime 默认值
 
     # 关系
     group = relationship('UserGroup', back_populates='group_perms')
 
 
+# 从中央配置导入 SessionLocal
+from app.core.database import SessionLocal
+from sqlalchemy.orm import Session
+
 class UserDatabase:
-    """用户数据库管理 - 单例模式"""
+    """用户数据库管理 - 不再是单例，直接使用中央 SessionLocal"""
 
-    _instance = None
-
-    def __new__(cls, db_path: str = None):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            if db_path is None:
-                import os
-                db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "users.db")
-            cls._instance._init_db(db_path)
-        return cls._instance
-
-    def _init_db(self, db_path: str):
-        """初始化数据库"""
-        import os
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
-
-        self.engine = create_engine(f"sqlite:///{db_path}", echo=False)
-        Base.metadata.create_all(self.engine)
-        session_factory = sessionmaker(bind=self.engine)
-        self.Session = scoped_session(session_factory)
+    def __init__(self, db_path: str = None):
+        """db_path 参数不再使用，保留签名以兼容旧代码"""
+        pass
 
     @property
-    def session(self):
+    def session(self) -> Session:
         """每次访问获取当前线程的 session，并刷新缓存避免脏读"""
-        s = self.Session()
-        s.expire_all()
+        s = SessionLocal()
+        s.expire_all() # 刷新缓存，确保获取最新数据
         return s
 
     def create_user(self, username: str, password_hash: str, role: str = "user", display_name: str = None, email: str = None, permissions: list = None) -> User:
         """创建用户"""
-        import json
         user = User(
             username=username,
             password_hash=password_hash,
             role=role,
             display_name=display_name or username,
             email=email,
-            permissions=json.dumps(permissions) if permissions else None
+            permissions=permissions # JSONB 字段直接传入 Python 列表/字典
         )
         self.session.add(user)
         self.session.commit()
@@ -172,10 +154,9 @@ class UserDatabase:
 
     def update_user_permissions(self, user_id: int, permissions: list) -> bool:
         """更新用户权限"""
-        import json
         user = self.session.query(User).filter(User.id == user_id).first()
         if user:
-            user.permissions = json.dumps(permissions)
+            user.permissions = permissions # JSONB 字段直接传入 Python 列表/字典
             self.session.commit()
             return True
         return False
@@ -310,6 +291,7 @@ class UserDatabase:
             {"key": "user_management", "label": "用户管理", "module": "Admin"},
         ]
 
-    def close(self):
-        """关闭数据库连接"""
-        self.session.close()
+    # close 方法不再需要，因为 session 由 SessionLocal 管理
+    # def close(self):
+    #     self.session.close()
+

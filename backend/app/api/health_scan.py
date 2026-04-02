@@ -4,12 +4,14 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user, require_roles
 from app.core.crypto import get_datasource_crypto
+from app.core.database import get_db # 导入中央数据库依赖
 from services.datasources.models import DataSourceDatabase
 from services.health_scan.models import HealthScanDatabase
 from services.health_scan.engine import HealthScanEngine
@@ -18,12 +20,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _db_path():
-    return str(Path(__file__).parent.parent.parent / "data" / "health_scan.db")
-
-
-def _ds_db_path():
-    return str(Path(__file__).parent.parent.parent / "data" / "datasources.db")
+# _db_path 和 _ds_db_path 不再需要
+# def _db_path():
+#     return str(Path(__file__).parent.parent.parent / "data" / "health_scan.db")
+#
+#
+# def _ds_db_path():
+#     return str(Path(__file__).parent.parent.parent / "data" / "datasources.db")
 
 
 class ScanRequest(BaseModel):
@@ -31,13 +34,13 @@ class ScanRequest(BaseModel):
 
 
 @router.post("/scan")
-async def trigger_scan(body: ScanRequest, request: Request):
+async def trigger_scan(body: ScanRequest, request: Request, db: Session = Depends(get_db)):
     """发起健康扫描"""
-    user = get_current_user(request)
-    require_roles(request, ["admin", "data_admin"])
+    user = get_current_user(request, db) # 传递 db
+    require_roles(request, ["admin", "data_admin"], db) # 传递 db
 
-    ds_db = DataSourceDatabase(db_path=_ds_db_path())
-    ds = ds_db.get_datasource(body.datasource_id)
+    ds_db = DataSourceDatabase() # 不再需要 db_path
+    ds = ds_db.get(body.datasource_id) # 使用 get 方法
     if not ds:
         raise HTTPException(status_code=404, detail="数据源不存在")
 
@@ -45,7 +48,7 @@ async def trigger_scan(body: ScanRequest, request: Request):
     if user["role"] not in ("admin",) and ds.owner_id != user["id"]:
         raise HTTPException(status_code=403, detail="无权操作此数据源")
 
-    scan_db = HealthScanDatabase(db_path=_db_path())
+    scan_db = HealthScanDatabase() # 不再需要 db_path
     record = scan_db.create_scan(
         datasource_id=ds.id,
         datasource_name=ds.name,
@@ -76,18 +79,18 @@ async def trigger_scan(body: ScanRequest, request: Request):
 
 @router.get("/scans")
 async def list_scans(request: Request, datasource_id: Optional[int] = None,
-                     page: int = 1, page_size: int = 20):
+                     page: int = 1, page_size: int = 20, db: Session = Depends(get_db)):
     """扫描历史列表"""
-    get_current_user(request)
-    scan_db = HealthScanDatabase(db_path=_db_path())
+    get_current_user(request, db) # 传递 db
+    scan_db = HealthScanDatabase() # 不再需要 db_path
     return scan_db.list_scans(datasource_id=datasource_id, page=page, page_size=page_size)
 
 
 @router.get("/scans/{scan_id}")
-async def get_scan(scan_id: int, request: Request):
+async def get_scan(scan_id: int, request: Request, db: Session = Depends(get_db)):
     """扫描详情"""
-    get_current_user(request)
-    scan_db = HealthScanDatabase(db_path=_db_path())
+    get_current_user(request, db) # 传递 db
+    scan_db = HealthScanDatabase() # 不再需要 db_path
     record = scan_db.get_scan(scan_id)
     if not record:
         raise HTTPException(status_code=404, detail="扫描记录不存在")
@@ -97,10 +100,10 @@ async def get_scan(scan_id: int, request: Request):
 @router.get("/scans/{scan_id}/issues")
 async def get_scan_issues(scan_id: int, request: Request,
                           severity: Optional[str] = None,
-                          page: int = 1, page_size: int = 50):
+                          page: int = 1, page_size: int = 50, db: Session = Depends(get_db)):
     """扫描问题列表"""
-    get_current_user(request)
-    scan_db = HealthScanDatabase(db_path=_db_path())
+    get_current_user(request, db) # 传递 db
+    scan_db = HealthScanDatabase() # 不再需要 db_path
     record = scan_db.get_scan(scan_id)
     if not record:
         raise HTTPException(status_code=404, detail="扫描记录不存在")
@@ -108,10 +111,10 @@ async def get_scan_issues(scan_id: int, request: Request,
 
 
 @router.get("/scans/{scan_id}/report")
-async def get_scan_report(scan_id: int, request: Request):
+async def get_scan_report(scan_id: int, request: Request, db: Session = Depends(get_db)):
     """导出 HTML 格式扫描报告"""
-    get_current_user(request)
-    scan_db = HealthScanDatabase(db_path=_db_path())
+    get_current_user(request, db) # 传递 db
+    scan_db = HealthScanDatabase() # 不再需要 db_path
     record = scan_db.get_scan(scan_id)
     if not record:
         raise HTTPException(status_code=404, detail="扫描记录不存在")
@@ -153,7 +156,7 @@ td {{ padding: 10px 14px; border-top: 1px solid #f1f5f9; font-size: 13px; }}
 </style></head><body>
 <div class="container">
 <h1>数仓健康检查报告</h1>
-<p class="subtitle">{record.datasource_name} · {record.db_type} · {record.database_name} · {record.finished_at or record.started_at or ''}</p>
+<p class="subtitle">{record.datasource_name} · {record.db_type} · {record.database_name} · {record.finished_at.strftime("%Y-%m-%d %H:%M:%S") if record.finished_at else record.started_at.strftime("%Y-%m-%d %H:%M:%S") if record.started_at else ''}</p>
 <div class="stats">
   <div class="stat"><div class="stat-label">健康评分</div><div class="stat-value score">{score}</div></div>
   <div class="stat"><div class="stat-label">检查表数</div><div class="stat-value">{record.total_tables}</div></div>
@@ -189,14 +192,4 @@ td {{ padding: 10px 14px; border-top: 1px solid #f1f5f9; font-size: 13px; }}
 </div></body></html>"""
 
     return HTMLResponse(content=html, headers={
-        "Content-Disposition": f'attachment; filename="health-report-{scan_id}.html"'
-    })
-
-
-@router.get("/summary")
-async def get_health_summary(request: Request):
-    """总览：每个数据源的最新扫描"""
-    get_current_user(request)
-    scan_db = HealthScanDatabase(db_path=_db_path())
-    records = scan_db.get_latest_scans()
-    return {"scans": [r.to_dict() for r in records]}
+        "Content-Disposition": f'attachment

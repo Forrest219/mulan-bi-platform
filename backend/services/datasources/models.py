@@ -1,18 +1,12 @@
 """数据源数据模型"""
-import threading
-from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import sessionmaker
-
-Base = declarative_base()
-
+from sqlalchemy import Column, Integer, String, DateTime, Boolean
+from app.core.database import Base, JSONB, sa_func, sa_text # 导入中央配置的 Base, JSONB, func, text
 
 class DataSource(Base):
     """数据源表"""
-    __tablename__ = "data_sources"
+    __tablename__ = "bi_data_sources" # 表名前缀规范化
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(128), nullable=False)
@@ -21,12 +15,12 @@ class DataSource(Base):
     port = Column(Integer, nullable=False)
     database_name = Column(String(128), nullable=False)
     username = Column(String(128), nullable=False)
-    password_encrypted = Column(Text, nullable=False)
-    extra_config = Column(Text, nullable=True)  # JSON: SSL、编码等
+    password_encrypted = Column(String(512), nullable=False) # 密码加密后长度可能变长，使用 String(512)
+    extra_config = Column(JSONB, nullable=True)  # JSON: SSL、编码等, 改为 JSONB
     owner_id = Column(Integer, nullable=False)  # 创建者用户 ID
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.now, nullable=False)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    is_active = Column(Boolean, default=True, server_default=sa_text('true')) # Boolean 默认值
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
+    updated_at = Column(DateTime, server_default=sa_func.now(), onupdate=sa_func.now()) # DateTime 默认值和更新
 
     def to_dict(self, include_password: bool = False) -> Dict[str, Any]:
         result = {
@@ -39,7 +33,7 @@ class DataSource(Base):
             "username": self.username,
             "owner_id": self.owner_id,
             "is_active": self.is_active,
-            "extra_config": self.extra_config,
+            "extra_config": self.extra_config, # JSONB 字段直接是 Python 对象
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
             "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
         }
@@ -48,44 +42,31 @@ class DataSource(Base):
         return result
 
 
+# 从中央配置导入 SessionLocal
+from app.core.database import SessionLocal
+from sqlalchemy.orm import Session
+
 class DataSourceDatabase:
-    """数据源数据库管理 - 单例模式（线程安全）"""
+    """数据源数据库管理 - 不再是单例，直接使用中央 SessionLocal"""
 
-    _instance = None
-    _lock = threading.Lock()
-
-    def __new__(cls, db_path: str = None):
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:  # 二次检查
-                    cls._instance = super().__new__(cls)
-                    if db_path is None:
-                        import os as _os
-                        db_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "data", "datasources.db")
-                    cls._instance._init_db(db_path)
-        return cls._instance
-
-    def _init_db(self, db_path: str):
-        """初始化数据库"""
-        import os
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        self.engine = create_engine(f"sqlite:///{db_path}", echo=False, pool_pre_ping=True)
-        Base.metadata.create_all(self.engine)
-        Session = sessionmaker(bind=self.engine, expire_on_commit=False)
-        from sqlalchemy.orm import scoped_session
-        self._scoped_session = scoped_session(Session)
+    def __init__(self, db_path: str = None):
+        """db_path 参数不再使用，保留签名以兼容旧代码"""
+        pass
 
     @property
-    def session(self):
-        """线程本地的 session，每次调用返回当前线程的 session"""
-        return self._scoped_session()
+    def session(self) -> Session:
+        """每次访问获取当前线程的 session，并刷新缓存避免脏读"""
+        s = SessionLocal()
+        s.expire_all()
+        return s
 
-    def close(self):
-        self._scoped_session.remove()
+    # close 方法不再需要
+    # def close(self):
+    #     self.session.remove()
 
     def create(self, name: str, db_type: str, host: str, port: int,
                database_name: str, username: str, password_encrypted: str,
-               owner_id: int, extra_config: str = None) -> DataSource:
+               owner_id: int, extra_config: dict = None) -> DataSource: # extra_config 现在是 dict
         """创建数据源"""
         ds = DataSource(
             name=name,
@@ -121,7 +102,7 @@ class DataSourceDatabase:
         for key, value in kwargs.items():
             if hasattr(ds, key) and value is not None:
                 setattr(ds, key, value)
-        ds.updated_at = datetime.now()
+        # updated_at 会由 onupdate 自动更新，无需手动设置
         self.session.commit()
         return True
 
@@ -132,3 +113,4 @@ class DataSourceDatabase:
         self.session.delete(ds)
         self.session.commit()
         return True
+

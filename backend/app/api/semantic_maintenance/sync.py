@@ -5,40 +5,47 @@ import asyncio
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi import APIRouter, HTTPException, Request, Query, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
-sys_path = str(Path(__file__).parent.parent.parent.parent.parent / "src")
-import sys
-sys.path.insert(0, sys_path)
-
+# 导入中央数据库依赖和统一的权限验证函数
+from app.core.database import get_db
+from app.utils.auth import verify_connection_access
 from app.core.dependencies import get_current_user
 from app.core.crypto import get_tableau_crypto
+
+# 导入 Tableau 模型和数据库服务
+from services.tableau.models import TableauConnection, TableauAsset, TableauDatabase
+from services.semantic_maintenance.field_sync import FieldSyncJob
+from services.semantic_maintenance.database import SemanticMaintenanceDatabase
 
 router = APIRouter()
 _crypto = get_tableau_crypto()
 
 
-def _db_path():
-    return str(Path(__file__).parent.parent.parent.parent.parent / "data" / "semantic_maintenance.db")
+# _db_path 和 _tableau_db_path 不再需要
+# def _db_path():
+#     return str(Path(__file__).parent.parent.parent.parent.parent / "data" / "semantic_maintenance.db")
+#
+#
+# def _tableau_db_path():
+#     return str(Path(__file__).parent.parent.parent.parent.parent / "data" / "tableau.db")
 
 
-def _tableau_db_path():
-    return str(Path(__file__).parent.parent.parent.parent.parent / "data" / "tableau.db")
-
-
-def _verify_connection_access(connection_id: int, user: dict) -> None:
-    """验证用户有权访问指定连接"""
-    import sqlite3
-    conn = sqlite3.connect(_tableau_db_path())
-    cursor = conn.cursor()
-    cursor.execute("SELECT owner_id FROM tableau_connections WHERE id = ?", (connection_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if not row:
-        raise HTTPException(status_code=404, detail="连接不存在")
-    if user["role"] != "admin" and row[0] != user["id"]:
-        raise HTTPException(status_code=403, detail="无权访问该连接")
+# _verify_connection_access 已经提取到 app.utils.auth.py
+# def _verify_connection_access(connection_id: int, user: dict) -> None:
+#     """验证用户有权访问指定连接"""
+#     import sqlite3
+#     conn = sqlite3.connect(_tableau_db_path())
+#     cursor = conn.cursor()
+#     cursor.execute("SELECT owner_id FROM tableau_connections WHERE id = ?", (connection_id,))
+#     row = cursor.fetchone()
+#     conn.close()
+#     if not row:
+#         raise HTTPException(status_code=404, detail="连接不存在")
+#     if user["role"] != "admin" and row[0] != user["id"]:
+#         raise HTTPException(status_code=403, detail="无权访问该连接")
 
 
 class SyncFieldsRequest(BaseModel):
@@ -52,51 +59,40 @@ async def sync_datasource_fields(
     conn_id: int,
     req: SyncFieldsRequest,
     request: Request,
+    db: Session = Depends(get_db) # 注入 db
 ):
     """触发数据源字段级元数据同步"""
-    import sqlite3
-    from semantic_maintenance.field_sync import FieldSyncJob
+    user = get_current_user(request, db) # 传递 db
+    verify_connection_access(conn_id, user, db) # 使用统一的权限验证函数
 
-    user = get_current_user(request)
-    _verify_connection_access(conn_id, user)
+    tableau_db = TableauDatabase() # 不再需要 db_path
+    sm_db = SemanticMaintenanceDatabase() # 不再需要 db_path
 
     # 获取连接信息
-    conn = sqlite3.connect(_tableau_db_path())
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT id, server_url, site, token_name, token_encrypted, api_version, connection_type "
-        "FROM tableau_connections WHERE id = ?", (conn_id,)
-    )
-    row = cursor.fetchone()
-    conn.close()
-    if not row:
+    conn = tableau_db.get_connection(conn_id)
+    if not conn:
         raise HTTPException(status_code=404, detail="连接不存在")
 
     # 获取 datasource asset
     asset_id = req.asset_id
     if not asset_id:
-        cursor2 = sqlite3.connect(_tableau_db_path())
-        cursor2.row_factory = sqlite3.Row
-        c2 = cursor2.cursor()
-        c2.execute(
-            "SELECT id FROM tableau_assets WHERE connection_id = ? AND tableau_id = ? AND is_deleted = 0",
-            (conn_id, req.tableau_datasource_id)
-        )
-        asset_row = c2.fetchone()
-        cursor2.close()
-        if not asset_row:
+        asset = db.query(TableauAsset).filter(
+            TableauAsset.connection_id == conn_id,
+            TableauAsset.tableau_id == req.tableau_datasource_id,
+            TableauAsset.is_deleted == False
+        ).first()
+        if not asset:
             raise HTTPException(status_code=404, detail=f"未找到 tableau_id={req.tableau_datasource_id} 的资产记录")
-        asset_id = asset_row["id"]
+        asset_id = asset.id
 
     # 解密 token
     try:
-        token_value = _crypto.decrypt(row["token_encrypted"])
+        token_value = _crypto.decrypt(conn.token_encrypted)
     except Exception:
         raise HTTPException(status_code=500, detail="Token 解密失败，请重新保存连接凭证")
 
     # 获取 site content_url（需要用 REST signin 获取）
-    site_content_url = row["site"]
+    site_content_url = conn.site # 假设 conn.site 已经是 contentUrl
 
     # 异步执行同步任务
     job = FieldSyncJob(
@@ -104,12 +100,13 @@ async def sync_datasource_fields(
         tableau_datasource_id=req.tableau_datasource_id,
         asset_id=asset_id,
         datasource_luid=req.tableau_datasource_id,
-        server_url=row["server_url"],
+        server_url=conn.server_url,
         site_content_url=site_content_url,
-        token_name=row["token_name"],
+        token_name=conn.token_name,
         token_value=token_value,
-        api_version=row["api_version"] or "3.21",
-        db_path=_db_path(),
+        api_version=conn.api_version or "3.21",
+        # db_path 不再需要，FieldSyncJob 内部会使用 refactored SemanticMaintenanceDatabase
+        # db_path=_db_path(),
     )
 
     # 在线程池中执行（避免阻塞事件循环）
@@ -132,13 +129,15 @@ async def sync_datasource_fields(
 async def get_sync_fields_status(
     conn_id: int,
     request: Request,
+    db: Session = Depends(get_db) # 注入 db
 ):
     """获取字段同步状态（P2 占位：可扩展为查询上次同步状态）"""
-    user = get_current_user(request)
-    _verify_connection_access(conn_id, user)
+    user = get_current_user(request, db) # 传递 db
+    verify_connection_access(conn_id, user, db) # 使用统一的权限验证函数
 
     return {
         "connection_id": conn_id,
         "status": "supported",
         "message": "字段同步状态查询在 P2 中扩展",
     }
+

@@ -1,38 +1,33 @@
 """数仓健康检查 - 数据模型"""
-import threading
-from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy import (
-    create_engine, Column, Integer, String, DateTime,
+    Column, Integer, String, DateTime,
     Float, Text, ForeignKey, Index
 )
-from sqlalchemy.orm import declarative_base, sessionmaker, scoped_session
-
-Base = declarative_base()
-
+from app.core.database import Base, sa_func, sa_text # 导入中央配置的 Base, func, text
 
 class HealthScanRecord(Base):
     """健康扫描记录"""
-    __tablename__ = "health_scan_records"
+    __tablename__ = "bi_health_scan_records" # 表名前缀规范化
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     datasource_id = Column(Integer, nullable=False, index=True)
     datasource_name = Column(String(128), nullable=False)
     db_type = Column(String(32), nullable=False)
     database_name = Column(String(128), nullable=False)
-    status = Column(String(16), nullable=False, default="pending")  # pending/running/success/failed
+    status = Column(String(16), nullable=False, default="pending", server_default=sa_text("'pending'"))  # pending/running/success/failed
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
-    total_tables = Column(Integer, default=0)
-    total_issues = Column(Integer, default=0)
-    high_count = Column(Integer, default=0)
-    medium_count = Column(Integer, default=0)
-    low_count = Column(Integer, default=0)
+    total_tables = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
+    total_issues = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
+    high_count = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
+    medium_count = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
+    low_count = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
     health_score = Column(Float, nullable=True)
     error_message = Column(Text, nullable=True)
     triggered_by = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -58,13 +53,13 @@ class HealthScanRecord(Base):
 
 class HealthScanIssue(Base):
     """扫描发现的问题"""
-    __tablename__ = "health_scan_issues"
+    __tablename__ = "bi_health_scan_issues" # 表名前缀规范化
     __table_args__ = (
         Index("ix_issue_scan_severity", "scan_id", "severity"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    scan_id = Column(Integer, ForeignKey("health_scan_records.id", ondelete="CASCADE"), nullable=False)
+    scan_id = Column(Integer, ForeignKey("bi_health_scan_records.id", ondelete="CASCADE"), nullable=False)
     severity = Column(String(16), nullable=False)  # high/medium/low
     object_type = Column(String(16), nullable=False)  # table/field
     object_name = Column(String(256), nullable=False)
@@ -72,7 +67,7 @@ class HealthScanIssue(Base):
     issue_type = Column(String(64), nullable=False)
     description = Column(Text, nullable=False)
     suggestion = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -88,37 +83,28 @@ class HealthScanIssue(Base):
         }
 
 
+# 从中央配置导入 SessionLocal
+from app.core.database import SessionLocal
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+
 class HealthScanDatabase:
-    """健康检查数据库管理 - 单例模式（线程安全）"""
+    """健康检查数据库管理 - 不再是单例，直接使用中央 SessionLocal"""
 
-    _instance = None
-    _lock = threading.Lock()
-
-    def __new__(cls, db_path: str = None):
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    if db_path is None:
-                        import os
-                        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "health_scan.db")
-                    cls._instance._init_db(db_path)
-        return cls._instance
-
-    def _init_db(self, db_path: str):
-        import os
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        self.engine = create_engine(f"sqlite:///{db_path}", echo=False, pool_pre_ping=True)
-        Base.metadata.create_all(self.engine)
-        Session = sessionmaker(bind=self.engine, expire_on_commit=False)
-        self._scoped_session = scoped_session(Session)
+    def __init__(self, db_path: str = None):
+        """db_path 参数不再使用，保留签名以兼容旧代码"""
+        pass
 
     @property
-    def session(self):
-        return self._scoped_session()
+    def session(self) -> Session:
+        """每次访问获取当前线程的 session，并刷新缓存避免脏读"""
+        s = SessionLocal()
+        s.expire_all()
+        return s
 
-    def close_session(self):
-        self._scoped_session.remove()
+    # close_session 方法不再需要
+    # def close_session(self):
+    #     self.session.remove()
 
     # --- Scan Record CRUD ---
 
@@ -132,7 +118,7 @@ class HealthScanDatabase:
                 db_type=db_type,
                 database_name=database_name,
                 status="running",
-                started_at=datetime.now(),
+                started_at=sa_func.now(), # 使用 server_default
                 triggered_by=triggered_by,
             )
             s.add(record)
@@ -142,7 +128,7 @@ class HealthScanDatabase:
             s.rollback()
             raise
         finally:
-            self.close_session()
+            s.close() # 确保会话关闭
 
     def finish_scan(self, scan_id: int, status: str, total_tables: int = 0,
                     total_issues: int = 0, high_count: int = 0, medium_count: int = 0,
@@ -154,7 +140,7 @@ class HealthScanDatabase:
             if not record:
                 return
             record.status = status
-            record.finished_at = datetime.now()
+            record.finished_at = sa_func.now() # 使用 server_default
             record.total_tables = total_tables
             record.total_issues = total_issues
             record.high_count = high_count
@@ -167,14 +153,14 @@ class HealthScanDatabase:
             s.rollback()
             raise
         finally:
-            self.close_session()
+            s.close() # 确保会话关闭
 
     def get_scan(self, scan_id: int) -> Optional[HealthScanRecord]:
         s = self.session
         try:
             return s.query(HealthScanRecord).get(scan_id)
         finally:
-            self.close_session()
+            s.close() # 确保会话关闭
 
     def list_scans(self, datasource_id: int = None, page: int = 1,
                    page_size: int = 20) -> Dict[str, Any]:
@@ -188,13 +174,12 @@ class HealthScanDatabase:
                      .offset((page - 1) * page_size).limit(page_size).all()
             return {"scans": [r.to_dict() for r in items], "total": total, "page": page, "page_size": page_size}
         finally:
-            self.close_session()
+            s.close() # 确保会话关闭
 
     def get_latest_scans(self) -> List[HealthScanRecord]:
         """每个数据源的最新一次扫描"""
         s = self.session
         try:
-            from sqlalchemy import func
             subq = s.query(
                 HealthScanRecord.datasource_id,
                 func.max(HealthScanRecord.id).label("max_id")
@@ -205,7 +190,7 @@ class HealthScanDatabase:
             ).all()
             return records
         finally:
-            self.close_session()
+            s.close() # 确保会话关闭
 
     # --- Issues CRUD ---
 
@@ -231,7 +216,7 @@ class HealthScanDatabase:
             s.rollback()
             raise
         finally:
-            self.close_session()
+            s.close() # 确保会话关闭
 
     def get_scan_issues(self, scan_id: int, severity: str = None,
                         page: int = 1, page_size: int = 50) -> Dict[str, Any]:
@@ -244,4 +229,5 @@ class HealthScanDatabase:
             items = q.order_by(HealthScanIssue.id).offset((page - 1) * page_size).limit(page_size).all()
             return {"issues": [i.to_dict() for i in items], "total": total, "page": page, "page_size": page_size}
         finally:
-            self.close_session()
+            s.close() # 确保会话关闭
+

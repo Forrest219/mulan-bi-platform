@@ -1,33 +1,26 @@
 """日志数据库模型"""
-from datetime import datetime
 from typing import Optional, List, Dict, Any
-from dataclasses import dataclass, field
-import json
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, JSON
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import sessionmaker, scoped_session
-
-Base = declarative_base()
-
+from sqlalchemy import Column, Integer, String, Text, DateTime
+from app.core.database import Base, JSONB, sa_func # 导入中央配置的 Base, JSONB, func
 
 class ScanLog(Base):
     """扫描日志表"""
-    __tablename__ = "scan_logs"
+    __tablename__ = "bi_scan_logs" # 表名前缀规范化
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    scan_time = Column(DateTime, default=datetime.now, nullable=False)
+    scan_time = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
     database_name = Column(String(128), nullable=False)
     db_type = Column(String(32), nullable=False)
-    table_count = Column(Integer, default=0)
-    total_violations = Column(Integer, default=0)
-    error_count = Column(Integer, default=0)
-    warning_count = Column(Integer, default=0)
-    info_count = Column(Integer, default=0)
-    duration_seconds = Column(Text, nullable=True)
-    status = Column(String(32), default="completed")  # completed, failed
+    table_count = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
+    total_violations = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
+    error_count = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
+    warning_count = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
+    info_count = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
+    duration_seconds = Column(Text, nullable=True) # 保持 Text，不一定是 JSON
+    status = Column(String(32), default="completed", server_default=sa_text("'completed'")) # String 默认值
     error_message = Column(Text, nullable=True)
-    results_json = Column(Text, nullable=True)  # JSON 格式存储违规详情
+    results_json = Column(JSONB, nullable=True)  # JSON 格式存储违规详情, 改为 JSONB
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -48,15 +41,15 @@ class ScanLog(Base):
 
 class RuleChangeLog(Base):
     """规则变更日志表"""
-    __tablename__ = "rule_change_logs"
+    __tablename__ = "bi_rule_change_logs" # 表名前缀规范化
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    change_time = Column(DateTime, default=datetime.now, nullable=False)
-    operator = Column(String(128), default="system")
+    change_time = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
+    operator = Column(String(128), default="system", server_default=sa_text("'system'"))
     rule_section = Column(String(64), nullable=False)
     change_type = Column(String(32), nullable=False)  # created, updated, deleted
-    old_value = Column(Text, nullable=True)
-    new_value = Column(Text, nullable=True)
+    old_value = Column(Text, nullable=True) # 保持 Text
+    new_value = Column(Text, nullable=True) # 保持 Text
     description = Column(Text, nullable=True)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -72,15 +65,15 @@ class RuleChangeLog(Base):
 
 class OperationLog(Base):
     """操作日志表"""
-    __tablename__ = "operation_logs"
+    __tablename__ = "bi_operation_logs" # 表名前缀规范化
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    op_time = Column(DateTime, default=datetime.now, nullable=False)
-    operator = Column(String(128), default="anonymous")
+    op_time = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
+    operator = Column(String(128), default="anonymous", server_default=sa_text("'anonymous'"))
     operation_type = Column(String(64), nullable=False)  # login, scan, export, rule_change
     target = Column(String(256), nullable=True)  # 操作目标
-    status = Column(String(32), default="success")  # success, failed
-    details = Column(Text, nullable=True)  # JSON 格式存储详情
+    status = Column(String(32), default="success", server_default=sa_text("'success'"))  # success, failed
+    details = Column(JSONB, nullable=True)  # JSON 格式存储详情, 改为 JSONB
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -90,38 +83,25 @@ class OperationLog(Base):
             "operation_type": self.operation_type,
             "target": self.target,
             "status": self.status,
-            "details": self.details,
+            "details": self.details, # JSONB 字段直接是 Python 对象
         }
 
 
+# 从中央配置导入 SessionLocal
+from app.core.database import SessionLocal
+from sqlalchemy.orm import Session
+
 class LogDatabase:
-    """日志数据库管理"""
+    """日志数据库管理 - 不再是单例，直接使用中央 SessionLocal"""
 
-    _instance = None
-
-    def __new__(cls, db_path: str = None):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            if db_path is None:
-                import os
-                db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "logs.db")
-            cls._instance._init_db(db_path)
-        return cls._instance
-
-    def _init_db(self, db_path: str):
-        """初始化数据库"""
-        import os
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
-
-        self.engine = create_engine(f"sqlite:///{db_path}", echo=False)
-        Base.metadata.create_all(self.engine)
-        session_factory = sessionmaker(bind=self.engine)
-        self.Session = scoped_session(session_factory)
+    def __init__(self, db_path: str = None):
+        """db_path 参数不再使用，保留签名以兼容旧代码"""
+        pass
 
     @property
-    def session(self):
+    def session(self) -> Session:
         """每次访问获取当前线程的 session，并刷新缓存避免脏读"""
-        s = self.Session()
+        s = SessionLocal()
         s.expire_all()
         return s
 
@@ -178,6 +158,7 @@ class LogDatabase:
             "total_violations": total_violations,
         }
 
-    def close(self):
-        """关闭数据库连接"""
-        self.session.close()
+    # close 方法不再需要
+    # def close(self):
+    #     self.session.close()
+

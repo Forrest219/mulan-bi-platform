@@ -1,31 +1,27 @@
 """Tableau Connection & Asset 数据模型"""
-import threading
-from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, UniqueConstraint, Index
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship
-
-Base = declarative_base()
-
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, UniqueConstraint, Index
+from sqlalchemy.orm import relationship
+from app.core.database import Base, JSONB, sa_func, sa_text # 导入中央配置的 Base, JSONB, func, text
 
 class TableauConnection(Base):
     """Tableau 连接表"""
-    __tablename__ = "tableau_connections"
+    __tablename__ = "tableau_connections" # 保持现有前缀
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(128), nullable=False)
     server_url = Column(String(512), nullable=False)
     site = Column(String(128), nullable=False)
-    api_version = Column(String(16), default="3.21")
-    connection_type = Column(String(16), default="mcp", nullable=False)  # 'mcp' or 'tsc'
+    api_version = Column(String(16), default="3.21", server_default=sa_text("'3.21'"))
+    connection_type = Column(String(16), default="mcp", nullable=False, server_default=sa_text("'mcp'"))  # 'mcp' or 'tsc'
     token_name = Column(String(256), nullable=False)
-    token_encrypted = Column(Text, nullable=False)
+    token_encrypted = Column(String(512), nullable=False) # 密码加密后长度可能变长，使用 String(512)
     owner_id = Column(Integer, nullable=False)
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True, server_default=sa_text('true')) # Boolean 默认值
     # 自动同步设置
-    auto_sync_enabled = Column(Boolean, default=False)
-    sync_interval_hours = Column(Integer, default=24)
+    auto_sync_enabled = Column(Boolean, default=False, server_default=sa_text('false')) # Boolean 默认值
+    sync_interval_hours = Column(Integer, default=24, server_default=sa_func.cast(24, Integer()))
     # 连接健康状态
     last_test_at = Column(DateTime, nullable=True)
     last_test_success = Column(Boolean, nullable=True)
@@ -33,17 +29,17 @@ class TableauConnection(Base):
     # 同步状态
     last_sync_at = Column(DateTime, nullable=True)
     last_sync_duration_sec = Column(Integer, nullable=True)
-    sync_status = Column(String(16), default="idle")  # idle / running / failed
-    created_at = Column(DateTime, default=datetime.now, nullable=False)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    sync_status = Column(String(16), default="idle", server_default=sa_text("'idle'"))  # idle / running / failed
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
+    updated_at = Column(DateTime, server_default=sa_func.now(), onupdate=sa_func.now()) # DateTime 默认值和更新
 
     assets = relationship("TableauAsset", back_populates="connection", cascade="all, delete-orphan")
 
     def to_dict(self) -> Dict[str, Any]:
         next_sync_at = None
         if self.auto_sync_enabled:
+            from datetime import timedelta # 局部导入，避免循环依赖
             if self.last_sync_at:
-                from datetime import timedelta
                 next_dt = self.last_sync_at + timedelta(hours=self.sync_interval_hours or 24)
                 next_sync_at = next_dt.strftime("%Y-%m-%d %H:%M:%S")
             else:
@@ -75,7 +71,7 @@ class TableauConnection(Base):
 
 class TableauAsset(Base):
     """Tableau 资产表（Workbooks, Views, Dashboards, DataSources）"""
-    __tablename__ = "tableau_assets"
+    __tablename__ = "tableau_assets" # 保持现有前缀
     __table_args__ = (
         UniqueConstraint("connection_id", "tableau_id", name="uq_asset_conn_tid"),
         Index("ix_asset_conn_deleted_type", "connection_id", "is_deleted", "asset_type"),
@@ -92,9 +88,9 @@ class TableauAsset(Base):
     owner_name = Column(String(128), nullable=True)
     thumbnail_url = Column(String(512), nullable=True)
     content_url = Column(String(512), nullable=True)
-    raw_metadata = Column(Text, nullable=True)
-    is_deleted = Column(Boolean, default=False)
-    synced_at = Column(DateTime, default=datetime.now, nullable=False)
+    raw_metadata = Column(JSONB, nullable=True) # 改为 JSONB
+    is_deleted = Column(Boolean, default=False, server_default=sa_text('false')) # Boolean 默认值
+    synced_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
     # Phase 1 AI 摘要
     ai_summary = Column(Text, nullable=True)
     ai_summary_generated_at = Column(DateTime, nullable=True)
@@ -103,7 +99,7 @@ class TableauAsset(Base):
     parent_workbook_id = Column(String(256), nullable=True)
     parent_workbook_name = Column(String(256), nullable=True)
     # Phase 2a: 扩展元数据
-    tags = Column(Text, nullable=True)  # JSON 数组
+    tags = Column(JSONB, nullable=True)  # JSON 数组, 改为 JSONB
     sheet_type = Column(String(32), nullable=True)
     created_on_server = Column(DateTime, nullable=True)
     updated_on_server = Column(DateTime, nullable=True)
@@ -113,7 +109,7 @@ class TableauAsset(Base):
     ai_explain_at = Column(DateTime, nullable=True)
     # Phase 2b: 健康度
     health_score = Column(Float, nullable=True)
-    health_details = Column(Text, nullable=True)  # JSON
+    health_details = Column(JSONB, nullable=True)  # JSON, 改为 JSONB
     # Phase 2b: 数据源扩展
     field_count = Column(Integer, nullable=True)
     is_certified = Column(Boolean, nullable=True)
@@ -139,7 +135,7 @@ class TableauAsset(Base):
             "ai_summary_generated_at": self.ai_summary_generated_at.strftime("%Y-%m-%d %H:%M:%S") if self.ai_summary_generated_at else None,
             "parent_workbook_id": self.parent_workbook_id,
             "parent_workbook_name": self.parent_workbook_name,
-            "tags": self.tags,
+            "tags": self.tags, # JSONB 字段直接是 Python 对象
             "sheet_type": self.sheet_type,
             "created_on_server": self.created_on_server.strftime("%Y-%m-%d %H:%M:%S") if self.created_on_server else None,
             "updated_on_server": self.updated_on_server.strftime("%Y-%m-%d %H:%M:%S") if self.updated_on_server else None,
@@ -154,7 +150,7 @@ class TableauAsset(Base):
 
 class TableauAssetDatasource(Base):
     """Tableau 资产的数据源关联表"""
-    __tablename__ = "tableau_asset_datasources"
+    __tablename__ = "tableau_asset_datasources" # 保持现有前缀
     __table_args__ = (
         UniqueConstraint("asset_id", "datasource_name", name="uq_asset_ds_name"),
     )
@@ -177,7 +173,7 @@ class TableauAssetDatasource(Base):
 
 class TableauSyncLog(Base):
     """同步日志表"""
-    __tablename__ = "tableau_sync_logs"
+    __tablename__ = "tableau_sync_logs" # 保持现有前缀
     __table_args__ = (
         Index("ix_synclog_conn_started", "connection_id", "started_at"),
     )
@@ -185,16 +181,16 @@ class TableauSyncLog(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     connection_id = Column(Integer, ForeignKey("tableau_connections.id", ondelete="CASCADE"), nullable=False)
     trigger_type = Column(String(16), nullable=False)  # 'manual' | 'scheduled'
-    started_at = Column(DateTime, nullable=False, default=datetime.now)
+    started_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
     finished_at = Column(DateTime, nullable=True)
-    status = Column(String(16), nullable=False, default="running")  # running / success / partial / failed
-    workbooks_synced = Column(Integer, default=0)
-    views_synced = Column(Integer, default=0)
-    dashboards_synced = Column(Integer, default=0)
-    datasources_synced = Column(Integer, default=0)
-    assets_deleted = Column(Integer, default=0)
+    status = Column(String(16), nullable=False, default="running", server_default=sa_text("'running'"))  # running / success / partial / failed
+    workbooks_synced = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
+    views_synced = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
+    dashboards_synced = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
+    datasources_synced = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
+    assets_deleted = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
     error_message = Column(Text, nullable=True)
-    details = Column(Text, nullable=True)  # JSON
+    details = Column(JSONB, nullable=True)  # JSON, 改为 JSONB
 
     connection = relationship("TableauConnection")
 
@@ -221,7 +217,7 @@ class TableauSyncLog(Base):
 
 class TableauDatasourceField(Base):
     """数据源字段缓存表"""
-    __tablename__ = "tableau_datasource_fields"
+    __tablename__ = "tableau_datasource_fields" # 保持现有前缀
     __table_args__ = (
         Index("ix_dsfield_asset_luid", "asset_id", "datasource_luid"),
     )
@@ -236,9 +232,9 @@ class TableauDatasourceField(Base):
     description = Column(Text, nullable=True)
     formula = Column(Text, nullable=True)
     aggregation = Column(String(32), nullable=True)
-    is_calculated = Column(Boolean, default=False)
-    metadata_json = Column(Text, nullable=True)
-    fetched_at = Column(DateTime, nullable=False, default=datetime.now)
+    is_calculated = Column(Boolean, default=False, server_default=sa_text('false')) # Boolean 默认值
+    metadata_json = Column(JSONB, nullable=True) # 改为 JSONB
+    fetched_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
     # AI 标注
     ai_caption = Column(String(256), nullable=True)
     ai_description = Column(Text, nullable=True)
@@ -270,99 +266,31 @@ class TableauDatasourceField(Base):
         }
 
 
+# 从中央配置导入 SessionLocal
+from app.core.database import SessionLocal
+from sqlalchemy.orm import Session
+
 class TableauDatabase:
-    """Tableau 数据库管理 - 单例模式（线程安全）"""
+    """Tableau 数据库管理 - 不再是单例，直接使用中央 SessionLocal"""
 
-    _instance = None
-    _lock = threading.Lock()
+    def __init__(self, db_path: str = None):
+        """db_path 参数不再使用，保留签名以兼容旧代码"""
+        pass
 
-    def __new__(cls, db_path: str = None):
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    if db_path is None:
-                        import os as _os
-                        db_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "data", "tableau.db")
-                    cls._instance._init_db(db_path)
-        return cls._instance
-
-    def _init_db(self, db_path: str):
-        """初始化数据库"""
-        import os
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        self.engine = create_engine(f"sqlite:///{db_path}", echo=False, pool_pre_ping=True)
-        Base.metadata.create_all(self.engine)
-        self._ensure_columns()
-        Session = sessionmaker(bind=self.engine, expire_on_commit=False)
-        from sqlalchemy.orm import scoped_session
-        self._scoped_session = scoped_session(Session)
-
-    def _ensure_columns(self):
-        """SQLite 迁移：为已有表补充新列"""
-        import sqlite3
-        raw_path = str(self.engine.url).replace("sqlite:///", "")
-        conn = sqlite3.connect(raw_path)
-        cursor = conn.cursor()
-
-        # --- tableau_connections 迁移 ---
-        cursor.execute("PRAGMA table_info(tableau_connections)")
-        conn_cols = {row[1] for row in cursor.fetchall()}
-        conn_migrations = {
-            "connection_type": "VARCHAR(16) NOT NULL DEFAULT 'mcp'",
-            "last_sync_duration_sec": "INTEGER",
-            "sync_status": "VARCHAR(16) DEFAULT 'idle'",
-        }
-        for col, col_def in conn_migrations.items():
-            if col not in conn_cols:
-                cursor.execute(f"ALTER TABLE tableau_connections ADD COLUMN {col} {col_def}")
-
-        # --- tableau_assets 迁移 ---
-        cursor.execute("PRAGMA table_info(tableau_assets)")
-        asset_cols = {row[1] for row in cursor.fetchall()}
-        asset_migrations = {
-            "parent_workbook_id": "VARCHAR(256)",
-            "parent_workbook_name": "VARCHAR(256)",
-            "tags": "TEXT",
-            "sheet_type": "VARCHAR(32)",
-            "created_on_server": "DATETIME",
-            "updated_on_server": "DATETIME",
-            "view_count": "INTEGER",
-            "ai_explain": "TEXT",
-            "ai_explain_at": "DATETIME",
-            "health_score": "FLOAT",
-            "health_details": "TEXT",
-            "field_count": "INTEGER",
-            "is_certified": "BOOLEAN",
-        }
-        for col, col_def in asset_migrations.items():
-            if col not in asset_cols:
-                cursor.execute(f"ALTER TABLE tableau_assets ADD COLUMN {col} {col_def}")
-
-        # --- 索引迁移（IF NOT EXISTS 兼容已有库）---
-        index_stmts = [
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_asset_conn_tid ON tableau_assets(connection_id, tableau_id)",
-            "CREATE INDEX IF NOT EXISTS ix_asset_conn_deleted_type ON tableau_assets(connection_id, is_deleted, asset_type)",
-            "CREATE INDEX IF NOT EXISTS ix_asset_conn_parent ON tableau_assets(connection_id, parent_workbook_id)",
-            "CREATE INDEX IF NOT EXISTS ix_synclog_conn_started ON tableau_sync_logs(connection_id, started_at)",
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_asset_ds_name ON tableau_asset_datasources(asset_id, datasource_name)",
-            "CREATE INDEX IF NOT EXISTS ix_dsfield_asset_luid ON tableau_datasource_fields(asset_id, datasource_luid)",
-        ]
-        for stmt in index_stmts:
-            try:
-                cursor.execute(stmt)
-            except Exception:
-                pass  # 表可能尚未创建，忽略
-
-        conn.commit()
-        conn.close()
+    # _ensure_columns 方法是针对 SQLite 迁移的，在 PostgreSQL 环境中由 Alembic 管理，因此移除
+    # def _ensure_columns(self):
+    #     pass
 
     @property
-    def session(self):
-        return self._scoped_session()
+    def session(self) -> Session:
+        """每次访问获取当前线程的 session，并刷新缓存避免脏读"""
+        s = SessionLocal()
+        s.expire_all()
+        return s
 
-    def close(self):
-        self._scoped_session.remove()
+    # close 方法不再需要
+    # def close(self):
+    #     self.session.remove()
 
     # --- Connection CRUD ---
 
@@ -402,7 +330,7 @@ class TableauDatabase:
         for key, value in kwargs.items():
             if hasattr(conn, key) and value is not None:
                 setattr(conn, key, value)
-        conn.updated_at = datetime.now()
+        # updated_at 会由 onupdate 自动更新
         self.session.commit()
         return True
 
@@ -418,7 +346,7 @@ class TableauDatabase:
         conn = self.get_connection(conn_id)
         if not conn:
             return False
-        conn.last_sync_at = datetime.now()
+        conn.last_sync_at = sa_func.now() # 使用 server_default
         self.session.commit()
         return True
 
@@ -427,7 +355,7 @@ class TableauDatabase:
         conn = self.get_connection(conn_id)
         if not conn:
             return False
-        conn.last_test_at = datetime.now()
+        conn.last_test_at = sa_func.now() # 使用 server_default
         conn.last_test_success = success
         conn.last_test_message = message
         self.session.commit()
@@ -448,7 +376,7 @@ class TableauDatabase:
             for key, value in kwargs.items():
                 if hasattr(existing, key) and value is not None:
                     setattr(existing, key, value)
-            existing.synced_at = datetime.now()
+            existing.synced_at = sa_func.now() # 使用 server_default
             existing.is_deleted = False
             self.session.commit()
             return existing
@@ -474,7 +402,7 @@ class TableauDatabase:
             TableauAsset.is_deleted == False,
             not_(TableauAsset.tableau_id.in_(valid_tableau_ids))
         )
-        count = query.update({TableauAsset.is_deleted: True})
+        count = query.update({TableauAsset.is_deleted: True}, synchronize_session=False) # synchronize_session=False 避免加载所有对象
         self.session.commit()
         return count
 
@@ -565,7 +493,7 @@ class TableauDatabase:
         if not asset:
             return False
         asset.ai_summary = summary
-        asset.ai_summary_generated_at = datetime.now()
+        asset.ai_summary_generated_at = sa_func.now() # 使用 server_default
         asset.ai_summary_error = None
         self.session.commit()
         return True
@@ -585,11 +513,11 @@ class TableauDatabase:
         if not asset:
             return False
         asset.ai_explain = explain
-        asset.ai_explain_at = datetime.now()
+        asset.ai_explain_at = sa_func.now() # 使用 server_default
         self.session.commit()
         return True
 
-    def update_asset_health(self, asset_id: int, score: float, details_json: str) -> bool:
+    def update_asset_health(self, asset_id: int, score: float, details_json: Dict[str, Any]) -> bool: # details_json 现在是 dict
         """更新资产健康评分"""
         asset = self.get_asset(asset_id)
         if not asset:
@@ -625,7 +553,7 @@ class TableauDatabase:
         log = TableauSyncLog(
             connection_id=connection_id,
             trigger_type=trigger_type,
-            started_at=datetime.now(),
+            started_at=sa_func.now(), # 使用 server_default
             status="running",
         )
         self.session.add(log)
@@ -637,7 +565,7 @@ class TableauDatabase:
         log = self.session.query(TableauSyncLog).filter(TableauSyncLog.id == log_id).first()
         if not log:
             return False
-        log.finished_at = datetime.now()
+        log.finished_at = sa_func.now() # 使用 server_default
         log.status = status
         for key, value in counts.items():
             if hasattr(log, key) and value is not None:
@@ -667,9 +595,9 @@ class TableauDatabase:
         self.session.query(TableauDatasourceField).filter(
             TableauDatasourceField.asset_id == asset_id,
             TableauDatasourceField.datasource_luid == datasource_luid,
-        ).delete()
+        ).delete(synchronize_session=False) # synchronize_session=False 避免加载所有对象
 
-        now = datetime.now()
+        now = sa_func.now() # 使用 server_default
         for f in fields:
             field = TableauDatasourceField(
                 asset_id=asset_id,
@@ -712,7 +640,7 @@ class TableauDatabase:
             field.ai_role = ai_role
         if ai_confidence is not None:
             field.ai_confidence = ai_confidence
-        field.ai_annotated_at = datetime.now()
+        field.ai_annotated_at = sa_func.now() # 使用 server_default
         self.session.commit()
         return True
 
@@ -729,5 +657,3 @@ class TableauDatabase:
         self.session.commit()
         return True
 
-    def close(self):
-        self.session.close()

@@ -1,14 +1,12 @@
 """语义维护模块 - SQLAlchemy 数据模型"""
-from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy import (
-    create_engine, Column, Integer, String, DateTime, Boolean,
+    Column, Integer, String, DateTime, Boolean,
     Text, Float, ForeignKey, UniqueConstraint, Index
 )
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship
-
-Base = declarative_base()
+from sqlalchemy.orm import relationship
+from app.core.database import Base, JSONB, sa_func, sa_text # 导入中央配置的 Base, JSONB, func, text
 
 # --- 枚举常量 ---
 class SemanticStatus:
@@ -59,7 +57,7 @@ class PublishStatus:
 
 class TableauDatasourceSemantics(Base):
     """数据源级语义主信息表"""
-    __tablename__ = "tableau_datasource_semantics"
+    __tablename__ = "tableau_datasource_semantics" # 保持现有前缀
     __table_args__ = (
         UniqueConstraint("connection_id", "tableau_datasource_id", name="uq_ds_semantic_conn_ds"),
         Index("ix_ds_semantic_status", "status"),
@@ -76,17 +74,17 @@ class TableauDatasourceSemantics(Base):
     usage_scenarios = Column(Text, nullable=True)
     owner = Column(String(128), nullable=True)
     steward = Column(String(128), nullable=True)
-    sensitivity_level = Column(String(16), default=SensitivityLevel.LOW)
-    tags_json = Column(Text, nullable=True)  # JSON array
-    status = Column(String(32), default=SemanticStatus.DRAFT)
-    source = Column(String(16), default=SemanticSource.MANUAL)
-    current_version = Column(Integer, default=1)
-    published_to_tableau = Column(Boolean, default=False)
+    sensitivity_level = Column(String(16), default=SensitivityLevel.LOW, server_default=sa_text(f"'{SensitivityLevel.LOW}'"))
+    tags_json = Column(JSONB, nullable=True)  # JSON array, 改为 JSONB
+    status = Column(String(32), default=SemanticStatus.DRAFT, server_default=sa_text(f"'{SemanticStatus.DRAFT}'"))
+    source = Column(String(16), default=SemanticSource.MANUAL, server_default=sa_text(f"'{SemanticSource.MANUAL}'"))
+    current_version = Column(Integer, default=1, server_default=sa_func.cast(1, Integer()))
+    published_to_tableau = Column(Boolean, default=False, server_default=sa_text('false')) # Boolean 默认值
     published_at = Column(DateTime, nullable=True)
     created_by = Column(Integer, nullable=True)
     updated_by = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.now, nullable=False)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
+    updated_at = Column(DateTime, server_default=sa_func.now(), onupdate=sa_func.now()) # DateTime 默认值和更新
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -101,7 +99,7 @@ class TableauDatasourceSemantics(Base):
             "owner": self.owner,
             "steward": self.steward,
             "sensitivity_level": self.sensitivity_level,
-            "tags_json": self.tags_json,
+            "tags_json": self.tags_json, # JSONB 字段直接是 Python 对象
             "status": self.status,
             "source": self.source,
             "current_version": self.current_version,
@@ -116,7 +114,7 @@ class TableauDatasourceSemantics(Base):
 
 class TableauDatasourceSemanticVersion(Base):
     """数据源语义历史版本快照"""
-    __tablename__ = "tableau_datasource_semantic_versions"
+    __tablename__ = "tableau_datasource_semantic_versions" # 保持现有前缀
     __table_args__ = (
         Index("ix_ds_ver_sem_id", "datasource_semantic_id"),
     )
@@ -124,10 +122,10 @@ class TableauDatasourceSemanticVersion(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     datasource_semantic_id = Column(Integer, ForeignKey("tableau_datasource_semantics.id", ondelete="CASCADE"), nullable=False)
     version = Column(Integer, nullable=False)
-    snapshot_json = Column(Text, nullable=False)
+    snapshot_json = Column(JSONB, nullable=False) # 完整快照 JSON, 改为 JSONB
     changed_by = Column(Integer, nullable=True)
     change_reason = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
 
     datasource_semantic = relationship("TableauDatasourceSemantics", back_populates="versions")
 
@@ -136,7 +134,7 @@ class TableauDatasourceSemanticVersion(Base):
             "id": self.id,
             "datasource_semantic_id": self.datasource_semantic_id,
             "version": self.version,
-            "snapshot_json": self.snapshot_json,
+            "snapshot_json": self.snapshot_json, # JSONB 字段直接是 Python 对象
             "changed_by": self.changed_by,
             "change_reason": self.change_reason,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
@@ -145,7 +143,7 @@ class TableauDatasourceSemanticVersion(Base):
 
 class TableauFieldSemantics(Base):
     """字段语义版本表"""
-    __tablename__ = "tableau_field_semantics"
+    __tablename__ = "tableau_field_semantics" # 保持现有前缀
     __table_args__ = (
         UniqueConstraint("connection_id", "tableau_field_id", name="uq_field_semantic_conn_fid"),
         Index("ix_field_semantic_status", "status"),
@@ -163,21 +161,21 @@ class TableauFieldSemantics(Base):
     metric_definition = Column(Text, nullable=True)
     dimension_definition = Column(Text, nullable=True)
     unit = Column(String(64), nullable=True)
-    enum_desc_json = Column(Text, nullable=True)
-    tags_json = Column(Text, nullable=True)
-    synonyms_json = Column(Text, nullable=True)
-    sensitivity_level = Column(String(16), default=SensitivityLevel.LOW)
-    is_core_field = Column(Boolean, default=False)
+    enum_desc_json = Column(JSONB, nullable=True) # 改为 JSONB
+    tags_json = Column(JSONB, nullable=True) # 改为 JSONB
+    synonyms_json = Column(JSONB, nullable=True) # 改为 JSONB
+    sensitivity_level = Column(String(16), default=SensitivityLevel.LOW, server_default=sa_text(f"'{SensitivityLevel.LOW}'"))
+    is_core_field = Column(Boolean, default=False, server_default=sa_text('false')) # Boolean 默认值
     ai_confidence = Column(Float, nullable=True)
-    status = Column(String(32), default=SemanticStatus.DRAFT)
-    source = Column(String(16), default=SemanticSource.MANUAL)
-    version = Column(Integer, default=1)
-    published_to_tableau = Column(Boolean, default=False)
+    status = Column(String(32), default=SemanticStatus.DRAFT, server_default=sa_text(f"'{SemanticStatus.DRAFT}'"))
+    source = Column(String(16), default=SemanticSource.MANUAL, server_default=sa_text(f"'{SemanticSource.MANUAL}'"))
+    version = Column(Integer, default=1, server_default=sa_func.cast(1, Integer()))
+    published_to_tableau = Column(Boolean, default=False, server_default=sa_text('false')) # Boolean 默认值
     published_at = Column(DateTime, nullable=True)
     created_by = Column(Integer, nullable=True)
     updated_by = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.now, nullable=False)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
+    updated_at = Column(DateTime, server_default=sa_func.now(), onupdate=sa_func.now()) # DateTime 默认值和更新
 
 
     def to_dict(self) -> Dict[str, Any]:
@@ -192,9 +190,9 @@ class TableauFieldSemantics(Base):
             "metric_definition": self.metric_definition,
             "dimension_definition": self.dimension_definition,
             "unit": self.unit,
-            "enum_desc_json": self.enum_desc_json,
-            "tags_json": self.tags_json,
-            "synonyms_json": self.synonyms_json,
+            "enum_desc_json": self.enum_desc_json, # JSONB 字段直接是 Python 对象
+            "tags_json": self.tags_json, # JSONB 字段直接是 Python 对象
+            "synonyms_json": self.synonyms_json, # JSONB 字段直接是 Python 对象
             "sensitivity_level": self.sensitivity_level,
             "is_core_field": self.is_core_field,
             "ai_confidence": self.ai_confidence,
@@ -212,7 +210,7 @@ class TableauFieldSemantics(Base):
 
 class TableauFieldSemanticVersion(Base):
     """字段语义历史版本快照"""
-    __tablename__ = "tableau_field_semantic_versions"
+    __tablename__ = "tableau_field_semantic_versions" # 保持现有前缀
     __table_args__ = (
         Index("ix_field_ver_sem_id", "field_semantic_id"),
     )
@@ -220,10 +218,10 @@ class TableauFieldSemanticVersion(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     field_semantic_id = Column(Integer, ForeignKey("tableau_field_semantics.id", ondelete="CASCADE"), nullable=False)
     version = Column(Integer, nullable=False)
-    snapshot_json = Column(Text, nullable=False)  # 完整快照 JSON
+    snapshot_json = Column(JSONB, nullable=False)  # 完整快照 JSON, 改为 JSONB
     changed_by = Column(Integer, nullable=True)
     change_reason = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
 
     field_semantic = relationship("TableauFieldSemantics", back_populates="versions")
 
@@ -232,7 +230,7 @@ class TableauFieldSemanticVersion(Base):
             "id": self.id,
             "field_semantic_id": self.field_semantic_id,
             "version": self.version,
-            "snapshot_json": self.snapshot_json,
+            "snapshot_json": self.snapshot_json, # JSONB 字段直接是 Python 对象
             "changed_by": self.changed_by,
             "change_reason": self.change_reason,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
@@ -241,7 +239,7 @@ class TableauFieldSemanticVersion(Base):
 
 class TableauPublishLog(Base):
     """发布回写日志表"""
-    __tablename__ = "tableau_publish_log"
+    __tablename__ = "tableau_publish_logs" # tableau_publish_log → tableau_publish_logs
     __table_args__ = (
         Index("ix_publish_log_conn_status", "connection_id", "status"),
         Index("ix_publish_log_object", "object_type", "object_id"),
@@ -252,13 +250,13 @@ class TableauPublishLog(Base):
     object_type = Column(String(32), nullable=False)  # 'datasource' / 'field'
     object_id = Column(Integer, nullable=False)
     tableau_object_id = Column(String(256), nullable=True)
-    target_system = Column(String(32), default="tableau")
-    publish_payload_json = Column(Text, nullable=True)
-    diff_json = Column(Text, nullable=True)
-    status = Column(String(16), default=PublishStatus.PENDING)
+    target_system = Column(String(32), default="tableau", server_default=sa_text("'tableau'"))
+    publish_payload_json = Column(JSONB, nullable=True) # 改为 JSONB
+    diff_json = Column(JSONB, nullable=True) # 改为 JSONB
+    status = Column(String(16), default=PublishStatus.PENDING, server_default=sa_text(f"'{PublishStatus.PENDING}'"))
     response_summary = Column(Text, nullable=True)
     operator = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -268,8 +266,8 @@ class TableauPublishLog(Base):
             "object_id": self.object_id,
             "tableau_object_id": self.tableau_object_id,
             "target_system": self.target_system,
-            "publish_payload_json": self.publish_payload_json,
-            "diff_json": self.diff_json,
+            "publish_payload_json": self.publish_payload_json, # JSONB 字段直接是 Python 对象
+            "diff_json": self.diff_json, # JSONB 字段直接是 Python 对象
             "status": self.status,
             "response_summary": self.response_summary,
             "operator": self.operator,
@@ -291,3 +289,4 @@ TableauFieldSemantics.versions = relationship(
     cascade="all, delete-orphan",
     order_by="desc(TableauFieldSemanticVersion.version)"
 )
+

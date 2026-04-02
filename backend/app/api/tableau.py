@@ -3,18 +3,20 @@ Tableau 管理 API
 """
 import logging
 import sys
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi import APIRouter, HTTPException, Request, Query, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-from tableau.models import TableauDatabase
-from tableau.sync_service import TableauSyncService, TableauRestSyncService
-from app.core.dependencies import get_current_user
+from services.tableau.models import TableauDatabase, TableauConnection # 导入 TableauConnection 模型
+from services.tableau.sync_service import TableauSyncService, TableauRestSyncService
+from app.core.dependencies import get_current_user, require_roles
 from app.core.crypto import get_tableau_crypto
+from app.core.database import get_db # 导入中央数据库依赖
+from app.utils.auth import verify_connection_access # 导入统一的权限验证函数
 
 router = APIRouter()
 
@@ -25,26 +27,28 @@ _encrypt = _crypto.encrypt
 _decrypt = _crypto.decrypt
 
 
-def _db_path():
-    return str(Path(__file__).parent.parent.parent.parent / "data" / "tableau.db")
+# _db_path 函数不再需要，因为 TableauDatabase 将使用中央配置
+# def _db_path():
+#     return str(Path(__file__).parent.parent.parent.parent / "data" / "tableau.db")
 
 
-def require_admin_or_data_admin(request: Request) -> dict:
-    """仅管理员或数据管理员可访问"""
-    user = get_current_user(request)
-    if user["role"] not in ("admin", "data_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员或数据管理员权限")
-    return user
+# require_admin_or_data_admin 已经通过 app.core.dependencies.require_roles 替代
+# def require_admin_or_data_admin(request: Request) -> dict:
+#     """仅管理员或数据管理员可访问"""
+#     user = get_current_user(request)
+#     if user["role"] not in ("admin", "data_admin"):
+#         raise HTTPException(status_code=403, detail="需要管理员或数据管理员权限")
+#     return user
 
-
-def _verify_connection_access(connection_id: int, user: dict, _db: TableauDatabase) -> None:
-    """验证用户有权访问指定连接（IDOR 修复）"""
-    conn = _db.get_connection(connection_id)
-    if not conn:
-        raise HTTPException(status_code=404, detail="连接不存在")
-    # admin 可访问所有连接，非 admin 只能访问自己的
-    if user["role"] != "admin" and conn.owner_id != user["id"]:
-        raise HTTPException(status_code=403, detail="无权访问该连接")
+# _verify_connection_access 已经提取到 app.utils.auth.py
+# def _verify_connection_access(connection_id: int, user: dict, _db: TableauDatabase) -> None:
+#     """验证用户有权访问指定连接（IDOR 修复）"""
+#     conn = _db.get_connection(connection_id)
+#     if not conn:
+#         raise HTTPException(status_code=404, detail="连接不存在")
+#     # admin 可访问所有连接，非 admin 只能访问自己的
+#     if user["role"] != "admin" and conn.owner_id != user["id"]:
+#         raise HTTPException(status_code=403, detail="无权访问该连接")
 
 
 # --- Pydantic Models ---
@@ -119,10 +123,10 @@ def _test_connection_rest(server_url: str, site: str, token_name: str,
 # --- Endpoints ---
 
 @router.get("/connections")
-async def list_connections(request: Request, include_inactive: bool = False):
+async def list_connections(request: Request, db: Session = Depends(get_db), include_inactive: bool = False):
     """获取 Tableau 连接列表"""
-    user = get_current_user(request)
-    _db = TableauDatabase(db_path=_db_path())
+    user = get_current_user(request, db) # 传递 db
+    _db = TableauDatabase() # 不再需要 db_path
 
     if user["role"] == "admin":
         connections = _db.get_all_connections(include_inactive=include_inactive)
@@ -133,10 +137,10 @@ async def list_connections(request: Request, include_inactive: bool = False):
 
 
 @router.post("/connections")
-async def create_connection(req: CreateConnectionRequest, request: Request):
+async def create_connection(req: CreateConnectionRequest, request: Request, db: Session = Depends(get_db)):
     """创建 Tableau 连接"""
-    user = require_admin_or_data_admin(request)
-    _db = TableauDatabase(db_path=_db_path())
+    user = require_roles(request, ["admin", "data_admin"], db) # 传递 db
+    _db = TableauDatabase() # 不再需要 db_path
 
     if req.connection_type not in ("mcp", "tsc"):
         raise HTTPException(status_code=400, detail="connection_type 必须为 'mcp' 或 'tsc'")
@@ -158,17 +162,13 @@ async def create_connection(req: CreateConnectionRequest, request: Request):
 
 
 @router.put("/connections/{conn_id}")
-async def update_connection(conn_id: int, req: UpdateConnectionRequest, request: Request):
+async def update_connection(conn_id: int, req: UpdateConnectionRequest, request: Request, db: Session = Depends(get_db)):
     """更新 Tableau 连接"""
-    user = require_admin_or_data_admin(request)
-    _db = TableauDatabase(db_path=_db_path())
+    user = require_roles(request, ["admin", "data_admin"], db) # 传递 db
+    _db = TableauDatabase() # 不再需要 db_path
 
-    conn = _db.get_connection(conn_id)
-    if not conn:
-        raise HTTPException(status_code=404, detail="连接不存在")
-
-    if user["role"] != "admin" and conn.owner_id != user["id"]:
-        raise HTTPException(status_code=403, detail="无权修改该连接")
+    # 使用统一的权限验证函数
+    verify_connection_access(conn_id, user, db)
 
     update_data = req.model_dump(exclude_unset=True)
     if "token_value" in update_data and update_data["token_value"]:
@@ -186,34 +186,30 @@ async def update_connection(conn_id: int, req: UpdateConnectionRequest, request:
 
 
 @router.delete("/connections/{conn_id}")
-async def delete_connection(conn_id: int, request: Request):
+async def delete_connection(conn_id: int, request: Request, db: Session = Depends(get_db)):
     """删除 Tableau 连接"""
-    user = require_admin_or_data_admin(request)
-    _db = TableauDatabase(db_path=_db_path())
+    user = require_roles(request, ["admin", "data_admin"], db) # 传递 db
+    _db = TableauDatabase() # 不再需要 db_path
 
-    conn = _db.get_connection(conn_id)
-    if not conn:
-        raise HTTPException(status_code=404, detail="连接不存在")
-
-    if user["role"] != "admin" and conn.owner_id != user["id"]:
-        raise HTTPException(status_code=403, detail="无权删除该连接")
+    # 使用统一的权限验证函数
+    verify_connection_access(conn_id, user, db)
 
     _db.delete_connection(conn_id)
     return {"message": "连接已删除"}
 
 
 @router.post("/connections/{conn_id}/test")
-async def test_connection(conn_id: int, request: Request):
+async def test_connection(conn_id: int, request: Request, db: Session = Depends(get_db)):
     """测试 Tableau 连接"""
-    user = require_admin_or_data_admin(request)
-    _db = TableauDatabase(db_path=_db_path())
+    user = require_roles(request, ["admin", "data_admin"], db) # 传递 db
+    _db = TableauDatabase() # 不再需要 db_path
 
-    conn = _db.get_connection(conn_id)
-    if not conn:
+    # 使用统一的权限验证函数
+    verify_connection_access(conn_id, user, db)
+
+    conn = _db.get_connection(conn_id) # 从 _db 获取连接对象
+    if not conn: # 再次检查，虽然 verify_connection_access 已经检查过
         raise HTTPException(status_code=404, detail="连接不存在")
-
-    if user["role"] != "admin" and conn.owner_id != user["id"]:
-        raise HTTPException(status_code=403, detail="无权操作该连接")
 
     from cryptography.fernet import InvalidToken as FernetInvalidToken
     try:
@@ -263,17 +259,17 @@ async def test_connection(conn_id: int, request: Request):
 
 
 @router.post("/connections/{conn_id}/sync")
-async def sync_connection(conn_id: int, request: Request):
+async def sync_connection(conn_id: int, request: Request, db: Session = Depends(get_db)):
     """触发 Tableau 资产同步"""
-    user = require_admin_or_data_admin(request)
-    _db = TableauDatabase(db_path=_db_path())
+    user = require_roles(request, ["admin", "data_admin"], db) # 传递 db
+    _db = TableauDatabase() # 不再需要 db_path
 
-    conn = _db.get_connection(conn_id)
-    if not conn:
+    # 使用统一的权限验证函数
+    verify_connection_access(conn_id, user, db)
+
+    conn = _db.get_connection(conn_id) # 从 _db 获取连接对象
+    if not conn: # 再次检查，虽然 verify_connection_access 已经检查过
         raise HTTPException(status_code=404, detail="连接不存在")
-
-    if user["role"] != "admin" and conn.owner_id != user["id"]:
-        raise HTTPException(status_code=403, detail="无权操作该连接")
 
     # MCP/REST 连接使用原生 REST API 同步，TSC 连接使用 tableauserverclient
     if getattr(conn, "connection_type", "mcp") == "mcp":
@@ -282,7 +278,7 @@ async def sync_connection(conn_id: int, request: Request):
         return await _sync_tsc(conn, conn_id, _db, _decrypt)
 
 
-async def _sync_mcp_rest(conn, conn_id: int, _db, _decrypt):
+async def _sync_mcp_rest(conn: TableauConnection, conn_id: int, _db: TableauDatabase, _decrypt) -> dict:
     """MCP REST 同步路径（不依赖 TSC 库）"""
     from cryptography.fernet import InvalidToken as FernetInvalidToken
     try:
@@ -332,7 +328,7 @@ async def _sync_mcp_rest(conn, conn_id: int, _db, _decrypt):
         return {"success": False, "message": f"同步失败: {e}"}
 
 
-async def _sync_tsc(conn, conn_id: int, _db, _decrypt):
+async def _sync_tsc(conn: TableauConnection, conn_id: int, _db: TableauDatabase, _decrypt) -> dict:
     """TSC 直连同步路径"""
     from cryptography.fernet import InvalidToken as FernetInvalidToken
     try:
@@ -388,14 +384,15 @@ async def list_assets(
     connection_id: int = Query(..., description="连接 ID"),
     asset_type: Optional[str] = Query(None, description="资产类型: workbook, view, datasource"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100)
+    page_size: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db) # 注入 db
 ):
     """获取资产列表（分页）"""
-    user = get_current_user(request)
-    _db = TableauDatabase(db_path=_db_path())
+    user = get_current_user(request, db) # 传递 db
+    _db = TableauDatabase() # 不再需要 db_path
 
     # 验证用户有权访问该连接
-    _verify_connection_access(connection_id, user, _db)
+    verify_connection_access(connection_id, user, db)
 
     assets, total = _db.get_assets(
         connection_id=connection_id,
@@ -420,15 +417,16 @@ async def search_assets(
     connection_id: Optional[int] = Query(None),
     asset_type: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100)
+    page_size: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db) # 注入 db
 ):
     """搜索资产"""
-    user = get_current_user(request)
-    _db = TableauDatabase(db_path=_db_path())
+    user = get_current_user(request, db) # 传递 db
+    _db = TableauDatabase() # 不再需要 db_path
 
     # 如果指定了 connection_id，验证用户有权访问
     if connection_id is not None:
-        _verify_connection_access(connection_id, user, _db)
+        verify_connection_access(connection_id, user, db)
 
     assets, total = _db.search_assets(
         connection_id=connection_id,
@@ -447,17 +445,17 @@ async def search_assets(
 
 
 @router.get("/assets/{asset_id}")
-async def get_asset(asset_id: int, request: Request):
+async def get_asset(asset_id: int, request: Request, db: Session = Depends(get_db)):
     """获取资产详情"""
-    user = get_current_user(request)
-    _db = TableauDatabase(db_path=_db_path())
+    user = get_current_user(request, db) # 传递 db
+    _db = TableauDatabase() # 不再需要 db_path
 
     asset = _db.get_asset(asset_id)
     if not asset or asset.is_deleted:
         raise HTTPException(status_code=404, detail="资产不存在")
 
     # 验证用户有权访问该资产所属的连接
-    _verify_connection_access(asset.connection_id, user, _db)
+    verify_connection_access(asset.connection_id, user, db)
 
     result = asset.to_dict()
 
@@ -476,14 +474,15 @@ async def get_asset(asset_id: int, request: Request):
 @router.get("/projects")
 async def get_projects(
     request: Request,
-    connection_id: int = Query(..., description="连接 ID")
+    connection_id: int = Query(..., description="连接 ID"),
+    db: Session = Depends(get_db) # 注入 db
 ):
     """获取项目树"""
-    user = get_current_user(request)
-    _db = TableauDatabase(db_path=_db_path())
+    user = get_current_user(request, db) # 传递 db
+    _db = TableauDatabase() # 不再需要 db_path
 
     # 验证用户有权访问该连接
-    _verify_connection_access(connection_id, user, _db)
+    verify_connection_access(connection_id, user, db)
 
     projects = _db.get_project_tree(connection_id)
     return {"projects": projects}
@@ -496,12 +495,13 @@ async def list_sync_logs(
     conn_id: int,
     request: Request,
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100)
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db) # 注入 db
 ):
     """获取同步日志列表"""
-    user = get_current_user(request)
-    _db = TableauDatabase(db_path=_db_path())
-    _verify_connection_access(conn_id, user, _db)
+    user = get_current_user(request, db) # 传递 db
+    _db = TableauDatabase() # 不再需要 db_path
+    verify_connection_access(conn_id, user, db)
 
     logs, total = _db.get_sync_logs(conn_id, page=page, page_size=page_size)
     return {
@@ -514,11 +514,11 @@ async def list_sync_logs(
 
 
 @router.get("/connections/{conn_id}/sync-logs/{log_id}")
-async def get_sync_log(conn_id: int, log_id: int, request: Request):
+async def get_sync_log(conn_id: int, log_id: int, request: Request, db: Session = Depends(get_db)):
     """获取同步日志详情"""
-    user = get_current_user(request)
-    _db = TableauDatabase(db_path=_db_path())
-    _verify_connection_access(conn_id, user, _db)
+    user = get_current_user(request, db) # 传递 db
+    _db = TableauDatabase() # 不再需要 db_path
+    verify_connection_access(conn_id, user, db)
 
     log = _db.get_sync_log(log_id)
     if not log or log.connection_id != conn_id:
@@ -527,18 +527,20 @@ async def get_sync_log(conn_id: int, log_id: int, request: Request):
 
 
 @router.get("/connections/{conn_id}/sync-status")
-async def get_sync_status(conn_id: int, request: Request):
+async def get_sync_status(conn_id: int, request: Request, db: Session = Depends(get_db)):
     """获取连接同步状态"""
-    user = get_current_user(request)
-    _db = TableauDatabase(db_path=_db_path())
-    _verify_connection_access(conn_id, user, _db)
+    user = get_current_user(request, db) # 传递 db
+    _db = TableauDatabase() # 不再需要 db_path
+    verify_connection_access(conn_id, user, db)
 
     conn = _db.get_connection(conn_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="连接不存在")
 
     next_sync_at = None
     if conn.auto_sync_enabled:
+        from datetime import timedelta # 局部导入
         if conn.last_sync_at:
-            from datetime import timedelta
             next_dt = conn.last_sync_at + timedelta(hours=conn.sync_interval_hours or 24)
             next_sync_at = next_dt.strftime("%Y-%m-%d %H:%M:%S")
         else:
@@ -557,15 +559,15 @@ async def get_sync_status(conn_id: int, request: Request):
 # --- Asset Hierarchy (Phase 2a) ---
 
 @router.get("/assets/{asset_id}/children")
-async def get_asset_children(asset_id: int, request: Request):
+async def get_asset_children(asset_id: int, request: Request, db: Session = Depends(get_db)):
     """获取 workbook 下属的 view/dashboard"""
-    user = get_current_user(request)
-    _db = TableauDatabase(db_path=_db_path())
+    user = get_current_user(request, db) # 传递 db
+    _db = TableauDatabase() # 不再需要 db_path
 
     asset = _db.get_asset(asset_id)
     if not asset or asset.is_deleted:
         raise HTTPException(status_code=404, detail="资产不存在")
-    _verify_connection_access(asset.connection_id, user, _db)
+    verify_connection_access(asset.connection_id, user, db)
 
     if asset.asset_type != "workbook":
         return {"children": []}
@@ -575,15 +577,15 @@ async def get_asset_children(asset_id: int, request: Request):
 
 
 @router.get("/assets/{asset_id}/parent")
-async def get_asset_parent(asset_id: int, request: Request):
+async def get_asset_parent(asset_id: int, request: Request, db: Session = Depends(get_db)):
     """获取 view/dashboard 的父 workbook"""
-    user = get_current_user(request)
-    _db = TableauDatabase(db_path=_db_path())
+    user = get_current_user(request, db) # 传递 db
+    _db = TableauDatabase() # 不再需要 db_path
 
     asset = _db.get_asset(asset_id)
     if not asset or asset.is_deleted:
         raise HTTPException(status_code=404, detail="资产不存在")
-    _verify_connection_access(asset.connection_id, user, _db)
+    verify_connection_access(asset.connection_id, user, db)
 
     parent = _db.get_parent_asset(asset_id)
     return {"parent": parent.to_dict() if parent else None}
@@ -596,15 +598,15 @@ class ExplainRequest(BaseModel):
 
 
 @router.post("/assets/{asset_id}/explain")
-async def explain_asset(asset_id: int, req: ExplainRequest, request: Request):
+async def explain_asset(asset_id: int, req: ExplainRequest, request: Request, db: Session = Depends(get_db)):
     """生成/获取深度 AI 解读"""
-    user = get_current_user(request)
-    _db = TableauDatabase(db_path=_db_path())
+    user = get_current_user(request, db) # 传递 db
+    _db = TableauDatabase() # 不再需要 db_path
 
     asset = _db.get_asset(asset_id)
     if not asset or asset.is_deleted:
         raise HTTPException(status_code=404, detail="资产不存在")
-    _verify_connection_access(asset.connection_id, user, _db)
+    verify_connection_access(asset.connection_id, user, db)
 
     # 获取数据源字段元数据（用于 field_semantics，无论是否缓存都需要）
     fields = _db.get_datasource_fields(asset_id)
@@ -621,6 +623,7 @@ async def explain_asset(asset_id: int, req: ExplainRequest, request: Request):
 
     # 缓存：1 小时内不重新生成（除非强制刷新）
     if not req.refresh and asset.ai_explain and asset.ai_explain_at:
+        from datetime import datetime, timedelta # 局部导入
         if datetime.now() - asset.ai_explain_at < timedelta(hours=1):
             return {
                 "explain": asset.ai_explain,
@@ -659,8 +662,8 @@ async def explain_asset(asset_id: int, req: ExplainRequest, request: Request):
 
     # 调用 LLM 生成深度解读
     try:
-        from llm.service import LLMService
-        from llm.prompts import ASSET_EXPLAIN_TEMPLATE
+        from services.llm.service import LLMService
+        from services.llm.prompts import ASSET_EXPLAIN_TEMPLATE
         llm = LLMService()
 
         prompt = ASSET_EXPLAIN_TEMPLATE.format(
@@ -697,38 +700,38 @@ async def explain_asset(asset_id: int, req: ExplainRequest, request: Request):
 # --- Asset Health Score (Phase 2b) ---
 
 @router.get("/assets/{asset_id}/health")
-async def get_asset_health(asset_id: int, request: Request):
+async def get_asset_health(asset_id: int, request: Request, db: Session = Depends(get_db)):
     """获取资产健康评分"""
-    user = get_current_user(request)
-    _db = TableauDatabase(db_path=_db_path())
+    user = get_current_user(request, db) # 传递 db
+    _db = TableauDatabase() # 不再需要 db_path
     asset = _db.get_asset(asset_id)
     if not asset or asset.is_deleted:
         raise HTTPException(status_code=404, detail="资产不存在")
-    _verify_connection_access(asset.connection_id, user, _db)
+    verify_connection_access(asset.connection_id, user, db)
 
-    from tableau.health import compute_asset_health
+    from services.tableau.health import compute_asset_health
     import json as _json
 
     datasources = _db.get_asset_datasources(asset_id)
     fields = _db.get_datasource_fields(asset_id)
     result = compute_asset_health(asset.to_dict(), datasources, fields)
 
-    _db.update_asset_health(asset_id, result["score"], _json.dumps(result, ensure_ascii=False))
+    _db.update_asset_health(asset.id, result["score"], result) # JSONB 字段直接传入 dict
 
     return result
 
 
 @router.get("/connections/{conn_id}/health-overview")
-async def get_connection_health_overview(conn_id: int, request: Request):
+async def get_connection_health_overview(conn_id: int, request: Request, db: Session = Depends(get_db)):
     """连接级健康总览"""
-    user = get_current_user(request)
-    _db = TableauDatabase(db_path=_db_path())
+    user = get_current_user(request, db) # 传递 db
+    _db = TableauDatabase() # 不再需要 db_path
     conn = _db.get_connection(conn_id)
     if not conn:
         raise HTTPException(status_code=404, detail="连接不存在")
-    _verify_connection_access(conn_id, user, _db)
+    verify_connection_access(conn_id, user, db)
 
-    from tableau.health import compute_asset_health, get_health_level
+    from services.tableau.health import compute_asset_health, get_health_level
     import json as _json
 
     assets, total = _db.get_assets(conn_id, include_deleted=False, page=1, page_size=9999)
@@ -756,7 +759,7 @@ async def get_connection_health_overview(conn_id: int, request: Request):
             "level": health["level"],
         })
 
-        _db.update_asset_health(asset.id, health["score"], _json.dumps(health, ensure_ascii=False))
+        _db.update_asset_health(asset.id, health["score"], health) # JSONB 字段直接传入 dict
 
     avg_score = round(total_score / len(assets), 1) if assets else 0
     sorted_issues = sorted(top_issues.items(), key=lambda x: x[1], reverse=True)
@@ -771,3 +774,4 @@ async def get_connection_health_overview(conn_id: int, request: Request):
         "top_issues": [{"check": k, "count": v} for k, v in sorted_issues[:5]],
         "assets": sorted(results, key=lambda x: x["score"]),
     }
+

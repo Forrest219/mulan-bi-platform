@@ -1,23 +1,16 @@
 """需求管理数据模型"""
-from datetime import datetime
 from typing import Optional, List, Dict, Any
-from dataclasses import dataclass, field
-import json
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, JSON
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import sessionmaker, scoped_session
-
-Base = declarative_base()
-
+from sqlalchemy import Column, Integer, String, Text, DateTime
+from app.core.database import Base, JSONB, sa_func # 导入中央配置的 Base, JSONB, func
 
 class Requirement(Base):
     """需求表"""
-    __tablename__ = "requirements"
+    __tablename__ = "bi_requirements" # 表名前缀规范化
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    create_time = Column(DateTime, default=datetime.now, nullable=False)
-    update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    create_time = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
+    update_time = Column(DateTime, server_default=sa_func.now(), onupdate=sa_func.now()) # DateTime 默认值和更新
 
     # 需求基本信息
     title = Column(String(256), nullable=False)  # 需求标题
@@ -29,8 +22,8 @@ class Requirement(Base):
     impact_scope = Column(Text, nullable=True)  # 影响范围
 
     # 状态和优先级
-    status = Column(String(32), default="pending")  # pending, approved, rejected, done
-    priority = Column(String(32), default="medium")  # low, medium, high, urgent
+    status = Column(String(32), default="pending", server_default=sa_text("'pending'"))  # pending, approved, rejected, done
+    priority = Column(String(32), default="medium", server_default=sa_text("'medium'"))  # low, medium, high, urgent
 
     # 关联信息
     related_tables = Column(Text, nullable=True)  # 涉及的表，多个用逗号分隔
@@ -43,7 +36,7 @@ class Requirement(Base):
     approve_time = Column(DateTime, nullable=True)  # 审批时间
 
     # 额外信息
-    extra_data = Column(Text, nullable=True)  # JSON 格式存储额外信息
+    extra_data = Column(JSONB, nullable=True)  # JSON 格式存储额外信息, 改为 JSONB
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -66,34 +59,21 @@ class Requirement(Base):
         }
 
 
+# 从中央配置导入 SessionLocal
+from app.core.database import SessionLocal
+from sqlalchemy.orm import Session
+
 class RequirementDatabase:
-    """需求数据库管理"""
+    """需求数据库管理 - 不再是单例，直接使用中央 SessionLocal"""
 
-    _instance = None
-
-    def __new__(cls, db_path: str = None):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            if db_path is None:
-                import os
-                db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "requirements.db")
-            cls._instance._init_db(db_path)
-        return cls._instance
-
-    def _init_db(self, db_path: str):
-        """初始化数据库"""
-        import os
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
-
-        self.engine = create_engine(f"sqlite:///{db_path}", echo=False)
-        Base.metadata.create_all(self.engine)
-        session_factory = sessionmaker(bind=self.engine)
-        self.Session = scoped_session(session_factory)
+    def __init__(self, db_path: str = None):
+        """db_path 参数不再使用，保留签名以兼容旧代码"""
+        pass
 
     @property
-    def session(self):
+    def session(self) -> Session:
         """每次访问获取当前线程的 session，并刷新缓存避免脏读"""
-        s = self.Session()
+        s = SessionLocal()
         s.expire_all()
         return s
 
@@ -104,7 +84,7 @@ class RequirementDatabase:
 
     def update_requirement(self, req: Requirement):
         """更新需求"""
-        req.update_time = datetime.now()
+        # update_time 会由 onupdate 自动更新，无需手动设置
         self.session.commit()
 
     def delete_requirement(self, req_id: int):
@@ -153,6 +133,7 @@ class RequirementDatabase:
             "done": done
         }
 
-    def close(self):
-        """关闭数据库连接"""
-        self.session.close()
+    # close 方法不再需要
+    # def close(self):
+    #     self.session.close()
+

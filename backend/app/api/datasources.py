@@ -7,13 +7,15 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-from datasources.models import DataSourceDatabase
-from app.core.dependencies import get_current_user
+from services.datasources.models import DataSourceDatabase
+from app.core.dependencies import get_current_user, require_roles
 from app.core.crypto import get_datasource_crypto
+from app.core.database import get_db # 导入中央数据库依赖
 
 router = APIRouter()
 
@@ -22,16 +24,18 @@ _encrypt = _crypto.encrypt
 _decrypt = _crypto.decrypt
 
 
-def _db_path():
-    return str(Path(__file__).parent.parent.parent.parent / "data" / "datasources.db")
+# _db_path 函数不再需要
+# def _db_path():
+#     return str(Path(__file__).parent.parent.parent.parent / "data" / "datasources.db")
 
 
-def require_admin_or_data_admin(request: Request) -> dict:
-    """仅管理员或数据管理员可访问"""
-    user = get_current_user(request)
-    if user["role"] not in ("admin", "data_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员或数据管理员权限")
-    return user
+# require_admin_or_data_admin 已经通过 app.core.dependencies.require_roles 替代
+# def require_admin_or_data_admin(request: Request) -> dict:
+#     """仅管理员或数据管理员可访问"""
+#     user = get_current_user(request)
+#     if user["role"] not in ("admin", "data_admin"):
+#         raise HTTPException(status_code=403, detail="需要管理员或数据管理员权限")
+#     return user
 
 
 class CreateDataSourceRequest(BaseModel):
@@ -58,10 +62,10 @@ class UpdateDataSourceRequest(BaseModel):
 
 
 @router.get("/")
-async def list_datasources(request: Request):
+async def list_datasources(request: Request, db: Session = Depends(get_db)):
     """获取数据源列表"""
-    user = get_current_user(request)
-    _db = DataSourceDatabase(db_path=_db_path())
+    user = get_current_user(request, db) # 传递 db
+    _db = DataSourceDatabase() # 不再需要 db_path
 
     # 管理员看所有，其他用户只看自己创建的
     if user["role"] == "admin":
@@ -73,13 +77,14 @@ async def list_datasources(request: Request):
 
 
 @router.post("/")
-async def create_datasource(request: CreateDataSourceRequest, req: Request):
+async def create_datasource(request: CreateDataSourceRequest, req: Request, db: Session = Depends(get_db)):
     """创建数据源"""
-    user = require_admin_or_data_admin(req)
-    _db = DataSourceDatabase(db_path=_db_path())
+    user = require_roles(req, ["admin", "data_admin"], db) # 传递 db
+    _db = DataSourceDatabase() # 不再需要 db_path
 
     encrypted_password = _encrypt(request.password)
-    extra_config = json.dumps(request.extra_config) if request.extra_config else None
+    # extra_config 现在直接是 dict，无需 json.dumps
+    extra_config = request.extra_config if request.extra_config else None
 
     ds = _db.create(
         name=request.name,
@@ -97,10 +102,10 @@ async def create_datasource(request: CreateDataSourceRequest, req: Request):
 
 
 @router.get("/{ds_id}")
-async def get_datasource(ds_id: int, request: Request):
+async def get_datasource(ds_id: int, request: Request, db: Session = Depends(get_db)):
     """获取单个数据源"""
-    user = get_current_user(request)
-    _db = DataSourceDatabase(db_path=_db_path())
+    user = get_current_user(request, db) # 传递 db
+    _db = DataSourceDatabase() # 不再需要 db_path
 
     ds = _db.get(ds_id)
     if not ds:
@@ -114,10 +119,10 @@ async def get_datasource(ds_id: int, request: Request):
 
 
 @router.put("/{ds_id}")
-async def update_datasource(ds_id: int, request: UpdateDataSourceRequest, req: Request):
+async def update_datasource(ds_id: int, request: UpdateDataSourceRequest, req: Request, db: Session = Depends(get_db)):
     """更新数据源"""
-    user = require_admin_or_data_admin(req)
-    _db = DataSourceDatabase(db_path=_db_path())
+    user = require_roles(req, ["admin", "data_admin"], db) # 传递 db
+    _db = DataSourceDatabase() # 不再需要 db_path
 
     ds = _db.get(ds_id)
     if not ds:
@@ -129,18 +134,18 @@ async def update_datasource(ds_id: int, request: UpdateDataSourceRequest, req: R
     update_data = request.model_dump(exclude_unset=True)
     if "password" in update_data:
         update_data["password_encrypted"] = _encrypt(update_data.pop("password"))
-    if "extra_config" in update_data and update_data["extra_config"]:
-        update_data["extra_config"] = json.dumps(update_data["extra_config"])
+    if "extra_config" in update_data and update_data["extra_config"] is not None: # extra_config 现在直接是 dict
+        update_data["extra_config"] = update_data["extra_config"]
 
     _db.update(ds_id, **update_data)
     return {"message": "数据源更新成功"}
 
 
 @router.delete("/{ds_id}")
-async def delete_datasource(ds_id: int, request: Request):
+async def delete_datasource(ds_id: int, request: Request, db: Session = Depends(get_db)):
     """删除数据源"""
-    user = require_admin_or_data_admin(request)
-    _db = DataSourceDatabase(db_path=_db_path())
+    user = require_roles(request, ["admin", "data_admin"], db) # 传递 db
+    _db = DataSourceDatabase() # 不再需要 db_path
 
     ds = _db.get(ds_id)
     if not ds:
@@ -154,12 +159,12 @@ async def delete_datasource(ds_id: int, request: Request):
 
 
 @router.post("/{ds_id}/test")
-async def test_connection(ds_id: int, request: Request):
+async def test_connection(ds_id: int, request: Request, db: Session = Depends(get_db)):
     """测试数据源连接（10秒超时）"""
     import asyncio
 
-    user = require_admin_or_data_admin(request)
-    _db = DataSourceDatabase(db_path=_db_path())
+    user = require_roles(request, ["admin", "data_admin"], db) # 传递 db
+    _db = DataSourceDatabase() # 不再需要 db_path
 
     ds = _db.get(ds_id)
     if not ds:
@@ -194,3 +199,4 @@ async def test_connection(ds_id: int, request: Request):
     except Exception as e:
         logging.getLogger(__name__).warning("数据源连接测试失败: %s", e, exc_info=True)
         return {"success": False, "message": "连接失败，请检查配置"}
+

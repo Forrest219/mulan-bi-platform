@@ -28,15 +28,11 @@ class LLMTestRequest(BaseModel):
     prompt: str = "Hello, respond with 'OK'"
 
 
-def _db_path():
-    return str(Path(__file__).parent.parent.parent.parent / "data" / "llm.db")
-
-
 @router.get("/config")
 async def get_llm_config(request: Request):
     """获取 LLM 配置（不返回 api_key 明文）"""
     get_current_admin(request)
-    db = LLMConfigDatabase(db_path=_db_path())
+    db = LLMConfigDatabase()
     config = db.get_config()
     if not config:
         return {"config": None, "message": "未配置 LLM"}
@@ -49,7 +45,7 @@ async def save_llm_config(req: LLMConfigRequest, request: Request):
     user = get_current_admin(request)
 
     encrypted_key = _encrypt(req.api_key)
-    db = LLMConfigDatabase(db_path=_db_path())
+    db = LLMConfigDatabase()
     db.save_config(
         provider=req.provider,
         base_url=req.base_url,
@@ -88,7 +84,7 @@ async def test_llm_connection(req: LLMTestRequest, request: Request):
 async def delete_llm_config(request: Request):
     """删除 LLM 配置"""
     get_current_admin(request)
-    db = LLMConfigDatabase(db_path=_db_path())
+    db = LLMConfigDatabase()
     db.delete_config()
     return {"message": "LLM 配置已删除"}
 
@@ -101,8 +97,7 @@ async def get_asset_summary(asset_id: int, request: Request, refresh: bool = Fal
     import datetime
     from tableau.models import TableauDatabase
 
-    db_path = str(Path(__file__).parent.parent.parent.parent / "data" / "tableau.db")
-    db = TableauDatabase(db_path=db_path)
+    db = TableauDatabase()
     asset = db.get_asset(asset_id)
 
     if not asset or asset.is_deleted:

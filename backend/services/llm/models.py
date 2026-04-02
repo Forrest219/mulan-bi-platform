@@ -1,26 +1,23 @@
 """LLM 配置数据模型"""
-import threading
-from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+from typing import Optional
 
-Base = declarative_base()
-
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime
+from app.core.database import Base, sa_func, sa_text # 导入中央配置的 Base, func, text
 
 class LLMConfig(Base):
     """LLM 配置"""
-    __tablename__ = "llm_configs"
+    __tablename__ = "ai_llm_configs" # 表名前缀规范化
 
     id = Column(Integer, primary_key=True)
-    provider = Column(String(32), default="openai")
-    base_url = Column(String(512), default="https://api.openai.com/v1")
-    api_key_encrypted = Column(Text, nullable=False)
-    model = Column(String(128), default="gpt-4o-mini")
-    temperature = Column(Float, default=0.7)
-    max_tokens = Column(Integer, default=1024)
-    is_active = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    provider = Column(String(32), default="openai", server_default=sa_text("'openai'"))
+    base_url = Column(String(512), default="https://api.openai.com/v1", server_default=sa_text("'https://api.openai.com/v1'"))
+    api_key_encrypted = Column(String(512), nullable=False) # 密码加密后长度可能变长，使用 String(512)
+    model = Column(String(128), default="gpt-4o-mini", server_default=sa_text("'gpt-4o-mini'"))
+    temperature = Column(Float, default=0.7, server_default=sa_func.cast(0.7, Float()))
+    max_tokens = Column(Integer, default=1024, server_default=sa_func.cast(1024, Integer()))
+    is_active = Column(Boolean, default=False, server_default=sa_text('false')) # Boolean 默认值
+    created_at = Column(DateTime, server_default=sa_func.now()) # DateTime 默认值
+    updated_at = Column(DateTime, server_default=sa_func.now(), onupdate=sa_func.now()) # DateTime 默认值和更新
 
     def to_dict(self):
         """返回配置，隐藏 api_key"""
@@ -38,31 +35,24 @@ class LLMConfig(Base):
         }
 
 
+# 从中央配置导入 SessionLocal
+from app.core.database import SessionLocal
+from sqlalchemy.orm import Session
+
 class LLMConfigDatabase:
-    """LLM 配置数据库 — 线程安全单例"""
-    _instance = None
-    _lock = threading.Lock()
+    """LLM 配置数据库 - 不再是单例，直接使用中央 SessionLocal"""
 
-    def __new__(cls, db_path: str = None):
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._init_db(db_path)
-        return cls._instance
+    def __init__(self, db_path: str = None):
+        """db_path 参数不再使用，保留签名以兼容旧代码"""
+        pass
 
-    def _init_db(self, db_path: str = None):
-        if db_path is None:
-            import os
-            db_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "llm.db")
-        self._engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
-        Base.metadata.create_all(self._engine)
-        self._Session = sessionmaker(bind=self._engine)
+    def get_session(self) -> Session:
+        """获取当前线程的 session"""
+        s = SessionLocal()
+        s.expire_all()
+        return s
 
-    def get_session(self):
-        return self._Session()
-
-    def get_config(self):
+    def get_config(self) -> Optional[LLMConfig]:
         session = self.get_session()
         try:
             return session.query(LLMConfig).first()
@@ -81,7 +71,7 @@ class LLMConfigDatabase:
                 config.temperature = temperature
                 config.max_tokens = max_tokens
                 config.is_active = is_active
-                config.updated_at = datetime.now()
+                # updated_at 会由 onupdate 自动更新
             else:
                 config = LLMConfig(
                     provider=provider,
@@ -104,3 +94,4 @@ class LLMConfigDatabase:
             session.commit()
         finally:
             session.close()
+
