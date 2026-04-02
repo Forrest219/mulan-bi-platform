@@ -83,6 +83,21 @@ export async function getScanIssues(scanId: number, params?: {
   return res.json();
 }
 
+export async function downloadScanReport(scanId: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/governance/health/scans/${scanId}/report`, { credentials: 'include' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || '导出报告失败');
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `health-report-${scanId}.html`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export async function getHealthSummary(): Promise<{ scans: HealthScan[] }> {
   const res = await fetch(`${API_BASE}/api/governance/health/summary`, { credentials: 'include' });
   if (!res.ok) throw new Error('获取健康总览失败');
