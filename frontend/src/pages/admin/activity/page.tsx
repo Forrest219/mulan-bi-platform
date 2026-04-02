@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { API_BASE, getAvatarGradient } from '../../../config';
 
 interface User {
@@ -31,6 +32,7 @@ export default function ActivityPage() {
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<TimeRange>('7d');
   const [opTypeFilter, setOpTypeFilter] = useState<OpType>('all');
+  const logScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { fetchData(); }, []);
 
@@ -71,6 +73,13 @@ export default function ActivityPage() {
     }
 
     return true;
+  });
+
+  const logVirtualizer = useVirtualizer({
+    count: filteredLogs.length,
+    getScrollElement: () => logScrollRef.current,
+    estimateSize: () => 64,
+    overscan: 10,
   });
 
   // 统计数据
@@ -289,44 +298,52 @@ export default function ActivityPage() {
               <h3 className="text-sm font-semibold text-slate-700">操作日志</h3>
               <span className="text-xs text-slate-400">共 {filteredLogs.length} 条记录</span>
             </div>
-            <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
-              {filteredLogs.map((log) => (
-                <div key={log.id} className={`px-4 py-3 flex items-start gap-3 hover:bg-slate-50/50 ${log.status === 'fail' ? 'bg-red-50/30' : ''}`}>
-                  <div className={`w-8 h-8 flex items-center justify-center rounded-full ${
-                    log.operation_type === 'login' ? 'bg-blue-100 text-blue-600' :
-                    log.operation_type === 'logout' ? 'bg-slate-100 text-slate-600' :
-                    log.status === 'fail' ? 'bg-red-100 text-red-600' :
-                    'bg-emerald-100 text-emerald-600'
-                  }`}>
-                    <i className={log.operation_type === 'login' ? 'ri-login-box-line' :
-                      log.operation_type === 'logout' ? 'ri-logout-box-line' :
-                      log.status === 'fail' ? 'ri-error-warning-line' :
-                      'ri-file-list-3-line'} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <span className={`text-sm font-medium ${log.status === 'fail' ? 'text-red-700' : 'text-slate-700'}`}>
-                        {log.operation_type === 'login' ? '用户登录' :
-                         log.operation_type === 'logout' ? '用户登出' :
-                         log.operation_type}
-                      </span>
-                      <span className="text-xs text-slate-400">{formatDate(log.op_time)}</span>
-                    </div>
-                    <div className="text-xs text-slate-500 mt-0.5">
-                      操作者: {log.operator} {log.target ? `→ ${log.target}` : ''}
-                    </div>
-                  </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${
-                    log.status === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
-                  }`}>
-                    {log.status === 'success' ? '成功' : '失败'}
-                  </span>
-                </div>
-              ))}
-              {filteredLogs.length === 0 && (
+            <div ref={logScrollRef} className="max-h-[600px] overflow-y-auto">
+              {filteredLogs.length === 0 ? (
                 <div className="p-8 text-center text-slate-400">
                   <i className="ri-file-list-3-line text-3xl mb-2 block" />
                   暂无操作日志
+                </div>
+              ) : (
+                <div style={{ height: `${logVirtualizer.getTotalSize()}px`, width: '100%', position: 'relative' }}>
+                  {logVirtualizer.getVirtualItems().map((virtualRow) => {
+                    const log = filteredLogs[virtualRow.index];
+                    return (
+                      <div key={log.id}
+                        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: `${virtualRow.size}px`, transform: `translateY(${virtualRow.start}px)` }}
+                        className={`px-4 py-3 flex items-start gap-3 hover:bg-slate-50/50 border-b border-slate-100 ${log.status === 'fail' ? 'bg-red-50/30' : ''}`}>
+                        <div className={`w-8 h-8 flex items-center justify-center rounded-full ${
+                          log.operation_type === 'login' ? 'bg-blue-100 text-blue-600' :
+                          log.operation_type === 'logout' ? 'bg-slate-100 text-slate-600' :
+                          log.status === 'fail' ? 'bg-red-100 text-red-600' :
+                          'bg-emerald-100 text-emerald-600'
+                        }`}>
+                          <i className={log.operation_type === 'login' ? 'ri-login-box-line' :
+                            log.operation_type === 'logout' ? 'ri-logout-box-line' :
+                            log.status === 'fail' ? 'ri-error-warning-line' :
+                            'ri-file-list-3-line'} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <span className={`text-sm font-medium ${log.status === 'fail' ? 'text-red-700' : 'text-slate-700'}`}>
+                              {log.operation_type === 'login' ? '用户登录' :
+                               log.operation_type === 'logout' ? '用户登出' :
+                               log.operation_type}
+                            </span>
+                            <span className="text-xs text-slate-400">{formatDate(log.op_time)}</span>
+                          </div>
+                          <div className="text-xs text-slate-500 mt-0.5">
+                            操作者: {log.operator} {log.target ? `→ ${log.target}` : ''}
+                          </div>
+                        </div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${
+                          log.status === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
+                        }`}>
+                          {log.status === 'success' ? '成功' : '失败'}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

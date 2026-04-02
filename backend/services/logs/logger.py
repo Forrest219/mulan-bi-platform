@@ -31,22 +31,6 @@ class Logger:
         error_message: str = None,
         results: Dict[str, Any] = None
     ):
-        """
-        记录扫描日志
-
-        Args:
-            database_name: 数据库名称
-            db_type: 数据库类型
-            table_count: 扫描的表数量
-            total_violations: 总违规数
-            error_count: 错误数
-            warning_count: 警告数
-            info_count: 提示数
-            duration_seconds: 耗时（秒）
-            status: 状态 (completed/failed)
-            error_message: 错误信息
-            results: 详细结果
-        """
         log = ScanLog(
             scan_time=datetime.now(),
             database_name=database_name,
@@ -63,7 +47,6 @@ class Logger:
         )
         self._db.add_scan_log(log)
 
-        # 同时记录操作日志
         self.log_operation(
             operation_type="scan",
             target=f"{db_type}:{database_name}",
@@ -81,24 +64,15 @@ class Logger:
         rule_section: str,
         change_type: str,
         operator: str = "system",
+        operator_id: int = None,
         old_value: Any = None,
         new_value: Any = None,
         description: str = None
     ):
-        """
-        记录规则变更日志
-
-        Args:
-            rule_section: 规则配置节
-            change_type: 变更类型 (created/updated/deleted)
-            operator: 操作人
-            old_value: 旧值
-            new_value: 新值
-            description: 描述
-        """
         log = RuleChangeLog(
             change_time=datetime.now(),
             operator=operator,
+            operator_id=operator_id,
             rule_section=rule_section,
             change_type=change_type,
             old_value=json.dumps(old_value, ensure_ascii=False) if old_value else None,
@@ -107,7 +81,6 @@ class Logger:
         )
         self._db.add_rule_change_log(log)
 
-        # 同时记录操作日志
         self.log_operation(
             operation_type="rule_change",
             target=rule_section,
@@ -115,7 +88,9 @@ class Logger:
             details={
                 "change_type": change_type,
                 "description": description
-            }
+            },
+            operator=operator,
+            operator_id=operator_id,
         )
 
     def log_operation(
@@ -124,21 +99,13 @@ class Logger:
         target: str = None,
         status: str = "success",
         details: Any = None,
-        operator: str = "anonymous"
+        operator: str = "anonymous",
+        operator_id: int = None,
     ):
-        """
-        记录操作日志
-
-        Args:
-            operation_type: 操作类型
-            target: 操作目标
-            status: 状态
-            details: 详情
-            operator: 操作人
-        """
         log = OperationLog(
             op_time=datetime.now(),
             operator=operator,
+            operator_id=operator_id,
             operation_type=operation_type,
             target=target,
             status=status,
@@ -147,22 +114,18 @@ class Logger:
         self._db.add_operation_log(log)
 
     def get_scan_history(self, limit: int = 100, database_name: str = None) -> list:
-        """获取扫描历史"""
         logs = self._db.get_scan_logs(limit=limit, database_name=database_name)
         return [log.to_dict() for log in logs]
 
     def get_rule_change_history(self, limit: int = 100) -> list:
-        """获取规则变更历史"""
         logs = self._db.get_rule_change_logs(limit=limit)
         return [log.to_dict() for log in logs]
 
     def get_operation_history(self, limit: int = 100, operation_type: str = None) -> list:
-        """获取操作历史"""
         logs = self._db.get_operation_logs(limit=limit, operation_type=operation_type)
         return [log.to_dict() for log in logs]
 
     def get_statistics(self) -> Dict[str, Any]:
-        """获取统计数据"""
         return self._db.get_statistics()
 
 

@@ -2,14 +2,15 @@
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy import Column, Integer, String, Text, DateTime
-from app.core.database import Base, JSONB, sa_func # 导入中央配置的 Base, JSONB, func
+from app.core.database import Base, JSONB, sa_func, sa_text
+
 
 class ScanLog(Base):
     """扫描日志表"""
-    __tablename__ = "bi_scan_logs" # 表名前缀规范化
+    __tablename__ = "bi_scan_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    scan_time = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
+    scan_time = Column(DateTime, nullable=False, server_default=sa_func.now())
     database_name = Column(String(128), nullable=False)
     db_type = Column(String(32), nullable=False)
     table_count = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
@@ -17,10 +18,10 @@ class ScanLog(Base):
     error_count = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
     warning_count = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
     info_count = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
-    duration_seconds = Column(Text, nullable=True) # 保持 Text，不一定是 JSON
-    status = Column(String(32), default="completed", server_default=sa_text("'completed'")) # String 默认值
+    duration_seconds = Column(Text, nullable=True)
+    status = Column(String(32), default="completed", server_default=sa_text("'completed'"))
     error_message = Column(Text, nullable=True)
-    results_json = Column(JSONB, nullable=True)  # JSON 格式存储违规详情, 改为 JSONB
+    results_json = Column(JSONB, nullable=True)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -41,15 +42,16 @@ class ScanLog(Base):
 
 class RuleChangeLog(Base):
     """规则变更日志表"""
-    __tablename__ = "bi_rule_change_logs" # 表名前缀规范化
+    __tablename__ = "bi_rule_change_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    change_time = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
+    change_time = Column(DateTime, nullable=False, server_default=sa_func.now())
     operator = Column(String(128), default="system", server_default=sa_text("'system'"))
+    operator_id = Column(Integer, nullable=True)
     rule_section = Column(String(64), nullable=False)
-    change_type = Column(String(32), nullable=False)  # created, updated, deleted
-    old_value = Column(Text, nullable=True) # 保持 Text
-    new_value = Column(Text, nullable=True) # 保持 Text
+    change_type = Column(String(32), nullable=False)
+    old_value = Column(Text, nullable=True)
+    new_value = Column(Text, nullable=True)
     description = Column(Text, nullable=True)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -57,6 +59,7 @@ class RuleChangeLog(Base):
             "id": self.id,
             "change_time": self.change_time.strftime("%Y-%m-%d %H:%M:%S") if self.change_time else None,
             "operator": self.operator,
+            "operator_id": self.operator_id,
             "rule_section": self.rule_section,
             "change_type": self.change_type,
             "description": self.description,
@@ -65,100 +68,82 @@ class RuleChangeLog(Base):
 
 class OperationLog(Base):
     """操作日志表"""
-    __tablename__ = "bi_operation_logs" # 表名前缀规范化
+    __tablename__ = "bi_operation_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    op_time = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
+    op_time = Column(DateTime, nullable=False, server_default=sa_func.now())
     operator = Column(String(128), default="anonymous", server_default=sa_text("'anonymous'"))
-    operation_type = Column(String(64), nullable=False)  # login, scan, export, rule_change
-    target = Column(String(256), nullable=True)  # 操作目标
-    status = Column(String(32), default="success", server_default=sa_text("'success'"))  # success, failed
-    details = Column(JSONB, nullable=True)  # JSON 格式存储详情, 改为 JSONB
+    operator_id = Column(Integer, nullable=True)
+    operation_type = Column(String(64), nullable=False)
+    target = Column(String(256), nullable=True)
+    status = Column(String(32), default="success", server_default=sa_text("'success'"))
+    details = Column(JSONB, nullable=True)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
             "op_time": self.op_time.strftime("%Y-%m-%d %H:%M:%S") if self.op_time else None,
             "operator": self.operator,
+            "operator_id": self.operator_id,
             "operation_type": self.operation_type,
             "target": self.target,
             "status": self.status,
-            "details": self.details, # JSONB 字段直接是 Python 对象
+            "details": self.details,
         }
 
 
-# 从中央配置导入 SessionLocal
 from app.core.database import SessionLocal
 from sqlalchemy.orm import Session
 
+
 class LogDatabase:
-    """日志数据库管理 - 不再是单例，直接使用中央 SessionLocal"""
+    """日志数据库管理"""
 
     def __init__(self, db_path: str = None):
-        """db_path 参数不再使用，保留签名以兼容旧代码"""
         pass
 
     @property
     def session(self) -> Session:
-        """每次访问获取当前线程的 session，并刷新缓存避免脏读"""
         s = SessionLocal()
         s.expire_all()
         return s
 
     def add_scan_log(self, log: ScanLog):
-        """添加扫描日志"""
         self.session.add(log)
         self.session.commit()
 
     def add_rule_change_log(self, log: RuleChangeLog):
-        """添加规则变更日志"""
         self.session.add(log)
         self.session.commit()
 
     def add_operation_log(self, log: OperationLog):
-        """添加操作日志"""
         self.session.add(log)
         self.session.commit()
 
     def get_scan_logs(self, limit: int = 100, database_name: str = None) -> List[ScanLog]:
-        """获取扫描日志"""
         query = self.session.query(ScanLog)
         if database_name:
             query = query.filter(ScanLog.database_name == database_name)
         return query.order_by(ScanLog.scan_time.desc()).limit(limit).all()
 
     def get_rule_change_logs(self, limit: int = 100) -> List[RuleChangeLog]:
-        """获取规则变更日志"""
         return self.session.query(RuleChangeLog).order_by(
             RuleChangeLog.change_time.desc()
         ).limit(limit).all()
 
     def get_operation_logs(self, limit: int = 100, operation_type: str = None) -> List[OperationLog]:
-        """获取操作日志"""
         query = self.session.query(OperationLog)
         if operation_type:
             query = query.filter(OperationLog.operation_type == operation_type)
         return query.order_by(OperationLog.op_time.desc()).limit(limit).all()
 
     def get_statistics(self) -> Dict[str, Any]:
-        """获取统计数据"""
         from sqlalchemy import func
-
         total_scans = self.session.query(ScanLog).count()
-        total_tables = self.session.query(
-            func.sum(ScanLog.table_count)
-        ).scalar() or 0
-        total_violations = self.session.query(
-            func.sum(ScanLog.total_violations)
-        ).scalar() or 0
-
+        total_tables = self.session.query(func.sum(ScanLog.table_count)).scalar() or 0
+        total_violations = self.session.query(func.sum(ScanLog.total_violations)).scalar() or 0
         return {
             "total_scans": total_scans,
             "total_tables": total_tables,
             "total_violations": total_violations,
         }
-
-    # close 方法不再需要
-    # def close(self):
-    #     self.session.close()
-

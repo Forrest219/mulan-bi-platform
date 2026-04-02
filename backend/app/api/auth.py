@@ -2,19 +2,15 @@
 认证 API
 """
 import os
-import sys
 import time
 from collections import defaultdict
-from pathlib import Path
 from typing import Optional
 
 import jwt
 from fastapi import APIRouter, HTTPException, Response, Request
 from pydantic import BaseModel
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-
-from auth import auth_service
+from services.auth import auth_service
 from app.core.constants import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRE_SECONDS, MIN_PASSWORD_LENGTH
 from app.core.dependencies import get_current_user as _get_current_user
 
@@ -157,7 +153,7 @@ async def logout(request: Request, response: Response):
         user_info = _decode_session_token(token)
         if user_info:
             try:
-                from logs import logger
+                from services.logs import logger
                 logger.log_operation(
                     operation_type="logout",
                     target=user_info["username"],

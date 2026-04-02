@@ -5,12 +5,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Request
 from typing import Optional
 
-# 导入需求模块
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-
-from requirements import requirement_service
+from services.requirements import requirement_service
 from app.core.dependencies import get_current_user, require_roles
 
 router = APIRouter()

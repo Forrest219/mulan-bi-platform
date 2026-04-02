@@ -3,14 +3,9 @@
 
 提供统一的认证依赖注入函数，消除 API 模块间的重复代码
 """
-import sys
-from pathlib import Path
-
 import jwt
 from fastapi import HTTPException, Request
 from typing import Optional
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
 
 from app.core.constants import JWT_SECRET, JWT_ALGORITHM
 
@@ -51,7 +46,7 @@ def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="无效或已过期的会话")
 
     # 从数据库验证用户当前状态和角色（防止 token 中的角色过期）
-    from auth import auth_service
+    from services.auth import auth_service
     db_user = auth_service.get_user(token_info["id"])
     if not db_user or not db_user.get("is_active"):
         raise HTTPException(status_code=401, detail="用户不存在或已被禁用")

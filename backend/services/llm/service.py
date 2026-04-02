@@ -1,4 +1,4 @@
-"""LLM 调用服务"""
+"""LLM 调用服务（异步）"""
 import os
 import logging
 from typing import Optional
@@ -19,21 +19,41 @@ _decrypt = _crypto.decrypt
 
 
 class LLMService:
-    """LLM 调用服务 — 单例"""
+    """LLM 调用服务 — 单例，异步接口，客户端单例缓存"""
     _instance = None
+    _clients: dict = {}
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._config_db = LLMConfigDatabase()
+            cls._instance._clients = {}
         return cls._instance
 
     def _load_config(self):
         return self._config_db.get_config()
 
-    def complete(self, prompt: str, system: str = None, timeout: int = 15) -> dict:
+    def _get_openai_client(self, api_key: str, base_url: str, timeout: int):
+        from openai import AsyncOpenAI
+        key = f"openai:{base_url}"
+        if key not in self._clients:
+            self._clients[key] = AsyncOpenAI(
+                api_key=api_key, base_url=base_url, timeout=timeout,
+            )
+        return self._clients[key]
+
+    def _get_anthropic_client(self, api_key: str, base_url: str, timeout: int):
+        from anthropic import AsyncAnthropic
+        key = f"anthropic:{base_url}"
+        if key not in self._clients:
+            self._clients[key] = AsyncAnthropic(
+                api_key=api_key, base_url=base_url, timeout=timeout,
+            )
+        return self._clients[key]
+
+    async def complete(self, prompt: str, system: str = None, timeout: int = 15) -> dict:
         """
-        同步 LLM 调用
+        异步 LLM 调用
         Returns: { "content": str } or { "error": str }
         """
         config = self._load_config()
@@ -48,22 +68,21 @@ class LLMService:
 
         try:
             if config.provider == "anthropic":
-                return self._anthropic_complete(api_key, config, prompt, system, timeout)
+                return await self._anthropic_complete(api_key, config, prompt, system, timeout)
             else:
-                return self._openai_complete(api_key, config, prompt, system, timeout)
+                return await self._openai_complete(api_key, config, prompt, system, timeout)
         except Exception as e:
             logger.error("LLM 调用失败: %s", e, exc_info=True)
             return {"error": str(e)}
 
-    def _openai_complete(self, api_key: str, config, prompt: str, system: str, timeout: int) -> dict:
-        from openai import OpenAI
-        client = OpenAI(api_key=api_key, base_url=config.base_url, timeout=timeout)
+    async def _openai_complete(self, api_key: str, config, prompt: str, system: str, timeout: int) -> dict:
+        client = self._get_openai_client(api_key, config.base_url, timeout)
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
         logger.info("LLM 调用（OpenAI）：model=%s, timeout=%ds", config.model, timeout)
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=config.model,
             messages=messages,
             temperature=config.temperature,
@@ -72,10 +91,9 @@ class LLMService:
         content = response.choices[0].message.content.strip()
         return {"content": content}
 
-    def _anthropic_complete(self, api_key: str, config, prompt: str, system: str, timeout: int) -> dict:
-        from anthropic import Anthropic
+    async def _anthropic_complete(self, api_key: str, config, prompt: str, system: str, timeout: int) -> dict:
         base_url = config.base_url or "https://api.minimaxi.com/anthropic"
-        client = Anthropic(api_key=api_key, base_url=base_url, timeout=timeout)
+        client = self._get_anthropic_client(api_key, base_url, timeout)
         messages = []
         if system:
             messages.append({"role": "user", "content": f"<system>{system}</system>\n\n{prompt}"})
@@ -83,7 +101,7 @@ class LLMService:
             messages.append({"role": "user", "content": prompt})
         logger.info("LLM 调用（Anthropic）：model=%s, base_url=%s, timeout=%ds", config.model, base_url, timeout)
         try:
-            response = client.messages.create(
+            response = await client.messages.create(
                 model=config.model,
                 messages=messages,
                 temperature=config.temperature,
@@ -96,7 +114,7 @@ class LLMService:
             return {"error": f"Anthropic API 错误: {error_msg}"}
 
         # 兼容 MiniMax 的 ThinkingBlock（思维链），提取第一个 TextBlock
-        from anthropic.types import TextBlock, Message
+        from anthropic.types import TextBlock
         text_blocks = [block for block in response.content if isinstance(block, TextBlock)]
         if not text_blocks:
             logger.error("Anthropic 响应中无 TextBlock: %s", response.content)
@@ -104,7 +122,7 @@ class LLMService:
         content = text_blocks[0].text.strip()
         return {"content": content}
 
-    def generate_asset_summary(self, asset) -> dict:
+    async def generate_asset_summary(self, asset) -> dict:
         """
         对 Tableau 资产生成摘要
         asset: TableauAsset 对象
@@ -120,14 +138,14 @@ class LLMService:
             owner_name=asset.owner_name or "",
         )
 
-        result = self.complete(prompt, system="你是一个数据分析助手。", timeout=15)
+        result = await self.complete(prompt, system="你是一个数据分析助手。", timeout=15)
         if "content" in result:
             return {"summary": result["content"]}
         return result
 
-    def test_connection(self, test_prompt: str = "Hello, respond with 'OK'") -> dict:
+    async def test_connection(self, test_prompt: str = "Hello, respond with 'OK'") -> dict:
         """测试 LLM 连接"""
-        result = self.complete(test_prompt, timeout=15)
+        result = await self.complete(test_prompt, timeout=15)
         if "error" in result:
             return {"success": False, "message": result["error"]}
         return {"success": True, "message": result["content"]}

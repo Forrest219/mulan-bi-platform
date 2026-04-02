@@ -1,16 +1,14 @@
 """
 DDL 检查 API
 """
+from pathlib import Path
+
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends
 from typing import Optional, List
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-
-from ddl_checker.parser import DDLParser
-from ddl_checker.validator import DDLValidator
+from services.ddl_checker.parser import DDLParser
+from services.ddl_checker.validator import DDLValidator
 from app.core.dependencies import get_current_user
 
 router = APIRouter()

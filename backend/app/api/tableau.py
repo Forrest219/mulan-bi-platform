@@ -2,17 +2,14 @@
 Tableau 管理 API
 """
 import logging
-import sys
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, Query, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-from services.tableau.models import TableauDatabase, TableauConnection # 导入 TableauConnection 模型
-from services.tableau.sync_service import TableauSyncService, TableauRestSyncService
+from services.tableau.models import TableauDatabase, TableauConnection
+from services.tableau.sync_service import TableauSyncService
 from app.core.dependencies import get_current_user, require_roles
 from app.core.crypto import get_tableau_crypto
 from app.core.database import get_db # 导入中央数据库依赖
@@ -260,122 +257,22 @@ async def test_connection(conn_id: int, request: Request, db: Session = Depends(
 
 @router.post("/connections/{conn_id}/sync")
 async def sync_connection(conn_id: int, request: Request, db: Session = Depends(get_db)):
-    """触发 Tableau 资产同步"""
-    user = require_roles(request, ["admin", "data_admin"], db) # 传递 db
-    _db = TableauDatabase() # 不再需要 db_path
+    """触发 Tableau 资产同步（Celery 异步任务）"""
+    user = require_roles(request, ["admin", "data_admin"], db)
+    _db = TableauDatabase()
 
-    # 使用统一的权限验证函数
     verify_connection_access(conn_id, user, db)
 
-    conn = _db.get_connection(conn_id) # 从 _db 获取连接对象
-    if not conn: # 再次检查，虽然 verify_connection_access 已经检查过
+    conn = _db.get_connection(conn_id)
+    if not conn:
         raise HTTPException(status_code=404, detail="连接不存在")
 
-    # MCP/REST 连接使用原生 REST API 同步，TSC 连接使用 tableauserverclient
-    if getattr(conn, "connection_type", "mcp") == "mcp":
-        return await _sync_mcp_rest(conn, conn_id, _db, _decrypt)
-    else:
-        return await _sync_tsc(conn, conn_id, _db, _decrypt)
+    if conn.sync_status == "running":
+        return {"message": "同步正在进行中", "status": "running"}
 
-
-async def _sync_mcp_rest(conn: TableauConnection, conn_id: int, _db: TableauDatabase, _decrypt) -> dict:
-    """MCP REST 同步路径（不依赖 TSC 库）"""
-    from cryptography.fernet import InvalidToken as FernetInvalidToken
-    try:
-        decrypted_token = _decrypt(conn.token_encrypted)
-    except FernetInvalidToken:
-        msg = "Token 解密失败：加密密钥可能已变更，请重新保存 PAT Token"
-        _db.update_connection_health(conn_id, False, msg)
-        return {"success": False, "message": msg}
-    except Exception as e:
-        msg = f"Token 解密失败：{e}"
-        _db.update_connection_health(conn_id, False, msg)
-        return {"success": False, "message": msg}
-
-    try:
-        service = TableauRestSyncService(
-            server_url=conn.server_url,
-            site=conn.site,
-            token_name=conn.token_name,
-            token_value=decrypted_token,
-            api_version=conn.api_version,
-        )
-        try:
-            if not service.connect():
-                return {"success": False, "message": "无法连接到 Tableau Server"}
-
-            result = service.sync_all_assets(_db, conn_id)
-
-            wb_count = len(result['synced'].get("workbook", []))
-            db_count = len(result['synced'].get("dashboard", []))
-            view_count = len(result['synced'].get("view", []))
-            ds_count = len(result['synced'].get("datasource", []))
-            details = f"工作簿:{wb_count} 仪表板:{db_count} 视图:{view_count} 数据源:{ds_count}"
-
-            return {
-                "success": result["status"] != "failed",
-                "message": f"同步{result['status']}，共 {result['total']} 个资产，标记 {result['deleted']} 个已删除，{details}",
-                "sync_log_id": result.get("sync_log_id"),
-                "duration_sec": result.get("duration_sec"),
-                "errors": result.get("errors", []),
-            }
-        finally:
-            service.disconnect()
-    except Exception as e:
-        import traceback
-        logger.error("MCP REST sync error for conn %s: %s", conn_id, e, exc_info=True)
-        _db.set_sync_status(conn_id, "failed")
-        return {"success": False, "message": f"同步失败: {e}"}
-
-
-async def _sync_tsc(conn: TableauConnection, conn_id: int, _db: TableauDatabase, _decrypt) -> dict:
-    """TSC 直连同步路径"""
-    from cryptography.fernet import InvalidToken as FernetInvalidToken
-    try:
-        decrypted_token = _decrypt(conn.token_encrypted)
-    except FernetInvalidToken:
-        msg = "Token 解密失败：加密密钥可能已变更，请重新保存 PAT Token"
-        _db.update_connection_health(conn_id, False, msg)
-        return {"success": False, "message": msg}
-    except Exception as e:
-        msg = f"Token 解密失败：{e}"
-        _db.update_connection_health(conn_id, False, msg)
-        return {"success": False, "message": msg}
-    try:
-        service = TableauSyncService(
-            server_url=conn.server_url,
-            site=conn.site,
-            token_name=conn.token_name,
-            token_value=decrypted_token,
-            api_version=conn.api_version
-        )
-
-        try:
-            if not service.connect():
-                return {"success": False, "message": "无法连接到 Tableau Server"}
-
-            result = service.sync_all_assets(_db, conn_id)
-
-            wb_count = len(result['synced'].get("workbook", []))
-            db_count = len(result['synced'].get("dashboard", []))
-            view_count = len(result['synced'].get("view", []))
-            ds_count = len(result['synced'].get("datasource", []))
-            details = f"工作簿:{wb_count} 仪表板:{db_count} 视图:{view_count} 数据源:{ds_count}"
-
-            return {
-                "success": result["status"] != "failed",
-                "message": f"同步{result['status']}，共 {result['total']} 个资产，标记 {result['deleted']} 个已删除，{details}",
-                "sync_log_id": result.get("sync_log_id"),
-                "duration_sec": result.get("duration_sec"),
-                "errors": result.get("errors", []),
-            }
-        finally:
-            service.disconnect()
-
-    except Exception as e:
-        error_msg = str(e)
-        _db.update_connection_health(conn_id, False, f"同步失败: {error_msg}")
-        return {"success": False, "message": f"同步失败: {error_msg}"}
+    from services.tasks.tableau_tasks import sync_connection_task
+    task = sync_connection_task.delay(conn_id)
+    return {"task_id": task.id, "message": "同步任务已提交", "status": "pending"}
 
 
 @router.get("/assets")
@@ -677,7 +574,7 @@ async def explain_asset(asset_id: int, req: ExplainRequest, request: Request, db
             field_metadata=field_text,
         )
 
-        result = llm.complete(prompt, system="你是一个专业的 BI 报表解读专家。", timeout=30)
+        result = await llm.complete(prompt, system="你是一个专业的 BI 报表解读专家。", timeout=30)
         if isinstance(result, dict) and "error" in result:
             return {"explain": None, "error": result["error"], "cached": False, "field_semantics": field_semantics}
 

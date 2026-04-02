@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 from app.core.dependencies import get_current_admin
+from services.auth import auth_service
 
 router = APIRouter(tags=["用户组管理"])
 
@@ -36,11 +37,6 @@ class AddMembersRequest(BaseModel):
 @router.get("/", dependencies=[Depends(get_current_admin)])
 async def get_groups():
     """获取所有用户组"""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-    from auth import auth_service
-
     groups = auth_service.get_groups()
     return {"groups": groups, "total": len(groups)}
 
@@ -48,11 +44,6 @@ async def get_groups():
 @router.get("/{group_id}", dependencies=[Depends(get_current_admin)])
 async def get_group(group_id: int):
     """获取用户组详情"""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-    from auth import auth_service
-
     group = auth_service.get_group(group_id)
     if not group:
         raise HTTPException(status_code=404, detail="用户组不存在")
@@ -63,11 +54,6 @@ async def get_group(group_id: int):
 @router.post("/", dependencies=[Depends(get_current_admin)])
 async def create_group(request: CreateGroupRequest):
     """创建用户组（管理员）"""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-    from auth import auth_service
-
     # 验证权限
     for perm in request.permissions:
         if perm not in auth_service.ALL_PERMISSIONS:
@@ -88,11 +74,6 @@ async def create_group(request: CreateGroupRequest):
 @router.put("/{group_id}", dependencies=[Depends(get_current_admin)])
 async def update_group(group_id: int, request: UpdateGroupRequest):
     """更新用户组（管理员）"""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-    from auth import auth_service
-
     success = auth_service.update_group(
         group_id=group_id,
         name=request.name,
@@ -108,11 +89,6 @@ async def update_group(group_id: int, request: UpdateGroupRequest):
 @router.delete("/{group_id}", dependencies=[Depends(get_current_admin)])
 async def delete_group(group_id: int):
     """删除用户组（管理员）"""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-    from auth import auth_service
-
     success = auth_service.delete_group(group_id)
     if not success:
         raise HTTPException(status_code=404, detail="用户组不存在")
@@ -123,11 +99,6 @@ async def delete_group(group_id: int):
 @router.get("/{group_id}/members", dependencies=[Depends(get_current_admin)])
 async def get_group_members(group_id: int):
     """获取组成员"""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-    from auth import auth_service
-
     members = auth_service.get_group_members(group_id)
     return {"members": members, "total": len(members)}
 
@@ -135,11 +106,6 @@ async def get_group_members(group_id: int):
 @router.post("/{group_id}/members", dependencies=[Depends(get_current_admin)])
 async def add_group_members(group_id: int, request: AddMembersRequest):
     """添加成员到组（管理员）"""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-    from auth import auth_service
-
     for user_id in request.user_ids:
         auth_service.add_user_to_group(user_id, group_id)
 
@@ -150,11 +116,6 @@ async def add_group_members(group_id: int, request: AddMembersRequest):
 @router.delete("/{group_id}/members/{user_id}", dependencies=[Depends(get_current_admin)])
 async def remove_group_member(group_id: int, user_id: int):
     """从组移除成员（管理员）"""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-    from auth import auth_service
-
     success = auth_service.remove_user_from_group(user_id, group_id)
     if not success:
         raise HTTPException(status_code=404, detail="用户或用户组不存在")
@@ -165,11 +126,6 @@ async def remove_group_member(group_id: int, user_id: int):
 @router.get("/{group_id}/permissions", dependencies=[Depends(get_current_admin)])
 async def get_group_permissions(group_id: int):
     """获取组权限"""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-    from auth import auth_service
-
     permissions = auth_service.get_group_permissions(group_id)
     return {"permissions": permissions}
 
@@ -177,11 +133,6 @@ async def get_group_permissions(group_id: int):
 @router.put("/{group_id}/permissions", dependencies=[Depends(get_current_admin)])
 async def set_group_permissions(group_id: int, request: SetPermissionsRequest):
     """设置组权限（管理员）"""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-    from auth import auth_service
-
     # 验证权限
     for perm in request.permissions:
         if perm not in auth_service.ALL_PERMISSIONS:

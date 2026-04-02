@@ -246,7 +246,7 @@ class SemanticMaintenanceService:
     ) -> tuple:
         """AI 生成数据源语义草稿"""
         try:
-            from llm.service import LLMService
+            from services.llm.service import LLMService
         except ImportError:
             return False, "LLM 服务未配置"
 
@@ -342,7 +342,7 @@ class SemanticMaintenanceService:
     ) -> tuple:
         """AI 生成字段语义草稿"""
         try:
-            from llm.service import LLMService
+            from services.llm.service import LLMService
         except ImportError:
             return False, "LLM 服务未配置"
 

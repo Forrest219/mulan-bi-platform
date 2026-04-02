@@ -1,5 +1,4 @@
 """数仓健康检查 API"""
-import asyncio
 import logging
 from pathlib import Path
 from typing import Optional
@@ -11,10 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user, require_roles
 from app.core.crypto import get_datasource_crypto
-from app.core.database import get_db # 导入中央数据库依赖
+from app.core.database import get_db
 from services.datasources.models import DataSourceDatabase
 from services.health_scan.models import HealthScanDatabase
-from services.health_scan.engine import HealthScanEngine
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -69,12 +67,11 @@ async def trigger_scan(body: ScanRequest, request: Request, db: Session = Depend
         "database": ds.database_name,
     }
 
-    # 后台线程执行扫描
-    engine = HealthScanEngine(db_config)
-    loop = asyncio.get_running_loop()
-    loop.run_in_executor(None, engine.run_scan, scan_db, record.id)
+    # 提交 Celery 异步任务
+    from services.tasks.health_scan_tasks import run_health_scan_task
+    task = run_health_scan_task.delay(record.id, db_config)
 
-    return {"scan_id": record.id, "message": "扫描已启动"}
+    return {"scan_id": record.id, "task_id": task.id, "message": "扫描已启动"}
 
 
 @router.get("/scans")

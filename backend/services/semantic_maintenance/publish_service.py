@@ -341,7 +341,7 @@ class PublishService:
         if not self._auth_token:
             return {}, "未连接"
 
-        results = {"succeeded": [], "failed": [], "skipped": []}
+        results = {"succeeded": [], "failed": [], "skipped": [], "not_supported": []}
 
         for field_id in field_ids:
             field = self.db.get_field_semantics_by_id(field_id)
@@ -366,6 +366,8 @@ class PublishService:
             success, err = self._publish_single_field(field, connection_id, operator)
             if success:
                 results["succeeded"].append({"field_id": field_id})
+            elif err and "暂不支持" in err:
+                results["not_supported"].append({"field_id": field_id, "reason": err})
             else:
                 results["failed"].append({"field_id": field_id, "reason": err})
 
@@ -374,13 +376,18 @@ class PublishService:
     def _publish_single_field(
         self, field, connection_id: int, operator: int = None
     ) -> Tuple[bool, Optional[str]]:
-        """发布单个字段到 Tableau"""
+        """发布单个字段到 Tableau — 当前 REST API 不支持字段级回写"""
         diff_result, err = self.preview_field_diff(connection_id, field.id)
         if err:
             return False, err
 
         if not diff_result.get("can_publish"):
             return False, "无有效差异或被敏感级别阻止"
+
+        not_supported_message = (
+            "Tableau REST API 暂不支持字段级 caption/description 回写，"
+            "语义信息已保存在平台内，但未推送至 Tableau Server。"
+        )
 
         # 创建发布日志
         log = self.db.create_publish_log(
@@ -392,22 +399,15 @@ class PublishService:
             diff_json=json.dumps(diff_result.get("diff", {}), ensure_ascii=False),
         )
 
-        # TODO: Tableau REST API 目前不支持直接更新字段 caption/description
-        # 需要通过 Metadata API 或 PBI 连接器实现
-        # 当前占位：标记 success 但实际回写需要 P3 完善 API 支持
+        # 标记为 NOT_SUPPORTED 而非虚假的 SUCCESS
         self.db.update_publish_log_status(
-            log.id, PublishStatus.SUCCESS,
-            "字段回写已记录（Tableau REST API 暂不支持直接更新字段，需 P3 扩展）"
+            log.id, PublishStatus.NOT_SUPPORTED, not_supported_message
         )
-        from semantic_maintenance.models import TableauFieldSemantics
-        self.db.session.query(TableauFieldSemantics).filter(
-            TableauFieldSemantics.id == field.id
-        ).update({
-            "published_to_tableau": True,
-            "published_at": datetime.now(),
-        })
-        self.db.session.commit()
-        return True, None
+
+        # 不设置 published_to_tableau = True
+        # 不设置 published_at
+
+        return False, not_supported_message
 
     def retry_publish(self, log_id: int, operator: int = None) -> Tuple[Dict[str, Any], Optional[str]]:
         """重试失败的发布任务"""

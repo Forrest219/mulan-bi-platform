@@ -11,7 +11,6 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
 from services.datasources.models import DataSourceDatabase
 from app.core.dependencies import get_current_user, require_roles
 from app.core.crypto import get_datasource_crypto

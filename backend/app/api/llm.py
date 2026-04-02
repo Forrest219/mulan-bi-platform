@@ -1,14 +1,11 @@
 """LLM 管理 API"""
-import sys
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-from llm.models import LLMConfigDatabase
-from llm.service import llm_service, _encrypt
+from services.llm.models import LLMConfigDatabase
+from services.llm.service import llm_service, _encrypt
 from app.core.dependencies import get_current_user, get_current_admin
 
 router = APIRouter()
@@ -57,7 +54,7 @@ async def save_llm_config(req: LLMConfigRequest, request: Request):
     )
 
     try:
-        from logs import logger
+        from services.logs import logger
         logger.log_operation(
             operation_type="llm_config_update",
             target="llm_config",
@@ -76,7 +73,7 @@ async def save_llm_config(req: LLMConfigRequest, request: Request):
 async def test_llm_connection(req: LLMTestRequest, request: Request):
     """测试 LLM 连接"""
     get_current_admin(request)
-    result = llm_service.test_connection(test_prompt=req.prompt)
+    result = await llm_service.test_connection(test_prompt=req.prompt)
     return result
 
 
@@ -115,7 +112,7 @@ async def get_asset_summary(asset_id: int, request: Request, refresh: bool = Fal
             return {"summary": asset.ai_summary, "cached": True}
 
     # 生成新摘要
-    result = llm_service.generate_asset_summary(asset)
+    result = await llm_service.generate_asset_summary(asset)
 
     if "summary" in result:
         db.update_asset_summary(asset_id, result["summary"])

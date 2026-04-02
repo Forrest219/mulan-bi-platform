@@ -7,6 +7,7 @@ from typing import Optional, List
 
 from app.core.dependencies import get_current_user, get_current_admin
 from app.core.constants import VALID_ROLES
+from services.auth import auth_service
 
 router = APIRouter()
 
@@ -33,11 +34,6 @@ class UpdatePermissionsRequest(BaseModel):
 @router.get("/", dependencies=[Depends(get_current_admin)])
 async def get_users(role: Optional[str] = None):
     """获取用户列表（管理员）"""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-    from auth import auth_service
-
     users = auth_service.get_users(role=role)
     return {"users": users, "total": len(users)}
 
@@ -45,11 +41,6 @@ async def get_users(role: Optional[str] = None):
 @router.post("/", dependencies=[Depends(get_current_admin)])
 async def create_user(request: CreateUserRequest):
     """创建用户（管理员）"""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-    from auth import auth_service
-
     if request.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail="无效的角色")
 
@@ -70,11 +61,6 @@ async def create_user(request: CreateUserRequest):
 @router.put("/{user_id}/role", dependencies=[Depends(get_current_admin)])
 async def update_user_role(user_id: int, request: UpdateUserRoleRequest, http_request: Request):
     """更新用户角色（管理员）"""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-    from auth import auth_service
-
     if request.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail="无效的角色")
 
@@ -93,11 +79,6 @@ async def update_user_role(user_id: int, request: UpdateUserRoleRequest, http_re
 @router.put("/{user_id}/toggle-active", dependencies=[Depends(get_current_admin)])
 async def toggle_user_active(user_id: int):
     """切换用户激活状态（管理员）"""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-    from auth import auth_service
-
     success = auth_service.toggle_user_active(user_id)
     if not success:
         raise HTTPException(status_code=404, detail="用户不存在")
@@ -108,11 +89,6 @@ async def toggle_user_active(user_id: int):
 @router.put("/{user_id}/permissions", dependencies=[Depends(get_current_admin)])
 async def update_user_permissions(user_id: int, request: UpdatePermissionsRequest):
     """更新用户权限（管理员）"""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-    from auth import auth_service
-
     # 验证权限
     for perm in request.permissions:
         if perm not in auth_service.ALL_PERMISSIONS:
@@ -128,11 +104,6 @@ async def update_user_permissions(user_id: int, request: UpdatePermissionsReques
 @router.get("/permissions", dependencies=[Depends(get_current_admin)])
 async def get_all_permissions():
     """获取所有可用权限（管理员）"""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-    from auth import auth_service
-
     PERMISSION_LABELS = {
         "ddl_check": "DDL 规范检查",
         "ddl_generator": "DDL 生成器",
@@ -152,11 +123,6 @@ async def get_all_permissions():
 @router.get("/roles", dependencies=[Depends(get_current_admin)])
 async def get_all_roles():
     """获取所有可用角色（管理员）"""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-    from auth import auth_service
-
     roles = [
         {"key": key, "label": label, "permissions": auth_service.ROLE_DEFAULT_PERMISSIONS.get(key, [])}
         for key, label in auth_service.ROLE_LABELS.items()
@@ -167,11 +133,6 @@ async def get_all_roles():
 @router.delete("/{user_id}", dependencies=[Depends(get_current_admin)])
 async def delete_user(user_id: int, http_request: Request):
     """删除用户（管理员）"""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
-    from auth import auth_service
-
     # 防止删除自己
     current_user = get_current_user(http_request)
     if current_user["id"] == user_id:

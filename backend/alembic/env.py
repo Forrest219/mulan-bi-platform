@@ -10,12 +10,10 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-# 确保 backend/ 和 backend/services/ 在 sys.path 中
+# 确保 backend/ 在 sys.path 中
 backend_dir = str(Path(__file__).resolve().parent.parent)
-services_dir = str(Path(backend_dir) / "services")
-for p in [backend_dir, services_dir]:
-    if p not in sys.path:
-        sys.path.insert(0, p)
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
 
 from app.core.database import Base
 
@@ -30,6 +28,7 @@ from services.tableau.models import (  # noqa: F401
     TableauSyncLog, TableauDatasourceField,
 )
 from services.health_scan.models import HealthScanRecord, HealthScanIssue  # noqa: F401
+from services.rules.models import RuleConfig  # noqa: F401
 from services.semantic_maintenance.models import (  # noqa: F401
     TableauDatasourceSemantics, TableauDatasourceSemanticVersion,
     TableauFieldSemantics, TableauFieldSemanticVersion, TableauPublishLog,

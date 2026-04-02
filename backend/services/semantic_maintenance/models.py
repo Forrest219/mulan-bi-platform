@@ -51,6 +51,7 @@ class PublishStatus:
     SUCCESS = "success"
     FAILED = "failed"
     ROLLED_BACK = "rolled_back"
+    NOT_SUPPORTED = "not_supported"
 
 
 # --- 数据模型 ---

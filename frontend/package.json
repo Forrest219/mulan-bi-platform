@@ -13,12 +13,10 @@
     "smoke:ui": "playwright test --ui"
   },
   "dependencies": {
-    "i18next": "^25.3.2",
-    "i18next-browser-languagedetector": "^8.2.0",
+    "@tanstack/react-virtual": "^3.13.0",
     "lucide-react": "^0.469.0",
     "react": "^19.1.2",
     "react-dom": "^19.1.2",
-    "react-i18next": "^15.6.0",
     "react-router-dom": "^7.6.3",
     "recharts": "3.2.0"
   },

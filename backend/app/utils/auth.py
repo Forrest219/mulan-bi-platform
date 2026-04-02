@@ -3,9 +3,6 @@
 
 提供统一的认证依赖注入函数，消除 API 模块间的重复代码
 """
-import sys
-from pathlib import Path
-
 import jwt
 from fastapi import HTTPException, Request, Depends
 from typing import Optional, List
@@ -14,8 +11,6 @@ from typing import Optional, List
 from app.core.database import get_db
 from services.tableau.models import TableauConnection
 from sqlalchemy.orm import Session
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "backend" / "services"))
 
 from app.core.constants import JWT_SECRET, JWT_ALGORITHM
 
