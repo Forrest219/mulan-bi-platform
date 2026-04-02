@@ -4,7 +4,7 @@ import logging
 from typing import Optional
 
 from .models import LLMConfigDatabase
-from common.crypto import CryptoHelper
+from services.common.crypto import CryptoHelper
 
 logger = logging.getLogger(__name__)
 

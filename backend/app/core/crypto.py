@@ -5,7 +5,7 @@
 """
 import os
 
-from common.crypto import CryptoHelper
+from services.common.crypto import CryptoHelper
 
 
 def get_datasource_crypto() -> CryptoHelper:

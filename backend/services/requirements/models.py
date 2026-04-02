@@ -2,7 +2,7 @@
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy import Column, Integer, String, Text, DateTime
-from app.core.database import Base, JSONB, sa_func # 导入中央配置的 Base, JSONB, func
+from app.core.database import Base, JSONB, sa_func, sa_text
 
 class Requirement(Base):
     """需求表"""

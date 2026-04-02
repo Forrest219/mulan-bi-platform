@@ -18,15 +18,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# _db_path 和 _ds_db_path 不再需要
-# def _db_path():
-#     return str(Path(__file__).parent.parent.parent / "data" / "health_scan.db")
-#
-#
-# def _ds_db_path():
-#     return str(Path(__file__).parent.parent.parent / "data" / "datasources.db")
-
-
 class ScanRequest(BaseModel):
     datasource_id: int
 
@@ -34,11 +25,11 @@ class ScanRequest(BaseModel):
 @router.post("/scan")
 async def trigger_scan(body: ScanRequest, request: Request, db: Session = Depends(get_db)):
     """发起健康扫描"""
-    user = get_current_user(request, db) # 传递 db
-    require_roles(request, ["admin", "data_admin"], db) # 传递 db
+    user = get_current_user(request, db)
+    require_roles(request, ["admin", "data_admin"], db)
 
-    ds_db = DataSourceDatabase() # 不再需要 db_path
-    ds = ds_db.get(body.datasource_id) # 使用 get 方法
+    ds_db = DataSourceDatabase()
+    ds = ds_db.get(body.datasource_id)
     if not ds:
         raise HTTPException(status_code=404, detail="数据源不存在")
 
@@ -46,7 +37,7 @@ async def trigger_scan(body: ScanRequest, request: Request, db: Session = Depend
     if user["role"] not in ("admin",) and ds.owner_id != user["id"]:
         raise HTTPException(status_code=403, detail="无权操作此数据源")
 
-    scan_db = HealthScanDatabase() # 不再需要 db_path
+    scan_db = HealthScanDatabase()
     record = scan_db.create_scan(
         datasource_id=ds.id,
         datasource_name=ds.name,
@@ -67,7 +58,7 @@ async def trigger_scan(body: ScanRequest, request: Request, db: Session = Depend
         "database": ds.database_name,
     }
 
-    # 提交 Celery 异步任务
+    # Celery 异步任务执行扫描
     from services.tasks.health_scan_tasks import run_health_scan_task
     task = run_health_scan_task.delay(record.id, db_config)
 
@@ -76,18 +67,18 @@ async def trigger_scan(body: ScanRequest, request: Request, db: Session = Depend
 
 @router.get("/scans")
 async def list_scans(request: Request, datasource_id: Optional[int] = None,
-                     page: int = 1, page_size: int = 20, db: Session = Depends(get_db)):
+                     page: int = 1, page_size: int = 20):
     """扫描历史列表"""
-    get_current_user(request, db) # 传递 db
-    scan_db = HealthScanDatabase() # 不再需要 db_path
+    get_current_user(request)
+    scan_db = HealthScanDatabase()
     return scan_db.list_scans(datasource_id=datasource_id, page=page, page_size=page_size)
 
 
 @router.get("/scans/{scan_id}")
-async def get_scan(scan_id: int, request: Request, db: Session = Depends(get_db)):
+async def get_scan(scan_id: int, request: Request):
     """扫描详情"""
-    get_current_user(request, db) # 传递 db
-    scan_db = HealthScanDatabase() # 不再需要 db_path
+    get_current_user(request)
+    scan_db = HealthScanDatabase()
     record = scan_db.get_scan(scan_id)
     if not record:
         raise HTTPException(status_code=404, detail="扫描记录不存在")
@@ -97,10 +88,10 @@ async def get_scan(scan_id: int, request: Request, db: Session = Depends(get_db)
 @router.get("/scans/{scan_id}/issues")
 async def get_scan_issues(scan_id: int, request: Request,
                           severity: Optional[str] = None,
-                          page: int = 1, page_size: int = 50, db: Session = Depends(get_db)):
+                          page: int = 1, page_size: int = 50):
     """扫描问题列表"""
-    get_current_user(request, db) # 传递 db
-    scan_db = HealthScanDatabase() # 不再需要 db_path
+    get_current_user(request)
+    scan_db = HealthScanDatabase()
     record = scan_db.get_scan(scan_id)
     if not record:
         raise HTTPException(status_code=404, detail="扫描记录不存在")
@@ -108,10 +99,10 @@ async def get_scan_issues(scan_id: int, request: Request,
 
 
 @router.get("/scans/{scan_id}/report")
-async def get_scan_report(scan_id: int, request: Request, db: Session = Depends(get_db)):
+async def get_scan_report(scan_id: int, request: Request):
     """导出 HTML 格式扫描报告"""
-    get_current_user(request, db) # 传递 db
-    scan_db = HealthScanDatabase() # 不再需要 db_path
+    get_current_user(request)
+    scan_db = HealthScanDatabase()
     record = scan_db.get_scan(scan_id)
     if not record:
         raise HTTPException(status_code=404, detail="扫描记录不存在")
@@ -121,63 +112,67 @@ async def get_scan_report(scan_id: int, request: Request, db: Session = Depends(
     all_issues = scan_db.get_scan_issues(scan_id, page=1, page_size=9999)
     issues = all_issues["issues"]
 
-    severity_label = {"high": "高风险", "medium": "中风险", "low": "低风险"}
-    severity_class = {"high": "level-error", "medium": "level-warning", "low": "level-info"}
-    score = record.health_score if record.health_score is not None else 0
-    score_color = "#16a34a" if score >= 90 else "#d97706" if score >= 75 else "#dc2626"
+    # 计算健康评分
+    total = record.total_tables or 1
+    score = max(0, min(100, 100 - record.high_count * 20 - record.medium_count * 5 - record.low_count * 1))
+    score_class = "high" if score >= 80 else "medium" if score >= 60 else "low"
 
-    html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8">
-<title>数仓健康检查报告 - {record.datasource_name}</title>
+    html = f"""
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数仓健康检查报告</title>
 <style>
-body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 30px; background: #f8fafc; color: #334155; }}
-.container {{ max-width: 900px; margin: 0 auto; }}
-h1 {{ font-size: 22px; margin-bottom: 4px; }}
-.subtitle {{ color: #94a3b8; font-size: 13px; margin-bottom: 24px; }}
-.stats {{ display: flex; gap: 16px; margin-bottom: 24px; }}
-.stat {{ background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 20px; flex: 1; }}
-.stat-label {{ font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }}
-.stat-value {{ font-size: 28px; font-weight: 700; margin-top: 4px; }}
-.score {{ color: {score_color}; }}
-table {{ border-collapse: collapse; width: 100%; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }}
-th {{ background: #f1f5f9; text-align: left; padding: 10px 14px; font-size: 11px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }}
-td {{ padding: 10px 14px; border-top: 1px solid #f1f5f9; font-size: 13px; }}
-.level-error {{ background: #fef2f2; }}
-.level-warning {{ background: #fffbeb; }}
-.level-info {{ background: #eff6ff; }}
-.badge {{ display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600; }}
-.badge-high {{ background: #fee2e2; color: #dc2626; }}
-.badge-medium {{ background: #fef3c7; color: #d97706; }}
-.badge-low {{ background: #dbeafe; color: #2563eb; }}
-.footer {{ text-align: center; margin-top: 30px; font-size: 11px; color: #94a3b8; }}
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f8fafc; color: #1e293b; }}
+  .container {{ max-width: 1200px; margin: 0 auto; padding: 24px; }}
+  h1 {{ font-size: 22px; font-weight: 700; margin-bottom: 6px; }}
+  .subtitle {{ font-size: 13px; color: #64748b; margin-bottom: 20px; }}
+  .stats {{ display: flex; gap: 16px; margin-bottom: 24px; }}
+  .stat {{ background: white; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; flex: 1; text-align: center; }}
+  .stat-label {{ font-size: 12px; color: #64748b; margin-bottom: 6px; }}
+  .stat-value {{ font-size: 24px; font-weight: 700; }}
+  .stat-value.score {{ color: #059669; }}
+  .stat-value.score.medium {{ color: #d97706; }}
+  .stat-value.score.low {{ color: #dc2626; }}
+  table {{ width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; border: 1px solid #e2e8f0; }}
+  th {{ background: #f1f5f9; padding: 10px 12px; text-align: left; font-size: 12px; font-weight: 600; color: #475569; border-bottom: 1px solid #e2e8f0; }}
+  td {{ padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #f1f5f9; }}
+  tr:last-child td {{ border-bottom: none; }}
+  .badge {{ display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600; }}
+  .badge-high {{ background: #fee2e2; color: #dc2626; }}
+  .badge-medium {{ background: #fef3c7; color: #d97706; }}
+  .badge-low {{ background: #dbeafe; color: #2563eb; }}
+  .footer {{ text-align: center; margin-top: 30px; font-size: 11px; color: #94a3b8; }}
 </style></head><body>
 <div class="container">
 <h1>数仓健康检查报告</h1>
-<p class="subtitle">{record.datasource_name} · {record.db_type} · {record.database_name} · {record.finished_at.strftime("%Y-%m-%d %H:%M:%S") if record.finished_at else record.started_at.strftime("%Y-%m-%d %H:%M:%S") if record.started_at else ''}</p>
+<p class="subtitle">{record.datasource_name} · {record.db_type} · {record.database_name} · {record.finished_at or record.started_at or ''}</p>
 <div class="stats">
-  <div class="stat"><div class="stat-label">健康评分</div><div class="stat-value score">{score}</div></div>
+  <div class="stat"><div class="stat-label">健康评分</div><div class="stat-value score {score_class}">{score}</div></div>
   <div class="stat"><div class="stat-label">检查表数</div><div class="stat-value">{record.total_tables}</div></div>
   <div class="stat"><div class="stat-label">问题总数</div><div class="stat-value">{record.total_issues}</div></div>
   <div class="stat"><div class="stat-label">高 / 中 / 低</div><div class="stat-value" style="font-size:20px">{record.high_count} / {record.medium_count} / {record.low_count}</div></div>
 </div>
 <table>
 <thead><tr><th>风险</th><th>对象类型</th><th>对象名称</th><th>问题类型</th><th>描述</th><th>建议</th></tr></thead>
-<tbody>"""
+<tbody>
+"""
 
     for issue in issues:
-        sev = issue["severity"]
-        cls = severity_class.get(sev, "level-info")
-        label = severity_label.get(sev, sev)
-        badge = f"badge-{sev}"
-        obj_type = "表" if issue["object_type"] == "table" else "字段"
+        severity_map = {"HIGH": "high", "MEDIUM": "medium", "LOW": "low"}
+        sev = issue.get("severity", "MEDIUM")
+        sev_class = severity_map.get(sev, "medium")
         html += f"""
-<tr class="{cls}">
-  <td><span class="badge {badge}">{label}</span></td>
-  <td>{obj_type}</td>
-  <td style="font-family:monospace">{issue["object_name"]}</td>
-  <td>{issue["issue_type"]}</td>
-  <td>{issue["description"]}</td>
-  <td>{issue["suggestion"]}</td>
+<tr>
+  <td><span class="badge badge-{sev_class}">{sev}</span></td>
+  <td>{issue.get('object_type', '')}</td>
+  <td><code>{issue.get('object_name', '')}</code></td>
+  <td>{issue.get('issue_type', '')}</td>
+  <td>{issue.get('description', '')}</td>
+  <td>{issue.get('suggestion', '')}</td>
 </tr>"""
 
     if not issues:
@@ -189,4 +184,14 @@ td {{ padding: 10px 14px; border-top: 1px solid #f1f5f9; font-size: 13px; }}
 </div></body></html>"""
 
     return HTMLResponse(content=html, headers={
-        "Content-Disposition": f'attachment
+        "Content-Disposition": f'attachment; filename="health-report-{scan_id}.html"'
+    })
+
+
+@router.get("/summary")
+async def get_health_summary(request: Request):
+    """总览：每个数据源的最新扫描"""
+    get_current_user(request)
+    scan_db = HealthScanDatabase()
+    records = scan_db.get_latest_scans()
+    return {"scans": [r.to_dict() for r in records]}
