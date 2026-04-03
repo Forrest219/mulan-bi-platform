@@ -13,7 +13,6 @@ def test_me_without_auth(client):
 
 def test_login_success(admin_client):
     resp = admin_client.get("/api/auth/me")
-    # 如果管理员登录成功，应返回用户信息
-    if resp.status_code == 200:
-        data = resp.json()
-        assert "username" in data or "user" in data
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "username" in data or "user" in data

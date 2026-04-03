@@ -618,11 +618,33 @@ BLOCKED_SENSITIVITY = {SensitivityLevel.HIGH, SensitivityLevel.CONFIDENTIAL}
 
 ## §11 CI/CD 约定
 
-- **Lint**：`npm run lint`（ESLint，0 warnings 策略）
-- **Type Check**：`npm run type-check`（TypeScript）
-- **Build**：`npm run build`（Vite production build）
-- **Backend Check**：`python3 -m py_compile` + `from app.main import app`
-- 所有 job 必须通过才能 merge
+### Frontend Job
+| 步骤 | 命令 | 说明 |
+|------|------|------|
+| Lint | `npm run lint` | ESLint，0 warnings |
+| Type Check | `npm run type-check` | TypeScript |
+| Unit Tests | `npm run test -- --coverage` | Vitest + RTL，覆盖率报告 |
+| Build | `npm run build` | Vite production build |
+
+### Backend Job (PostgreSQL service container)
+| 步骤 | 命令 | 说明 |
+|------|------|------|
+| Syntax Check | `python3 -m py_compile` | 全量 Python 文件 |
+| Import Check | `from app.main import app` | 验证无导入错误 |
+| Tests + Coverage | `pytest tests/ --cov=services --cov=app --cov-fail-under=50` | pytest + pytest-cov，门槛 50% |
+
+### 覆盖率门槛
+- `services/` — ≥ 50%
+- `app/` — ≥ 50%
+- `frontend/src/` — 鼓励 ≥ 50%
+
+### 断言规范
+- 禁止软断言（`if resp.status_code == 200` 静默通过）
+- 必须用硬断言 `assert resp.status_code == 200, f"Got {resp.status_code}: {resp.text}"`
+
+### 数据库
+- CI 使用 `postgres:16` Docker service，测试库 `mulan_bi_test`
+- 开发：`docker-compose up -d` 启动后手动跑测试
 
 ---
 

@@ -8,14 +8,13 @@ def test_get_connections_without_auth(client):
 
 def test_get_connections(admin_client):
     resp = admin_client.get("/api/tableau/connections")
-    if resp.status_code == 200:
-        data = resp.json()
-        assert "connections" in data
-        assert isinstance(data["connections"], list)
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+    data = resp.json()
+    assert "connections" in data
+    assert isinstance(data["connections"], list)
 
 
-def test_get_assets(admin_client):
+def test_get_assets_requires_connection_id(admin_client):
+    """GET /api/tableau/assets 需要 connection_id，未提供时返回 422"""
     resp = admin_client.get("/api/tableau/assets")
-    if resp.status_code == 200:
-        data = resp.json()
-        assert "assets" in data
+    assert resp.status_code == 422, f"Expected 422 for missing connection_id, got {resp.status_code}: {resp.text}"

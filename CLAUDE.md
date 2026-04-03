@@ -5,7 +5,7 @@
 ## ⚠️ Gemini MCP 使用规则
 
 - **NEVER** use `gemini-2.5-pro` via MCP. It causes quota errors on this API key.
-- **ALWAYS** specify `model="gemini-2.5-flash"` or `model="gemini-2.0-flash"` when calling Gemini MCP tools.
+- **ALWAYS** specify `model="gemini-2.5-flash"` when calling Gemini MCP tools.
 - If `gemini_codebase_analyzer` fails due to quota, fallback to reading files manually and using current session model for analysis.
 - The API key `AIzaSyAoHsKF8oO_z2Y1uXtihi0BgdvjjKBfz_A` is on free tier — use Flash models only.
 
@@ -158,6 +158,31 @@ Opus 在终审阶段可执行的动作：
 3. **所有交接均为文件交接，不以口头上下文传递**
 4. **Opus 终审不得做大规模代码修改（量化标准见上方规则 3）**
 5. **Final Approval 必须输出 SPEC 合规 + 真实风险两维报告**
+
+---
+
+## 测试规范（强制）
+
+新功能提交前必须满足以下条件，否则 CI 失败：
+
+### 后端测试
+- **框架**: pytest + pytest-cov（已在 `backend/requirements.txt`）
+- **覆盖率门槛**: 核心服务层 (`services/`) ≥ 50%，API 层 (`app/`) ≥ 50%
+- **断言**: 必须使用硬断言 `assert resp.status_code == 200`，禁止 `if resp.status_code == 200` 静默通过
+- **单元测试文件**: `backend/tests/test_*.py`
+- **运行**: `cd backend && pytest tests/ --cov=services --cov=app --cov-fail-under=50`
+- **新增测试场景**: auth (密码哈希/JWT)、health scoring (7因子算法)、encryption (Fernet)
+
+### 前端测试
+- **框架**: Vitest + React Testing Library（已在 `frontend/package.json`）
+- **单元测试文件**: `frontend/tests/unit/*.test.{ts,tsx}`
+- **运行**: `cd frontend && npm test`
+- **覆盖率**: 鼓励达到 50%+
+
+### CI 执行
+- `.github/workflows/ci.yml` 中两个 job 均运行测试
+- PostgreSQL service container 供后端测试使用
+- 不跑的测试 = 不存在的测试
 
 ---
 

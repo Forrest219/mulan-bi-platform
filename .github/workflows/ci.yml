@@ -27,11 +27,28 @@ jobs:
       - name: Lint
         run: cd frontend && npm run lint
 
+      - name: Unit tests
+        run: cd frontend && npm run test -- --coverage
+
       - name: Build
         run: cd frontend && npm run build
 
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: mulan
+          POSTGRES_PASSWORD: mulan
+          POSTGRES_DB: mulan_bi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -48,7 +65,32 @@ jobs:
 
       - name: Verify backend app imports
         env:
+          DATABASE_URL: postgresql://mulan:mulan@localhost:5432/mulan_bi_test
           SESSION_SECRET: test-secret
-          DATASOURCE_ENCRYPTION_KEY: test-encryption-key-32-bytes-ok
-          TABLEAU_ENCRYPTION_KEY: test-tableau-key-32-bytes-ok
+          ADMIN_USERNAME: admin
+          ADMIN_PASSWORD: admin123
+          DATASOURCE_ENCRYPTION_KEY: test-datasource-key-32-bytes-ok!!
+          TABLEAU_ENCRYPTION_KEY: test-tableau-key-32-bytes-ok!!
+          LLM_ENCRYPTION_KEY: test-llm-key-32-bytes-ok!!!!
         run: cd backend && python3 -c "from app.main import app; print('Backend app OK')"
+
+      - name: Run tests with coverage
+        env:
+          DATABASE_URL: postgresql://mulan:mulan@localhost:5432/mulan_bi_test
+          SESSION_SECRET: test-secret
+          ADMIN_USERNAME: admin
+          ADMIN_PASSWORD: admin123
+          DATASOURCE_ENCRYPTION_KEY: test-datasource-key-32-bytes-ok!!
+          TABLEAU_ENCRYPTION_KEY: test-tableau-key-32-bytes-ok!!
+          LLM_ENCRYPTION_KEY: test-llm-key-32-bytes-ok!!!!
+        run: |
+          cd backend
+          alembic upgrade head || true
+          pytest tests/ --cov=services --cov=app --cov-report=xml --cov-report=term-missing --cov-fail-under=50 -q
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: backend/coverage.xml
+          fail_ci_if_error: false
+          verbose: true
