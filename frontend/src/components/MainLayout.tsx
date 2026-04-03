@@ -91,7 +91,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             {visibleSections.map((section) => (
               <div key={section.section} className="mb-4">
                 <div className="px-3 mb-1">
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                  <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide">
                     {section.section}
                   </span>
                 </div>
@@ -103,7 +103,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                       to={item.path}
                       className={`flex items-center gap-2.5 px-3 py-2 rounded-lg mb-0.5 transition-colors ${
                         active
-                          ? 'bg-blue-50 text-blue-600'
+                          ? 'bg-blue-50 text-blue-700 font-medium'
                           : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
                       }`}
                     >
@@ -119,7 +119,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             {isAdmin && (
               <div className="mb-4">
                 <div className="px-3 mb-1">
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                  <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide">
                     后台管理
                   </span>
                 </div>
@@ -139,18 +139,18 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           </nav>
 
           {/* 用户信息 */}
-          <div className="px-3 py-3 border-t border-slate-100">
-            <div className="flex items-center gap-2.5 px-3 py-2 bg-slate-50 rounded-lg">
+          <div className="px-3 py-3 border-t border-gray-200 bg-slate-50">
+            <div className="flex items-center gap-2.5 px-3 py-2">
               <div className="w-7 h-7 flex items-center justify-center bg-blue-100 text-blue-600 rounded-full shrink-0">
                 <span className="text-xs font-semibold">
                   {user?.display_name?.charAt(0) || 'A'}
                 </span>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-[12px] font-medium text-slate-700 truncate">
+                <div className="text-[12px] font-semibold text-gray-700 truncate">
                   {user?.display_name}
                 </div>
-                <div className="text-[10px] text-slate-400">{user?.username}</div>
+                <div className="text-[10px] text-gray-500">{user?.username}</div>
               </div>
             </div>
           </div>

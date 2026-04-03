@@ -167,9 +167,9 @@ export default function TableauAssetBrowserPage() {
           {/* Main Content */}
           <main className="flex-1">
             {loading ? (
-              <div className="text-center py-20 text-slate-400">
-                <i className="ri-loader-4-line text-2xl animate-spin" />
-                <p className="mt-2">加载中...</p>
+              <div className="flex flex-col items-center justify-center py-20">
+                <i className="ri-loader-4-line text-2xl text-blue-600 animate-spin" />
+                <p className="mt-3 text-sm text-gray-500">加载中...</p>
               </div>
             ) : assets.length === 0 ? (
               <div className="text-center py-20 text-slate-400">
