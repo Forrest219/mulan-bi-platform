@@ -1,0 +1,1155 @@
+# 语义层-LLM 集成协议技术规格书
+
+| 属性 | 值 |
+|------|-----|
+| 版本 | v1.0 |
+| 日期 | 2026-04-04 |
+| 状态 | 草稿 |
+| 作者 | Mulan BI Platform Team |
+| 模块路径 | `backend/services/semantic_maintenance/` + `backend/services/llm/` |
+| 关联 ARCHITECTURE | `docs/ARCHITECTURE.md` §6 |
+
+---
+
+## 目录
+
+1. [概述](#1-概述)
+2. [集成架构](#2-集成架构)
+3. [上下文组装协议](#3-上下文组装协议)
+4. [Prompt 模板注册](#4-prompt-模板注册)
+5. [AI 语义生成协议](#5-ai-语义生成协议)
+6. [NL-to-VizQL 协议](#6-nl-to-vizql-协议)
+7. [置信度与质量控制](#7-置信度与质量控制)
+8. [错误码](#8-错误码)
+9. [安全](#9-安全)
+10. [时序图](#10-时序图)
+11. [测试策略](#11-测试策略)
+12. [开放问题](#12-开放问题)
+
+---
+
+## 1. 概述
+
+### 1.1 目的
+
+本规格书定义**语义维护模块（Semantic Maintenance）与 LLM 能力层（LLM Layer）之间的集成协议**，填补 `ARCHITECTURE.md` §6 所描述的交互标准与实际代码实现之间的架构空白。
+
+当前现状：
+- `service.py` 中的 `generate_ai_draft_datasource()` 和 `generate_ai_draft_field()` 直接在业务方法内硬编码 Prompt 和 JSON 解析逻辑
+- 上下文组装、Token 预算控制、置信度阈值判定等关键协议分散在业务代码中，缺乏统一规范
+- NL-to-VizQL 的 Prompt 模板已定义（`prompts.py`）但无完整的输入/输出契约规范
+
+本规格书将以上交互行为标准化为可测试、可审计的集成协议。
+
+### 1.2 范围
+
+- **包含**：
+  - Semantic -> LLM 调用链路与上下文组装协议
+  - AI 语义生成的输入/输出契约（JSON Schema）
+  - NL-to-VizQL 的输入/输出契约
+  - Token 预算管理与截断策略
+  - 置信度阈值与质量控制机制
+  - 错误处理与降级策略
+  - 敏感度过滤安全策略
+
+- **不包含**：
+  - LLM 供应商接入细节（见 [08-llm-layer-spec.md](08-llm-layer-spec.md)）
+  - 语义状态机与 CRUD 逻辑（见 [09-semantic-maintenance-spec.md](09-semantic-maintenance-spec.md)）
+  - 前端交互流程
+  - 多模型路由策略（列入开放问题）
+
+### 1.3 关联文档
+
+| 文档 | 路径 | 关系 |
+|------|------|------|
+| 架构规范 §6 | `docs/ARCHITECTURE.md` | 交互标准定义源 |
+| LLM 层规格书 | `docs/specs/08-llm-layer-spec.md` | 下游能力提供方 |
+| 语义维护规格书 | `docs/specs/09-semantic-maintenance-spec.md` | 上游数据提供方 |
+| Prompt 模板 | `backend/services/llm/prompts.py` | 模板实现 |
+| LLM 服务 | `backend/services/llm/service.py` | 调用入口 |
+| 语义服务 | `backend/services/semantic_maintenance/service.py` | AI 生成调用方 |
+
+---
+
+## 2. 集成架构
+
+### 2.1 Semantic -> LLM 调用链路图
+
+```mermaid
+graph TB
+    subgraph 语义维护模块
+        SM_SVC[SemanticMaintenanceService]
+        SM_DB[(语义数据库<br/>field_semantics<br/>datasource_semantics)]
+        CTX_ASM[上下文组装器<br/>ContextAssembler]
+    end
+
+    subgraph LLM 能力层
+        LLM_SVC[LLMService 单例]
+        PROMPTS[Prompt 模板注册表<br/>prompts.py]
+        CRYPTO[CryptoHelper]
+    end
+
+    subgraph 外部供应商
+        OPENAI[OpenAI / 兼容接口]
+        ANTHROPIC[Anthropic / MiniMax]
+    end
+
+    subgraph Tableau 数据服务
+        FIELD_REG[(tableau_datasource_fields)]
+        FIELD_SYNC[FieldSyncService]
+    end
+
+    SM_SVC -->|1. 查询字段元数据| SM_DB
+    SM_SVC -->|2. 加载字段注册表| FIELD_REG
+    SM_SVC -->|3. 组装上下文| CTX_ASM
+    CTX_ASM -->|4. 选择模板| PROMPTS
+    CTX_ASM -->|5. Token 预算截断| CTX_ASM
+    SM_SVC -->|6. 调用 complete()| LLM_SVC
+    LLM_SVC -->|7. 解密 API Key| CRYPTO
+    LLM_SVC -->|8a. OpenAI 协议| OPENAI
+    LLM_SVC -->|8b. Anthropic 协议| ANTHROPIC
+    LLM_SVC -->|9. 返回原始文本| SM_SVC
+    SM_SVC -->|10. JSON 解析 + 校验| SM_SVC
+    SM_SVC -->|11. 写入语义记录| SM_DB
+
+    FIELD_SYNC -->|定期同步| FIELD_REG
+```
+
+### 2.2 模块职责边界
+
+| 模块 | 职责 | 不得越界 |
+|------|------|---------|
+| `SemanticMaintenanceService` | 上下文组装、JSON 解析、置信度判定、语义写入 | 不得直接构造 HTTP 请求 |
+| `LLMService` | 供应商路由、API 调用、错误封装 | 不得感知业务语义 |
+| `prompts.py` | 模板定义与变量声明 | 不得包含业务逻辑 |
+| `ContextAssembler`（规划） | Token 计算、字段优先级排序、截断 | 不得直接操作数据库 |
+
+---
+
+## 3. 上下文组装协议
+
+### 3.1 三段式上下文结构
+
+遵循 `ARCHITECTURE.md` §6.1 定义，所有 Semantic -> LLM 调用必须按以下结构组装上下文：
+
+```
+┌─────────────────────────────────────────┐
+│ 第一段：System Prompt                    │
+│  - 角色定义（BI 数据语义专家 / 查询专家）  │
+│  - 输出格式约束（仅输出 JSON）             │
+│  - 语言约束（中文优先）                    │
+├─────────────────────────────────────────┤
+│ 第二段：数据上下文块（Data Context Block） │
+│  - 数据源名称 / 描述                      │
+│  - 字段列表（按优先级排序）                │
+│  - 业务术语映射（如有）                    │
+├─────────────────────────────────────────┤
+│ 第三段：用户指令（User Instruction）       │
+│  - 具体操作要求或自然语言问题              │
+│  - 输出 JSON Schema 约束                  │
+└─────────────────────────────────────────┘
+```
+
+### 3.2 Token 预算
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| 单次调用上下文上限 | **3000 tokens** | 包含 System Prompt + Data Context + User Instruction |
+| System Prompt 预留 | ~200 tokens | 角色定义 + 格式约束 |
+| User Instruction 预留 | ~300 tokens | 操作要求 + Schema 定义 |
+| Data Context 可用预算 | **~2500 tokens** | 剩余空间全部分配给字段元数据 |
+
+Token 估算规则（简化）：
+- 中文字符：约 1.5 token/字
+- 英文单词：约 1.3 token/word
+- JSON 结构符号：按字符数 * 1.0 估算
+
+### 3.3 字段元数据序列化格式
+
+每个字段按以下格式序列化为文本行：
+
+```
+- {field_name} ({field_caption}) [{data_type}] [{role}] 公式: {formula}
+```
+
+示例：
+```
+- Sales (销售额) [REAL] [measure]
+- Region (地区) [STRING] [dimension]
+- Profit_Ratio (利润率) [REAL] [measure] 公式: SUM([Profit])/SUM([Sales])
+```
+
+### 3.4 核心字段优先级（截断策略）
+
+当字段元数据超出 Token 预算时，按以下优先级截断：
+
+| 优先级 | 字段类别 | 处理规则 |
+|--------|---------|---------|
+| P0（最高） | 核心度量字段（`is_core_field=True` 且 `role=measure`） | 始终保留完整信息 |
+| P1 | 核心维度字段（`is_core_field=True` 且 `role=dimension`） | 始终保留完整信息 |
+| P2 | 普通度量字段 | 保留名称 + 类型，截断公式 |
+| P3 | 普通维度字段 | 保留名称 + 类型 |
+| P4 | 计算字段 | 仅保留名称，截断公式全文 |
+| P5（最低） | 隐藏字段 / 低使用频率字段 | 直接丢弃 |
+
+截断算法伪代码：
+
+```python
+def truncate_context(fields: List[FieldMeta], budget_tokens: int) -> str:
+    # 1. 按优先级分组
+    groups = group_by_priority(fields)
+
+    # 2. 从 P0 开始逐级添加
+    result_lines = []
+    used_tokens = 0
+
+    for priority in [P0, P1, P2, P3, P4, P5]:
+        for field in groups[priority]:
+            line = serialize_field(field, truncate_formula=(priority >= P2))
+            line_tokens = estimate_tokens(line)
+            if used_tokens + line_tokens > budget_tokens:
+                return "\n".join(result_lines)
+            result_lines.append(line)
+            used_tokens += line_tokens
+
+    return "\n".join(result_lines)
+```
+
+---
+
+## 4. Prompt 模板注册
+
+### 4.1 模板注册表
+
+所有 Semantic-LLM 集成使用的 Prompt 模板必须在 `backend/services/llm/prompts.py` 中集中注册。
+
+| 模板常量名 | 用途 | 消费方 | System Prompt |
+|-----------|------|--------|---------------|
+| `AI_SEMANTIC_DS_TEMPLATE` | 数据源语义生成 | `generate_ai_draft_datasource()` | 你是一个专业的 BI 数据语义专家。 |
+| `AI_SEMANTIC_FIELD_TEMPLATE` | 字段语义生成 | `generate_ai_draft_field()` | 你是一个专业的 BI 字段语义专家。 |
+| `NL_TO_QUERY_TEMPLATE` | 自然语言转 VizQL | NL-to-Query 服务 | 你是一个 Tableau 数据查询专家。 |
+| `ASSET_EXPLAIN_TEMPLATE` | 报表深度解读 | 资产详情页 | （内置于模板） |
+
+### 4.2 三段式组合规范
+
+每次 LLM 调用必须按以下方式组合三段 Prompt：
+
+```python
+# 调用方式
+result = await llm_service.complete(
+    prompt=data_context_block + "\n\n" + user_instruction,
+    system=system_prompt,
+    timeout=30
+)
+```
+
+各段定义：
+
+**System Prompt（第一段）**：
+```
+你是一个专业的 BI {role}。
+{output_format_constraint}
+```
+
+**Data Context Block（第二段）**：
+```
+## 数据源信息
+名称：{datasource_name}
+描述：{datasource_description}
+
+## 字段列表
+{serialized_fields}
+
+## 业务术语映射（如有）
+{term_mappings}
+```
+
+**User Instruction（第三段）**：
+```
+请以 JSON 格式输出{task_description}，包含以下字段：
+{json_schema_description}
+
+只输出 JSON，不要有其他文字。
+```
+
+### 4.3 数据源语义生成模板定义
+
+```python
+AI_SEMANTIC_DS_TEMPLATE = """## 数据源信息
+名称：{ds_name}
+描述：{description}
+现有语义名：{existing_semantic_name}
+现有中文名：{existing_semantic_name_zh}
+
+## 字段列表
+{field_context}
+
+请以 JSON 格式输出语义建议，包含以下字段：
+- semantic_name: 英文语义名
+- semantic_name_zh: 中文语义名（必填）
+- semantic_description: 语义描述（必填）
+- business_definition: 业务定义
+- owner: 责任人建议
+- sensitivity_level: 敏感级别（low/medium/high/confidential）
+- tags_json: JSON 格式标签数组
+- confidence: AI 置信度 0~1
+
+只输出 JSON，不要有其他文字。"""
+```
+
+### 4.4 字段语义生成模板定义
+
+```python
+AI_SEMANTIC_FIELD_TEMPLATE = """## 字段信息
+字段名：{field_name}
+数据类型：{data_type}
+角色：{role}
+公式：{formula}
+现有语义名：{existing_semantic_name}
+现有中文名：{existing_semantic_name_zh}
+枚举值示例：
+{enum_values}
+
+请以 JSON 格式输出语义建议：
+- semantic_name: 英文语义名
+- semantic_name_zh: 中文语义名（必填）
+- semantic_description: 语义定义（必填）
+- semantic_type: 语义类型（dimension / measure / time_dimension）
+- metric_definition: 指标口径（若为 measure 字段必填）
+- dimension_definition: 维度解释（若为 dimension 字段必填）
+- unit: 单位（如金额、百分比、人次等）
+- synonyms_json: JSON 同义词数组
+- sensitivity_level: 敏感级别（low/medium/high/confidential）
+- is_core_field: 是否为核心字段（true/false）
+- confidence: AI 置信度 0~1
+- tags_json: JSON 标签数组
+
+只输出 JSON，不要有其他文字。"""
+```
+
+---
+
+## 5. AI 语义生成协议
+
+### 5.1 输入契约（字段元数据）
+
+调用 `generate_ai_draft_field()` 时，输入参数必须满足以下契约：
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AI 语义生成输入 — 字段元数据",
+  "type": "object",
+  "required": ["field_id"],
+  "properties": {
+    "field_id": {
+      "type": "integer",
+      "description": "字段语义记录 ID（tableau_field_semantics.id）"
+    },
+    "field_name": {
+      "type": "string",
+      "description": "Tableau 原始字段名"
+    },
+    "data_type": {
+      "type": "string",
+      "enum": ["STRING", "INTEGER", "REAL", "BOOLEAN", "DATE", "DATETIME"],
+      "description": "字段数据类型"
+    },
+    "role": {
+      "type": "string",
+      "enum": ["dimension", "measure"],
+      "description": "字段角色"
+    },
+    "formula": {
+      "type": ["string", "null"],
+      "description": "计算字段公式（非计算字段为 null）"
+    },
+    "enum_values": {
+      "type": ["array", "null"],
+      "items": {"type": "string"},
+      "maxItems": 20,
+      "description": "枚举值示例（最多 20 个）"
+    },
+    "user_id": {
+      "type": ["integer", "null"],
+      "description": "操作人用户 ID"
+    }
+  }
+}
+```
+
+调用 `generate_ai_draft_datasource()` 时，输入参数：
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AI 语义生成输入 — 数据源元数据",
+  "type": "object",
+  "required": ["ds_id"],
+  "properties": {
+    "ds_id": {
+      "type": "integer",
+      "description": "数据源语义记录 ID"
+    },
+    "ds_name": {
+      "type": ["string", "null"],
+      "description": "数据源显示名"
+    },
+    "description": {
+      "type": ["string", "null"],
+      "description": "数据源描述"
+    },
+    "field_context": {
+      "type": ["array", "null"],
+      "description": "字段上下文列表",
+      "items": {
+        "type": "object",
+        "properties": {
+          "field_name": {"type": "string"},
+          "field_caption": {"type": "string"},
+          "role": {"type": "string"},
+          "data_type": {"type": "string"},
+          "formula": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "user_id": {
+      "type": ["integer", "null"]
+    }
+  }
+}
+```
+
+### 5.2 输出契约（AI 语义生成结果）
+
+LLM 返回的 JSON 必须符合以下 Schema（对应 `ARCHITECTURE.md` §6.2 定义）：
+
+#### 5.2.1 字段语义输出 Schema
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AI 语义生成输出 — 字段",
+  "type": "object",
+  "required": ["semantic_name", "semantic_name_zh", "semantic_description", "semantic_type", "confidence"],
+  "properties": {
+    "semantic_name": {
+      "type": "string",
+      "description": "英文语义名，snake_case 格式",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "maxLength": 256
+    },
+    "semantic_name_zh": {
+      "type": "string",
+      "description": "中文语义名",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "semantic_description": {
+      "type": "string",
+      "description": "业务语义描述",
+      "minLength": 1
+    },
+    "semantic_type": {
+      "type": "string",
+      "enum": ["dimension", "measure", "time_dimension"],
+      "description": "语义分类"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "AI 置信度，0~1"
+    },
+    "metric_definition": {
+      "type": ["string", "null"],
+      "description": "指标口径（measure 字段必填）"
+    },
+    "dimension_definition": {
+      "type": ["string", "null"],
+      "description": "维度解释（dimension 字段必填）"
+    },
+    "unit": {
+      "type": ["string", "null"],
+      "description": "单位"
+    },
+    "synonyms_json": {
+      "type": ["array", "null"],
+      "items": {"type": "string"},
+      "description": "同义词列表"
+    },
+    "sensitivity_level": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "confidential"],
+      "default": "low"
+    },
+    "is_core_field": {
+      "type": "boolean",
+      "default": false
+    },
+    "tags_json": {
+      "type": ["array", "null"],
+      "items": {"type": "string"}
+    }
+  }
+}
+```
+
+#### 5.2.2 数据源语义输出 Schema
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AI 语义生成输出 — 数据源",
+  "type": "object",
+  "required": ["semantic_name_zh", "semantic_description", "confidence"],
+  "properties": {
+    "semantic_name": {
+      "type": "string",
+      "description": "英文语义名"
+    },
+    "semantic_name_zh": {
+      "type": "string",
+      "description": "中文语义名",
+      "minLength": 1
+    },
+    "semantic_description": {
+      "type": "string",
+      "description": "语义描述",
+      "minLength": 1
+    },
+    "business_definition": {
+      "type": ["string", "null"]
+    },
+    "owner": {
+      "type": ["string", "null"]
+    },
+    "sensitivity_level": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "confidential"],
+      "default": "low"
+    },
+    "tags_json": {
+      "type": ["array", "null"],
+      "items": {"type": "string"}
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  }
+}
+```
+
+### 5.3 输出字段映射
+
+LLM 输出字段到数据库字段的映射关系：
+
+| LLM 输出字段 | 数据库字段（field_semantics） | 数据库字段（datasource_semantics） |
+|-------------|--------------------------|--------------------------------|
+| `semantic_name` | `semantic_name` | `semantic_name` |
+| `semantic_name_zh` | `semantic_name_zh` | `semantic_name_zh` |
+| `semantic_description` | `semantic_definition` | `semantic_description` |
+| `semantic_type` | — (用于校验 role) | — |
+| `confidence` | `ai_confidence` | — (记录在日志中) |
+| `metric_definition` | `metric_definition` | — |
+| `dimension_definition` | `dimension_definition` | — |
+| `unit` | `unit` | — |
+| `synonyms_json` | `synonyms_json` (JSON序列化) | — |
+| `sensitivity_level` | `sensitivity_level` | `sensitivity_level` |
+| `is_core_field` | `is_core_field` | — |
+| `tags_json` | `tags_json` (JSON序列化) | `tags_json` (JSON序列化) |
+| `business_definition` | — | `business_definition` |
+| `owner` | — | `owner` |
+
+### 5.4 写入副作用
+
+AI 生成成功后，自动执行以下副作用：
+1. `status` 设置为 `SemanticStatus.AI_GENERATED`
+2. `source` 设置为 `SemanticSource.AI`
+3. 创建版本快照（`change_reason="ai_generated"`）
+4. 记录 `ai_confidence` 值
+
+---
+
+## 6. NL-to-VizQL 协议
+
+### 6.1 输入契约
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NL-to-VizQL 输入",
+  "type": "object",
+  "required": ["question", "datasource_luid", "datasource_name", "fields"],
+  "properties": {
+    "question": {
+      "type": "string",
+      "description": "用户自然语言问题",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "datasource_luid": {
+      "type": "string",
+      "description": "Tableau 数据源 LUID"
+    },
+    "datasource_name": {
+      "type": "string",
+      "description": "数据源显示名"
+    },
+    "fields": {
+      "type": "array",
+      "description": "可用字段列表",
+      "items": {
+        "type": "object",
+        "required": ["fieldCaption", "dataType", "role"],
+        "properties": {
+          "fieldCaption": {"type": "string"},
+          "fieldName": {"type": "string"},
+          "dataType": {"type": "string"},
+          "role": {"type": "string", "enum": ["dimension", "measure"]},
+          "description": {"type": ["string", "null"]},
+          "semantic_name_zh": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "term_mappings": {
+      "type": ["object", "null"],
+      "description": "业务术语到字段名的映射",
+      "additionalProperties": {"type": "string"}
+    }
+  }
+}
+```
+
+### 6.2 输出契约
+
+LLM 输出必须匹配 Tableau VizQL Data Service `query-datasource` 工具的参数格式：
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NL-to-VizQL 输出",
+  "type": "object",
+  "required": ["fields"],
+  "properties": {
+    "fields": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["fieldCaption"],
+        "properties": {
+          "fieldCaption": {
+            "type": "string",
+            "description": "字段显示名，必须与数据源中的字段匹配"
+          },
+          "function": {
+            "type": "string",
+            "enum": ["SUM", "AVG", "MEDIAN", "COUNT", "COUNTD", "MIN", "MAX", "STDEV", "VAR", "YEAR", "QUARTER", "MONTH", "WEEK", "DAY", "TRUNC_YEAR", "TRUNC_QUARTER", "TRUNC_MONTH", "TRUNC_WEEK", "TRUNC_DAY", "AGG", "NONE"],
+            "description": "聚合函数（度量字段必填，维度字段不填）"
+          },
+          "fieldAlias": {
+            "type": "string",
+            "description": "字段别名"
+          },
+          "sortDirection": {
+            "type": "string",
+            "enum": ["ASC", "DESC"]
+          },
+          "sortPriority": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxDecimalPlaces": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "filters": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "SET 过滤器",
+            "required": ["field", "filterType", "values"],
+            "properties": {
+              "field": {
+                "type": "object",
+                "required": ["fieldCaption"],
+                "properties": {
+                  "fieldCaption": {"type": "string"}
+                }
+              },
+              "filterType": {"type": "string", "const": "SET"},
+              "values": {"type": "array"},
+              "exclude": {"type": "boolean"}
+            }
+          },
+          {
+            "type": "object",
+            "description": "TOP 过滤器",
+            "required": ["field", "filterType", "howMany", "fieldToMeasure"],
+            "properties": {
+              "field": {
+                "type": "object",
+                "required": ["fieldCaption"],
+                "properties": {"fieldCaption": {"type": "string"}}
+              },
+              "filterType": {"type": "string", "const": "TOP"},
+              "howMany": {"type": "integer"},
+              "direction": {"type": "string", "enum": ["TOP", "BOTTOM"]},
+              "fieldToMeasure": {
+                "type": "object",
+                "required": ["fieldCaption"],
+                "properties": {"fieldCaption": {"type": "string"}}
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "DATE 过滤器",
+            "required": ["field", "filterType", "periodType", "dateRangeType"],
+            "properties": {
+              "field": {
+                "type": "object",
+                "required": ["fieldCaption"],
+                "properties": {"fieldCaption": {"type": "string"}}
+              },
+              "filterType": {"type": "string", "const": "DATE"},
+              "periodType": {
+                "type": "string",
+                "enum": ["MINUTES", "HOURS", "DAYS", "WEEKS", "MONTHS", "QUARTERS", "YEARS"]
+              },
+              "dateRangeType": {
+                "type": "string",
+                "enum": ["CURRENT", "LAST", "NEXT", "TODATE", "LASTN", "NEXTN"]
+              },
+              "rangeN": {"type": "integer"}
+            }
+          },
+          {
+            "type": "object",
+            "description": "QUANTITATIVE_NUMERICAL 过滤器",
+            "required": ["field", "filterType", "quantitativeFilterType"],
+            "properties": {
+              "field": {
+                "type": "object",
+                "required": ["fieldCaption"],
+                "properties": {"fieldCaption": {"type": "string"}}
+              },
+              "filterType": {"type": "string", "const": "QUANTITATIVE_NUMERICAL"},
+              "quantitativeFilterType": {"type": "string", "enum": ["RANGE", "MIN", "MAX"]},
+              "min": {"type": "number"},
+              "max": {"type": "number"}
+            }
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+### 6.3 语义增强
+
+NL-to-VizQL 调用前，从语义层获取以下增强信息：
+
+| 增强项 | 数据来源 | 作用 |
+|--------|---------|------|
+| `semantic_name_zh` | `tableau_field_semantics` | 中文名到字段的映射 |
+| `synonyms_json` | `tableau_field_semantics` | 同义词匹配 |
+| `metric_definition` | `tableau_field_semantics` | 帮助 LLM 理解指标口径 |
+| `dimension_definition` | `tableau_field_semantics` | 帮助 LLM 理解维度含义 |
+
+术语映射构建逻辑：
+
+```python
+def build_term_mappings(fields: List[FieldSemantics]) -> Dict[str, str]:
+    mappings = {}
+    for field in fields:
+        if field.semantic_name_zh:
+            mappings[field.semantic_name_zh] = field.field_caption
+        if field.synonyms_json:
+            for synonym in json.loads(field.synonyms_json):
+                mappings[synonym] = field.field_caption
+    return mappings
+```
+
+### 6.4 字段验证
+
+LLM 输出的 `fieldCaption` 必须与数据源中实际存在的字段匹配。验证规则：
+
+1. 精确匹配：`fieldCaption` 完全等于某个字段的 `field_caption`
+2. 模糊匹配：如精确匹配失败，尝试通过 `semantic_name_zh` 或 `synonyms_json` 映射
+3. 匹配失败：从结果中移除该字段，并在响应中标记警告
+
+---
+
+## 7. 置信度与质量控制
+
+### 7.1 置信度阈值
+
+| 阈值区间 | 处理策略 | 状态流转 |
+|---------|---------|---------|
+| `confidence >= 0.7` | 高置信度，可直接进入审核流程 | `ai_generated` |
+| `0.3 <= confidence < 0.7` | 中置信度，建议人工复核后提交 | `ai_generated` |
+| `confidence < 0.3` | **低置信度**，标记需人工审核 | `ai_generated`（前端标黄警告） |
+
+低置信度标记规则：
+- 前端展示时添加 "AI 置信度低，建议人工审核" 警告
+- 不阻止状态流转（仍可提交审核），但审核人可见置信度标记
+
+### 7.2 JSON 解析失败处理
+
+```mermaid
+flowchart TD
+    A[LLM 返回原始文本] --> B{是否以 ``` 开头?}
+    B -->|是| C[提取代码块内容]
+    B -->|否| D[直接作为 JSON 解析]
+    C --> D
+    D --> E{JSON.parse 成功?}
+    E -->|是| F[Schema 校验]
+    E -->|否| G[重试 1 次]
+    G --> H{重试 JSON.parse 成功?}
+    H -->|是| F
+    H -->|否| I[返回 SLI_003 错误]
+    F --> J{必填字段完整?}
+    J -->|是| K[写入语义记录]
+    J -->|否| L[返回 SLI_004 错误]
+```
+
+重试策略：
+- 首次 JSON 解析失败后，使用相同 Prompt 重试 **1 次**
+- 重试仍失败，返回 `SLI_003` 错误（对应 `ARCHITECTURE.md` §6.2 中的 `SM_006`）
+- 不进行无限重试，避免 Token 浪费
+
+### 7.3 降级策略
+
+| 故障场景 | 降级行为 | 用户提示 |
+|---------|---------|---------|
+| LLM 未配置 | 跳过 AI 生成，保留手动编辑入口 | "AI 服务未配置，请手动填写语义信息" |
+| LLM 调用超时（30s） | 返回错误，不重试 | "AI 服务响应超时，请稍后重试" |
+| LLM 供应商不可用 | 返回错误，记录日志 | "AI 服务暂时不可用，请手动填写" |
+| JSON 解析失败（含重试） | 返回错误码 SLI_003 | "AI 返回格式异常，请手动填写" |
+| 必填字段缺失 | 返回错误码 SLI_004 | "AI 生成结果不完整，请手动补充" |
+| 高敏感字段 | 直接跳过 AI 生成 | "该字段为高敏感级别，不支持 AI 生成" |
+
+---
+
+## 8. 错误码
+
+所有 Semantic-LLM 集成错误使用 `SLI` 前缀（**S**emantic **L**LM **I**ntegration）。
+
+| 错误码 | HTTP 状态码 | 触发条件 | 错误消息 | 对应上游错误 |
+|--------|-----------|---------|---------|------------|
+| `SLI_001` | 503 | LLM 服务未配置或未启用 | AI 服务未配置，请联系管理员 | LLM_001 |
+| `SLI_002` | 502 | LLM 调用超时或供应商不可用 | AI 服务调用失败：{error_detail} | LLM_003 / LLM_004 |
+| `SLI_003` | 422 | JSON 解析失败（含 1 次重试） | AI 返回格式异常，无法解析为有效 JSON | — |
+| `SLI_004` | 422 | LLM 输出缺少必填字段 | AI 生成结果不完整，缺少：{missing_fields} | — |
+| `SLI_005` | 403 | 高敏感字段（HIGH/CONFIDENTIAL）尝试 AI 生成 | 敏感级别为 {level} 的字段禁止 AI 处理 | — |
+| `SLI_006` | 422 | NL-to-VizQL 输出字段验证失败（无有效字段） | 自然语言查询转换失败，未匹配到有效字段 | — |
+| `SLI_007` | 400 | 输入记录不存在 | 目标记录不存在（ID={id}） | — |
+| `SLI_008` | 422 | Token 预算不足（字段过多无法组装有效上下文） | 字段元数据过多，无法在 Token 预算内组装有效上下文 | — |
+
+### 错误码与上游映射
+
+```
+SemanticMaintenanceService          LLMService              供应商
+        │                              │                      │
+        │── SLI_001 ←── LLM_001 ←────│ 无配置                │
+        │── SLI_002 ←── LLM_003 ←────│──── 超时 ────────────│
+        │── SLI_002 ←── LLM_004 ←────│──── API 错误 ────────│
+        │── SLI_003 ←── (自行处理)     │                      │
+        │── SLI_004 ←── (自行处理)     │                      │
+        │── SLI_005 ←── (前置校验)     │                      │
+```
+
+---
+
+## 9. 安全
+
+### 9.1 敏感度过滤
+
+在调用 LLM 前，必须执行敏感度过滤检查：
+
+```python
+BLOCKED_FOR_LLM = {SensitivityLevel.HIGH, SensitivityLevel.CONFIDENTIAL}
+
+def pre_llm_sensitivity_check(field_or_ds) -> Optional[str]:
+    """LLM 调用前置敏感度检查，返回 None 表示通过，否则返回错误消息"""
+    if field_or_ds.sensitivity_level in BLOCKED_FOR_LLM:
+        return f"SLI_005: 敏感级别为 {field_or_ds.sensitivity_level} 的对象禁止 AI 处理"
+    return None
+```
+
+过滤规则：
+
+| 敏感级别 | AI 语义生成 | NL-to-VizQL 字段可见性 | 发布到 Tableau |
+|---------|-----------|---------------------|--------------|
+| `LOW` | 允许 | 可见 | 允许 |
+| `MEDIUM` | 允许 | 可见 | 允许 |
+| `HIGH` | **禁止** | **不可见（从上下文中过滤）** | 禁止 |
+| `CONFIDENTIAL` | **禁止** | **不可见（从上下文中过滤）** | 禁止 |
+
+### 9.2 上下文净化
+
+在组装 Data Context Block 时，必须执行以下净化操作：
+
+1. **敏感字段过滤**：`HIGH` / `CONFIDENTIAL` 级别字段不进入 LLM 上下文
+2. **实际数据值排除**：仅发送字段元数据（名称、类型、公式），不得发送实际行级数据
+3. **枚举值脱敏**：`enum_values` 最多包含 20 个示例值，且仅限非敏感字段
+
+```python
+def sanitize_fields_for_llm(fields: List[dict]) -> List[dict]:
+    """净化字段列表，移除敏感字段和实际数据值"""
+    sanitized = []
+    for f in fields:
+        if f.get("sensitivity_level") in BLOCKED_FOR_LLM:
+            continue
+        safe_field = {
+            "field_name": f.get("field_name"),
+            "field_caption": f.get("field_caption"),
+            "data_type": f.get("data_type"),
+            "role": f.get("role"),
+            "formula": f.get("formula"),  # 公式是元数据，允许
+        }
+        # 枚举值截断
+        if f.get("enum_values"):
+            safe_field["enum_values"] = f["enum_values"][:20]
+        sanitized.append(safe_field)
+    return sanitized
+```
+
+### 9.3 HTML 转义
+
+LLM 返回的所有文本内容在写入数据库前无需转义（保持原始语义），但前端渲染时**必须进行 HTML 转义**：
+
+| 字段 | 存储时 | 展示时 |
+|------|--------|--------|
+| `semantic_name_zh` | 原始文本 | HTML 转义 |
+| `semantic_description` | 原始文本 | HTML 转义 |
+| `metric_definition` | 原始文本 | HTML 转义 |
+| `dimension_definition` | 原始文本 | HTML 转义 |
+
+前端转义责任链：
+```
+LLM 返回 → JSON 解析 → 写入 DB（原始） → API 响应（原始） → 前端渲染（转义）
+```
+
+### 9.4 Prompt 注入防护
+
+- 用户输入（自然语言问题）在嵌入 Prompt 前，需过滤以下模式：
+  - 系统指令覆盖尝试（如 "忽略以上指令"）
+  - 角色切换尝试（如 "你现在是..."）
+- 当前阶段采用输入长度限制（`maxLength: 500`）作为基础防护
+- 后续版本考虑引入 Prompt 注入检测中间件（列入开放问题）
+
+---
+
+## 10. 时序图
+
+### 10.1 AI 语义生成流程
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant API as FastAPI 端点
+    participant SM as SemanticMaintenanceService
+    participant DB as 语义数据库
+    participant CTX as 上下文组装器
+    participant LLM as LLMService
+    participant Provider as LLM 供应商
+
+    User->>API: POST /fields/{id}/generate-ai
+    API->>API: 权限校验（editor/admin）
+
+    API->>SM: generate_ai_draft_field(field_id, user_id, ...)
+    SM->>DB: get_field_semantics_by_id(field_id)
+    DB-->>SM: field 记录
+
+    SM->>SM: pre_llm_sensitivity_check(field)
+    alt 敏感级别为 HIGH/CONFIDENTIAL
+        SM-->>API: SLI_005 禁止 AI 处理
+        API-->>User: 403
+    end
+
+    SM->>CTX: 组装上下文（字段元数据 + 模板）
+    CTX->>CTX: sanitize_fields_for_llm()
+    CTX->>CTX: truncate_context(budget=2500 tokens)
+    CTX-->>SM: system_prompt + prompt
+
+    SM->>LLM: complete(prompt, system, timeout=30)
+    LLM->>LLM: load_config() + decrypt(api_key)
+    LLM->>Provider: API 调用
+    Provider-->>LLM: 响应文本
+
+    alt LLM 返回错误
+        LLM-->>SM: {"error": "..."}
+        SM-->>API: SLI_001 或 SLI_002
+        API-->>User: 502/503
+    end
+
+    LLM-->>SM: {"content": "..."}
+
+    SM->>SM: 提取 JSON（处理 ``` 代码块）
+    SM->>SM: JSON.parse(content)
+
+    alt JSON 解析失败
+        SM->>LLM: 重试 1 次（相同 Prompt）
+        LLM->>Provider: API 调用
+        Provider-->>LLM: 响应文本
+        LLM-->>SM: {"content": "..."}
+        SM->>SM: JSON.parse(content)
+        alt 重试仍失败
+            SM-->>API: SLI_003
+            API-->>User: 422
+        end
+    end
+
+    SM->>SM: Schema 校验（必填字段检查）
+    alt 缺少必填字段
+        SM-->>API: SLI_004
+        API-->>User: 422
+    end
+
+    SM->>SM: 置信度判定（confidence < 0.3 标记低置信度）
+    SM->>DB: update_field_semantics(status=AI_GENERATED, source=AI)
+    SM->>DB: 创建版本快照
+    DB-->>SM: updated field
+
+    SM-->>API: (True, field.to_dict())
+    API-->>User: 200 {field_data, confidence_warning?}
+```
+
+### 10.2 NL-to-Query 流程
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant API as FastAPI 端点
+    participant NLQ as NL-to-Query 服务
+    participant SM as SemanticMaintenanceService
+    participant DB as 语义数据库
+    participant LLM as LLMService
+    participant Provider as LLM 供应商
+    participant VDS as Tableau VizQL Data Service
+
+    User->>API: POST /nl-query {question, datasource_luid}
+    API->>API: 权限校验
+
+    API->>NLQ: translate(question, datasource_luid)
+
+    NLQ->>DB: 查询数据源字段元数据
+    DB-->>NLQ: fields[]
+
+    NLQ->>SM: 获取语义增强信息
+    SM->>DB: 查询 field_semantics（semantic_name_zh, synonyms）
+    DB-->>SM: semantics[]
+    SM-->>NLQ: term_mappings + 语义描述
+
+    NLQ->>NLQ: sanitize_fields_for_llm（过滤 HIGH/CONFIDENTIAL）
+    NLQ->>NLQ: 序列化字段为 fields_with_types
+    NLQ->>NLQ: 组装 NL_TO_QUERY_TEMPLATE
+
+    NLQ->>LLM: complete(prompt, system, timeout=30)
+    LLM->>Provider: API 调用
+    Provider-->>LLM: 响应 JSON 文本
+    LLM-->>NLQ: {"content": "..."}
+
+    NLQ->>NLQ: JSON.parse(content)
+    alt JSON 解析失败
+        NLQ->>LLM: 重试 1 次
+        LLM->>Provider: API 调用
+        Provider-->>LLM: 响应
+        LLM-->>NLQ: {"content": "..."}
+        NLQ->>NLQ: JSON.parse
+        alt 仍失败
+            NLQ-->>API: SLI_003
+            API-->>User: 422
+        end
+    end
+
+    NLQ->>NLQ: 字段验证（fieldCaption 匹配检查）
+    alt 无有效字段
+        NLQ-->>API: SLI_006
+        API-->>User: 422
+    end
+
+    NLQ-->>API: VizQL Query JSON
+    API->>VDS: query-datasource(datasourceLuid, query)
+    VDS-->>API: 查询结果
+    API-->>User: 200 {query_result, generated_query}
+```
+
+---
+
+## 11. 测试策略
+
+### 11.1 单元测试
+
+| 测试模块 | 测试项 | Mock 对象 | 验证点 |
+|---------|--------|-----------|--------|
+| 上下文组装 | Token 预算截断 | 无 | 输出 <= 2500 tokens；P0 字段始终保留 |
+| 上下文组装 | 字段优先级排序 | 无 | 核心度量 > 核心维度 > 普通度量 > ... |
+| 上下文组装 | 敏感字段过滤 | 无 | HIGH/CONFIDENTIAL 字段不出现在输出中 |
+| 字段序列化 | 格式正确性 | 无 | 输出匹配 `- {name} ({caption}) [{type}] [{role}]` 格式 |
+| JSON 解析 | 正常 JSON | 无 | 正确提取所有字段 |
+| JSON 解析 | Markdown 代码块包裹 | 无 | 正确提取 ``` 内的 JSON |
+| JSON 解析 | 非法 JSON | `LLMService` | 触发重试逻辑 |
+| Schema 校验 | 必填字段缺失 | 无 | 返回 SLI_004 + 缺失字段列表 |
+| Schema 校验 | confidence 类型错误 | 无 | 返回校验错误 |
+| 置信度判定 | confidence < 0.3 | 无 | 标记低置信度警告 |
+| 置信度判定 | confidence >= 0.7 | 无 | 无警告标记 |
+| 敏感度检查 | HIGH 级别字段 | 无 | 返回 SLI_005 |
+| 敏感度检查 | LOW 级别字段 | 无 | 通过检查 |
+| 术语映射构建 | synonyms 展开 | 无 | 同义词正确映射到 fieldCaption |
+
+### 11.2 集成测试
+
+| 测试场景 | 步骤 | 验证点 |
+|---------|------|--------|
+| AI 字段语义生成端到端 | 1. 创建字段记录 2. 调用 generate-ai 3. 验证结果 | 状态变为 ai_generated；ai_confidence 有值；版本递增 |
+| AI 数据源语义生成端到端 | 1. 创建数据源记录 2. 调用 generate-ai 3. 验证结果 | 状态变为 ai_generated；语义字段非空 |
+| LLM 不可用降级 | 1. 关闭 LLM 配置 2. 调用 generate-ai | 返回 SLI_001；原始记录不变 |
+| JSON 解析失败降级 | 1. Mock LLM 返回非法文本 2. 调用 generate-ai | 重试 1 次后返回 SLI_003 |
+| 敏感字段拦截 | 1. 设置字段 sensitivity_level=HIGH 2. 调用 generate-ai | 返回 SLI_005；不调用 LLM |
+| NL-to-VizQL 生成 | 1. 准备字段元数据 2. 发送自然语言问题 | 输出为有效 VizQL JSON；字段名匹配数据源 |
+| Token 预算溢出 | 1. 准备 200+ 字段 2. 调用 AI 生成 | 上下文被正确截断；核心字段保留 |
+
+### 11.3 安全测试
+
+| 测试项 | 验证点 |
+|--------|--------|
+| 敏感字段不泄露 | HIGH/CONFIDENTIAL 字段的名称、公式不出现在 LLM 请求日志中 |
+| 实际数据不泄露 | Prompt 中不包含行级数据值（仅元数据） |
+| Prompt 注入防护 | 包含 "忽略以上指令" 的输入不影响 System Prompt 行为 |
+| XSS 防护 | LLM 返回 `<script>alert(1)</script>` 时，前端正确转义 |
+
+### 11.4 性能测试
+
+| 测试项 | 目标 | 方法 |
+|--------|------|------|
+| 上下文组装延迟 | < 50ms（200 字段） | 基准测试 |
+| 端到端 AI 生成延迟 | < 35s（含 30s LLM 超时） | 端到端计时 |
+| 并发 AI 生成 | 5 并发不超时 | 并发压测 |
+
+---
+
+## 12. 开放问题
+
+| 编号 | 问题 | 优先级 | 状态 |
+|------|------|--------|------|
+| OI-01 | 当前上下文组装逻辑内嵌在 `service.py` 的各 `generate_ai_draft_*` 方法中，是否需要抽取独立的 `ContextAssembler` 类？ | P1 | 待实现 |
+| OI-02 | Token 预算 3000 的计算目前依赖字符数估算，是否需要引入 `tiktoken` 做精确计算？ | P2 | 待评估 |
+| OI-03 | `NL_TO_QUERY_TEMPLATE` 已定义但无对应 API 端点，需确定接入时间线和路由设计（对应 08-spec OI-07） | P1 | 待规划 |
+| OI-04 | Prompt 注入防护目前仅依赖输入长度限制，是否需要引入检测中间件或 guardrails？ | P2 | 待讨论 |
+| OI-05 | 当前 `confidence` 字段在数据源语义输出中为 `ai_confidence`，在字段语义输出中也为 `ai_confidence`，但 `ARCHITECTURE.md` §6.2 定义为 `confidence`，需统一字段命名 | P1 | 待统一 |
+| OI-06 | AI 语义生成是否需要支持批量模式（一次生成多个字段的语义），以减少 LLM 调用次数？ | P2 | 待讨论 |
+| OI-07 | 多模型路由策略：不同场景（语义生成 vs NL-to-Query）是否需要使用不同的模型和参数（如 temperature）？当前为单配置模式 | P2 | 待讨论 |
+| OI-08 | NL-to-VizQL 的字段模糊匹配逻辑是否需要引入向量相似度计算，而非简单的字符串匹配？ | P3 | 待评估 |
+| OI-09 | 错误码前缀：`ARCHITECTURE.md` §6.2 使用 `SM_006`，本规格书使用 `SLI_003`，需协商统一命名 | P1 | 待统一 |
