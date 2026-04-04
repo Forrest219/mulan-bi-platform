@@ -1,4 +1,5 @@
 """知识库数据模型（PRD §2）"""
+import json
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy import (
@@ -54,6 +55,19 @@ class KbGlossary(Base):
             "created_at": self.created_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.created_at else None,
             "updated_at": self.updated_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.updated_at else None,
         }
+
+    def build_embedding_text(self) -> str:
+        """
+        按 PRD §5.1 构造 Embedding 文本格式。
+        glossary: "{canonical_term}: {definition}。同义词: {synonyms}。公式: {formula}"
+        """
+        parts = [f"{self.canonical_term}: {self.definition}"]
+        synonyms = self.synonyms_json or []
+        if synonyms:
+            parts.append(f"同义词: {', '.join(synonyms)}")
+        if self.formula:
+            parts.append(f"公式: {self.formula}")
+        return "。".join(parts)
 
 
 # === kb_schemas ===
@@ -131,6 +145,13 @@ class KbDocument(Base):
             "created_at": self.created_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.created_at else None,
             "updated_at": self.updated_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.updated_at else None,
         }
+
+    def build_embedding_text(self, chunk_text: str) -> str:
+        """
+        按 PRD §5.1 构造 document 类型的 Embedding 文本。
+        document: 分块后的原始文本（chunk_text 即为已分块内容）
+        """
+        return chunk_text
 
 
 # === kb_embeddings ===
@@ -286,15 +307,26 @@ class KbDocumentDatabase:
         db.commit(); db.refresh(d)
         return d
 
-    def delete(self, db: Session, doc_id: int) -> bool:
+    def delete(self, db: Session, doc_id: int, hard: bool = False) -> bool:
+        """
+        删除文档。
+        - hard=False（软删除）：status → archived（data_admin 操作）
+        - hard=True（硬删除）：同时清理 kb_embeddings（admin 专属）
+        """
         d = self.get(db, doc_id)
         if not d:
             return False
-        db.query(KbEmbedding).filter(
-            KbEmbedding.source_type == "document",
-            KbEmbedding.source_id == doc_id,
-        ).delete(synchronize_session=False)
-        db.delete(d); db.commit()
+        if hard:
+            # 硬删除：级联清理向量
+            db.query(KbEmbedding).filter(
+                KbEmbedding.source_type == "document",
+                KbEmbedding.source_id == doc_id,
+            ).delete(synchronize_session=False)
+            db.delete(d)
+        else:
+            # 软删除：标记为 archived
+            d.status = "archived"
+        db.commit()
         return True
 
     def update_embedding_meta(self, db: Session, doc_id: int, chunk_count: int):

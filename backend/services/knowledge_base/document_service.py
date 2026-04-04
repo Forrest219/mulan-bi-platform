@@ -39,20 +39,31 @@ class DocumentService:
         format: str = "markdown", category: str = "general",
         tags: List[str] = None, created_by: int = None
     ) -> KbDocument:
-        """创建文档（不自动生成 Embedding）"""
-        return self._db.create(
+        """
+        创建文档（PRD §4 副作用）：
+        创建后立即返回，Embedding 由 Celery Worker 异步生成。
+        """
+        doc = self._db.create(
             db, title=title, content=content, format=format,
             category=category, tags=tags, created_by=created_by,
         )
+        # 触发 Celery 异步任务（不等候完成）
+        from services.tasks.knowledge_base_tasks import generate_document_embeddings
+        generate_document_embeddings.delay(doc.id)
+        return doc
 
     def update_document(self, db: Session, doc_id: int, **kwargs) -> Optional[Dict[str, Any]]:
         """更新文档"""
         d = self._db.update(db, doc_id, **kwargs)
         return d.to_dict() if d else None
 
-    def delete_document(self, db: Session, doc_id: int) -> bool:
-        """删除文档（同时删除关联的 Embedding）"""
-        return self._db.delete(db, doc_id)
+    def delete_document(self, db: Session, doc_id: int, hard: bool = False) -> bool:
+        """
+        删除文档。
+        - hard=False（软删除）：status → archived
+        - hard=True（硬删除）：级联清理 kb_embeddings（admin 专属）
+        """
+        return self._db.delete(db, doc_id, hard=hard)
 
     def chunk_and_embed(self, db: Session, doc_id: int) -> Dict[str, Any]:
         """

@@ -1,4 +1,4 @@
-"""知识库 API（管理员专用，PRD §8）"""
+"""知识库 API（PRD §7 + §8 + §9）"""
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Query
@@ -10,9 +10,31 @@ from services.knowledge_base.glossary_service import glossary_service
 from services.knowledge_base.document_service import document_service
 from services.knowledge_base.embedding_service import embedding_service
 from services.knowledge_base.rag_service import rag_service
+from services.knowledge_base.errors import KBErrorCode, kb_error_response
 
 router = APIRouter()
 
+
+def _require_role(user, min_role: str) -> None:
+    """权限拦截：analyst < data_admin < admin"""
+    role_rank = {"user": 0, "analyst": 1, "data_admin": 2, "admin": 3}
+    user_rank = role_rank.get(user.get("role", "user"), 0)
+    min_rank = role_rank.get(min_role, 0)
+    if user_rank < min_rank:
+        raise HTTPException(
+            status_code=403,
+            detail=kb_error_response(KBErrorCode.TERM_NOT_FOUND, 403)  # 复用，无专门权限错误码
+        )
+
+
+def _error_response(code: KBErrorCode, status_code: int, **kwargs):
+    return HTTPException(
+        status_code=status_code,
+        detail=kb_error_response(code, status_code, **kwargs)
+    )
+
+
+# === 术语端点 ===
 
 @router.get("/glossary")
 async def list_glossary(
@@ -22,10 +44,9 @@ async def list_glossary(
     keyword: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    """术语列表（PRD §8.1）GET /api/kb/glossary"""
+    """术语列表（PRD §7.1）GET /api/knowledge-base/glossary — analyst+"""
     user = get_current_user(request=None, db=db)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="仅管理员可访问知识库")
+    _require_role(user, "analyst")
 
     result = glossary_service.search_terms(
         db, keyword=keyword, category=category, page=page, page_size=page_size
@@ -45,40 +66,47 @@ async def create_glossary(
     source: str = "manual",
     db: Session = Depends(get_db),
 ):
-    """创建术语（PRD §8.2）POST /api/kb/glossary"""
+    """创建术语（PRD §7.2）POST /api/knowledge-base/glossary — data_admin+"""
     user = get_current_user(request=None, db=db)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="仅管理员可访问知识库")
+    _require_role(user, "data_admin")
+
+    if not definition or not definition.strip():
+        raise _error_response(KBErrorCode.TERM_MISSING_FIELD, 400)
 
     import json
     synonyms_list = json.loads(synonyms) if synonyms else []
     related_fields_list = json.loads(related_fields) if related_fields else []
 
-    glossary = glossary_service.create_term(
-        db,
-        term=term,
-        canonical_term=canonical_term,
-        definition=definition,
-        category=category,
-        synonyms=synonyms_list,
-        formula=formula,
-        related_fields=related_fields_list,
-        source=source,
-        created_by=user.get("id"),
-    )
-    return glossary.to_dict()
+    try:
+        glossary = glossary_service.create_term(
+            db,
+            term=term,
+            canonical_term=canonical_term,
+            definition=definition,
+            category=category,
+            synonyms=synonyms_list,
+            formula=formula,
+            related_fields=related_fields_list,
+            source=source,
+            created_by=user.get("id"),
+        )
+    except Exception as e:
+        if "unique" in str(e).lower() or "duplicate" in str(e).lower():
+            raise _error_response(KBErrorCode.TERM_DUPLICATE, 409)
+        raise
+
+    return {"id": glossary.id, "message": "术语创建成功"}
 
 
 @router.get("/glossary/{glossary_id}")
 async def get_glossary(glossary_id: int, db: Session = Depends(get_db)):
-    """术语详情（PRD §8.3）GET /api/kb/glossary/{id}"""
+    """术语详情（PRD §7.3）GET /api/knowledge-base/glossary/{id} — analyst+"""
     user = get_current_user(request=None, db=db)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="仅管理员可访问知识库")
+    _require_role(user, "analyst")
 
     result = glossary_service.get_term(db, glossary_id)
     if not result:
-        raise HTTPException(status_code=404, detail="术语不存在")
+        raise _error_response(KBErrorCode.TERM_NOT_FOUND, 404)
     return result
 
 
@@ -95,10 +123,9 @@ async def update_glossary(
     status: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    """更新术语（PRD §8.4）PUT /api/kb/glossary/{id}"""
+    """更新术语（PRD §7.4）PUT /api/knowledge-base/glossary/{id} — data_admin+"""
     user = get_current_user(request=None, db=db)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="仅管理员可访问知识库")
+    _require_role(user, "data_admin")
 
     import json
     kwargs = {}
@@ -107,6 +134,8 @@ async def update_glossary(
     if canonical_term is not None:
         kwargs["canonical_term"] = canonical_term
     if definition is not None:
+        if not definition.strip():
+            raise _error_response(KBErrorCode.TERM_MISSING_FIELD, 400)
         kwargs["definition"] = definition
     if category is not None:
         kwargs["category"] = category
@@ -121,22 +150,36 @@ async def update_glossary(
 
     result = glossary_service.update_term(db, glossary_id, **kwargs)
     if not result:
-        raise HTTPException(status_code=404, detail="术语不存在")
+        raise _error_response(KBErrorCode.TERM_NOT_FOUND, 404)
     return result
 
 
 @router.delete("/glossary/{glossary_id}")
-async def delete_glossary(glossary_id: int, db: Session = Depends(get_db)):
-    """删除术语（PRD §8.5）DELETE /api/kb/glossary/{id}"""
+async def delete_glossary(
+    glossary_id: int,
+    hard: bool = Query(False, description="硬删除（仅 admin）"),
+    db: Session = Depends(get_db),
+):
+    """
+    删除术语（PRD §7.5）DELETE /api/knowledge-base/glossary/{id}
+    - hard=false（默认）：软删除（data_admin+），status → deprecated
+    - hard=true：硬删除（admin 专属），同时清理 kb_embeddings
+    """
     user = get_current_user(request=None, db=db)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="仅管理员可访问知识库")
 
-    success = glossary_service.deprecate_term(db, glossary_id)
+    if hard:
+        _require_role(user, "admin")
+        success = glossary_service.hard_delete_term(db, glossary_id)
+    else:
+        _require_role(user, "data_admin")
+        success = glossary_service.deprecate_term(db, glossary_id)
+
     if not success:
-        raise HTTPException(status_code=404, detail="术语不存在")
-    return {"message": "术语已标记为 deprecated"}
+        raise _error_response(KBErrorCode.TERM_NOT_FOUND, 404)
+    return {"message": "术语已删除" if hard else "术语已标记为 deprecated"}
 
+
+# === 文档端点 ===
 
 @router.get("/documents")
 async def list_documents(
@@ -145,10 +188,9 @@ async def list_documents(
     category: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    """文档列表（PRD §8.6）GET /api/kb/documents"""
+    """文档列表（PRD §7.6）GET /api/knowledge-base/documents — analyst+"""
     user = get_current_user(request=None, db=db)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="仅管理员可访问知识库")
+    _require_role(user, "analyst")
 
     return document_service.list_documents(db, page=page, page_size=page_size, category=category)
 
@@ -162,10 +204,19 @@ async def create_document(
     tags: str = "",
     db: Session = Depends(get_db),
 ):
-    """创建文档（PRD §8.7）POST /api/kb/documents"""
+    """
+    创建文档（PRD §7.7）POST /api/knowledge-base/documents — data_admin+
+    副作用：Celery Worker 异步生成 Embedding（不等候完成，立即返回 201）。
+    """
     user = get_current_user(request=None, db=db)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="仅管理员可访问知识库")
+    _require_role(user, "data_admin")
+
+    if not content or not content.strip():
+        raise _error_response(KBErrorCode.DOC_EMPTY_CONTENT, 400)
+
+    supported_formats = {"markdown", "text"}
+    if format not in supported_formats:
+        raise _error_response(KBErrorCode.DOC_UNSUPPORTED_FORMAT, 400, format=format)
 
     import json
     tags_list = json.loads(tags) if tags else []
@@ -179,62 +230,154 @@ async def create_document(
         tags=tags_list,
         created_by=user.get("id"),
     )
-    return doc.to_dict()
+    return {"id": doc.id, "message": "文档创建成功"}
+
+
+@router.get("/documents/{doc_id}")
+async def get_document(doc_id: int, db: Session = Depends(get_db)):
+    """获取文档详情（PRD §7.x）GET /api/knowledge-base/documents/{id} — analyst+"""
+    user = get_current_user(request=None, db=db)
+    _require_role(user, "analyst")
+
+    result = document_service.get_document(db, doc_id)
+    if not result:
+        raise _error_response(KBErrorCode.DOC_NOT_FOUND, 404)
+    return result
+
+
+@router.put("/documents/{doc_id}")
+async def update_document(
+    doc_id: int,
+    title: Optional[str] = None,
+    content: Optional[str] = None,
+    format: Optional[str] = None,
+    category: Optional[str] = None,
+    tags: Optional[str] = None,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """更新文档（PRD §7.x）PUT /api/knowledge-base/documents/{id} — data_admin+"""
+    user = get_current_user(request=None, db=db)
+    _require_role(user, "data_admin")
+
+    if content is not None and not content.strip():
+        raise _error_response(KBErrorCode.DOC_EMPTY_CONTENT, 400)
+
+    if format is not None:
+        supported_formats = {"markdown", "text"}
+        if format not in supported_formats:
+            raise _error_response(KBErrorCode.DOC_UNSUPPORTED_FORMAT, 400, format=format)
+
+    import json
+    kwargs = {}
+    if title is not None:
+        kwargs["title"] = title
+    if content is not None:
+        kwargs["content"] = content
+    if format is not None:
+        kwargs["format"] = format
+    if category is not None:
+        kwargs["category"] = category
+    if tags is not None:
+        kwargs["tags_json"] = json.loads(tags) if tags else []
+    if status is not None:
+        kwargs["status"] = status
+
+    result = document_service.update_document(db, doc_id, **kwargs)
+    if not result:
+        raise _error_response(KBErrorCode.DOC_NOT_FOUND, 404)
+    return result
 
 
 @router.post("/documents/{doc_id}/embed")
-async def embed_document(doc_id: int, db: Session = Depends(get_db)):
-    """文档向量化（PRD §8.8）POST /api/kb/documents/{id}/embed"""
+async def embed_document(
+    doc_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    手动触发文档向量化（PRD §7.8）POST /api/knowledge-base/documents/{id}/embed — data_admin+
+    仅当自动嵌入失败时使用，正常创建文档后由 Celery 自动处理。
+    """
     user = get_current_user(request=None, db=db)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="仅管理员可访问知识库")
+    _require_role(user, "data_admin")
 
+    # 同步调用（Celery Worker 内部也用此路径）
     result = document_service.chunk_and_embed(db, doc_id)
     if "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
+        raise _error_response(KBErrorCode.EMBEDDING_FAILED, 502)
     return result
 
 
 @router.delete("/documents/{doc_id}")
-async def delete_document(doc_id: int, db: Session = Depends(get_db)):
-    """删除文档（PRD §8.9）DELETE /api/kb/documents/{id}"""
-    user = get_current_user(request=None, db=db)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="仅管理员可访问知识库")
-
-    success = document_service.delete_document(db, doc_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="文档不存在")
-    return {"message": "文档已删除"}
-
-
-@router.get("/search")
-async def search_knowledge(
-    q: str = Query(..., min_length=1),
-    top_k: int = Query(5, ge=1, le=20),
-    source_type: Optional[str] = None,
+async def delete_document(
+    doc_id: int,
+    hard: bool = Query(False, description="硬删除（仅 admin）"),
     db: Session = Depends(get_db),
 ):
-    """知识检索（PRD §8.10）GET /api/kb/search?q=...&top_k=5"""
+    """
+    删除文档（PRD §7.9）DELETE /api/knowledge-base/documents/{id}
+    - hard=false（默认）：软删除（data_admin+）
+    - hard=true：硬删除（admin 专属），同时清理 kb_embeddings
+    """
     user = get_current_user(request=None, db=db)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="仅管理员可访问知识库")
 
-    # 1. 术语精确匹配
+    if hard:
+        _require_role(user, "admin")
+    else:
+        _require_role(user, "data_admin")
+
+    success = document_service.delete_document(db, doc_id, hard=hard)
+    if not success:
+        raise _error_response(KBErrorCode.DOC_NOT_FOUND, 404)
+    return {"message": "文档已删除" if hard else "文档已归档"}
+
+
+# === 搜索端点 ===
+
+@router.post("/search")
+async def search_knowledge(
+    q: str,
+    top_k: int = Query(10, ge=1, le=20),
+    source_types: Optional[str] = None,
+    threshold: float = Query(0.50, ge=0.0, le=1.0),
+    db: Session = Depends(get_db),
+):
+    """
+    知识库语义搜索（PRD §7.10）POST /api/knowledge-base/search — analyst+
+    请求体参数：query, top_k, source_types[], threshold
+    """
+    user = get_current_user(request=None, db=db)
+    _require_role(user, "analyst")
+
+    if not q or not q.strip():
+        raise _error_response(KBErrorCode.SEARCH_QUERY_EMPTY, 400)
+
+    import json
+    source_type_list = json.loads(source_types) if source_types else None
+
+    # 术语精确匹配
     matched_terms = glossary_service.match_terms(db, q, limit=top_k)
 
-    # 2. 向量相似度检索
+    # 向量相似度检索
     try:
         query_embedding = await embedding_service.embed_text(q)
         vector_results = embedding_service.search(
-            db, query_embedding, top_k=top_k, source_type=source_type
+            db, query_embedding,
+            top_k=top_k,
+            threshold=threshold,
+            source_type=source_type_list[0] if source_type_list and len(source_type_list) == 1 else None,
         )
-    except Exception as e:
-        vector_results = []
+        # 多 type 过滤在 service 层实现（按 source_type 分组）
+        if source_type_list and len(source_type_list) > 1:
+            vector_results = [r for r in vector_results if r["source_type"] in source_type_list]
+    except RuntimeError as e:
+        raise _error_response(KBErrorCode.VECTOR_SEARCH_UNAVAILABLE, 502)
+    except Exception:
+        raise _error_response(KBErrorCode.VECTOR_SEARCH_UNAVAILABLE, 502)
 
     return {
+        "results": vector_results,
         "terms": matched_terms,
-        "vectors": vector_results,
         "query": q,
     }
 
@@ -245,10 +388,11 @@ async def rag_enrich(
     scenario: str = "default",
     db: Session = Depends(get_db),
 ):
-    """RAG 上下文增强（PRD §8.11）POST /api/kb/rag/enrich"""
+    """
+    RAG 上下文增强（PRD §7.11）POST /api/knowledge-base/rag/enrich — analyst+
+    """
     user = get_current_user(request=None, db=db)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="仅管理员可访问知识库")
+    _require_role(user, "analyst")
 
     result = await rag_service.enrich_context(db, question, scenario)
     return result
