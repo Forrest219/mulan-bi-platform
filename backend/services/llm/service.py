@@ -143,6 +143,72 @@ class LLMService:
             return {"summary": result["content"]}
         return result
 
+    async def generate_asset_explanation(self, asset, context: str = None) -> dict:
+        """
+        对报表/视图生成 AI 解读
+        asset: TableauAsset 对象
+        context: 可选的额外上下文信息
+        Returns: { "explanation": str } or { "error": str }
+        """
+        from .prompts import ASSET_EXPLAIN_TEMPLATE
+        from tableau.models import TableauDatabase
+
+        db = TableauDatabase()
+
+        # 获取父工作簿信息
+        parent_workbook_info = "无"
+        if asset.parent_workbook_id and asset.parent_workbook_name:
+            parent_workbook_info = f"工作簿名称：{asset.parent_workbook_name}（ID: {asset.parent_workbook_id}）"
+        elif asset.parent_workbook_id:
+            parent_asset = db.get_parent_asset(asset.id)
+            if parent_asset:
+                parent_workbook_info = f"工作簿名称：{parent_asset.name}（ID: {asset.parent_workbook_id}）"
+
+        # 获取关联数据源
+        datasources_info = "无"
+        datasources = db.get_asset_datasources(asset.id)
+        if datasources:
+            ds_list = []
+            for ds in datasources[:5]:  # 最多显示5个
+                ds_list.append(f"- {ds.datasource_name} ({ds.datasource_type or '未知类型'})")
+            if len(datasources) > 5:
+                ds_list.append(f"- ...还有 {len(datasources) - 5} 个数据源")
+            datasources_info = "\n".join(ds_list)
+
+        # 获取字段元数据
+        field_metadata = "无"
+        fields = db.get_datasource_fields(asset.id)
+        if fields:
+            field_list = []
+            for f in fields[:10]:  # 最多显示10个字段
+                role_label = "度量" if f.role == "measure" else "维度"
+                formula_info = f"（公式: {f.formula}）" if f.formula else ""
+                desc_info = f" - {f.description}" if f.description else ""
+                field_list.append(f"- [{role_label}] {f.field_caption or f.field_name}{formula_info}{desc_info}")
+            if len(fields) > 10:
+                field_list.append(f"- ...还有 {len(fields) - 10} 个字段")
+            field_metadata = "\n".join(field_list)
+
+        prompt = ASSET_EXPLAIN_TEMPLATE.format(
+            name=asset.name or "",
+            asset_type=asset.asset_type or "",
+            project_name=asset.project_name or "",
+            description=asset.description or "",
+            owner_name=asset.owner_name or "",
+            parent_workbook_info=parent_workbook_info,
+            datasources=datasources_info,
+            field_metadata=field_metadata,
+        )
+
+        system_prompt = "你是一个 BI 报表解读专家。"
+        if context:
+            system_prompt += f"\n\n附加上下文：{context}"
+
+        result = await self.complete(prompt, system=system_prompt, timeout=30)
+        if "content" in result:
+            return {"explanation": result["content"]}
+        return result
+
     async def test_connection(self, test_prompt: str = "Hello, respond with 'OK'") -> dict:
         """测试 LLM 连接"""
         result = await self.complete(test_prompt, timeout=15)

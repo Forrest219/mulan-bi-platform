@@ -122,3 +122,39 @@ async def get_asset_summary(asset_id: int, request: Request, refresh: bool = Fal
         db.update_asset_error(asset_id, error_msg)
         return {"summary": None, "error": error_msg}
 
+
+@router.get("/assets/{asset_id}/explain")
+async def get_asset_explanation(asset_id: int, request: Request, refresh: bool = False):
+    """获取资产 AI 详细解读（PRD §2.4）"""
+    user = get_current_user(request)
+
+    import datetime
+    from tableau.models import TableauDatabase
+
+    db = TableauDatabase()
+    asset = db.get_asset(asset_id)
+
+    if not asset or asset.is_deleted:
+        raise HTTPException(status_code=404, detail="资产不存在")
+
+    # IDOR 校验
+    conn = db.get_connection(asset.connection_id)
+    if user["role"] != "admin" and conn.owner_id != user["id"]:
+        raise HTTPException(status_code=403, detail="无权访问该资产")
+
+    # 检查缓存（1小时）
+    if not refresh and asset.ai_explain and asset.ai_explain_at:
+        elapsed = datetime.datetime.now() - asset.ai_explain_at
+        if elapsed.total_seconds() < 3600:
+            return {"explanation": asset.ai_explain, "cached": True}
+
+    # 生成新解读
+    result = await llm_service.generate_asset_explanation(asset)
+
+    if "explanation" in result:
+        db.update_asset_explain(asset_id, result["explanation"])
+        return {"explanation": result["explanation"], "cached": False}
+    else:
+        error_msg = result.get("error", "生成失败")
+        return {"explanation": None, "error": error_msg}
+

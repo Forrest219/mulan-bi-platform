@@ -88,15 +88,21 @@ class LLMService:
     def __init__(self):
         self._config = None  # 从数据库加载配置
 
-    def complete(self, prompt: str, system: str = None, stream: bool = False) -> dict | Generator:
-        """同步或流式生成"""
+    async def complete(self, prompt: str, system: str = None, timeout: int = 15) -> dict:
+        """异步 LLM 调用，返回 { "content": str } 或 { "error": str }"""
 
-    def generate_asset_summary(self, asset: TableauAsset) -> str:
-        """对 Tableau 资产生成摘要"""
+    async def generate_asset_summary(self, asset: TableauAsset) -> dict:
+        """对 Tableau 资产生成摘要（15秒超时），返回 { "summary": str } 或 { "error": str }"""
 
-    def explain_asset(self, asset: TableauAsset, context: str = None) -> str:
-        """对报表/视图生成 AI 解读"""
+    async def generate_asset_explanation(self, asset: TableauAsset, context: str = None) -> dict:
+        """对报表/视图生成 AI 解读（30秒超时），返回 { "explanation": str } 或 { "error": str }"""
 ```
+
+> **实现说明：**
+> - 接口采用异步实现（`async/await`），提升并发处理能力
+> - `stream` 参数改为 `timeout` 超时控制，默认 15 秒
+> - `generate_asset_summary` 适用于快速摘要场景（15秒超时）
+> - `generate_asset_explanation` 适用于详细解读场景（30秒超时），包含数据源、字段等丰富上下文
 
 #### Prompt 模板
 
@@ -142,7 +148,7 @@ class LLMService:
     → 前端调用 GET /api/llm/assets/{id}/summary
     → 后端从 DB 获取资产信息
     → 后端调用 LLMService.generate_asset_summary()
-    → LLM 生成摘要（带 30 秒超时保护）
+    → LLM 生成摘要（带 15 秒超时保护）
     → 前端展示摘要文本
 ```
 
@@ -156,6 +162,8 @@ Response: { "summary": "这是一个销售报表..." }
 - 已登录用户可调用
 - 同一资产 1 小时内不重复生成（缓存 `asset_summary` 字段，刷新由用户手动触发）
 - LLM 调用失败返回 `{ "summary": null, "error": "LLM 服务暂不可用" }`
+- 摘要生成超时：15 秒（快速摘要场景）
+- 解读生成超时：30 秒（复杂解读场景）
 
 #### 字段变更
 
@@ -199,6 +207,34 @@ Response: { "summary": "这是一个销售报表..." }
 │  └────────────────────────────────┘    │
 └────────────────────────────────────────┘
 ```
+
+#### API 设计
+
+```
+GET /api/llm/assets/{asset_id}/explain
+Response: { "explanation": "这是..." }
+```
+
+- 已登录用户可调用
+- 同一资产 1 小时内不重复生成（缓存 `ai_explain` 字段，刷新由用户手动触发）
+- 解读生成超时：30 秒
+- LLM 调用失败返回 `{ "explanation": null, "error": "生成失败" }`
+
+#### 字段变更
+
+`TableauAsset` 模型新增字段：
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `ai_explain` | TEXT | AI 生成的详细解读 |
+| `ai_explain_at` | DATETIME | 解读生成时间 |
+
+#### 解读上下文
+
+`generate_asset_explanation` 方法会收集以下上下文信息用于生成高质量解读：
+
+- **父工作簿信息**：获取视图/仪表板所属的工作簿名称
+- **关联数据源**：获取资产关联的数据源列表（最多5个）
+- **字段元数据**：获取数据源字段列表（最多10个），包含字段名称、类型、角色、公式、描述
 
 ### 2.5 标准扩展接口预留（P2 规划）
 
@@ -245,7 +281,7 @@ frontend/src/
 ```python
 # src/llm/models.py
 class LLMConfig(SQLAlchemyModel):
-    __tablename__ = "llm_configs"
+    __tablename__ = "ai_llm_configs"
 
     id: int
     provider: str          # "openai"
@@ -287,7 +323,7 @@ Frontend                    Backend                      LLM Provider
 |------|----------|
 | LLM 配置未设置 | 返回 `{ "error": "LLM 未配置，请联系管理员" }` |
 | API Key 无效 | 记录日志，返回 `{ "error": "LLM 认证失败" }` |
-| LLM 调用超时（30s） | 记录日志，返回 `{ "error": "生成超时，请重试" }` |
+| LLM 调用超时（摘要 15s，解读 30s） | 记录日志，返回 `{ "error": "生成超时，请重试" }` |
 | LLM 服务不可用 | 返回 `{ "error": "LLM 服务暂不可用" }` |
 | 网络错误 | 返回 `{ "error": "网络错误，请检查配置" }` |
 
