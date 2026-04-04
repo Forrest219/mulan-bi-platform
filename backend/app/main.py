@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm, health_scan, tasks, notifications, events
+from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm, health_scan, tasks, notifications, events, knowledge_base
 from app.api.semantic_maintenance import datasources as sm_datasources, fields as sm_fields, review as sm_review, sync as sm_sync, publish as sm_publish
 
 logger = logging.getLogger(__name__)
@@ -56,6 +56,7 @@ app.include_router(llm.router, prefix="/api/llm", tags=["LLM 管理"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["任务管理"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["通知"])
 app.include_router(events.router, prefix="/api/events", tags=["事件"])
+app.include_router(knowledge_base.router, prefix="/api/kb", tags=["知识库"])
 app.include_router(sm_datasources.router, prefix="/api/semantic-maintenance", tags=["语义维护"])
 app.include_router(sm_fields.router, prefix="/api/semantic-maintenance", tags=["语义维护"])
 app.include_router(sm_review.router, prefix="/api/semantic-maintenance", tags=["语义维护"])

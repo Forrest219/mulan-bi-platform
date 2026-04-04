@@ -127,6 +127,8 @@
 | `ix_glossary_category` | `category` | BTREE | 按分类筛选 |
 | `ix_glossary_status` | `status` | BTREE | 按状态筛选 |
 
+> **SSOT 原则**：`kb_glossary` 是业务术语的唯一入口。即使 MVP 阶段不做与 `tableau_field_semantics.synonyms_json` 的自动同步，也强制要求团队所有术语录入必须通过 `kb_glossary` 入口，不允许直接写入下游 `synonyms_json` 字段，以避免历史脏数据。
+
 ### 2.3 `kb_schemas` — 数据模型语义描述
 
 | 列 | 类型 | 约束 | 默认值 | 说明 |
@@ -181,7 +183,7 @@
 | `source_id` | INTEGER | NOT NULL | — | 来源记录 ID |
 | `chunk_index` | INTEGER | NOT NULL | `0` | 文本块序号（文档拆分场景） |
 | `chunk_text` | TEXT | NOT NULL | — | 原始文本块 |
-| `embedding` | VECTOR(1536) | NOT NULL | — | 向量（pgvector，维度随模型调整） |
+| `embedding` | VECTOR | NOT NULL | — | 向量（pgvector，维度由 model_name 指定） |
 | `model_name` | VARCHAR(128) | NOT NULL | — | 生成 Embedding 的模型名，如 `text-embedding-3-small` |
 | `token_count` | INTEGER | NULLABLE | — | 文本块 Token 数 |
 | `created_at` | TIMESTAMP | NOT NULL | `now()` | 创建时间 |
@@ -191,9 +193,9 @@
 | 索引名 | 列 | 类型 | 说明 |
 |--------|-----|------|------|
 | `ix_emb_source` | `(source_type, source_id)` | BTREE | 按来源查询 |
-| `ix_emb_vector` | `embedding` | IVFFlat (lists=100) | 向量近似最近邻检索 |
+| `ix_emb_vector` | `embedding` | HNSW (m=16, ef_construction=200) | 向量近似最近邻检索 |
 
-> **pgvector 说明**：`VECTOR(1536)` 对应 OpenAI `text-embedding-3-small` 输出维度。若使用其他 Embedding 模型，需通过 Alembic 迁移调整维度。IVFFlat 索引在数据量 < 10 万条时性能良好，超过后考虑切换 HNSW。
+> **pgvector 说明**：采用 HNSW 索引，相比 IVFFlat 在数据量小（<万条）时无精度缺失、无冷启动问题，且整体检索性能更优。`VECTOR` 类型不硬编码维度上限（PG 16 + pgvector 0.5+ 支持动态维度），由 `model_name` 字段追踪实际模型，按需切换 Embedding 模型时无需修改表结构。
 
 ### 2.6 ER 关系图
 
@@ -446,13 +448,21 @@ RAG 增强发生在所有 LLM 调用场景中，通过 `RAGService` 在调用 `L
 |--------|-----------|------|
 | System Prompt | 200 | 角色定义 + 输出格式约束 |
 | 数据上下文 | 1200 | 字段元数据、计算字段公式（原有） |
-| **RAG 知识上下文** | **800** | 术语定义 + 知识文档片段（新增） |
+| **RAG 知识上下文** | **动态**（见下方公式） | 术语定义 + 知识文档片段（新增） |
 | 用户指令 | 800 | 用户问题 + 操作要求 |
-| **合计** | **3000** | — |
+| **合计** | **<= 3000** | — |
+
+**动态 Token 预算公式**：
+
+```
+RAG可用预算 = 3000 - System Prompt(200) - 数据上下文实际占用 - 用户指令(800)
+```
+
+其中「数据上下文实际占用」按 `{字段数 × 平均字段描述 Token}` 动态计算（经验值：单字段约 30 Token）。RAG 预算最小不低于 200 Token。
 
 ### 6.3 RAG 上下文优先级
 
-当检索结果超出 800 Token 预算时，按以下优先级裁剪：
+当检索结果超出动态计算的 RAG Token 预算时，按以下优先级裁剪：
 
 | 优先级 | 来源 | 说明 |
 |--------|------|------|
@@ -464,7 +474,7 @@ RAG 增强发生在所有 LLM 调用场景中，通过 `RAGService` 在调用 `L
 
 裁剪规则：
 1. P0 始终保留（通常 < 200 tokens）
-2. P1-P4 按优先级依次填充，直到达到 800 Token 上限
+2. P1-P4 按优先级依次填充，直到达到动态计算的 RAG Token 上限
 3. 同优先级内按 similarity 降序排列，取前 N 条
 
 ### 6.4 上下文注入格式
@@ -738,7 +748,7 @@ sequenceDiagram
     PGV-->>Emb: relevant_chunks[]
     Emb-->>RAG: search_results[]
 
-    Note over RAG: 阶段3：上下文组装（800 Token 预算）
+    Note over RAG: 阶段3：上下文组装（动态 Token 预算）
     RAG->>RAG: 按优先级裁剪 matched_terms + search_results
     RAG-->>API: rag_context (结构化文本)
 
@@ -833,8 +843,8 @@ sequenceDiagram
 
 | 编号 | 问题 | 优先级 | 状态 |
 |------|------|--------|------|
-| OI-01 | Embedding 维度（1536）绑定 OpenAI `text-embedding-3-small`，切换模型需迁移全部向量数据。是否需要支持多模型 Embedding 共存？ | P1 | 待讨论 |
-| OI-02 | pgvector IVFFlat 索引在数据量超过 10 万条后性能下降，是否需要预先规划 HNSW 索引切换方案？ | P2 | 待评估 |
+| OI-01 | Embedding 维度不再硬编码，VECTOR 类型支持动态维度，切换 Embedding 模型时通过 `model_name` 追踪，无需迁移表结构。是否需要支持多模型 Embedding 共存？ | P1 | 已解决（动态维度） |
+| OI-02 | HNSW 索引参数（m=16, ef_construction=200）在不同数据量级下的最优配置是否需要调优？ | P2 | 已采用 HNSW，参数按需调优 |
 | OI-03 | 文档分块参数（512 tokens / 64 overlap）为初始值，是否需要提供管理员可配置化能力？ | P3 | 待讨论 |
 | OI-04 | RAG 上下文 800 Token 预算是否充足？复杂业务场景可能需要更多知识上下文，但会压缩数据上下文和用户指令空间。 | P1 | 待验证 |
 | OI-05 | `kb_glossary` 与 `tableau_field_semantics.synonyms_json` 存在数据重叠，是否需要建立同步机制？ | P2 | 待设计 |

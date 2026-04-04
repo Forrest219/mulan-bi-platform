@@ -52,6 +52,7 @@ def init_db():
         from services.health_scan.models import HealthScanRecord, HealthScanIssue
         from services.semantic_maintenance.models import TableauDatasourceSemantics, TableauDatasourceSemanticVersion, TableauFieldSemantics, TableauFieldSemanticVersion, TableauPublishLog
         from services.events.models import BiEvent, BiNotification
+        from services.knowledge_base.models import KbGlossary, KbSchema, KbDocument, KbEmbedding
 
         Base.metadata.create_all(bind=engine)
         print("Database schema initialized successfully.")

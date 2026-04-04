@@ -216,5 +216,34 @@ class LLMService:
             return {"success": False, "message": result["error"]}
         return {"success": True, "message": result["content"]}
 
+    async def generate_embedding(self, text: str, model: str = "text-embedding-3-small", timeout: int = 15) -> dict:
+        """
+        生成 Embedding 向量（PRD §5.1）。
+        内部路由到 OpenAI embeddings.create() 接口。
+        Returns: { "embedding": List[float] } or { "error": str }
+        """
+        config = self._load_config()
+        if not config or not config.is_active or not config.api_key_encrypted:
+            return {"error": "LLM 未配置，请联系管理员"}
+
+        try:
+            api_key = _decrypt(config.api_key_encrypted)
+        except Exception as e:
+            logger.error("LLM API Key 解密失败: %s", e, exc_info=True)
+            return {"error": "LLM 认证配置错误"}
+
+        try:
+            client = self._get_openai_client(api_key, config.base_url, timeout)
+            logger.info("Embedding 调用：model=%s, text_len=%d", model, len(text))
+            response = await client.embeddings.create(
+                model=model,
+                input=text,
+            )
+            embedding = response.data[0].embedding
+            return {"embedding": embedding}
+        except Exception as e:
+            logger.error("Embedding 生成失败: %s", e, exc_info=True)
+            return {"error": f"Embedding 生成失败: {str(e)}"}
+
 
 llm_service = LLMService()
