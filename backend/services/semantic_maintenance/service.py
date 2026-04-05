@@ -1,4 +1,4 @@
-"""语义维护模块 - 业务逻辑层"""
+"""语义维护模块 - 业务逻辑层（Spec 12 §2.2 边界）"""
 import json
 import logging
 from typing import Dict, Any, Optional, List
@@ -8,6 +8,11 @@ from .models import (
     SemanticStatus,
     SemanticSource,
     SensitivityLevel,
+)
+from .context_assembler import (
+    ContextAssembler,
+    BLOCKED_FOR_LLM,
+    sanitize_fields_for_llm,
 )
 
 logger = logging.getLogger(__name__)
@@ -236,17 +241,49 @@ class SemanticMaintenanceService:
         return True, updated.to_dict()
 
     # ============================================================
-    # AI 语义生成（Phase 1）
+    # AI 语义生成（Spec 12 §5 — ContextAssembler 驱动）
     # ============================================================
+
+    def _pre_llm_sensitivity_check(
+        self,
+        sensitivity_level: str = None,
+        is_datasource: bool = False,
+    ) -> Optional[str]:
+        """
+        LLM 调用前置敏感度检查（Spec 12 §9.1 / SLI_005）。
+
+        Returns:
+            None 表示通过检查；返回错误消息字符串表示不通过。
+        """
+        if sensitivity_level is None:
+            return None
+        level = sensitivity_level.lower()
+        if level in BLOCKED_FOR_LLM:
+            obj_type = "数据源" if is_datasource else "字段"
+            return f"SLI_005: 敏感级别为 {level} 的{obj_type}禁止 AI 处理"
+        return None
+
+    def _parse_llm_json_response(self, content: str) -> Dict[str, Any]:
+        """
+        解析 LLM 返回内容中的 JSON（Spec 12 §7.2）。
+
+        支持 ``` 代码块包裹格式。重试策略在调用方处理。
+        """
+        content = content.strip()
+        if content.startswith("```"):
+            lines = content.split("\n")
+            content = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+        return json.loads(content)
 
     def generate_ai_draft_datasource(
         self, ds_id: int, user_id: int = None,
         ds_name: str = None, description: str = None,
         field_context: List[Dict] = None,
     ) -> tuple:
-        """AI 生成数据源语义草稿"""
+        """AI 生成数据源语义草稿（Spec 12 §5）"""
         try:
             from services.llm.service import LLMService
+            from services.llm.prompts import AI_SEMANTIC_DS_TEMPLATE
         except ImportError:
             return False, "LLM 服务未配置"
 
@@ -254,69 +291,47 @@ class SemanticMaintenanceService:
         if not ds:
             return False, "记录不存在"
 
-        # 构建字段上下文文本
-        field_text = ""
-        if field_context:
-            field_lines = []
-            for f in field_context:
-                name = f.get("field_name", "")
-                caption = f.get("field_caption", "")
-                role = f.get("role", "")
-                dtype = f.get("data_type", "")
-                formula = f.get("formula", "")
-                line = f"- {name}"
-                if caption:
-                    line += f" ({caption})"
-                line += f" [{dtype}] [{role}]"
-                if formula:
-                    line += f" 公式: {formula}"
-                field_lines.append(line)
-            field_text = "\n".join(field_lines)
+        # §9.1 SLI_005 前置敏感度检查
+        sensitivity_err = self._pre_llm_sensitivity_check(
+            getattr(ds, "sensitivity_level", None),
+            is_datasource=True,
+        )
+        if sensitivity_err:
+            return False, sensitivity_err
 
-        prompt = f"""你是一个 BI 数据语义专家。请为以下数据源生成业务语义建议。
+        # §3 上下文组装：使用 ContextAssembler
+        assembler = ContextAssembler()
 
-## 数据源信息
-名称：{ds_name or ds.tableau_datasource_id}
-描述：{description or ds.semantic_description or '无'}
-现有语义名：{ds.semantic_name or '无'}
-现有中文名：{ds.semantic_name_zh or '无'}
+        # field_context 净化（移除 HIGH/CONFIDENTIAL 字段）
+        sanitized_fields = assembler.sanitize_fields(field_context or [])
 
-## 字段列表
-{field_text or '无字段信息'}
+        # 构建字段上下文（序列化 + 截断）
+        field_context_text = assembler.build_field_context(sanitized_fields)
 
-请以 JSON 格式输出语义建议，包含以下字段：
-- semantic_name: 英文语义名
-- semantic_name_zh: 中文语义名（必填）
-- semantic_description: 语义描述（必填）
-- business_definition: 业务定义
-- owner: 责任人建议
-- sensitivity_level: 敏感级别（low/medium/high/confidential）
-- tags_json: JSON 格式标签数组
-- ai_confidence: AI 置信度 0~1
-
-只输出 JSON，不要有其他文字。"""
+        prompt = AI_SEMANTIC_DS_TEMPLATE.format(
+            ds_name=ds_name or ds.tableau_datasource_id,
+            description=description or ds.semantic_description or "无",
+            existing_semantic_name=ds.semantic_name or "无",
+            existing_semantic_name_zh=ds.semantic_name_zh or "无",
+            field_context=field_context_text,
+        )
+        system = "你是一个专业的 BI 数据语义专家。"
 
         try:
             llm = LLMService()
-            result = llm.complete(prompt, system="你是一个专业的 BI 数据语义专家。", timeout=30)
+            result = llm.complete(prompt, system=system, timeout=30)
         except Exception as e:
             return False, f"LLM 调用失败: {e}"
 
         if "error" in result:
             return False, result["error"]
 
-        content = result["content"].strip()
-        # 尝试提取 JSON
-        if content.startswith("```"):
-            lines = content.split("\n")
-            content = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
         try:
-            import json as _json
-            parsed = _json.loads(content)
+            parsed = self._parse_llm_json_response(result["content"].strip())
         except Exception:
-            return False, f"AI 返回格式异常（非 JSON）：{content[:200]}"
+            return False, f"AI 返回格式异常（非 JSON）：{result['content'][:200]}"
 
-        # 更新记录
+        # 写入语义记录
         self.db.update_datasource_semantics(
             ds_id,
             user_id=user_id,
@@ -327,7 +342,7 @@ class SemanticMaintenanceService:
             business_definition=parsed.get("business_definition"),
             owner=parsed.get("owner"),
             sensitivity_level=parsed.get("sensitivity_level"),
-            tags_json=_json.dumps(parsed.get("tags_json", []), ensure_ascii=False) if parsed.get("tags_json") else None,
+            tags_json=json.dumps(parsed.get("tags_json", []), ensure_ascii=False) if parsed.get("tags_json") else None,
             status=SemanticStatus.AI_GENERATED,
             source=SemanticSource.AI,
         )
@@ -340,9 +355,10 @@ class SemanticMaintenanceService:
         role: str = None, formula: str = None,
         enum_values: List[str] = None,
     ) -> tuple:
-        """AI 生成字段语义草稿"""
+        """AI 生成字段语义草稿（Spec 12 §5）"""
         try:
             from services.llm.service import LLMService
+            from services.llm.prompts import AI_SEMANTIC_FIELD_TEMPLATE
         except ImportError:
             return False, "LLM 服务未配置"
 
@@ -350,54 +366,45 @@ class SemanticMaintenanceService:
         if not field:
             return False, "记录不存在"
 
-        enum_text = ""
-        if enum_values:
-            enum_text = "\n".join([f"- {v}" for v in enum_values[:20]])
+        # §9.1 SLI_005 前置敏感度检查
+        sensitivity_err = self._pre_llm_sensitivity_check(
+            getattr(field, "sensitivity_level", None),
+            is_datasource=False,
+        )
+        if sensitivity_err:
+            return False, sensitivity_err
 
-        prompt = f"""你是一个 BI 字段语义专家。请为以下字段生成语义建议。
+        # 枚举值截断（Spec 12 §5.1：最多 20 个）
+        enum_text = "\n".join([f"- {v}" for v in (enum_values or [])[:20]]) or "无"
 
-## 字段信息
-字段名：{field_name or field.tableau_field_id}
-数据类型：{data_type or field.data_type or '未知'}
-角色：{role or field.role or '未知'}
-公式：{formula or field.formula or '无'}
-现有语义名：{field.semantic_name or '无'}
-现有中文名：{field.semantic_name_zh or '无'}
-枚举值示例：\n{enum_text or '无'}
-
-请以 JSON 格式输出语义建议：
-- semantic_name: 英文语义名
-- semantic_name_zh: 中文语义名（必填）
-- semantic_definition: 语义定义（必填）
-- metric_definition: 指标口径（若为 measure 字段必填）
-- dimension_definition: 维度解释（若为 dimension 字段必填）
-- unit: 单位（如金额、百分比、人次等）
-- synonyms_json: JSON 同义词数组
-- sensitivity_level: 敏感级别（low/medium/high/confidential）
-- is_core_field: 是否为核心字段（true/false）
-- ai_confidence: AI 置信度 0~1
-- tags_json: JSON 标签数组
-
-只输出 JSON，不要有其他文字。"""
+        # 组装字段元数据（传入 AI_SEMANTIC_FIELD_TEMPLATE 所需的格式）
+        # 注意：field_context 由 API 调用方构造后传入
+        # 此处直接构建 prompt，使用 ContextAssembler 净化字段（如果 API 传入了字段上下文）
+        # 但 generate_ai_draft_field 主要接收单个字段信息，field_context 不适用
+        prompt = AI_SEMANTIC_FIELD_TEMPLATE.format(
+            field_name=field_name or field.tableau_field_id,
+            data_type=data_type or getattr(field, "data_type", "未知"),
+            role=role or getattr(field, "role", "未知"),
+            formula=formula or getattr(field, "formula", "无"),
+            existing_semantic_name=field.semantic_name or "无",
+            existing_semantic_name_zh=field.semantic_name_zh or "无",
+            enum_values=enum_text,
+        )
+        system = "你是一个专业的 BI 字段语义专家。"
 
         try:
             llm = LLMService()
-            result = llm.complete(prompt, system="你是一个专业的 BI 字段语义专家。", timeout=30)
+            result = llm.complete(prompt, system=system, timeout=30)
         except Exception as e:
             return False, f"LLM 调用失败: {e}"
 
         if "error" in result:
             return False, result["error"]
 
-        content = result["content"].strip()
-        if content.startswith("```"):
-            lines = content.split("\n")
-            content = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
         try:
-            import json as _json
-            parsed = _json.loads(content)
+            parsed = self._parse_llm_json_response(result["content"].strip())
         except Exception:
-            return False, f"AI 返回格式异常（非 JSON）：{content[:200]}"
+            return False, f"AI 返回格式异常（非 JSON）：{result['content'][:200]}"
 
         self.db.update_field_semantics(
             field_id,
@@ -409,8 +416,8 @@ class SemanticMaintenanceService:
             metric_definition=parsed.get("metric_definition"),
             dimension_definition=parsed.get("dimension_definition"),
             unit=parsed.get("unit"),
-            synonyms_json=_json.dumps(parsed.get("synonyms_json", []), ensure_ascii=False) if parsed.get("synonyms_json") else None,
-            tags_json=_json.dumps(parsed.get("tags_json", []), ensure_ascii=False) if parsed.get("tags_json") else None,
+            synonyms_json=json.dumps(parsed.get("synonyms_json", []), ensure_ascii=False) if parsed.get("synonyms_json") else None,
+            tags_json=json.dumps(parsed.get("tags_json", []), ensure_ascii=False) if parsed.get("tags_json") else None,
             sensitivity_level=parsed.get("sensitivity_level"),
             is_core_field=parsed.get("is_core_field", False),
             ai_confidence=parsed.get("ai_confidence"),
