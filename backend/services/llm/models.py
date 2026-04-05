@@ -1,8 +1,8 @@
 """LLM 配置数据模型"""
 from typing import Optional
 
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime
-from app.core.database import Base, sa_func, sa_text # 导入中央配置的 Base, func, text
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, JSON, Index
+from app.core.database import Base, JSONB, sa_func, sa_text # 导入中央配置的 Base, JSONB, func, text
 
 class LLMConfig(Base):
     """LLM 配置"""
@@ -94,4 +94,72 @@ class LLMConfigDatabase:
             session.commit()
         finally:
             session.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NL-to-Query 查询审计日志（PRD §10.1）
+# ─────────────────────────────────────────────────────────────────────────────
+
+class NlqQueryLog(Base):
+    """
+    NL-to-Query 查询审计日志表。
+
+    每次 NL-to-Query 请求（成功或失败）均记录一条。
+    注意：VizQL JSON 会记录，但查询结果数据不记录（PRD §10.4 数据隔离）。
+    """
+    __tablename__ = "nlq_query_logs"
+    __table_args__ = (
+        Index("ix_nlq_log_user_created", "user_id", "created_at"),
+        Index("ix_nlq_log_datasource", "datasource_luid"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    question = Column(Text, nullable=False)
+    intent = Column(String(32), nullable=True)
+    datasource_luid = Column(String(256), nullable=True)
+    vizql_json = Column(JSONB, nullable=True)  # 仅记录查询结构，不记录结果
+    response_type = Column(String(16), nullable=True)
+    execution_time_ms = Column(Integer, nullable=True)
+    error_code = Column(String(16), nullable=True)  # 成功时为 NULL
+    created_at = Column(DateTime, server_default=sa_func.now(), nullable=False)
+
+
+def log_nlq_query(
+    user_id: int,
+    question: str,
+    intent: str = None,
+    datasource_luid: str = None,
+    vizql_json: dict = None,
+    response_type: str = None,
+    execution_time_ms: int = None,
+    error_code: str = None,
+) -> None:
+    """
+    写入一条 NL-to-Query 审计日志（PRD §10.1）。
+
+    在 search.py 的 /api/search/query 返回前调用（无论成功或失败）。
+    注意：此函数为 fire-and-forget，异常不向上抛出以避免干扰主流程。
+    """
+    try:
+        from app.core.database import SessionLocal
+        session = SessionLocal()
+        try:
+            log = NlqQueryLog(
+                user_id=user_id,
+                question=question,
+                intent=intent,
+                datasource_luid=datasource_luid,
+                vizql_json=vizql_json,
+                response_type=response_type,
+                execution_time_ms=execution_time_ms,
+                error_code=error_code,
+            )
+            session.add(log)
+            session.commit()
+        finally:
+            session.close()
+    except Exception:
+        # fire-and-forget，审计失败不干扰主流程
+        pass
 

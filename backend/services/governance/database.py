@@ -1,0 +1,437 @@
+"""数据质量监控 - 数据库访问层
+
+遵循 Spec 15 v1.1：
+- bi_quality_scores: Append-Only（每次 INSERT，不 UPSERT）
+- bi_quality_results: 90 天保留，PostgreSQL 按月分区
+- 规则 CRUD、结果查询、评分聚合
+"""
+from datetime import datetime, timedelta
+from typing import Optional, List, Dict, Any, Tuple
+
+from sqlalchemy import desc, and_, func, text
+from sqlalchemy.orm import Session
+
+from .models import QualityRule, QualityResult, QualityScore
+
+
+class QualityDatabase:
+    """质量监控数据库访问层"""
+
+    def _session(self) -> Session:
+        from app.core.database import SessionLocal
+        s = SessionLocal()
+        s.expire_all()
+        return s
+
+    # ==================== 规则 CRUD ====================
+
+    def create_rule(self, **kwargs) -> QualityRule:
+        s = self._session()
+        try:
+            rule = QualityRule(**kwargs)
+            s.add(rule)
+            s.commit()
+            s.refresh(rule)
+            return rule
+        except Exception:
+            s.rollback()
+            raise
+        finally:
+            s.close()
+
+    def get_rule(self, rule_id: int) -> Optional[QualityRule]:
+        s = self._session()
+        try:
+            return s.query(QualityRule).filter(QualityRule.id == rule_id).first()
+        finally:
+            s.close()
+
+    def list_rules(
+        self,
+        datasource_id: int = None,
+        table_name: str = None,
+        enabled: bool = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        s = self._session()
+        try:
+            q = s.query(QualityRule)
+            if datasource_id is not None:
+                q = q.filter(QualityRule.datasource_id == datasource_id)
+            if table_name:
+                q = q.filter(QualityRule.table_name == table_name)
+            if enabled is not None:
+                q = q.filter(QualityRule.enabled == enabled)
+            total = q.count()
+            items = q.order_by(QualityRule.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
+            return {"rules": [r.to_dict() for r in items], "total": total, "page": page, "page_size": page_size}
+        finally:
+            s.close()
+
+    def update_rule(self, rule_id: int, **kwargs) -> bool:
+        s = self._session()
+        try:
+            rule = s.query(QualityRule).filter(QualityRule.id == rule_id).first()
+            if not rule:
+                return False
+            for key, value in kwargs.items():
+                if hasattr(rule, key) and value is not None:
+                    setattr(rule, key)
+            s.commit()
+            return True
+        except Exception:
+            s.rollback()
+            raise
+        finally:
+            s.close()
+
+    def delete_rule(self, rule_id: int) -> bool:
+        s = self._session()
+        try:
+            rule = s.query(QualityRule).filter(QualityRule.id == rule_id).first()
+            if not rule:
+                return False
+            s.delete(rule)
+            s.commit()
+            return True
+        except Exception:
+            s.rollback()
+            raise
+        finally:
+            s.close()
+
+    def toggle_rule(self, rule_id: int) -> Optional[bool]:
+        """切换规则启用状态，返回切换后的 enabled 值"""
+        s = self._session()
+        try:
+            rule = s.query(QualityRule).filter(QualityRule.id == rule_id).first()
+            if not rule:
+                return None
+            rule.enabled = not rule.enabled
+            s.commit()
+            return rule.enabled
+        except Exception:
+            s.rollback()
+            raise
+        finally:
+            s.close()
+
+    def get_enabled_rules(self, datasource_id: int = None) -> List[QualityRule]:
+        """获取所有启用规则，支持按数据源过滤"""
+        s = self._session()
+        try:
+            q = s.query(QualityRule).filter(QualityRule.enabled == True)
+            if datasource_id is not None:
+                q = q.filter(QualityRule.datasource_id == datasource_id)
+            return q.all()
+        finally:
+            s.close()
+
+    def rule_exists(self, datasource_id: int, table_name: str, field_name: str, rule_type: str, exclude_id: int = None) -> bool:
+        """检查同一数据源+表+字段+规则类型是否已存在"""
+        s = self._session()
+        try:
+            q = s.query(QualityRule).filter(
+                and_(
+                    QualityRule.datasource_id == datasource_id,
+                    QualityRule.table_name == table_name,
+                    QualityRule.field_name == field_name,
+                    QualityRule.rule_type == rule_type,
+                )
+            )
+            if exclude_id is not None:
+                q = q.filter(QualityRule.id != exclude_id)
+            return q.first() is not None
+        finally:
+            s.close()
+
+    # ==================== 检测结果 ====================
+
+    def create_result(self, **kwargs) -> QualityResult:
+        s = self._session()
+        try:
+            result = QualityResult(**kwargs)
+            s.add(result)
+            s.commit()
+            s.refresh(result)
+            return result
+        except Exception:
+            s.rollback()
+            raise
+        finally:
+            s.close()
+
+    def batch_create_results(self, results: List[Dict[str, Any]]) -> int:
+        """批量插入检测结果"""
+        s = self._session()
+        try:
+            objs = [QualityResult(**r) for r in results]
+            s.bulk_save_objects(objs)
+            s.commit()
+            return len(objs)
+        except Exception:
+            s.rollback()
+            raise
+        finally:
+            s.close()
+
+    def list_results(
+        self,
+        datasource_id: int = None,
+        rule_id: int = None,
+        passed: bool = None,
+        start_date: datetime = None,
+        end_date: datetime = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        s = self._session()
+        try:
+            q = s.query(QualityResult)
+            if datasource_id is not None:
+                q = q.filter(QualityResult.datasource_id == datasource_id)
+            if rule_id is not None:
+                q = q.filter(QualityResult.rule_id == rule_id)
+            if passed is not None:
+                q = q.filter(QualityResult.passed == passed)
+            if start_date:
+                q = q.filter(QualityResult.executed_at >= start_date)
+            if end_date:
+                q = q.filter(QualityResult.executed_at <= end_date)
+            total = q.count()
+            items = q.order_by(desc(QualityResult.executed_at)).offset((page - 1) * page_size).limit(page_size).all()
+            return {"results": [r.to_dict() for r in items], "total": total, "page": page, "page_size": page_size}
+        finally:
+            s.close()
+
+    def get_latest_results(self, datasource_id: int = None, limit: int = 100) -> List[QualityResult]:
+        """获取各规则最新一次检测结果"""
+        s = self._session()
+        try:
+            subq = (
+                s.query(
+                    QualityResult.rule_id,
+                    func.max(QualityResult.executed_at).label("max_exec"),
+                )
+                .group_by(QualityResult.rule_id)
+                .subquery()
+            )
+            q = (
+                s.query(QualityResult)
+                .join(subq, and_(QualityResult.rule_id == subq.c.rule_id, QualityResult.executed_at == subq.c.max_exec))
+            )
+            if datasource_id is not None:
+                q = q.filter(QualityResult.datasource_id == datasource_id)
+            return q.limit(limit).all()
+        finally:
+            s.close()
+
+    # ==================== 质量评分 ====================
+
+    def append_score(self, **kwargs) -> QualityScore:
+        """追加评分快照 - Append-Only，每次计算后 INSERT 新记录"""
+        s = self._session()
+        try:
+            score = QualityScore(**kwargs)
+            s.add(score)
+            s.commit()
+            s.refresh(score)
+            return score
+        except Exception:
+            s.rollback()
+            raise
+        finally:
+            s.close()
+
+    def get_latest_scores(self, datasource_id: int, scope_type: str = None, scope_name: str = None) -> List[QualityScore]:
+        """获取最新评分（按 scope_type + scope_name 取最新一条）"""
+        s = self._session()
+        try:
+            filters = [QualityScore.datasource_id == datasource_id]
+            if scope_type:
+                filters.append(QualityScore.scope_type == scope_type)
+            if scope_name:
+                filters.append(QualityScore.scope_name == scope_name)
+
+            # 按 scope_type + scope_name 分组，取每组最新
+            subq = (
+                s.query(
+                    QualityScore.scope_type,
+                    QualityScore.scope_name,
+                    func.max(QualityScore.id).label("max_id"),
+                )
+                .filter(*filters)
+                .group_by(QualityScore.scope_type, QualityScore.scope_name)
+                .subquery()
+            )
+            scores = (
+                s.query(QualityScore)
+                .join(subq, and_(
+                    QualityScore.scope_type == subq.c.scope_type,
+                    QualityScore.scope_name == subq.c.scope_name,
+                    QualityScore.id == subq.c.max_id,
+                ))
+                .all()
+            )
+            return scores
+        finally:
+            s.close()
+
+    def get_score_trend(
+        self,
+        datasource_id: int,
+        scope_type: str = None,
+        scope_name: str = None,
+        days: int = 30,
+    ) -> List[Dict[str, Any]]:
+        """获取评分趋势 - 按日期聚合近 N 天每日最新评分"""
+        s = self._session()
+        try:
+            cutoff = datetime.now() - timedelta(days=days)
+            filters = [
+                QualityScore.datasource_id == datasource_id,
+                QualityScore.calculated_at >= cutoff,
+            ]
+            if scope_type:
+                filters.append(QualityScore.scope_type == scope_type)
+            if scope_name:
+                filters.append(QualityScore.scope_name == scope_name)
+
+            # 按日期聚合，取每日最新评分
+            trend = (
+                s.query(
+                    func.date(QualityScore.calculated_at).label("date"),
+                    func.max(QualityScore.overall_score).label("overall_score"),
+                )
+                .filter(*filters)
+                .group_by(func.date(QualityScore.calculated_at))
+                .order_by(func.date(QualityScore.calculated_at))
+                .all()
+            )
+            return [{"date": str(row.date), "overall_score": row.overall_score} for row in trend]
+        finally:
+            s.close()
+
+    def get_health_scan_score(self, datasource_id: int) -> Optional[float]:
+        """从 bi_health_scan_records 读取最新健康扫描评分（Spec 11 集成）"""
+        s = self._session()
+        try:
+            from services.health_scan.models import HealthScanRecord
+            record = (
+                s.query(HealthScanRecord)
+                .filter(
+                    HealthScanRecord.datasource_id == datasource_id,
+                    HealthScanRecord.status == "success",
+                )
+                .order_by(desc(HealthScanRecord.id))
+                .first()
+            )
+            return record.health_score if record else None
+        finally:
+            s.close()
+
+    def get_ddl_compliance_score(self, datasource_id: int) -> Optional[float]:
+        """从 bi_scan_logs 读取最新 DDL 合规评分（Spec 06 集成）"""
+        s = self._session()
+        try:
+            from services.logs.models import ScanLog
+            record = (
+                s.query(ScanLog)
+                .filter(
+                    ScanLog.datasource_id == datasource_id,
+                    ScanLog.status == "completed",
+                )
+                .order_by(desc(ScanLog.id))
+                .first()
+            )
+            if not record:
+                return None
+            # ddl_score = 100 - (error * 20 + warning * 5 + info * 1)
+            ddl_score = max(0.0, 100.0 - (record.error_count or 0) * 20 - (record.warning_count or 0) * 5 - (record.info_count or 0) * 1)
+            return round(ddl_score, 1)
+        finally:
+            s.close()
+
+    # ==================== 看板聚合 ====================
+
+    def get_dashboard_summary(self) -> Dict[str, Any]:
+        """质量看板汇总统计"""
+        s = self._session()
+        try:
+            total_ds = s.query(func.count(func.distinct(QualityScore.datasource_id))).scalar() or 0
+
+            # 平均评分（各数据源最新评分）
+            latest_subq = (
+                s.query(
+                    QualityScore.datasource_id,
+                    func.max(QualityScore.id).label("max_id"),
+                )
+                .group_by(QualityScore.datasource_id)
+                .subquery()
+            )
+            avg_score = (
+                s.query(func.avg(QualityScore.overall_score))
+                .join(latest_subq, QualityScore.id == latest_subq.c.max_id)
+                .scalar()
+            ) or 0.0
+
+            total_rules = s.query(func.count(QualityRule.id)).scalar() or 0
+            enabled_rules = s.query(func.count(QualityRule.id)).filter(QualityRule.enabled == True).scalar() or 0
+
+            # 最新结果统计
+            latest_results = self.get_latest_results(limit=10000)
+            passed_count = sum(1 for r in latest_results if r.passed)
+            failed_count = len(latest_results) - passed_count
+
+            return {
+                "total_datasources": total_ds,
+                "avg_score": round(avg_score, 1),
+                "rules_total": total_rules,
+                "rules_passed": passed_count,
+                "rules_failed": failed_count,
+            }
+        finally:
+            s.close()
+
+    def get_top_failures(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """失败规则 TOP N（按连续失败次数排序）"""
+        s = self._session()
+        try:
+            latest_results = self.get_latest_results(limit=1000)
+            failures = [r for r in latest_results if not r.passed]
+
+            # 聚合：rule_id -> 失败次数
+            from collections import defaultdict
+            rule_failure_count: Dict[int, int] = defaultdict(int)
+            rule_info: Dict[int, Dict[str, Any]] = {}
+
+            for r in failures:
+                rule_failure_count[r.rule_id] += 1
+                if r.rule_id not in rule_info:
+                    rule_info[r.rule_id] = {
+                        "rule_id": r.rule_id,
+                        "table_name": r.table_name,
+                        "field_name": r.field_name,
+                        "datasource_id": r.datasource_id,
+                    }
+
+            sorted_failures = sorted(
+                [{"consecutive_failures": rule_failure_count[k], **rule_info[k]} for k in rule_failure_count],
+                key=lambda x: -x["consecutive_failures"],
+            )[:limit]
+
+            # 补充 rule_name 和 datasource_name
+            for f in sorted_failures:
+                rule = self.get_rule(f["rule_id"])
+                if rule:
+                    f["rule_name"] = rule.name
+                    f["severity"] = rule.severity
+                ds_db = s.query(QualityResult).filter(QualityResult.rule_id == f["rule_id"]).first()
+                if ds_db:
+                    from services.datasources.models import DataSource
+                    ds = s.query(DataSource).filter(DataSource.id == f["datasource_id"]).first()
+                    f["datasource_name"] = ds.name if ds else f["datasource_id"]
+            return sorted_failures
+        finally:
+            s.close()

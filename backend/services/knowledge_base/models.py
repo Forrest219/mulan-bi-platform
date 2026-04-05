@@ -103,6 +103,20 @@ class KbSchema(Base):
             "updated_at": self.updated_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.updated_at else None,
         }
 
+    def build_embedding_text(self) -> str:
+        """
+        按 PRD §5.1 构造 schema 类型的 Embedding 文本。
+        schema: "{datasource_id} 数据模型: {description}。{schema_yaml 摘要}"
+        """
+        # schema_yaml 可能很长，取前 500 字符作为摘要
+        yaml_summary = self.schema_yaml[:500] if self.schema_yaml else ""
+        parts = [f"{self.datasource_id} 数据模型"]
+        if self.description:
+            parts.append(f"{self.description}")
+        if yaml_summary:
+            parts.append(f"。{yaml_summary}")
+        return "".join(parts)
+
 
 # === kb_documents ===
 

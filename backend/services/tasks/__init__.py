@@ -27,6 +27,10 @@ celery_app.conf.update(
             "task": "services.tasks.tableau_tasks.scheduled_sync_all",
             "schedule": 60.0,
         },
+        "quality-cleanup-old-results": {
+            "task": "services.tasks.quality_tasks.cleanup_old_quality_results",
+            "schedule": 86400.0,  # 每天执行一次（清理 90 天前数据）
+        },
     },
 )
 

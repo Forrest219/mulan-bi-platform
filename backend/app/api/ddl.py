@@ -2,25 +2,41 @@
 DDL 检查 API
 """
 from pathlib import Path
-
-from pydantic import BaseModel
-from fastapi import APIRouter, Depends
 from typing import Optional, List
+
+from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 
 from services.ddl_checker.parser import DDLParser
 from services.ddl_checker.validator import DDLValidator
+from services.rules.models import RuleConfigDatabase
 from app.core.dependencies import get_current_user
 
 router = APIRouter()
 
-# 规则配置文件路径
-RULES_CONFIG_PATH = Path(__file__).parent.parent.parent.parent / "config" / "rules.yaml"
-validator = DDLValidator(str(RULES_CONFIG_PATH))
+# DDL 文本最大长度 64KB（65,536 字节）— ReDoS 防护
+MAX_DDL_TEXT_LENGTH = 65536
+
+# 懒加载 DDLValidator，规则从数据库读取
+_validator: Optional[DDLValidator] = None
+
+
+def get_validator() -> DDLValidator:
+    """获取 DDLValidator 单例"""
+    global _validator
+    if _validator is None:
+        _validator = DDLValidator()
+    return _validator
 
 
 class DDLCheckRequest(BaseModel):
     """DDL 检查请求"""
-    ddl_text: str
+    ddl_text: str = Field(
+        ...,
+        max_length=MAX_DDL_TEXT_LENGTH,
+        description=f"CREATE TABLE SQL 语句，最大长度 {MAX_DDL_TEXT_LENGTH} 字节"
+    )
     db_type: str = "mysql"
 
 
@@ -73,9 +89,19 @@ async def check_ddl(request: DDLCheckRequest):
     """
     检查 DDL 语句
 
-    - **ddl_text**: CREATE TABLE SQL 语句
+    - **ddl_text**: CREATE TABLE SQL 语句，最大 64KB
     - **db_type**: 数据库类型 (mysql/sqlserver)
     """
+    # 长度检查（ReDoS 防护第一道防线）
+    if len(request.ddl_text.encode("utf-8")) > MAX_DDL_TEXT_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "DDL_004",
+                "message": f"ddl_text 超过最大长度限制 ({MAX_DDL_TEXT_LENGTH} 字节)"
+            }
+        )
+
     parser = DDLParser()
     table_info = parser.parse_create_table(request.ddl_text)
 
@@ -95,6 +121,7 @@ async def check_ddl(request: DDLCheckRequest):
             executable=False
         )
 
+    validator = get_validator()
     violations = validator.validate_table(table_info)
     score, summary = _calculate_score(violations)
 
@@ -112,29 +139,17 @@ async def check_ddl(request: DDLCheckRequest):
 
 @router.get("/rules", dependencies=[Depends(get_current_user)])
 async def get_rules():
-    """获取当前启用的规则列表（从 rules.yaml）"""
-    import yaml
-    with open(RULES_CONFIG_PATH, "r", encoding="utf-8") as f:
-        rules_config = yaml.safe_load(f)
+    """获取当前启用的规则列表（从数据库 bi_rule_configs 加载）"""
+    rule_db = RuleConfigDatabase()
+    all_rules = rule_db.get_all()
 
     rules = []
-    rule_id = 1
-
-    sections = [
-        ("table_naming", "表命名规范"),
-        ("column_naming", "字段命名规范"),
-        ("data_type", "数据类型规范"),
-        ("primary_key", "主键规范"),
-        ("index", "索引规范"),
-        ("comment", "注释规范"),
-        ("timestamp", "时间戳规范"),
-        ("soft_delete", "软删除规范"),
-    ]
-
-    for section, name in sections:
-        if rules_config.get(section, {}).get("enabled", True):
-            risk = "High" if section in ("table_naming", "column_naming", "primary_key", "timestamp") else "Medium"
-            rules.append({"rule_id": f"RULE_{rule_id:03d}", "name": name, "risk_level": risk})
-            rule_id += 1
+    for rule in all_rules:
+        if rule.enabled:
+            rules.append({
+                "rule_id": rule.rule_id,
+                "name": rule.name,
+                "risk_level": rule.level,
+            })
 
     return {"rules": rules, "total": len(rules)}

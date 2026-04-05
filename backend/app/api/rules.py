@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app.core.dependencies import get_current_user, require_roles
 from services.rules.models import RuleConfigDatabase
+from services.logs.logger import logger as audit_logger
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -118,9 +119,32 @@ async def toggle_rule(rule_id: str, request: Request):
     if not rule:
         raise HTTPException(status_code=404, detail="规则不存在")
 
+    # 获取操作人信息
+    user = get_current_user(request)
+    operator = user.get("username", "unknown")
+    operator_id = user.get("id")
+
+    # 记录变更前快照
+    old_snapshot = rule.to_dict()
+    old_enabled = rule.enabled
+
     new_enabled = not rule.enabled
     rule_db.toggle(rule_id, new_enabled)
     new_status = "enabled" if new_enabled else "disabled"
+
+    # 异步写入审计日志
+    try:
+        audit_logger.log_rule_change(
+            rule_section=rule_id,
+            change_type="toggle",
+            operator=operator,
+            operator_id=operator_id,
+            old_value={"enabled": old_enabled},
+            new_value={"enabled": new_enabled},
+            description=f"规则 {rule_id} 状态切换: {old_enabled} -> {new_enabled}"
+        )
+    except Exception as e:
+        logger.warning("规则变更审计日志写入失败: %s", e)
 
     return {
         "rule_id": rule_id,
@@ -139,6 +163,11 @@ async def create_custom_rule(rule: ValidationRule, request: Request):
     if existing:
         raise HTTPException(status_code=409, detail=f"规则 ID '{rule.id}' 已存在")
 
+    # 获取操作人信息
+    user = get_current_user(request)
+    operator = user.get("username", "unknown")
+    operator_id = user.get("id")
+
     new_rule = rule_db.create_rule(
         rule_id=rule.id,
         name=rule.name,
@@ -150,6 +179,20 @@ async def create_custom_rule(rule: ValidationRule, request: Request):
         is_custom=True,
         enabled=True,
     )
+
+    # 异步写入审计日志
+    try:
+        audit_logger.log_rule_change(
+            rule_section=new_rule.rule_id,
+            change_type="create",
+            operator=operator,
+            operator_id=operator_id,
+            old_value=None,
+            new_value=new_rule.to_dict(),
+            description=f"创建自定义规则 {new_rule.rule_id}"
+        )
+    except Exception as e:
+        logger.warning("规则变更审计日志写入失败: %s", e)
 
     return {"rule": new_rule.to_dict(), "message": "自定义规则创建成功"}
 
@@ -166,5 +209,28 @@ async def delete_custom_rule(rule_id: str, request: Request):
     if not rule.is_custom:
         raise HTTPException(status_code=403, detail="无法删除内置规则")
 
+    # 获取操作人信息
+    user = get_current_user(request)
+    operator = user.get("username", "unknown")
+    operator_id = user.get("id")
+
+    # 记录删除前快照
+    old_snapshot = rule.to_dict()
+
     rule_db.delete(rule_id)
+
+    # 异步写入审计日志
+    try:
+        audit_logger.log_rule_change(
+            rule_section=rule_id,
+            change_type="delete",
+            operator=operator,
+            operator_id=operator_id,
+            old_value=old_snapshot,
+            new_value=None,
+            description=f"删除自定义规则 {rule_id}"
+        )
+    except Exception as e:
+        logger.warning("规则变更审计日志写入失败: %s", e)
+
     return {"message": "规则删除成功"}

@@ -116,13 +116,13 @@ class DDLParser:
         if not table_name:
             return None
 
-        # 提取列定义
-        columns = DDLParser._extract_columns(sql)
+        # 提取列定义（含表级 COMMENT 提取）
+        columns, table_comment = DDLParser._extract_columns(sql)
 
         # 提取索引定义
         indexes = DDLParser._extract_indexes(sql, table_name)
 
-        return TableInfo(name=table_name, columns=columns, indexes=indexes)
+        return TableInfo(name=table_name, columns=columns, indexes=indexes, comment=table_comment)
 
     @staticmethod
     def _extract_table_name(sql: str) -> Optional[str]:
@@ -135,14 +135,20 @@ class DDLParser:
         return None
 
     @staticmethod
-    def _extract_columns(sql: str) -> List[ColumnInfo]:
-        """提取列定义"""
+    def _extract_columns(sql: str) -> tuple:
+        """提取列定义
+
+        Returns:
+            tuple: (List[ColumnInfo], table_comment: str)
+        """
         columns = []
+        table_comment = ""
 
         # 提取列定义部分
         paren_depth = 0
         col_start = -1
         in_columns = False
+        table_comment_section = ""
 
         for i, char in enumerate(sql):
             if char == "(":
@@ -154,6 +160,7 @@ class DDLParser:
                 paren_depth -= 1
                 if paren_depth == 0 and in_columns:
                     column_section = sql[col_start:i]
+                    table_comment_section = sql[i:]
                     break
 
         # 解析每一行列定义
@@ -171,7 +178,39 @@ class DDLParser:
             if column:
                 columns.append(column)
 
-        return columns
+        # 从表级 COMMENT 部分提取表注释
+        table_comment = DDLParser._extract_table_comment(table_comment_section)
+
+        return columns, table_comment
+
+    @staticmethod
+    def _extract_table_comment(sql_tail: str) -> str:
+        """从 SQL 尾部提取表级 COMMENT
+
+        支持两种格式:
+        - COMMENT='表注释'
+        - COMMENT="表注释"
+
+        Args:
+            sql_tail: 闭括号之后的 SQL 部分
+
+        Returns:
+            表注释字符串，无则返回空字符串
+        """
+        if not sql_tail:
+            return ""
+
+        # 匹配 COMMENT='xxx' 或 COMMENT="xxx"
+        match = re.search(r"COMMENT\s*=\s*['\"]([^'\"]*)['\"]", sql_tail, re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+        # 兼容 MySQL 语法: COMMENT 'xxx'（无等号）
+        match = re.search(r"COMMENT\s+['\"]([^'\"]*)['\"]", sql_tail, re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+        return ""
 
     @staticmethod
     def _parse_column_definition(line: str) -> Optional[ColumnInfo]:

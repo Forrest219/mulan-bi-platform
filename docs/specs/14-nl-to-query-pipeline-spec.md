@@ -18,6 +18,7 @@
 3. [意图分类](#3-意图分类)
 4. [字段解析](#4-字段解析)
 5. [查询构建](#5-查询构建)
+5.5 [查询执行层（Stage 3）](#55-查询执行层stage-3)
 6. [API 设计](#6-api-设计)
 7. [多数据源路由](#7-多数据源路由)
 8. [响应类型](#8-响应类型)
@@ -362,6 +363,8 @@ class ResolvedField:
 - filters 用于时间过滤、分类过滤、数值范围过滤等
 ```
 
+**LLM 参数约束**：为了保证输出结构化 JSON 的绝对稳定性，防止格式错乱或产生幻觉，此处的 LLM API 调用必须硬编码配置 `temperature = 0.1`，不允许继承系统的全局配置（0.7）。
+
 ### 5.2 One-Pass 输出格式
 
 输出为两层结构：`intent` + `confidence` 来自意图分类，`vizql_json` 直接匹配 Tableau VizQL Data Service `query-datasource` 工具参数格式：
@@ -487,8 +490,191 @@ ONE_PASS_OUTPUT_SCHEMA = {
 ```
 
 校验失败处理：
-1. 首次校验失败：重试 1 次（重新调用 LLM）
-2. 重试仍失败：返回 `NLQ_003` 错误
+1. 首次校验失败：触发带反馈重试（最多重试 1 次）。必须将 JSON Schema 的具体解析报错信息追加到原 Prompt 末尾（例如："你上次生成的 JSON 存在以下错误：{error_details}，请严格按照 Schema 格式重新生成"），再重新调用 LLM。
+2. 重试仍失败：终止调用，返回 `NLQ_003` 错误。
+
+---
+
+## 5.5 查询执行层（Stage 3）
+
+> **背景**：阶段3将 One-Pass LLM 生成的 VizQL JSON 通过 Tableau MCP 的 `query-datasource` 工具执行查询，返回原始数据。本节定义 MCP 工具调用方式、请求/响应格式、认证契约和错误处理策略。
+
+### 5.5.1 MCP 工具调用契约
+
+**工具名**: `query-datasource`
+**MCP Server**: `tableau-bi-ksyun`（已配置的 Tableau Server/Site 连接）
+**调用方式**: MCP tool call（通过 `mcp__tableau-bi-ksyun__query-datasource` 工具）
+
+阶段3接收到 One-Pass LLM 输出的 `vizql_json` 后，执行以下步骤：
+
+1. 从 `TableauAsset.datasource_luid` 查找对应 `TableauConnection.id`，复用已存储的 PAT 认证上下文
+2. 调用 MCP tool `query-datasource`，传入 `datasourceLuid` 和 `query`（VizQL JSON）
+3. 解析返回的 `fields` + `rows`，若超时或失败则按 §5.5.3 处理
+
+### 5.5.2 请求格式
+
+**MCP 工具请求参数**:
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `datasourceLuid` | `string` | ✅ | - | Tableau 数据源 LUID（来自阶段1路由结果） |
+| `query.fields` | `array` | ✅ | - | 字段列表，每个元素见下表 |
+| `query.filters` | `array` | ❌ | `[]` | 过滤器列表 |
+| `query.parameters` | `array` | ❌ | `[]` | 参数化查询值（如有参数化字段） |
+| `limit` | `integer` | ❌ | `1000` | 最大返回行数（1~1000） |
+
+**`query.fields` 元素结构**:
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `fieldCaption` | `string` | 字段显示名（与数据源元数据精确匹配） |
+| `function` | `string` | 聚合函数：`SUM`/`AVG`/`COUNT`/`COUNTD`/`MIN`/`MAX`/`MEDIAN`，或时间粒度：`YEAR`/`QUARTER`/`MONTH`/`WEEK`/`DAY`（维度字段无需填写） |
+| `fieldAlias` | `string` | 结果集中使用的列别名（可选） |
+
+**`query.filters` 元素内层 `field` 结构**（注意双层嵌套）:
+
+```json
+"field": {"fieldCaption": "Order Date"}
+```
+
+> ⚠️ 注意：此处的 `field` 是对象 `{"fieldCaption": "..."}`，不是字符串 `"field": "Order Date"`。这是与 Tableau VizQL API 交互的确定性格式。
+
+**完整请求示例**:
+
+```json
+{
+  "datasourceLuid": "ABC-123-XYZ",
+  "query": {
+    "fields": [
+      {"fieldCaption": "Region", "fieldAlias": "区域"},
+      {"fieldCaption": "Sales", "function": "SUM", "fieldAlias": "总销售额"}
+    ],
+    "filters": [
+      {
+        "field": {"fieldCaption": "Order Date"},
+        "filterType": "DATE",
+        "periodType": "MONTHS",
+        "dateRangeType": "LAST",
+        "rangeN": 1
+      }
+    ],
+    "parameters": []
+  },
+  "limit": 100
+}
+```
+
+### 5.5.3 响应格式
+
+**MCP 工具响应格式**:
+
+```json
+{
+  "fields": [
+    {"fieldCaption": "Region", "dataType": "string"},
+    {"fieldCaption": "Sales", "dataType": "number"}
+  ],
+  "rows": [
+    ["华东", 100000],
+    ["华南", 85000]
+  ]
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `fields[].fieldCaption` | `string` | 列名（与请求中的 `fieldCaption` 对应） |
+| `fields[].dataType` | `string` | 数据类型：`string`/`number`/`boolean`/`date` |
+| `rows` | `array[array]` | 二维数据数组，每行顺序与 `fields` 对应 |
+
+**空结果集**:
+
+```json
+{
+  "fields": [...],
+  "rows": []
+}
+```
+
+### 5.5.4 认证与连接复用
+
+MCP query 使用 `tableau_connections` 中已存储的 Personal Access Token (PAT) 认证信息，每次查询按以下流程：
+
+1. 根据 `TableauAsset.datasource_luid` 查找对应的 `TableauConnection.id`
+2. 解密该连接的 `token_encrypted` 字段获取 PAT 凭据
+3. 携带 PAT 向 Tableau VizQL Data Service 发起 `query-datasource` 请求
+4. **无需每次重新认证**；MCP server 内部维护连接复用
+
+> 注意：若 `TableauConnection.is_active = false` 或 `last_test_success = false`，查询直接返回 NLQ_009，不尝试调用 MCP。
+
+### 5.5.5 错误处理策略
+
+| 错误场景 | 错误码 | HTTP 状态 | 处理策略 |
+|---------|--------|----------|---------|
+| MCP tool 调用失败（网络超时、连接拒绝） | `NLQ_006` | 502 | 重试 1 次（间隔 1s），仍失败返回 NLQ_006 |
+| VizQL 语法错误（字段名不存在、聚合函数不合法） | `NLQ_006` | 400 | 直接返回，不重试（问题在 LLM 生成阶段） |
+| 查询超时（> `options.timeout` 秒） | `NLQ_007` | 504 | 返回超时错误，附上 `options.timeout` 值 |
+| 数据源不存在 / 已删除 | `NLQ_009` | 404 | 明确提示"数据源不可用" |
+| 数据源无权限（PAT 无权访问该 datasource） | `NLQ_009` | 403 | 提示权限不足，建议联系管理员 |
+| MCP server 不可用（未配置或启动失败） | `NLQ_006` | 502 | 返回"MCP 服务不可用"，不重试 |
+
+### 5.5.6 与相关 Spec 的边界说明
+
+| 模块 | 边界 | 关联 |
+|------|------|------|
+| Spec 07 (Tableau MCP V1) | 仅定义资产同步（Workbook/View/Datasource 同步），**不包含** query-datasource | Stage 3 依赖 Spec 07 的资产元数据（`TableauAsset.datasource_luid`），但不调用其同步接口 |
+| Spec 13 (MCP V2 直连) | 规划 MCP 直连模式（跳过 REST），与 Stage 3 无关 | 未来可迁移至 Spec 13 的直连方案以降低延迟 |
+| Spec 09 (语义维护) | 提供字段语义标注（`TableauFieldSemantics`），供阶段2字段解析使用 | Stage 3 的查询执行不直接依赖语义标注 |
+
+### 5.5.7 工程实现注意事项（Stage 3 接入时必须满足）
+
+> 以下三条为线上性能强制约束，违反任意一条不得合入。
+
+#### 约束 A：环境变量完整性
+
+MCP Server (`tableau-bi-ksyun`) 启动时依赖以下环境变量，必须在进程启动前完成注入：
+
+| 环境变量 | 来源 | 说明 |
+|---------|------|------|
+| `TABLEAU_SERVER_URL` | `TableauConnection.server_url` | Tableau Server 地址 |
+| `TABLEAU_SITE` | `TableauConnection.site` | Site 名称 |
+| `TABLEAU_PAT_NAME` | `TableauConnection.token_name` | Personal Access Token Name |
+| `TABLEAU_PAT_VALUE` | 解密 `TableauConnection.token_encrypted` | PAT Secret（Fernet 解密后） |
+
+**注入时机**：每次查询执行前，从 DB 读取对应 `TableauConnection` 记录，解密 token，写入进程环境变量（`os.environ`）或 MCP ClientSession 初始化参数。禁止硬编码。
+
+#### 约束 B：MCP ClientSession 长连接复用
+
+Stage 3 查询调用链路为：
+
+```
+FastAPI 请求
+  → search.py（阶段1~2）
+  → tableau_mcp_client.query_datasource()   ← 禁止每次请求 new Session
+  → MCP Server（npx tableau-mcp ...）
+```
+
+**复用策略**：
+- MCP ClientSession 应作为**单例**（` tableau_mcp_client = MCPClientSingleton()`）持有，不可在 `query_datasource()` 内部每次 `async with ClientSession()` 新建
+- 若 MCP Server 支持 `npx` 常驻进程模式（而非每次 spawn），连接握手延迟可从 ~500ms 降至 ~10ms
+- 若使用 `mcp__tableau-bi-ksyun__query-datasource` MCP 工具，工具内部已维护 Session 生命周期；直接调用即可，无需在外层额外包装 Session
+- **禁止**：在 FastAPI 路由处理器内直接 `subprocess.run(["npx", "tableau-mcp"])` — 每次调用会拉起新进程，300 个 Golden Case 测试将从秒级跳至分钟级
+
+#### 约束 C：字段一致性校验（Stage 2 强化）
+
+Stage 2 `resolve_fields()` 的输出必须与 Stage 1 生成的 VizQL JSON 保持字段一致：
+
+```
+用户问题 → Stage 1（One-Pass LLM）→ VizQL JSON（fieldCaption = ?）
+        → Stage 2（FieldResolver）→ ResolvedField[]（field_caption = ?）
+                                     ↑
+                              模糊匹配："营收" → "Sales"
+```
+
+**一致性规则**：
+- Stage 2 为 Stage 1 提供字段映射校验：`ResolvedField.user_term`（用户表述）→ `ResolvedField.field_caption`（数据源实际字段）
+- 若 Stage 1 生成的 VizQL 中 `fieldCaption` 与 Stage 2 返回的 `field_caption` 不一致，应以 Stage 2 为准（Stage 2 有语义标注、同义词表等更多上下文）
+- 模糊匹配场景示例（Golden Case #21）：用户说"营收"，同义词表映射到 `Sales`，则 VizQL JSON 中必须是 `"fieldCaption": "Sales"`，不能是 `"fieldCaption": "营收"`
 
 ---
 
@@ -638,6 +824,9 @@ def route_datasource(question: str, connection_id: int = None) -> DatasourceCand
         raise NLQError("NLQ_005", "无法匹配到合适的数据源")
     return scored[0][0]
 ```
+
+**⚡ 性能防抖约束（强制）**：
+路由算法的步骤 3 会循环遍历所有数据源并调用 `get_datasource_fields`。为了防止 N+1 数据库查询风暴导致服务卡顿，此处的 `get_datasource_fields` 必须命中 Redis 缓存（仅缓存数据源的 `field_caption` 列表，有效期建议设为 1 小时）。禁止在路由打分阶段直接对数据库发起高频全表查询。
 
 ### 7.2 评分维度
 
@@ -1050,4 +1239,3 @@ sequenceDiagram
 | OI-07 | 拼音匹配依赖 `pypinyin` 库，是否纳入依赖？或在初始版本中省略拼音匹配？ | P3 | 待决定 |
 | OI-08 | 查询审计日志表 `nlq_query_logs` 的数据保留策略：是否需要定期清理？保留期限多久？ | P3 | 待讨论 |
 | OI-09 | 计算字段（formula 非空）是否允许出现在 NL-to-Query 的字段候选列表中？Tableau VizQL 是否支持直接查询计算字段？ | P2 | 待验证 |
-| OI-10 | 当前 LLM 输出 `temperature=0.7`（继承全局配置），NL-to-Query 场景是否需要降低至 0.1~0.3 以提高确定性？ | P1 | 待调整 |

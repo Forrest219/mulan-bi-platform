@@ -8,7 +8,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm, health_scan, tasks, notifications, events, knowledge_base
+from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm, health_scan, tasks, notifications, events, knowledge_base, search
+from app.api.governance import quality
 from app.api.semantic_maintenance import datasources as sm_datasources, fields as sm_fields, review as sm_review, sync as sm_sync, publish as sm_publish
 
 logger = logging.getLogger(__name__)
@@ -52,11 +53,13 @@ app.include_router(activity.router, prefix="/api/activity", tags=["访问日志"
 app.include_router(datasources.router, prefix="/api/datasources", tags=["数据源管理"])
 app.include_router(tableau.router, prefix="/api/tableau", tags=["Tableau 管理"])
 app.include_router(health_scan.router, prefix="/api/governance/health", tags=["数仓健康检查"])
+app.include_router(quality.router, prefix="/api/governance/quality", tags=["数据质量监控"])
 app.include_router(llm.router, prefix="/api/llm", tags=["LLM 管理"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["任务管理"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["通知"])
 app.include_router(events.router, prefix="/api/events", tags=["事件"])
 app.include_router(knowledge_base.router, prefix="/api/knowledge-base", tags=["知识库"])
+app.include_router(search.router, prefix="/api/search", tags=["NL搜索"])
 app.include_router(sm_datasources.router, prefix="/api/semantic-maintenance", tags=["语义维护"])
 app.include_router(sm_fields.router, prefix="/api/semantic-maintenance", tags=["语义维护"])
 app.include_router(sm_review.router, prefix="/api/semantic-maintenance", tags=["语义维护"])

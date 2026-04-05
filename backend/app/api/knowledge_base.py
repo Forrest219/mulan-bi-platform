@@ -1,5 +1,6 @@
 """知识库 API（PRD §7 + §8 + §9）"""
-from typing import Optional
+from typing import Optional, Dict
+from pydantic import BaseModel
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
@@ -11,6 +12,13 @@ from services.knowledge_base.document_service import document_service
 from services.knowledge_base.embedding_service import embedding_service
 from services.knowledge_base.rag_service import rag_service
 from services.knowledge_base.errors import KBErrorCode, kb_error_response
+from services.knowledge_base.models import KbGlossary, KbDocument, KbSchema
+
+
+class RagEnrichRequest(BaseModel):
+    """RAG enrich 请求体（PRD §7.11）"""
+    question: str
+    scenario: str = "default"
 
 router = APIRouter()
 
@@ -32,6 +40,53 @@ def _error_response(code: KBErrorCode, status_code: int, **kwargs):
         status_code=status_code,
         detail=kb_error_response(code, status_code, **kwargs)
     )
+
+
+def _format_search_result(db: Session, raw: Dict) -> Dict:
+    """
+    将原始向量检索结果格式化为 PRD §7.10 规定格式：
+    {source_type, source_id, title, content, similarity}
+    - title: 从对应源表查询（glossary→canonical_term, document→title, schema→datasource_id, field_semantic→semantic_name_zh）
+    - content: chunk_text
+    - similarity: 原始相似度得分
+    """
+    from services.semantic_maintenance.models import TableauFieldSemantics
+
+    source_type = raw["source_type"]
+    source_id = raw["source_id"]
+    similarity = raw.get("similarity", 0.0)
+
+    title = f"{source_type}_{source_id}"  # 默认 title
+    content = raw.get("chunk_text", "")
+
+    if source_type == "glossary":
+        record = db.query(KbGlossary).filter(KbGlossary.id == source_id).first()
+        if record:
+            title = record.canonical_term
+            content = record.definition
+    elif source_type == "document":
+        record = db.query(KbDocument).filter(KbDocument.id == source_id).first()
+        if record:
+            title = record.title
+            # content 保留 chunk_text（分块后的文本片段）
+    elif source_type == "schema":
+        record = db.query(KbSchema).filter(KbSchema.id == source_id).first()
+        if record:
+            title = f"schema_{record.datasource_id}"
+            content = record.description or record.schema_yaml[:500] if record.schema_yaml else ""
+    elif source_type == "field_semantic":
+        record = db.query(TableauFieldSemantics).filter(TableauFieldSemantics.id == source_id).first()
+        if record:
+            title = record.semantic_name_zh or record.semantic_name or f"field_{source_id}"
+            content = record.semantic_definition or ""
+
+    return {
+        "source_type": source_type,
+        "source_id": source_id,
+        "title": title,
+        "content": content,
+        "similarity": similarity,
+    }
 
 
 # === 术语端点 ===
@@ -315,16 +370,12 @@ async def delete_document(
     db: Session = Depends(get_db),
 ):
     """
-    删除文档（PRD §7.9）DELETE /api/knowledge-base/documents/{id}
-    - hard=false（默认）：软删除（data_admin+）
+    删除文档（PRD §7.9 + §9.1）DELETE /api/knowledge-base/documents/{id}
+    - hard=false（默认）：软删除（admin 专属，PRD §9.1）
     - hard=true：硬删除（admin 专属），同时清理 kb_embeddings
     """
     user = get_current_user(request=None, db=db)
-
-    if hard:
-        _require_role(user, "admin")
-    else:
-        _require_role(user, "data_admin")
+    _require_role(user, "admin")
 
     success = document_service.delete_document(db, doc_id, hard=hard)
     if not success:
@@ -376,7 +427,7 @@ async def search_knowledge(
         raise _error_response(KBErrorCode.VECTOR_SEARCH_UNAVAILABLE, 502)
 
     return {
-        "results": vector_results,
+        "results": [_format_search_result(db, r) for r in vector_results],
         "terms": matched_terms,
         "query": q,
     }
@@ -384,15 +435,15 @@ async def search_knowledge(
 
 @router.post("/rag/enrich")
 async def rag_enrich(
-    question: str,
-    scenario: str = "default",
+    body: RagEnrichRequest,
     db: Session = Depends(get_db),
 ):
     """
     RAG 上下文增强（PRD §7.11）POST /api/knowledge-base/rag/enrich — analyst+
+    请求体：{ "question": str, "scenario": str }
     """
     user = get_current_user(request=None, db=db)
     _require_role(user, "analyst")
 
-    result = await rag_service.enrich_context(db, question, scenario)
+    result = await rag_service.enrich_context(db, body.question, body.scenario)
     return result

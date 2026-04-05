@@ -75,6 +75,93 @@ class LLMService:
             logger.error("LLM 调用失败: %s", e, exc_info=True)
             return {"error": str(e)}
 
+    async def complete_with_temp(
+        self, prompt: str, system: str = None, timeout: int = 15, temperature: float = 0.1
+    ) -> dict:
+        """
+        异步 LLM 调用（指定 temperature，不继承全局配置）。
+        用于 NL-to-Query One-Pass LLM 等对输出稳定性有强制要求的场景。
+        Returns: { "content": str } or { "error": str }
+        """
+        config = self._load_config()
+        if not config or not config.is_active or not config.api_key_encrypted:
+            return {"error": "LLM 未配置，请联系管理员"}
+
+        try:
+            api_key = _decrypt(config.api_key_encrypted)
+        except Exception as e:
+            logger.error("LLM API Key 解密失败: %s", e, exc_info=True)
+            return {"error": "LLM 认证配置错误"}
+
+        try:
+            if config.provider == "anthropic":
+                return await self._anthropic_complete_with_temp(
+                    api_key, config, prompt, system, timeout, temperature
+                )
+            else:
+                return await self._openai_complete_with_temp(
+                    api_key, config, prompt, system, timeout, temperature
+                )
+        except Exception as e:
+            logger.error("LLM 调用失败: %s", e, exc_info=True)
+            return {"error": str(e)}
+
+    async def _openai_complete_with_temp(
+        self, api_key: str, config, prompt: str, system: str, timeout: int, temperature: float
+    ) -> dict:
+        client = self._get_openai_client(api_key, config.base_url, timeout)
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        logger.info(
+            "LLM 调用（OpenAI, temp=%.1f）：model=%s, timeout=%ds",
+            temperature, config.model, timeout,
+        )
+        response = await client.chat.completions.create(
+            model=config.model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=config.max_tokens,
+        )
+        content = response.choices[0].message.content.strip()
+        return {"content": content}
+
+    async def _anthropic_complete_with_temp(
+        self, api_key: str, config, prompt: str, system: str, timeout: int, temperature: float
+    ) -> dict:
+        base_url = config.base_url or "https://api.minimaxi.com/anthropic"
+        client = self._get_anthropic_client(api_key, base_url, timeout)
+        messages = []
+        if system:
+            messages.append({"role": "user", "content": f"<system>{system}</system>\n\n{prompt}"})
+        else:
+            messages.append({"role": "user", "content": prompt})
+        logger.info(
+            "LLM 调用（Anthropic, temp=%.1f）：model=%s, base_url=%s, timeout=%ds",
+            temperature, config.model, base_url, timeout,
+        )
+        try:
+            response = await client.messages.create(
+                model=config.model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=config.max_tokens,
+            )
+        except Exception as e:
+            error_type = type(e).__name__
+            error_msg = str(e)
+            logger.error("Anthropic API 调用失败 [%s]: %s", error_type, error_msg, exc_info=True)
+            return {"error": f"Anthropic API 错误: {error_msg}"}
+
+        from anthropic.types import TextBlock
+        text_blocks = [block for block in response.content if isinstance(block, TextBlock)]
+        if not text_blocks:
+            logger.error("Anthropic 响应中无 TextBlock: %s", response.content)
+            return {"error": "MiniMax 响应格式异常：未找到文本内容"}
+        content = text_blocks[0].text.strip()
+        return {"content": content}
+
     async def _openai_complete(self, api_key: str, config, prompt: str, system: str, timeout: int) -> dict:
         client = self._get_openai_client(api_key, config.base_url, timeout)
         messages = []

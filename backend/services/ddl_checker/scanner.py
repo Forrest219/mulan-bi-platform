@@ -28,12 +28,11 @@ class DDLScanner:
         初始化扫描器
 
         Args:
-            rules_config_path: 规则配置文件路径，默认使用 config/rules.yaml
+            rules_config_path: 兼容旧接口，传入会被忽略。规则从数据库加载。
             enable_logging: 是否启用日志记录
         """
-        if rules_config_path is None:
-            rules_config_path = Path(__file__).parent.parent.parent / "config" / "rules.yaml"
-        self.rules_config_path = str(rules_config_path)
+        # rules_config_path 参数已废弃，运行时规则从数据库加载
+        self.rules_config_path = None
         self.connector: Optional[DatabaseConnector] = None
         self.validator: Optional[DDLValidator] = None
         self.enable_logging = enable_logging
@@ -81,7 +80,7 @@ class DDLScanner:
 
         try:
             # 初始化验证器
-            self.validator = DDLValidator(self.rules_config_path)
+            self.validator = DDLValidator()
 
             # 获取所有表
             table_names = self.connector.get_table_names()
@@ -157,7 +156,7 @@ class DDLScanner:
             return DDLScanResult(success=False, error="请先连接数据库")
 
         try:
-            self.validator = DDLValidator(self.rules_config_path)
+            self.validator = DDLValidator()
 
             table_info = self._read_table_info(table_name)
             if not table_info:
@@ -185,7 +184,7 @@ class DDLScanner:
         try:
             from .parser import DDLParser
 
-            self.validator = DDLValidator(self.rules_config_path)
+            self.validator = DDLValidator()
 
             table_info = DDLParser.parse_create_table(sql)
             if not table_info:

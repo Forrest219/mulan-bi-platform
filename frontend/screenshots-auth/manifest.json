@@ -1,0 +1,168 @@
+{
+  "version": "1.0",
+  "generatedAt": "2026-04-03T09:31:19.434Z",
+  "baseUrl": "http://localhost:3000",
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "login": {
+    "username": "admin",
+    "apiBase": "http://localhost:8000"
+  },
+  "pages": [
+    {
+      "route": "/home",
+      "title": "首页",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_home.png",
+      "status": "success",
+      "duration": 4073
+    },
+    {
+      "route": "/ddl-validator",
+      "title": "DDL 校验",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_ddl-validator.png",
+      "status": "success",
+      "duration": 4073
+    },
+    {
+      "route": "/rule-config",
+      "title": "规则配置",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_rule-config.png",
+      "status": "success",
+      "duration": 4081
+    },
+    {
+      "route": "/database-monitor",
+      "title": "数据库监控",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_database-monitor.png",
+      "status": "success",
+      "duration": 4055
+    },
+    {
+      "route": "/tableau/assets",
+      "title": "Tableau 资产",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_tableau_assets.png",
+      "status": "success",
+      "duration": 4058
+    },
+    {
+      "route": "/tableau/connections",
+      "title": "Tableau 连接",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_tableau_connections.png",
+      "status": "success",
+      "duration": 4064
+    },
+    {
+      "route": "/tableau/health",
+      "title": "Tableau 健康",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_tableau_health.png",
+      "status": "success",
+      "duration": 4064
+    },
+    {
+      "route": "/tableau/sync-logs",
+      "title": "Tableau 同步日志",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_tableau_sync-logs.png",
+      "status": "success",
+      "duration": 4060
+    },
+    {
+      "route": "/semantic-maintenance/field-list",
+      "title": "语义维护-字段列表",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_semantic-maintenance_field-list.png",
+      "status": "success",
+      "duration": 4056
+    },
+    {
+      "route": "/semantic-maintenance/datasource-list",
+      "title": "语义维护-数据源列表",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_semantic-maintenance_datasource-list.png",
+      "status": "success",
+      "duration": 4053
+    },
+    {
+      "route": "/semantic-maintenance/datasource-detail",
+      "title": "语义维护-数据源详情",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_semantic-maintenance_datasource-detail.png",
+      "status": "success",
+      "duration": 4048
+    },
+    {
+      "route": "/data-governance/quality",
+      "title": "数据治理-质量",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_data-governance_quality.png",
+      "status": "success",
+      "duration": 4059
+    },
+    {
+      "route": "/data-governance/health",
+      "title": "数据治理-健康",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_data-governance_health.png",
+      "status": "success",
+      "duration": 4047
+    },
+    {
+      "route": "/knowledge",
+      "title": "知识库",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_knowledge.png",
+      "status": "success",
+      "duration": 4053
+    },
+    {
+      "route": "/admin/datasources",
+      "title": "管理后台-数据源",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_admin_datasources.png",
+      "status": "success",
+      "duration": 4052
+    },
+    {
+      "route": "/admin/tasks",
+      "title": "管理后台-任务",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_admin_tasks.png",
+      "status": "success",
+      "duration": 4058
+    },
+    {
+      "route": "/admin/llm",
+      "title": "管理后台-LLM配置",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_admin_llm.png",
+      "status": "success",
+      "duration": 4053
+    },
+    {
+      "route": "/admin/activity",
+      "title": "管理后台-活动日志",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_admin_activity.png",
+      "status": "success",
+      "duration": 4055
+    },
+    {
+      "route": "/admin/groups",
+      "title": "管理后台-用户组",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_admin_groups.png",
+      "status": "success",
+      "duration": 4055
+    },
+    {
+      "route": "/admin/permissions",
+      "title": "管理后台-权限",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_admin_permissions.png",
+      "status": "success",
+      "duration": 4059
+    },
+    {
+      "route": "/admin/user-management",
+      "title": "管理后台-用户管理",
+      "screenshot": "/Users/zhangxingchen/Documents/Claude code projects/mulan-bi-platform/frontend/screenshots-auth/_admin_user-management.png",
+      "status": "success",
+      "duration": 4060
+    }
+  ],
+  "summary": {
+    "total": 21,
+    "success": 21,
+    "failed": 0
+  },
+  "duration": 121624
+}
