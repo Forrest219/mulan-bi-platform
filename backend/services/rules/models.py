@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional
 
 from sqlalchemy import Column, Integer, String, Boolean, DateTime
 from sqlalchemy.orm import Session
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.core.database import Base, SessionLocal, JSONB, sa_func
 
 
@@ -19,6 +20,8 @@ class RuleConfig(Base):
     suggestion = Column(String(1024), default="", nullable=False)
     enabled = Column(Boolean, default=True, nullable=False)
     is_custom = Column(Boolean, default=False, nullable=False)
+    is_modified_by_user = Column(Boolean, default=False, nullable=False)
+    scene_type = Column(String(16), default="ALL", nullable=False)
     config_json = Column(JSONB, default={}, nullable=False)
     created_at = Column(DateTime, server_default=sa_func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=sa_func.now(), onupdate=sa_func.now(), nullable=False)
@@ -100,16 +103,70 @@ class RuleConfigDatabase:
             db.close()
 
     def seed_defaults(self, default_rules: List[Dict]) -> None:
+        """
+        基于 rule_id 执行 UPSERT（Seed 幂等性）。
+
+        - 若 rule_id 不存在：INSERT
+        - 若 rule_id 存在但 is_modified_by_user=FALSE：UPDATE（覆盖）
+        - 若 rule_id 存在且 is_modified_by_user=TRUE：SKIP（保留用户修改）
+        """
         db = self._get_db()
         try:
             for rule_data in default_rules:
+                rule_id = rule_data.get("rule_id")
                 existing = db.query(RuleConfig).filter(
-                    RuleConfig.rule_id == rule_data["rule_id"]
+                    RuleConfig.rule_id == rule_id
                 ).first()
+
                 if not existing:
+                    # INSERT 新规则
                     db.add(RuleConfig(**rule_data))
+                elif not existing.is_modified_by_user:
+                    # UPDATE：用户未修改，覆盖
+                    for key, value in rule_data.items():
+                        if hasattr(existing, key):
+                            setattr(existing, key, value)
+                else:
+                    # SKIP：用户已修改，保留
+                    pass
             db.commit()
         except Exception:
             db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def upsert_seed(self, rule_data: Dict[str, Any]) -> bool:
+        """
+        单条 UPSERT，用于 rules_sync 脚本。
+
+        Args:
+            rule_data: 规则数据（含 rule_id）
+
+        Returns:
+            True=新增, False=更新, None=跳过（用户修改）
+        """
+        db = self._get_db()
+        try:
+            rule_id = rule_data.get("rule_id")
+            existing = db.query(RuleConfig).filter(
+                RuleConfig.rule_id == rule_id
+            ).first()
+
+            if not existing:
+                db.add(RuleConfig(**rule_data))
+                db.commit()
+                return True
+            elif not existing.is_modified_by_user:
+                for key, value in rule_data.items():
+                    if hasattr(existing, key):
+                        setattr(existing, key, value)
+                db.commit()
+                return False
+            else:
+                return None
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()

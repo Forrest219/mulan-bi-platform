@@ -2,9 +2,9 @@
 
 | 属性 | 值 |
 |------|------|
-| 版本 | v1.0 |
-| 日期 | 2026-04-03 |
-| 状态 | Draft |
+| 版本 | v1.1 |
+| 日期 | 2026-04-06 |
+| 状态 | Draft v1.1 |
 | 作者 | Mulan BI Team |
 
 ---
@@ -33,9 +33,11 @@ DDL 合规检查模块为 Mulan BI 平台的核心数据治理能力之一。该
 ### 1.2 目标
 
 - 提供在线 DDL 合规检查 API，支持 MySQL / SQL Server 两种数据库类型
-- 通过可量化的评分体系（0-100）衡量 DDL 规范程度
+- 通过可量化的评分体系（0-100）衡量 DDL 规范程度，支持按业务场景（ODS/DWD/ADS）差异化配置
 - 规则可配置，支持内置规则与自定义规则的 CRUD 管理
 - 扫描结果可审计，支持历史查询
+- 通过正则 + AST 双引擎保障解析覆盖率（正则优先，复杂场景自动降级到 sqlglot/sqlparse）
+- 全库扫描支持任务拆分并发执行（Celery 分布式）
 
 ### 1.3 范围
 
@@ -54,12 +56,15 @@ DDL 合规检查模块为 Mulan BI 平台的核心数据治理能力之一。该
 |------|------|------|
 | DDL Check API | `backend/app/api/ddl.py` | HTTP 接口层 |
 | Rules Config API | `backend/app/api/rules.py` | 规则 CRUD 接口层 |
-| DDLParser | `backend/services/ddl_checker/parser.py` | SQL 解析，提取 TableInfo |
+| DDLParser | `backend/services/ddl_checker/parser.py` | SQL 解析，提取 TableInfo（正则优先 + AST 回退） |
 | DDLValidator | `backend/services/ddl_checker/validator.py` | 规则匹配与违规检测 |
+| RuleCache | `backend/services/ddl_checker/cache.py` | 规则运行时缓存（Redis） |
 | DDLScanner | `backend/services/ddl_checker/scanner.py` | 全库扫描编排器 |
+| TaskSplitter | `backend/services/ddl_checker/task_splitter.py` | 扫描任务拆分（Celery） |
+| RulesSeedService | `backend/services/rules/seed_service.py` | 种子文件同步（幂等 UPSERT） |
 | RuleConfig Model | `backend/services/rules/models.py` | 规则持久化 ORM |
 | DDL Check Engine | `modules/ddl_check_engine/` | 独立可分发的检查引擎模块 |
-| 规则配置文件 | `config/rules.yaml` | 静态规则定义 |
+| 规则配置文件 | `config/rules.yaml` | 静态规则定义（Seed） |
 
 ---
 
@@ -81,7 +86,9 @@ DDL 合规检查模块为 Mulan BI 平台的核心数据治理能力之一。该
 | suggestion | VARCHAR(1024) | NOT NULL, DEFAULT '' | 修复建议 |
 | enabled | BOOLEAN | NOT NULL, DEFAULT TRUE | 是否启用 |
 | is_custom | BOOLEAN | NOT NULL, DEFAULT FALSE | 是否为自定义规则 |
-| config_json | JSONB | NOT NULL, DEFAULT '{}' | 规则扩展参数 |
+| **is_modified_by_user** | **BOOLEAN** | **NOT NULL, DEFAULT FALSE** | **用户是否手动修改过（Seed 幂等性保护）** |
+| **scene_type** | **VARCHAR(16)** | **NOT NULL, DEFAULT 'ALL'** | **适用场景：ODS / DWD / ADS / ALL** |
+| config_json | JSONB | NOT NULL, DEFAULT '{}' | 规则扩展参数（含场景化扣分权重配置） |
 | created_at | DATETIME | NOT NULL, SERVER_DEFAULT now() | 创建时间 |
 | updated_at | DATETIME | NOT NULL, SERVER_DEFAULT now(), ON UPDATE now() | 更新时间 |
 
@@ -90,6 +97,7 @@ DDL 合规检查模块为 Mulan BI 平台的核心数据治理能力之一。该
 | 列名 | 类型 | 约束 | 说明 |
 |------|------|------|------|
 | id | INTEGER | PK, AUTO_INCREMENT | 自增主键 |
+| **trace_id** | **VARCHAR(64)** | **NOT NULL, INDEX** | **追踪 ID（关联日志系统）** |
 | database_name | VARCHAR(128) | NOT NULL | 扫描的数据库名 |
 | db_type | VARCHAR(32) | NOT NULL | 数据库类型 |
 | table_count | INTEGER | NOT NULL | 扫描表数量 |
@@ -100,7 +108,8 @@ DDL 合规检查模块为 Mulan BI 平台的核心数据治理能力之一。该
 | duration_seconds | FLOAT | NOT NULL | 扫描耗时（秒） |
 | status | VARCHAR(32) | NOT NULL | 扫描状态：completed / failed |
 | error_message | TEXT | NULL | 失败原因 |
-| results | JSONB | NULL | 详细扫描结果 |
+| results | JSONB | NULL | 原始扫描结果（含敏感列名） |
+| **results_masked** | **JSONB** | **NULL** | **脱敏后扫描结果（敏感关键词已处理）** |
 | created_at | DATETIME | NOT NULL, SERVER_DEFAULT now() | 创建时间 |
 
 #### bi_rule_change_logs（规则变更审计表）
@@ -200,39 +209,52 @@ class Violation:
 |------|------|------|------|
 | ddl_text | string | 是 | CREATE TABLE SQL 语句，**最大长度 64KB**，超长返回 `DDL_004` |
 | db_type | string | 否 | 数据库类型，默认 "mysql" |
+| scene_type | string | 否 | 业务场景：`ODS` / `DWD` / `ADS` / `ALL`，默认 `ALL` |
 
-**响应体**:
+**响应体**（统一响应结构）:
 
 ```json
 {
-  "passed": true,
-  "score": 85,
-  "summary": {
-    "High": 0,
-    "Medium": 1,
-    "Low": 2
-  },
-  "issues": [
-    {
-      "rule_id": "data_type",
-      "risk_level": "Medium",
-      "object_type": "column",
-      "object_name": "status",
-      "description": "列 'status' 使用不推荐的数据类型 TINYINT",
-      "suggestion": "建议使用 BIGINT, DECIMAL, VARCHAR, TEXT, DATETIME, DATE, BOOLEAN 之一"
-    }
-  ],
-  "executable": true
+  "code": "DDL_000",
+  "message": "检查完成",
+  "trace_id": "a1b2c3d4-e5f6-7890",
+  "data": {
+    "passed": true,
+    "score": 85,
+    "summary": {
+      "High": 0,
+      "Medium": 1,
+      "Low": 2
+    },
+    "issues": [
+      {
+        "rule_id": "data_type",
+        "risk_level": "Medium",
+        "object_type": "column",
+        "object_name": "status",
+        "description": "列 'status' 使用不推荐的数据类型 TINYINT",
+        "suggestion": "建议使用 BIGINT, DECIMAL, VARCHAR, TEXT, DATETIME, DATE, BOOLEAN 之一"
+      }
+    ],
+    "executable": true,
+    "parse_mode": "regex",
+    "scene_type": "ODS"
+  }
 }
 ```
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| passed | boolean | 是否通过（executable=true 且 score >= 80） |
-| score | integer | 合规评分 0-100 |
-| summary | object | 按风险级别汇总：High / Medium / Low |
-| issues | array | 违规问题列表 |
-| executable | boolean | 是否可执行（score >= 60 且无 High 问题） |
+| code | string | 业务错误码，DDL_000=成功，DDL_xxx=业务错误 |
+| message | string | 人类可读的消息 |
+| trace_id | string | 追踪 ID，贯穿日志系统 |
+| data.passed | boolean | 是否通过（executable=true 且 score >= 80） |
+| data.score | integer | 合规评分 0-100 |
+| data.summary | object | 按风险级别汇总：High / Medium / Low |
+| data.issues | array | 违规问题列表 |
+| data.executable | boolean | 是否可执行（score >= 60 且无 High 问题） |
+| data.parse_mode | string | 解析模式：`regex`（正则）或 `ast`（AST 回退） |
+| data.scene_type | string | 使用的业务场景 |
 
 #### GET /api/ddl/rules
 
@@ -401,6 +423,59 @@ class Violation:
 - 404 Not Found — 规则不存在
 - 403 Forbidden — 无法删除内置规则
 
+#### POST /api/rules/test
+
+Dry Run：测试新规则对指定 DDL 的拦截效果（不保存规则）。
+
+**认证要求**: admin 或 data_admin 角色
+
+**请求体**:
+
+```json
+{
+  "rule": {
+    "rule_id": "RULE_TEST",
+    "name": "测试规则",
+    "level": "HIGH",
+    "pattern": "^RULE_.*$",
+    "check_target": "table_name",
+    "enabled": true
+  },
+  "ddl_text": "CREATE TABLE rule_test_table (\n  id BIGINT PRIMARY KEY\n);",
+  "db_type": "mysql"
+}
+```
+
+**响应体**:
+
+```json
+{
+  "code": "DDL_000",
+  "message": "Dry Run 完成",
+  "trace_id": "test-123-456",
+  "data": {
+    "rule_id": "RULE_TEST",
+    "ddl_text": "CREATE TABLE rule_test_table (...)",
+    "hit": true,
+    "violations": [
+      {
+        "level": "HIGH",
+        "message": "表名 'rule_test_table' 不符合正则 ^RULE_.*$",
+        "suggestion": "表名必须以 RULE_ 开头"
+      }
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| rule | object | 待测试的规则配置 |
+| ddl_text | string | 测试用 DDL 文本 |
+| db_type | string | 数据库类型 |
+
+**用途**: 管理员修改规则正则模式后，在不保存的情况下预验证规则是否按预期拦截/放行。
+
 ---
 
 ## 4. 业务逻辑
@@ -413,15 +488,24 @@ class Violation:
        v
   DDLParser.parse_create_table(sql)
        |
-       |--- 解析失败 ---> 返回 score=0, PARSE_ERROR
+       |--- 正则解析优先 ---
+       |   若关键元数据（表名/列名）为空且 SQL 合法
+       |         |
+       |         v
+       |   自动降级 AST 解析（sqlglot/sqlparse）
+       |         |
+       |--- 解析失败 ---> 返回 score=0, DDL_001
        |
        v
   TableInfo (表名、列列表、索引列表)
        |
        v
-  DDLValidator.validate_table(table_info)
+  RuleCache.get_active_rules(scene_type)
        |
-       |--- 从数据库加载活跃规则（bi_rule_configs 中 enabled=true 的记录）
+       |--- Redis 缓存未命中 ---> 从 bi_rule_configs 加载 + 写入缓存
+       |
+       v
+  DDLValidator.validate_table(table_info, scene_type)
        |
        |--- TableValidator (表级检查)
        |       |-- _check_naming()       表命名规范
@@ -440,18 +524,48 @@ class Violation:
   List[Violation]
        |
        v
-  _calculate_score(violations)
+  _calculate_score(violations, scene_type)
        |
        v
-  DDLCheckResponse (score, passed, executable, issues)
+  DDLCheckResponse (score, passed, executable, issues, parse_mode, scene_type)
+```
+
+#### 解析器双引擎策略
+
+DDLParser 采用正则优先 + AST 回退的双引擎策略：
+
+1. **正则解析**（优先）：保持轻量，处理标准 CREATE TABLE 语句
+2. **AST 解析**（降级）：当正则提取的关键元数据（表名、列名）为空且 SQL 语法合法时，自动调用 `sqlglot` 或 `sqlparse` 进行完整语法树解析
+
+| 解析模式 | 触发条件 | 优点 |
+|----------|----------|------|
+| `regex` | 正则提取到表名/列名 | 性能优，轻量 |
+| `ast` | 正则提取失败但 SQL 合法 | 覆盖复杂语法 |
+
+#### 规则缓存策略
+
+`RuleCache` 使用 Redis 作为缓存层：
+
+- **缓存键**：`ddl:rules:{scene_type}:{db_type}`
+- **TTL**：300 秒（5 分钟）
+- **失效机制**：
+  - API 层变更规则（toggle/create/delete）时，主动 `DEL` 对应缓存键
+  - `functools.lru_cache` 不适用于请求级 DDLValidator 实例，**禁止使用**
+
+#### API 层缓存失效
+
+```
+POST /api/rules/        -> 删除 {ALL} 缓存键
+PUT  /api/rules/{id}/toggle -> 删除 {ALL} + {ODS/DWD/ADS} 缓存键
+DELETE /api/rules/{id}  -> 删除 {ALL} 缓存键
 ```
 
 ### 4.2 评分算法
 
 起始分值为 100 分，按违规级别逐项扣分：
 
-| 违规级别 | 映射关系 | 扣分 |
-|----------|----------|------|
+| 违规级别 | 映射关系 | 默认扣分 |
+|----------|----------|----------|
 | High（error） | ViolationLevel.ERROR | -20 分/项 |
 | Medium（warning） | ViolationLevel.WARNING | -5 分/项 |
 | Low（info） | ViolationLevel.INFO | -1 分/项 |
@@ -460,14 +574,39 @@ class Violation:
 - 最低分: 0
 - 最高分: 100
 
+**场景化评分（scene_type）**:
+
+不同业务场景可以设置不同的扣分权重，通过 `config_json` 配置：
+
+```json
+{
+  "scene_weights": {
+    "ODS": { "high": -15, "medium": -3, "low": -1 },
+    "DWD": { "high": -20, "medium": -5, "low": -1 },
+    "ADS": { "high": -25, "medium": -8, "low": -2 }
+  }
+}
+```
+
+| 场景 | 特点 | 建议权重 |
+|------|------|----------|
+| ODS（原始层） | 数据刚入库，规范要求相对宽松 | high=-15, medium=-3 |
+| DWD（明细层） | 标准数仓层，严格规范 | high=-20, medium=-5（默认） |
+| ADS（应用层） | 直接面向业务，严苛要求 | high=-25, medium=-8 |
+
 **输入安全约束**:
 - `ddl_text` 最大长度限制为 **64KB**（65,536 字节），超长输入直接返回 `DDL_004` 错误
-- 此长度限制同时作为 ReDoS 防护的第一道防线
+- **ReDoS 防护**：正则匹配单次超时设置为 **200ms**，超时后立即终止并返回 `DDL_005` 错误
 
 **判定逻辑**:
 
 ```python
-score = 100 - (high_count * 20) - (medium_count * 5) - (low_count * 1)
+scene_weights = config_json.get("scene_weights", {}).get(scene_type, DEFAULT_WEIGHTS)
+high_penalty = scene_weights.get("high", -20)
+medium_penalty = scene_weights.get("medium", -5)
+low_penalty = scene_weights.get("low", -1)
+
+score = 100 + (high_count * high_penalty) + (medium_count * medium_penalty) + (low_count * low_penalty)
 score = max(0, min(100, score))
 
 executable = score >= 60 AND high_count == 0
@@ -497,6 +636,24 @@ passed     = executable AND score >= 80
 ### 4.4 rules.yaml 配置结构
 
 > ⚠️ **重要定位说明**：本文件的定位为**初始化种子文件 (Seed)**，仅在系统初次部署时用于向 `bi_rule_configs` 表写入内置规则。运行时规则引擎**必须**从数据库（`bi_rule_configs` 表，`enabled=true`）中加载规则配置。rules.yaml 文件本身不参与任何运行时决策。
+
+#### Seed 幂等性策略
+
+RulesSeedService 基于 `rule_id` 执行 **UPSERT**（Insert or Update on Conflict）：
+
+```
+for each rule in rules.yaml:
+    if rule_id exists in bi_rule_configs:
+        if is_modified_by_user == FALSE:
+            UPDATE rule from rules.yaml
+        else:
+            SKIP (保留用户修改)
+    else:
+        INSERT new rule
+        SET is_modified_by_user = FALSE
+```
+
+> 用户通过 API 修改过的规则，Seed 文件不会覆盖（`is_modified_by_user = TRUE` 时跳过）。
 
 ```yaml
 table_naming:
@@ -549,43 +706,83 @@ soft_delete:
 
 ### 4.5 DDL 解析能力
 
-DDLParser 通过正则表达式解析 CREATE TABLE 语句，支持以下语法元素：
+DDLParser 采用**正则优先 + AST 回退**双引擎策略，支持以下语法元素：
 
-| 元素 | 支持情况 |
-|------|----------|
-| CREATE TABLE (IF NOT EXISTS) | 支持 |
-| 反引号/引号包裹的标识符 | 支持 |
-| 列定义（类型、NOT NULL、DEFAULT、COMMENT） | 支持 |
-| PRIMARY KEY（内联和独立声明） | 支持 |
-| INDEX / KEY | 支持 |
-| UNIQUE INDEX / KEY | 支持 |
-| FOREIGN KEY | 不支持（跳过） |
-| **表级 COMMENT** (`COMMENT='xxx'` 或 `COMMENT="xxx"`) | **支持（新增）** |
-| 分区定义 | 不支持 |
+| 元素 | 正则解析 | AST 回退 |
+|------|----------|----------|
+| CREATE TABLE (IF NOT EXISTS) | 支持 | 支持 |
+| 反引号/引号包裹的标识符 | 支持 | 支持 |
+| 列定义（类型、NOT NULL、DEFAULT、COMMENT） | 支持 | 支持 |
+| PRIMARY KEY（内联和独立声明） | 支持 | 支持 |
+| INDEX / KEY | 支持 | 支持 |
+| UNIQUE INDEX / KEY | 支持 | 支持 |
+| FOREIGN KEY | 不支持（跳过） | 支持 |
+| **表级 COMMENT** (`COMMENT='xxx'` 或 `COMMENT="xxx"`) | **支持** | 支持 |
+| 分区定义 | 不支持 | 支持 |
+| 复杂 DEFAULT 值（函数、表达式） | 有限支持 | **完整支持** |
+| 复杂 CHECK 约束 | 不支持 | **完整支持** |
+
+**回退触发条件**：正则提取到空表名/空列名且 SQL 语法合法时，自动降级 AST 解析。
+
+**ReDoS 深度防护**：正则匹配时设置单次超时 200ms，超时则中断并尝试 AST 模式。
 
 ### 4.6 数据库连接扫描模式
 
 DDLScanner 支持通过 DatabaseConnector 直连数据库执行全库扫描：
 
-1. `connect_database(db_config)` — 建立数据库连接
-2. `scan_all_tables()` — 遍历所有表，读取结构信息并验证
-3. `scan_table(table_name)` — 扫描单表
+1. `connect_database(db_config)` — 建立**独立短连接池**
+2. `scan_all_tables()` — **任务拆分模式**：只下发"扫描单表"任务到 Celery 队列，由分布式 Worker 并发执行
+3. `scan_table(table_name)` — 扫描单表（Worker 执行单元）
 4. `scan_sql(sql)` — 扫描 SQL 文本（不需要数据库连接）
 5. 扫描完成后自动记录 bi_scan_logs
+
+#### 任务拆分策略
+
+当目标库表数量 ≥ 阈值（如 100 张）时，启用任务拆分：
+
+```
+scan_all_tables()
+    |
+    v
+获取表名列表 [t1, t2, ..., t10000]
+    |
+    v
+批量下发 Celery 任务：
+  - scan_table_task.delay(t1)
+  - scan_table_task.delay(t2)
+  - ...
+  （每个任务独立连接 + 独立规则缓存）
+    |
+    v
+汇总任务收集结果 + 生成报告
+```
+
+#### 连接池精细化配置
+
+| 连接类型 | 配置 | 说明 |
+|----------|------|------|
+| Mulan 平台连接池 | 全局 PG 连接池 | 管理自身元数据 |
+| 目标库连接池 | **独立短连接池 + statement_timeout=30s** | 防止目标库慢查询耗尽连接 |
+
+> ⚠️ **重要**：目标库连接必须使用**独立连接池**，不得复用 Mulan 平台连接池，避免因目标库问题影响平台自身稳定性。
 
 ---
 
 ## 5. 错误码
 
+> ⚠️ **统一响应规范**：所有 API 响应统一使用 `{ "code": "...", "message": "...", "data": {...}, "trace_id": "..." }` 结构。HTTP 状态码仅用于区分网络层错误（404/500 等），业务错误统一使用 `DDL_xxx` 错误码。
+
 | 错误码 | HTTP 状态码 | 说明 | 触发场景 |
 |--------|------------|------|----------|
+| DDL_000 | 200 | 成功 | 检查成功 |
 | DDL_001 | 400 | DDL 语法无效 | DDLParser 无法解析提交的 SQL 语句 |
 | DDL_002 | 404 | 规则不存在 | toggle/delete 操作时找不到指定 rule_id |
 | DDL_003 | 400 | 规则配置无效 | 创建自定义规则时参数校验失败 |
-| **DDL_004** | **400** | **输入超长** | **ddl_text 超过 64KB 限制（ReDoS 防护）** |
-| PARSE_ERROR | 200 | 解析失败 | DDL 检查时解析失败，返回 score=0 |
-| 409 | 409 | 规则 ID 冲突 | 创建自定义规则时 rule_id 已存在 |
-| 403 | 403 | 操作被拒绝 | 尝试删除内置规则 |
+| DDL_004 | 400 | 输入超长 | ddl_text 超过 64KB 限制 |
+| **DDL_005** | **400** | **正则解析超时** | **单次正则匹配超时 200ms（ReDoS 深度防御）** |
+| **DDL_006** | **400** | **规则 Dry Run 失败** | **POST /api/rules/test 验证失败** |
+| DDL_409 | 409 | 规则 ID 冲突 | 创建自定义规则时 rule_id 已存在 |
+| DDL_403 | 403 | 操作被拒绝 | 尝试删除内置规则 |
 
 ---
 
@@ -606,19 +803,28 @@ DDLScanner 支持通过 DatabaseConnector 直连数据库执行全库扫描：
 
 - **SQL 注入防护**: DDLParser 仅做正则解析，不执行提交的 SQL 语句，无注入风险
 - **请求体大小**: `ddl_text` 最大长度限制为 **64KB**（65,536 字节），在 API 入口处截断并返回 `DDL_004` 错误
-- **ReDoS 防护**: 除长度限制外，正则引擎需设置回溯上限（如 `re.MAX_REPEAT` 或超时机制），防止恶意构造的 ReDoS 正则导致 CPU 耗尽
+- **ReDoS 深度防护**:
+  - 第一道防线：64KB 长度限制
+  - 第二道防线：正则匹配**单次超时 200ms**（`signal.SIGALRM` 或 `multiprocessing` 进程超时），超时立即中断并降级 AST 模式，超时返回 `DDL_005`
+  - 第三道防线：禁止使用用户传入的动态正则（所有正则来自 `config_json` 白名单）
 - **rules.yaml 路径**: 硬编码为相对于项目根目录的固定路径，不接受用户输入的文件路径
+- **敏感数据脱敏**: `bi_scan_logs.results_masked` 字段对命中敏感关键词（如 `phone`, `id_card`, `password`, `secret`）的列名进行脱敏处理
 
 ### 6.3 数据库连接安全
 
 - DatabaseConnector 连接信息不通过 API 暴露
 - 数据库连接凭据应通过环境变量或加密配置注入
 - 扫描操作仅执行 SELECT 级别的元数据查询
+- **目标库连接隔离**：DDLScanner 直连目标库时，必须使用**独立短连接池**（不得复用 Mulan 平台连接池），并强制设置 `statement_timeout=30000`（30 秒），防止目标库慢查询耗尽平台连接资源
 
 ### 6.4 审计
 
 - 规则变更操作应记录到 bi_rule_change_logs，包含操作人、操作类型、变更前后快照
 - 扫描操作记录到 bi_scan_logs，包含结果和耗时
+- **审计可靠性**：
+  - 关键规则变更（`delete`、`disable`）必须在**同一数据库事务内同步写入** `bi_rule_change_logs`，不允许使用 `BackgroundTasks`（进程崩溃会丢失）
+  - 一般规则变更（`create`、`toggle`）可使用 Celery 任务队列（利用其重试机制确保审计记录存在）
+  - 所有 API 响应包含 `trace_id`，贯穿日志系统便于定位问题
 
 ---
 
@@ -630,9 +836,12 @@ DDLScanner 支持通过 DatabaseConnector 直连数据库执行全库扫描：
 |----------|------|------|
 | 认证模块 | FastAPI Depends | 通过 get_current_user / require_roles 依赖注入 |
 | PostgreSQL | SQLAlchemy ORM | bi_rule_configs / bi_scan_logs / bi_rule_change_logs 表操作 |
+| Redis | 规则缓存 | 运行时规则缓存（TTL 300s），API 层触发失效 |
+| Celery | 任务队列 | 全库扫描任务拆分 + 重试机制（审计日志保障） |
 | rules.yaml | 文件读取 | **仅在初始化时读取一次**作为内置规则种子数据；**运行时规则从数据库加载** |
 | 前端 DDL 检查页面 | REST API | /api/ddl/check 接口 |
 | 前端规则管理页面 | REST API | /api/rules/ CRUD 接口 |
+| 前端 DDL 暂存区 | 前端本地存储 | 记录上次检查的 DDL 文本，支持 Diff 高亮对比 |
 
 ### 7.2 外部集成
 
@@ -762,7 +971,8 @@ services/ddl_checker/scanner.py
 | 测试范围 | 测试目标 | 关键用例 |
 |----------|----------|----------|
 | DDLParser | 解析正确性 | 标准 CREATE TABLE、IF NOT EXISTS、反引号标识符、多列、多索引 |
-| DDLParser | 边界处理 | 空字符串、无效 SQL、仅含注释的 SQL、嵌套括号 |
+| DDLParser | AST 回退 | 正则提取失败时自动降级 AST（复杂 DEFAULT、分区表） |
+| DDLParser | ReDoS 超时 | 恶意正则 200ms 超时，抛出 DDL_005 |
 | TableValidator | 表命名规则 | 合规表名、大写表名、超长表名、数字开头、前缀白名单 |
 | TableValidator | 主键规则 | 有主键、无主键、复合主键 |
 | TableValidator | 时间戳规则 | 有 create_time/update_time、缺失其一、缺失全部 |
@@ -770,18 +980,26 @@ services/ddl_checker/scanner.py
 | ColumnValidator | 数据类型规则 | 推荐类型、不推荐类型（FLOAT, DOUBLE） |
 | ColumnValidator | 注释规则 | 有注释、无注释 |
 | 评分算法 | 分值计算 | 零违规(100分)、全 High(0分)、混合违规、边界值 |
+| 评分算法 | 场景化权重 | ODS/DWD/ADS 不同权重配置下的分值差异 |
 | 判定逻辑 | executable/passed | 各组合条件下的判定结果 |
+| RuleCache | 缓存命中/失效 | 缓存写入、读取、API 触发失效 |
+| 敏感数据脱敏 | 列名脱敏 | phone, id_card, password 等关键词脱敏处理 |
+| Dry Run | 规则验证 | POST /api/rules/test 验证新规则拦截效果 |
 
 ### 9.2 集成测试
 
 | 测试范围 | 测试目标 |
 |----------|----------|
 | POST /api/ddl/check | 端到端检查流程，验证请求-解析-验证-响应链路 |
+| POST /api/ddl/check + scene_type | ODS/DWD/ADS 场景差异化评分 |
 | GET /api/ddl/rules | rules.yaml 加载与返回格式 |
 | POST /api/rules/ | 自定义规则创建，重复 ID 冲突 |
-| PUT /api/rules/{id}/toggle | 规则状态切换 |
+| PUT /api/rules/{id}/toggle | 规则状态切换，验证缓存失效 |
 | DELETE /api/rules/{id} | 自定义规则删除、内置规则删除拒绝 |
+| POST /api/rules/test | Dry Run 模式验证 |
 | 权限测试 | 普通用户无法创建/删除规则 |
+| 审计日志测试 | delete/disable 规则时日志同步写入（非 BackgroundTasks） |
+| 任务拆分测试 | 大库扫描触发 Celery 任务拆分（>=100 表） |
 
 ### 9.3 测试数据
 
@@ -817,10 +1035,13 @@ CREATE TABLE UserInfo (
 | 编号 | 问题 | 影响范围 | 优先级 | 状态 |
 |------|------|----------|--------|------|
 | **OI-002** | **【已修复】rules.yaml 静态规则与 bi_rule_configs 数据库规则为两套独立体系。修复方案：明确 rules.yaml 为 Seed 文件，运行时规则统一从数据库加载。** | 架构一致性 | **P0** | ✅ 已修复 |
-| OI-001 | 当前 DDLParser 基于正则表达式实现，对复杂 DDL（分区表、存储过程内嵌 DDL）解析能力有限。是否需要引入 SQL AST 解析器（如 sqlparse / sqlglot）？ | 解析覆盖率 | P2 | 待办 |
+| **OI-001** | **【已修复】正则解析复杂 DDL 能力有限。修复方案：正则优先 + AST 回退双引擎（sqlglot/sqlparse），当正则提取元数据为空且 SQL 合法时自动降级。** | 解析覆盖率 | **P0** | ✅ 已修复 |
 | OI-003 | **【已修复】表级 COMMENT 在纯 SQL 文本解析模式下无法提取。修复方案：增强 Parser 支持 `COMMENT='xxx'` 语法。** | 检查完整性 | P2 | ✅ 已修复 |
-| OI-004 | 当前评分权重（High=-20, Medium=-5, Low=-1）为硬编码。是否需要支持管理员自定义扣分权重？ | 灵活性 | P3 | 待办 |
+| **OI-004** | **【已修复】评分权重硬编码。修复方案：通过 `config_json.scene_weights` 支持 ODS/DWD/ADS 场景化权重配置。** | 灵活性 | **P1** | ✅ 已修复 |
 | OI-005 | DDL 检查目前不支持 ALTER TABLE 语句。是否需要扩展支持增量变更检查？ | 功能覆盖 | P2 | 待办 |
-| **OI-006** | **【已修复】规则变更审计表 bi_rule_change_logs 在当前代码中尚未实现写入逻辑。修复方案：在所有规则变更 API 的后置操作中显式加入异步写入步骤。** | 合规审计 | **P1** | ✅ 已修复 |
-| **OI-007** | **【已修复】ddl_text 输入缺少长度限制，大文本可能导致正则引擎性能问题（ReDoS 风险）。修复方案：API 入口强制限制 64KB，增加 ReDoS 正则回溯上限。** | 安全 | **P1** | ✅ 已修复 |
+| **OI-006** | **【已修复】BackgroundTasks 进程崩溃会丢失审计日志。修复方案：delete/disable 操作在同一 DB 事务内同步写入；一般变更使用 Celery 队列（带重试）。** | 合规审计 | **P1** | ✅ 已修复 |
+| **OI-007** | **【已修复】64KB 长度限制不足以防 ReDoS。修复方案：正则匹配单次超时 200ms，超时返回 DDL_005 并尝试 AST 降级。** | 安全 | **P1** | ✅ 已修复 |
 | OI-008 | 内置规则种子数据 (DEFAULT_RULES_SEED) 在模块导入时执行写入，若数据库未就绪会静默失败。是否需要改为显式初始化命令？ | 启动可靠性 | P2 | 待办 |
+| **OI-009** | **【新增】Seed 幂等性问题：重复部署会覆盖用户已修改的规则。修复方案：添加 `is_modified_by_user` 标记 + UPSERT 逻辑。** | Seed 管理 | **P2** | ✅ 已修复 |
+| **OI-010** | **【新增】全库扫描万级表同步阻塞 Worker。修复方案：任务拆分策略，Celery 分布式并发执行单表扫描任务。** | 扫描性能 | **P1** | ✅ 已修复 |
+| OI-011 | 前端 DDL 暂存区与 Diff 功能未实现 | 开发体验 | P3 | 待办 |

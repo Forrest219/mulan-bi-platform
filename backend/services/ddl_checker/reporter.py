@@ -1,9 +1,119 @@
 """检查报告生成模块"""
 import json
+import re
 from typing import List, Dict, Any
 from datetime import datetime
 from dataclasses import dataclass, asdict
 from .validator import Violation, ViolationLevel
+
+
+# 敏感关键词列表（匹配列名或表名时脱敏）
+SENSITIVE_KEYWORDS = [
+    r"phone", r"mobile", r"tel",
+    r"id_card", r"idcard", r"identity", r"身份证",
+    r"password", r"pwd", r"passwd", r"secret",
+    r"bank", r"card", r"账号", r"账户",
+    r"credit", r"debit", r"cvv", r"cvc",
+    r"social", r"security", r"社保",
+    r"salary", r"wage", r"工资",
+    r"address", r"addr", r"地址",
+]
+
+# 脱敏替换符
+MASK_CHAR = "*"
+MASK_PATTERN = re.compile(r"(" + "|".join(SENSITIVE_KEYWORDS) + r")", re.IGNORECASE)
+
+
+def mask_value(value: str) -> str:
+    """
+    对敏感值进行脱敏处理。
+
+    规则：
+    - 保留首字符
+    - 保留末字符
+    - 中间字符替换为 *
+    - 总长度 >= 8 时保留首尾各 2 字符
+    """
+    if not value or len(value) < 4:
+        return MASK_CHAR * len(value) if value else ""
+
+    if len(value) <= 6:
+        # 短字符串：保留首尾
+        return value[0] + MASK_CHAR * (len(value) - 2) + value[-1]
+
+    # 长字符串：保留首2尾2
+    return value[:2] + MASK_CHAR * (len(value) - 4) + value[-2:]
+
+
+def mask_column_name(name: str) -> str:
+    """
+    对列名进行脱敏。
+
+    若列名命中敏感关键词，返回脱敏后的列名。
+    """
+    if not name:
+        return name
+
+    # 检查是否命中敏感关键词
+    if MASK_PATTERN.search(name):
+        # 保留原始结构信息，只替换敏感部分
+        return MASK_PATTERN.sub(lambda m: mask_value(m.group(1)), name, count=1)
+
+    return name
+
+
+def mask_violation_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    对单条违规记录进行脱敏处理。
+
+    规则：
+    - column_name 命中敏感词时脱敏
+    - table_name 命中敏感词时脱敏
+    - message 中的敏感内容脱敏
+    """
+    masked = record.copy()
+
+    # 脱敏列名
+    if "column_name" in masked and masked["column_name"]:
+        masked["column_name"] = mask_column_name(masked["column_name"])
+
+    # 脱敏表名
+    if "table_name" in masked and masked["table_name"]:
+        if MASK_PATTERN.search(masked["table_name"]):
+            parts = masked["table_name"].split("_")
+            masked["table_name"] = "_".join(mask_column_name(p) for p in parts)
+
+    # 脱敏消息（如果有）
+    if "message" in masked and masked["message"]:
+        msg = masked["message"]
+        # 脱敏引号内的值
+        msg = re.sub(r"'([^']+)'", lambda m: f"'{mask_value(m.group(1))}'", msg)
+        masked["message"] = msg
+
+    return masked
+
+
+def mask_results(results: Any) -> Any:
+    """
+    对扫描结果进行递归脱敏处理。
+
+    支持：
+    - Dict: 递归处理每个 key-value
+    - List: 递归处理每个元素
+    - str: 检查是否需要脱敏
+    """
+    if isinstance(results, dict):
+        return {k: mask_results(v) for k, v in results.items()}
+    elif isinstance(results, list):
+        return [mask_results(item) for item in results]
+    elif isinstance(results, str):
+        # 字符串值检查是否包含需要脱敏的内容
+        if MASK_PATTERN.search(results):
+            # 简单处理：返回脱敏标记
+            return MASK_PATTERN.sub(lambda m: mask_value(m.group(1)), results)
+        return results
+    else:
+        return results
 
 
 @dataclass
@@ -39,12 +149,13 @@ class ReportGenerator:
     """报告生成器"""
 
     @staticmethod
-    def generate(validation_results: Dict[str, List[Violation]]) -> CheckReport:
+    def generate(validation_results: Dict[str, List[Violation]], mask: bool = True) -> CheckReport:
         """
         生成检查报告
 
         Args:
             validation_results: 验证结果，{表名: [违规列表]}
+            mask: 是否对结果进行脱敏处理，默认 True
 
         Returns:
             CheckReport 对象
@@ -57,6 +168,11 @@ class ReportGenerator:
 
         for table_name, violations in validation_results.items():
             violations_dict = [v.to_dict() for v in violations]
+
+            # 脱敏处理
+            if mask:
+                violations_dict = [mask_violation_record(v) for v in violations_dict]
+
             table_results[table_name] = violations_dict
 
             total_violations += len(violations)

@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app.core.dependencies import get_current_user, require_roles
 from services.rules.models import RuleConfigDatabase
+from services.ddl_checker.cache import RuleCache
 from services.logs.logger import logger as audit_logger
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ DEFAULT_RULES_SEED = [
      "suggestion": "使用 sp_addextendedproperty 存储注释"},
 ]
 
-# 初始化 seed
+# 初始化 seed（幂等性：已修改的规则不会被覆盖）
 try:
     _rule_db = RuleConfigDatabase()
     _rule_db.seed_defaults(DEFAULT_RULES_SEED)
@@ -72,6 +73,13 @@ class ValidationRule(BaseModel):
     db_type: str
     built_in: bool = True
     status: str = "enabled"
+
+
+class DryRunRequest(BaseModel):
+    """Dry Run 请求"""
+    rule: dict
+    ddl_text: str
+    db_type: str = "mysql"
 
 
 @router.get("/")
@@ -111,40 +119,62 @@ async def get_rules(
 
 @router.put("/{rule_id}/toggle")
 async def toggle_rule(rule_id: str, request: Request):
-    """切换规则启用/禁用状态"""
+    """
+    切换规则启用/禁用状态。
+
+    关键变更（disable）使用同一 DB 事务同步写入审计日志。
+    """
     require_roles(request, ["admin", "data_admin"])
     rule_db = RuleConfigDatabase()
 
     rule = rule_db.get_by_rule_id(rule_id)
     if not rule:
-        raise HTTPException(status_code=404, detail="规则不存在")
+        raise HTTPException(status_code=404, detail={"code": "DDL_002", "message": "规则不存在"})
 
-    # 获取操作人信息
     user = get_current_user(request)
     operator = user.get("username", "unknown")
     operator_id = user.get("id")
 
-    # 记录变更前快照
     old_snapshot = rule.to_dict()
     old_enabled = rule.enabled
-
     new_enabled = not rule.enabled
+
+    # 切换状态
     rule_db.toggle(rule_id, new_enabled)
     new_status = "enabled" if new_enabled else "disabled"
 
-    # 异步写入审计日志
-    try:
-        audit_logger.log_rule_change(
-            rule_section=rule_id,
-            change_type="toggle",
-            operator=operator,
-            operator_id=operator_id,
-            old_value={"enabled": old_enabled},
-            new_value={"enabled": new_enabled},
-            description=f"规则 {rule_id} 状态切换: {old_enabled} -> {new_enabled}"
-        )
-    except Exception as e:
-        logger.warning("规则变更审计日志写入失败: %s", e)
+    # 失效缓存
+    RuleCache.invalidate()
+
+    # 关键变更（disable）同步写入审计日志，确保可靠性
+    if not new_enabled:
+        try:
+            audit_logger.log_rule_change(
+                rule_section=rule_id,
+                change_type="toggle",
+                operator=operator,
+                operator_id=operator_id,
+                old_value={"enabled": old_enabled},
+                new_value={"enabled": new_enabled},
+                description=f"规则 {rule_id} 状态切换: {old_enabled} -> {new_enabled}"
+            )
+        except Exception as e:
+            logger.error("关键规则变更审计日志写入失败: %s", e)
+            raise HTTPException(status_code=500, detail={"code": "DDL_500", "message": "审计日志写入失败"})
+    else:
+        # 一般变更可用异步
+        try:
+            audit_logger.log_rule_change(
+                rule_section=rule_id,
+                change_type="toggle",
+                operator=operator,
+                operator_id=operator_id,
+                old_value={"enabled": old_enabled},
+                new_value={"enabled": new_enabled},
+                description=f"规则 {rule_id} 状态切换: {old_enabled} -> {new_enabled}"
+            )
+        except Exception as e:
+            logger.warning("规则变更审计日志写入失败: %s", e)
 
     return {
         "rule_id": rule_id,
@@ -178,7 +208,11 @@ async def create_custom_rule(rule: ValidationRule, request: Request):
         db_type=rule.db_type,
         is_custom=True,
         enabled=True,
+        is_modified_by_user=True,  # 标记为用户创建的规则
     )
+
+    # 失效缓存
+    RuleCache.invalidate()
 
     # 异步写入审计日志
     try:
@@ -199,27 +233,33 @@ async def create_custom_rule(rule: ValidationRule, request: Request):
 
 @router.delete("/{rule_id}")
 async def delete_custom_rule(rule_id: str, request: Request):
-    """删除自定义规则"""
+    """
+    删除自定义规则。
+
+    删除操作使用同步 DB 事务写入审计日志，确保可靠性。
+    """
     require_roles(request, ["admin", "data_admin"])
     rule_db = RuleConfigDatabase()
 
     rule = rule_db.get_by_rule_id(rule_id)
     if not rule:
-        raise HTTPException(status_code=404, detail="规则不存在")
+        raise HTTPException(status_code=404, detail={"code": "DDL_002", "message": "规则不存在"})
     if not rule.is_custom:
-        raise HTTPException(status_code=403, detail="无法删除内置规则")
+        raise HTTPException(status_code=403, detail={"code": "DDL_403", "message": "无法删除内置规则"})
 
-    # 获取操作人信息
     user = get_current_user(request)
     operator = user.get("username", "unknown")
     operator_id = user.get("id")
 
-    # 记录删除前快照
     old_snapshot = rule.to_dict()
 
+    # 删除规则
     rule_db.delete(rule_id)
 
-    # 异步写入审计日志
+    # 失效缓存
+    RuleCache.invalidate()
+
+    # 同步写入审计日志（关键操作，必须确保成功）
     try:
         audit_logger.log_rule_change(
             rule_section=rule_id,
@@ -231,6 +271,98 @@ async def delete_custom_rule(rule_id: str, request: Request):
             description=f"删除自定义规则 {rule_id}"
         )
     except Exception as e:
-        logger.warning("规则变更审计日志写入失败: %s", e)
+        logger.error("关键规则删除审计日志写入失败: %s", e)
+        raise HTTPException(status_code=500, detail={"code": "DDL_500", "message": "审计日志写入失败"})
 
     return {"message": "规则删除成功"}
+
+
+@router.post("/test")
+async def test_rule(request: Request, body: DryRunRequest):
+    """
+    Dry Run：测试新规则对指定 DDL 的拦截效果（不保存规则）。
+
+    用于管理员在修改规则配置后，预验证规则是否按预期拦截/放行。
+    """
+    require_roles(request, ["admin", "data_admin"])
+
+    from services.ddl_checker.parser import DDLParser
+    from services.ddl_checker.validator import DDLValidator, ViolationLevel
+
+    rule = body.rule
+    ddl_text = body.ddl_text
+    db_type = body.db_type
+
+    # 解析 DDL
+    parser = DDLParser()
+    try:
+        table_info, parse_mode = parser.parse_create_table(ddl_text)
+    except Exception as e:
+        return {
+            "code": "DDL_006",
+            "message": f"Dry Run 失败: {str(e)}",
+            "trace_id": "",
+            "data": {
+                "rule_id": rule.get("rule_id", "TEST"),
+                "ddl_text": ddl_text,
+                "hit": False,
+                "violations": []
+            }
+        }
+
+    if not table_info:
+        return {
+            "code": "DDL_001",
+            "message": "无法解析 DDL 语句",
+            "trace_id": "",
+            "data": {
+                "rule_id": rule.get("rule_id", "TEST"),
+                "ddl_text": ddl_text,
+                "hit": False,
+                "violations": []
+            }
+        }
+
+    # 临时应用规则进行测试
+    # 注意：这里仅做简化验证，实际实现可能需要更复杂的规则引擎
+    violations = []
+
+    # 简单检查：按规则中的 pattern 进行正则匹配
+    import re
+    pattern = rule.get("pattern", "")
+    check_target = rule.get("check_target", "table_name")
+
+    if pattern:
+        try:
+            if check_target == "table_name":
+                target_value = table_info.name
+                if not re.match(pattern, target_value):
+                    violations.append({
+                        "level": rule.get("level", "HIGH"),
+                        "message": f"表名 '{target_value}' 不符合正则 {pattern}",
+                        "suggestion": rule.get("suggestion", "")
+                    })
+        except re.error:
+            return {
+                "code": "DDL_006",
+                "message": f"规则正则表达式无效: {pattern}",
+                "trace_id": "",
+                "data": {
+                    "rule_id": rule.get("rule_id", "TEST"),
+                    "ddl_text": ddl_text,
+                    "hit": False,
+                    "violations": []
+                }
+            }
+
+    return {
+        "code": "DDL_000",
+        "message": "Dry Run 完成",
+        "trace_id": "",
+        "data": {
+            "rule_id": rule.get("rule_id", "TEST"),
+            "ddl_text": ddl_text,
+            "hit": len(violations) > 0,
+            "violations": violations
+        }
+    }

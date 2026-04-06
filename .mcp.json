@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "gemini-text": {
+      "command": "gemini-mcp",
+      "env": {
+        "GEMINI_API_KEY": "AIzaSyDJ6rN2Sn3Kd1UiOh0G4AMVKqFPTeMsQOI"
+      }
+    }
+  }
+}

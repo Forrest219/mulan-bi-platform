@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .parser import TableInfo, ColumnInfo
+from .cache import RuleCache
 
 
 class ViolationLevel(Enum):
@@ -35,22 +36,25 @@ class Violation:
         }
 
 
+# 默认扣分权重
+DEFAULT_WEIGHTS = {"high": -20, "medium": -5, "low": -1}
+
+
 class DatabaseRulesAdapter:
     """
-    数据库规则适配器 — 从 bi_rule_configs 表加载运行时规则
+    数据库规则适配器 — 从 bi_rule_configs 表加载运行时规则（带 Redis 缓存）
 
     替代原来的 rules.yaml + RulesConfig 组合，
     确保 DDL 检查使用与规则管理 API 同一数据源。
     """
 
     # 规则分类名到规则 ID 前缀的映射（与 rules.py 中 DEFAULT_RULES_SEED 对应）
-    # 格式: category -> rule_id 前缀（取第一个字段）
     RULE_CATEGORY_MAP = {
         "table_naming": "RULE_001",
         "column_naming": "RULE_008",
         "data_type": "RULE_003",
-        "timestamp": "RULE_004",       # create_time
-        "timestamp_update": "RULE_005", # update_time
+        "timestamp": "RULE_004",
+        "timestamp_update": "RULE_005",
         "primary_key": "RULE_006",
         "index": "RULE_007",
         "table_comment": "RULE_010",
@@ -58,57 +62,106 @@ class DatabaseRulesAdapter:
         "soft_delete": "RULE_009",
     }
 
-    def __init__(self):
-        self._rules_cache: Optional[Dict[str, Any]] = None
+    def __init__(self, scene_type: str = "ALL", db_type: str = "MySQL"):
+        self.scene_type = scene_type
+        self.db_type = db_type
+        self._rules_cache: Optional[List[Dict[str, Any]]] = None
 
-    def _load_rules(self) -> Dict[str, Any]:
-        """从数据库加载所有启用规则"""
-        if self._rules_cache is not None:
-            return self._rules_cache
+    def _load_rules(self) -> List[Dict[str, Any]]:
+        """
+        从 Redis 缓存加载规则，未命中则从数据库加载并写入缓存。
 
+        缓存键: ddl:rules:{scene_type}:{db_type}
+        TTL: 300 秒
+        """
+        # 尝试从 Redis 缓存读取
+        cached = RuleCache.get(self.scene_type, self.db_type)
+        if cached is not None:
+            self._rules_cache = cached
+            return cached
+
+        # 缓存未命中，从数据库加载
         from services.rules.models import RuleConfigDatabase
 
         db = RuleConfigDatabase()
         all_rules = db.get_all()
 
-        # 按 rule_id 建立索引
-        rules_dict = {r.rule_id: r for r in all_rules if r.enabled}
+        # 按 rule_id 建立索引，仅保留启用的规则
+        enabled_rules = [r for r in all_rules if r.enabled]
 
-        self._rules_cache = rules_dict
-        return rules_dict
+        # 转换为 dict 列表（避免 ORM 对象序列化问题）
+        rules_list = []
+        for r in enabled_rules:
+            rules_list.append({
+                "rule_id": r.rule_id,
+                "name": r.name,
+                "description": r.description,
+                "level": r.level,
+                "category": r.category,
+                "db_type": r.db_type,
+                "suggestion": r.suggestion,
+                "enabled": r.enabled,
+                "is_custom": r.is_custom,
+                "scene_type": r.scene_type,
+                "config_json": r.config_json or {},
+            })
 
-    def get_enabled_rules(self) -> List[Any]:
-        """获取所有已启用的规则对象"""
-        return list(self._load_rules().values())
+        # 写入 Redis 缓存
+        RuleCache.set(rules_list, self.scene_type, self.db_type)
 
-    def _find_rule_by_category(self, category: str) -> Optional[Any]:
+        self._rules_cache = rules_list
+        return rules_list
+
+    def get_enabled_rules(self) -> List[Dict[str, Any]]:
+        """获取所有已启用的规则（dict 列表）"""
+        return self._load_rules()
+
+    def _find_rule_by_category(self, category: str) -> Optional[Dict[str, Any]]:
         """根据分类查找匹配的规则"""
         rules = self._load_rules()
         rule_id = self.RULE_CATEGORY_MAP.get(category)
         if not rule_id:
             return None
-        return rules.get(rule_id)
+        for rule in rules:
+            if rule["rule_id"] == rule_id:
+                return rule
+        return None
 
     def is_rule_enabled(self, category: str) -> bool:
         """检查某分类规则是否启用"""
         rule = self._find_rule_by_category(category)
         if rule is None:
             return True  # 未知分类默认启用
-        return rule.enabled
+        return rule.get("enabled", True)
 
     def get_rule_config(self, category: str) -> Dict[str, Any]:
         """获取某分类规则的配置"""
         rule = self._find_rule_by_category(category)
         if rule is None:
-            return {"enabled": True}
+            return {"enabled": True, "config_json": {}}
 
         return {
-            "enabled": rule.enabled,
-            "description": rule.description,
-            "suggestion": rule.suggestion,
-            "level": rule.level,
-            "config_json": rule.config_json or {},
+            "enabled": rule.get("enabled", True),
+            "description": rule.get("description", ""),
+            "suggestion": rule.get("suggestion", ""),
+            "level": rule.get("level", "MEDIUM"),
+            "config_json": rule.get("config_json", {}),
         }
+
+    def get_scene_weights(self) -> Dict[str, int]:
+        """
+        获取当前场景的扣分权重。
+
+        从 config_json.scene_weights[{scene_type}] 读取，
+        若无配置则返回 DEFAULT_WEIGHTS。
+        """
+        # 从任意规则中获取全局 scene_weights 配置
+        rules = self._load_rules()
+        for rule in rules:
+            scene_weights = rule.get("config_json", {}).get("scene_weights", {})
+            if self.scene_type in scene_weights:
+                return scene_weights[self.scene_type]
+        return DEFAULT_WEIGHTS
 
 
 class RulesConfig:
@@ -449,18 +502,20 @@ class DDLValidator:
     """
     DDL 验证器 — 整合表级和列级验证
 
-    运行时从数据库（bi_rule_configs）加载规则，不再依赖 rules.yaml。
+    运行时从数据库（bi_rule_configs）加载规则，支持场景化评分。
     """
 
-    def __init__(self, rules_config: str = None):
+    def __init__(self, scene_type: str = "ALL", db_type: str = "MySQL"):
         """
         初始化验证器
 
         Args:
-            rules_config: 兼容旧接口，传入 YAML 路径会被忽略。
-                         运行时规则始终从数据库加载。
+            scene_type: 业务场景（ODS/DWD/ADS/ALL），用于差异化评分
+            db_type: 数据库类型（MySQL/SQL Server）
         """
-        self._db_adapter = DatabaseRulesAdapter()
+        self.scene_type = scene_type
+        self.db_type = db_type
+        self._db_adapter = DatabaseRulesAdapter(scene_type=scene_type, db_type=db_type)
         self.table_validator = TableValidator(self._db_adapter)
         self.column_validator = ColumnValidator(self._db_adapter)
 
@@ -477,3 +532,25 @@ class DDLValidator:
         for table in tables:
             results[table.name] = self.validate_table(table)
         return results
+
+    def calculate_score(self, violations: List[Violation]) -> tuple:
+        """
+        计算评分（支持场景化权重）。
+
+        Returns:
+            tuple: (score, summary_dict)
+        """
+        weights = self._db_adapter.get_scene_weights()
+        high_penalty = weights.get("high", -20)
+        medium_penalty = weights.get("medium", -5)
+        low_penalty = weights.get("low", -1)
+
+        high_count = sum(1 for v in violations if v.level == ViolationLevel.ERROR)
+        medium_count = sum(1 for v in violations if v.level == ViolationLevel.WARNING)
+        low_count = sum(1 for v in violations if v.level == ViolationLevel.INFO)
+
+        score = 100 + (high_count * high_penalty) + (medium_count * medium_penalty) + (low_count * low_penalty)
+        score = max(0, min(100, score))
+        summary = {"High": high_count, "Medium": medium_count, "Low": low_count}
+
+        return score, summary
