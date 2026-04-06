@@ -1,6 +1,6 @@
 """NL-to-Query 搜索 API（PRD §14 §6）"""
 import logging
-from typing import Optional
+from typing import Dict, Optional
 from pydantic import BaseModel
 
 from fastapi import APIRouter, HTTPException, Depends
@@ -19,6 +19,10 @@ from services.llm.models import log_nlq_query
 from services.common.redis_cache import check_rate_limit
 from services.tableau.models import TableauDatabase, TableauAsset
 from services.knowledge_base.glossary_service import glossary_service
+from services.semantic_maintenance.context_assembler import (
+    ContextAssembler,
+    sanitize_fields_for_llm,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -42,15 +46,19 @@ def _require_role(user, min_role: str) -> None:
 
 
 def _build_fields_with_types(fields: list) -> str:
-    """将字段列表格式化为 Prompt 上下文字符串"""
-    lines = []
-    for f in fields:
-        role = f.get("role", "dimension")
-        data_type = f.get("data_type", "string")
-        caption = f.get("field_caption", f.get("field_name", ""))
-        formula = f" (公式: {f['formula']})" if f.get("formula") else ""
-        lines.append(f"- [{role}] {caption} ({data_type}){formula}")
-    return "\n".join(lines) if lines else "无可用字段"
+    """
+    将已 sanitized 的字段列表格式化为 LLM 上下文字符串（Spec 14 v1.1 §5.1 Token 预算管理）。
+
+    注意：本函数假设输入 fields 已经过 sanitize_fields_for_llm 过滤。
+    本函数只负责 P0-P5 优先级截断 + Token 预算（ContextAssembler）。
+    """
+    if not fields:
+        return "无可用字段"
+
+    # P0-P5 优先级截断 + Token 预算（ContextAssembler 内部处理）
+    assembler = ContextAssembler()
+    # build_field_context 默认 max_tokens=MAX_CONTEXT_TOKENS-500=2500
+    return assembler.build_field_context(fields)
 
 
 def _nlq_error_response(code: str, message: str, details: dict = None):
@@ -165,6 +173,32 @@ async def query(
             raise _nlq_error_response("NLQ_009", "数据源不存在或已删除")
 
         field_records = db.get_datasource_fields(asset.id)
+
+        # 提取 field_registry_id（= TableauDatasourceField.id）用于批量查敏感度
+        field_ids = [f.id for f in field_records]
+
+        # 批量查询字段敏感度（JOIN TableauFieldSemantics）
+        # 注意：使用新的 session 查询，因为前面的 session 已关闭
+        sensitivity_map: Dict[int, str] = {}
+        if field_ids:
+            from services.semantic_maintenance.models import TableauFieldSemantics
+            db2 = TableauDatabase()
+            session2 = db2.session
+            try:
+                semantics_records = session2.query(
+                    TableauFieldSemantics.field_registry_id,
+                    TableauFieldSemantics.sensitivity_level,
+                ).filter(
+                    TableauFieldSemantics.field_registry_id.in_(field_ids),
+                    TableauFieldSemantics.connection_id == asset.connection_id,
+                ).all()
+                sensitivity_map = {
+                    row.field_registry_id: (row.sensitivity_level or "low").lower()
+                    for row in semantics_records
+                }
+            finally:
+                session2.close()
+
         fields = [
             {
                 "field_caption": f.field_caption,
@@ -172,10 +206,18 @@ async def query(
                 "role": f.role,
                 "data_type": f.data_type,
                 "formula": f.formula,
+                "sensitivity_level": sensitivity_map.get(f.id, "low"),
             }
             for f in field_records
         ]
-        fields_with_types = _build_fields_with_types(fields)
+
+        # Step 1: 敏感字段过滤（Spec 12 §9.2 + Spec 14 v1.1 §5.1 Token 熔断）
+        # sanitize_fields_for_llm 会过滤 HIGH/CONFIDENTIAL 字段，
+        # 截断 enum_values（≤20条，每条≤50字符），仅保留字段元数据
+        sanitized_fields = sanitize_fields_for_llm(fields)
+
+        # _build_fields_with_types 内部再次使用 ContextAssembler 做 P0-P5 截断（2500 tokens）
+        fields_with_types = _build_fields_with_types(sanitized_fields)
 
         # 1d. 获取业务术语映射（知识库术语 + 同义词）
         term_mappings = ""
@@ -211,8 +253,8 @@ async def query(
         if confidence < 0.5:
             raise _nlq_error_response("NLQ_002", "无法理解查询意图")
 
-        # === 阶段2：字段解析 ===
-        resolved_fields = await resolve_fields(question, fields, intent)
+        # === 阶段2：字段解析（使用已 sanitized 的字段列表，防止敏感字段泄露）===
+        resolved_fields = await resolve_fields(question, sanitized_fields, intent)
 
         # === 阶段3：查询执行（PRD §5.5）===
         # 约束 A：环境变量从 TableauConnection 解密注入（mcp_client 内部处理）

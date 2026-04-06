@@ -2,8 +2,8 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | v1.0 |
-| 日期 | 2026-04-04 |
+| 版本 | v1.1 |
+| 日期 | 2026-04-06 |
 | 状态 | 草稿 |
 | 作者 | Mulan BI Platform Team |
 | 模块路径 | `backend/services/llm/`, `backend/app/api/search.py`(规划) |
@@ -317,7 +317,8 @@ class ResolvedField:
 ├──────────────────────────────────────────┤
 │ 可用字段 (fields_with_types):              │
 │   · field_caption + data_type + role      │
-│   · 经阶段2解析后的候选字段优先排列          │
+│   · 原始数据源字段表（非阶段2输出）          │
+│   · 超出 Token 预算时按 P0-P5 优先级截断     │
 ├──────────────────────────────────────────┤
 │ 业务术语映射 (term_mappings):               │
 │   · 同义词表 + 语义标注                     │
@@ -364,6 +365,28 @@ class ResolvedField:
 ```
 
 **LLM 参数约束**：为了保证输出结构化 JSON 的绝对稳定性，防止格式错乱或产生幻觉，此处的 LLM API 调用必须硬编码配置 `temperature = 0.1`，不允许继承系统的全局配置（0.7）。
+
+**Token 预算管理（强制）**：`{fields_with_types}` 注入时必须遵守 Token 预算上限：
+
+| 预算项 | 上限 | 说明 |
+|--------|------|------|
+| System Prompt 预留 | 200 tokens | "你是一个 Tableau 数据查询专家。" |
+| User Instruction 预留 | 300 tokens | 数据源信息 + 术语映射 + 问题文本 |
+| **字段上下文可用预算** | **2500 tokens** | `MAX_NL2Q_CONTEXT_TOKENS - 200 - 300` |
+| 单次调用总上限 | 3000 tokens | 与 Spec 12 §3.2 保持一致 |
+
+**字段优先级截断策略**（与 Spec 12 §3.4 对齐）：
+
+| 优先级 | 类型 | 截断规则 |
+|--------|------|---------|
+| P0 | 核心度量字段（`is_core_field=True` 且 `role=measure`） | 优先保留，公式完整保留 |
+| P1 | 核心维度字段（`is_core_field=True` 且 `role=dimension`） | 其次保留 |
+| P2 | 普通度量字段（`role=measure`） | 公式截断为"[公式已截断]" |
+| P3 | 普通维度字段（`role=dimension`） | 截断公式 |
+| P4 | 计算字段（有 formula） | 截断公式 |
+| P5 | 其他字段 | 超预算时优先丢弃 |
+
+**敏感字段过滤（强制）**：`sensitivity_level` 为 `HIGH` / `CONFIDENTIAL` 的字段不得进入 `{fields_with_types}` 上下文（与 Spec 12 §9.2 对齐）。过滤在截断前执行。
 
 ### 5.2 One-Pass 输出格式
 
@@ -630,7 +653,7 @@ MCP query 使用 `tableau_connections` 中已存储的 Personal Access Token (PA
 
 > 以下三条为线上性能强制约束，违反任意一条不得合入。
 
-#### 约束 A：环境变量完整性
+#### 约束 A：动态凭据传递（安全 + 并发）
 
 MCP Server (`tableau-bi-ksyun`) 启动时依赖以下环境变量，必须在进程启动前完成注入：
 
@@ -641,7 +664,26 @@ MCP Server (`tableau-bi-ksyun`) 启动时依赖以下环境变量，必须在进
 | `TABLEAU_PAT_NAME` | `TableauConnection.token_name` | Personal Access Token Name |
 | `TABLEAU_PAT_VALUE` | 解密 `TableauConnection.token_encrypted` | PAT Secret（Fernet 解密后） |
 
-**注入时机**：每次查询执行前，从 DB 读取对应 `TableauConnection` 记录，解密 token，写入进程环境变量（`os.environ`）或 MCP ClientSession 初始化参数。禁止硬编码。
+**注入时机**：每次查询执行前，从 DB 读取对应 `TableauConnection` 记录，解密 token，**通过 `contextvars` 或函数传参将 PAT 凭据传递到 MCP ClientSession**。严禁写入 `os.environ`（见下方 P0 警告）。
+
+**P0 多租户安全警告**：在 FastAPI 等异步 Web 框架中，`os.environ` 是进程全局共享的。若向 `os.environ` 写入动态凭据，用户 A 和用户 B 的并发请求会产生竞态条件——用户 A 的查询可能使用用户 B 的 Tableau PAT 凭据，导致跨租户数据泄露。**禁止使用 `os.environ` 传递动态凭据**。正确做法：
+
+```python
+# ❌ 禁止：os.environ 全局污染，并发竞态
+os.environ["TABLEAU_PAT_VALUE"] = decrypted_token
+
+# ✅ 正确：使用 contextvars 限定在当前请求生命周期内
+from contextvars import copy_context, ContextVar
+_tableau_creds: ContextVar[dict] = ContextVar("tableau_creds")
+
+async def query_with_creds(connection_id: int, vizql_json: dict):
+    creds = await load_and_decrypt_connection_creds(connection_id)
+    token = _tableau_creds.set(creds)  # 仅当前协程可见
+    try:
+        return await mcp_client.query_datasource(vizql_json)
+    finally:
+        _tableau_creds.reset(token)
+```
 
 #### 约束 B：MCP ClientSession 长连接复用
 

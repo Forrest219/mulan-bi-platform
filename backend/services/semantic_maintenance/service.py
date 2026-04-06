@@ -1,4 +1,5 @@
 """语义维护模块 - 业务逻辑层（Spec 12 §2.2 边界）"""
+import asyncio
 import json
 import logging
 from typing import Dict, Any, Optional, List
@@ -319,17 +320,32 @@ class SemanticMaintenanceService:
 
         try:
             llm = LLMService()
-            result = llm.complete(prompt, system=system, timeout=30)
+            # v1.2 §4.2: 强制 temperature=0.1，OpenAI 启用 json_object 响应格式
+            # 使用 asyncio.run() 桥接异步 LLM 调用（service 层保持同步接口）
+            result = asyncio.run(llm.complete_for_semantic(prompt, system=system, timeout=30))
         except Exception as e:
             return False, f"LLM 调用失败: {e}"
 
         if "error" in result:
             return False, result["error"]
 
+        # JSON 解析 + v1.2 §6.2 重试策略：首次失败追加错误反馈重试 1 次
         try:
             parsed = self._parse_llm_json_response(result["content"].strip())
-        except Exception:
-            return False, f"AI 返回格式异常（非 JSON）：{result['content'][:200]}"
+        except json.JSONDecodeError as first_err:
+            # 重试 1 次：追加 JSON 解析错误反馈
+            retry_prompt = (
+                f"{prompt}\n\n"
+                f"[修正要求] 你上次生成的格式有误，JSON 解析报错信息为：{first_err.msg}。"
+                f"请严格按照 JSON 规范重新生成，不要包含任何 Markdown 标记（如 ```json），只输出纯 JSON。"
+            )
+            result_retry = asyncio.run(llm.complete_for_semantic(retry_prompt, system=system, timeout=30))
+            if "error" in result_retry:
+                return False, result_retry["error"]
+            try:
+                parsed = self._parse_llm_json_response(result_retry["content"].strip())
+            except json.JSONDecodeError:
+                return False, "AI 返回格式异常（重试后仍非有效 JSON）"
 
         # 写入语义记录
         self.db.update_datasource_semantics(
@@ -394,17 +410,31 @@ class SemanticMaintenanceService:
 
         try:
             llm = LLMService()
-            result = llm.complete(prompt, system=system, timeout=30)
+            # v1.2 §4.2: 强制 temperature=0.1，OpenAI 启用 json_object 响应格式
+            result = asyncio.run(llm.complete_for_semantic(prompt, system=system, timeout=30))
         except Exception as e:
             return False, f"LLM 调用失败: {e}"
 
         if "error" in result:
             return False, result["error"]
 
+        # JSON 解析 + v1.2 §6.2 重试策略：首次失败追加错误反馈重试 1 次
         try:
             parsed = self._parse_llm_json_response(result["content"].strip())
-        except Exception:
-            return False, f"AI 返回格式异常（非 JSON）：{result['content'][:200]}"
+        except json.JSONDecodeError as first_err:
+            # 重试 1 次：追加 JSON 解析错误反馈
+            retry_prompt = (
+                f"{prompt}\n\n"
+                f"[修正要求] 你上次生成的格式有误，JSON 解析报错信息为：{first_err.msg}。"
+                f"请严格按照 JSON 规范重新生成，不要包含任何 Markdown 标记（如 ```json），只输出纯 JSON。"
+            )
+            result_retry = asyncio.run(llm.complete_for_semantic(retry_prompt, system=system, timeout=30))
+            if "error" in result_retry:
+                return False, result_retry["error"]
+            try:
+                parsed = self._parse_llm_json_response(result_retry["content"].strip())
+            except json.JSONDecodeError:
+                return False, "AI 返回格式异常（重试后仍非有效 JSON）"
 
         self.db.update_field_semantics(
             field_id,

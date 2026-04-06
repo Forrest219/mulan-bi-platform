@@ -305,12 +305,14 @@ async def one_pass_llm(
 
     system_prompt = "你是一个 Tableau 数据查询专家。"
 
-    # 首次调用
-    result = await llm_service.complete_with_temp(
+    # 首次调用：使用 complete_for_semantic（Spec 14 v1.1 §5.1 + Spec 12 v1.2 §4.2）
+    # - temperature=0.1
+    # - OpenAI: response_format={"type": "json_object"}
+    # - Anthropic: 仅 temperature=0.1（不支持 response_format）
+    result = await llm_service.complete_for_semantic(
         prompt=prompt,
         system=system_prompt,
-        timeout=15,
-        temperature=0.1,  # PRD §5.1 强制约束
+        timeout=30,
     )
 
     if "error" in result:
@@ -354,11 +356,10 @@ async def _retry_with_feedback(
     """
     retry_prompt = ONE_PASS_RETRY_TEMPLATE.format(error_details=error_details) + "\n\n原始 Prompt：\n" + prompt
 
-    result = await llm_service.complete_with_temp(
+    result = await llm_service.complete_for_semantic(
         prompt=retry_prompt,
         system=system_prompt,
-        timeout=15,
-        temperature=0.1,
+        timeout=30,
     )
 
     if "error" in result:
@@ -458,21 +459,13 @@ def get_datasource_fields_cached(asset_id: int) -> List[str]:
         return cached
 
     # 缓存未命中，查数据库
+    from services.tableau.models import TableauDatasourceField
     db = TableauDatabase()
     session = db.session
-    fields = session.query(TableauAsset).filter(
-        TableauAsset.id == asset_id
-    ).all()
-    session.close()
-
-    # 获取 field_caption 列表（仅缓存字段名）
-    from services.tableau.models import TableauDatasourceField
-    db2 = TableauDatabase()
-    session2 = db2.session
-    field_records = session2.query(TableauDatasourceField).filter(
+    field_records = session.query(TableauDatasourceField).filter(
         TableauDatasourceField.asset_id == asset_id
     ).all()
-    session2.close()
+    session.close()
 
     field_captions = [f.field_caption or f.field_name for f in field_records if f.field_caption or f.field_name]
 

@@ -106,6 +106,66 @@ class LLMService:
             logger.error("LLM 调用失败: %s", e, exc_info=True)
             return {"error": str(e)}
 
+    async def complete_for_semantic(
+        self, prompt: str, system: str = None, timeout: int = 30
+    ) -> dict:
+        """
+        Semantic 语义生成专用调用（Spec v1.2 §4.2 强制超参数）。
+
+        - temperature=0.1（抑制幻觉，格式化元数据生成必须低随机性）
+        - OpenAI 供应商：额外指定 response_format={"type": "json_object"}
+        - Anthropic 供应商：不支持 response_format，仅设置 temperature=0.1
+
+        Returns: { "content": str } or { "error": str }
+        """
+        config = self._load_config()
+        if not config or not config.is_active or not config.api_key_encrypted:
+            return {"error": "LLM 未配置，请联系管理员"}
+
+        try:
+            api_key = _decrypt(config.api_key_encrypted)
+        except Exception as e:
+            logger.error("LLM API Key 解密失败: %s", e, exc_info=True)
+            return {"error": "LLM 认证配置错误"}
+
+        try:
+            if config.provider == "anthropic":
+                return await self._anthropic_complete_with_temp(
+                    api_key, config, prompt, system, timeout, temperature=0.1
+                )
+            else:
+                return await self._openai_complete_with_semantic(
+                    api_key, config, prompt, system, timeout
+                )
+        except Exception as e:
+            logger.error("LLM 调用失败: %s", e, exc_info=True)
+            return {"error": str(e)}
+
+    async def _openai_complete_with_semantic(
+        self, api_key: str, config, prompt: str, system: str, timeout: int
+    ) -> dict:
+        """
+        OpenAI 语义生成专用路径：temperature=0.1 + response_format=json_object。
+        """
+        client = self._get_openai_client(api_key, config.base_url, timeout)
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        logger.info(
+            "LLM 调用（语义生成, temp=0.1, json_object）：model=%s, timeout=%ds",
+            config.model, timeout,
+        )
+        response = await client.chat.completions.create(
+            model=config.model,
+            messages=messages,
+            temperature=0.1,
+            max_tokens=config.max_tokens,
+            response_format={"type": "json_object"},
+        )
+        content = response.choices[0].message.content.strip()
+        return {"content": content}
+
     async def _openai_complete_with_temp(
         self, api_key: str, config, prompt: str, system: str, timeout: int, temperature: float
     ) -> dict:

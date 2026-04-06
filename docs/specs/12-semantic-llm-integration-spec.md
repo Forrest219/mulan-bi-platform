@@ -2,8 +2,8 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | v1.1 |
-| 日期 | 2026-04-05 |
+| 版本 | v1.2 |
+| 日期 | 2026-04-06 |
 | 状态 | 草稿（修订中） |
 | 作者 | Mulan BI Platform Team |
 | 模块路径 | `backend/services/semantic_maintenance/` + `backend/services/llm/` |
@@ -160,10 +160,14 @@ graph TB
 | User Instruction 预留 | ~300 tokens | 操作要求 + Schema 定义 |
 | Data Context 可用预算 | **~2500 tokens** | 剩余空间全部分配给字段元数据 |
 
-Token 估算规则（简化）：
-- 中文字符：约 1.5 token/字
-- 英文单词：约 1.3 token/word
-- JSON 结构符号：按字符数 * 1.0 估算
+Token 估算规则：
+
+> **⚠️ 废弃声明（v1.2 修订）**：严禁使用字符乘法估算（"中文字符约 1.5 token/字" 等），
+> 边界溢出将导致 LLM API 返回 400 错误。ContextAssembler 必须使用 **tiktoken**（cl100k_base 编码）
+> 进行精确 Token 计算。
+
+- 优先：使用 `tiktoken.get_encoding("cl100k_base")` 进行精确计算
+- 回退：无 tiktoken 时使用保守截断（按中文字符 2.0 token/字估算，保证不超限）
 
 ### 3.3 字段元数据序列化格式
 
@@ -240,7 +244,10 @@ def truncate_context(fields: List[FieldMeta], budget_tokens: int) -> str:
 result = await llm_service.complete(
     prompt=data_context_block + "\n\n" + user_instruction,
     system=system_prompt,
-    timeout=30
+    timeout=30,
+    # === v1.2 必填超参数（格式化元数据生成，幻觉率必须极低）===
+    temperature=0.1,           # 必须 ≤ 0.2，抑制自由发挥
+    response_format={"type": "json_object"},  # 若供应商支持，必须启用（OpenAI 等）
 )
 ```
 
@@ -367,9 +374,9 @@ AI_SEMANTIC_FIELD_TEMPLATE = """## 字段信息
     },
     "enum_values": {
       "type": ["array", "null"],
-      "items": {"type": "string"},
+      "items": {"type": "string", "maxLength": 50},
       "maxItems": 20,
-      "description": "枚举值示例（最多 20 个）"
+      "description": "枚举值示例（最多 20 个，单个值最大 50 字符，超出用 ... 截断）"
     },
     "user_id": {
       "type": ["integer", "null"],
@@ -600,7 +607,7 @@ flowchart TD
     C --> D
     D --> E{JSON.parse 成功?}
     E -->|是| F[Schema 校验]
-    E -->|否| G[重试 1 次]
+    E -->|否| G[追加错误反馈 + 重试 1 次]
     G --> H{重试 JSON.parse 成功?}
     H -->|是| F
     H -->|否| I[返回 SLI_003 错误]
@@ -609,8 +616,12 @@ flowchart TD
     J -->|否| L[返回 SLI_004 错误]
 ```
 
-重试策略：
-- 首次 JSON 解析失败后，使用相同 Prompt 重试 **1 次**
+重试策略（v1.2 修订）：
+- 首次 JSON 解析失败后，**追加错误反馈后重试 1 次**：
+  ```
+  原始 Prompt + "\n\n[修正要求] 你上次生成的格式有误，JSON 解析报错信息为：{error_message}。
+  请严格按照 JSON 规范重新生成，不要包含任何 Markdown 标记（如 ```json），只输出纯 JSON。"
+  ```
 - 重试仍失败，返回 `SLI_003` 错误
 - 不进行无限重试，避免 Token 浪费
 
@@ -687,7 +698,7 @@ def pre_llm_sensitivity_check(field_or_ds) -> Optional[str]:
 
 1. **敏感字段过滤**：`HIGH` / `CONFIDENTIAL` 级别字段不进入 LLM 上下文
 2. **实际数据值排除**：仅发送字段元数据（名称、类型、公式），不得发送实际行级数据
-3. **枚举值脱敏**：`enum_values` 最多包含 20 个示例值，且仅限非敏感字段
+3. **枚举值脱敏**：`enum_values` 最多包含 20 个示例值，**单个值最大 50 字符（超出用 `...` 截断）**，且仅限非敏感字段
 
 ```python
 def sanitize_fields_for_llm(fields: List[dict]) -> List[dict]:
@@ -703,9 +714,11 @@ def sanitize_fields_for_llm(fields: List[dict]) -> List[dict]:
             "role": f.get("role"),
             "formula": f.get("formula"),  # 公式是元数据，允许
         }
-        # 枚举值截断
+        # 枚举值截断（数量 ≤20，单个值 ≤50 字符）
         if f.get("enum_values"):
-            safe_field["enum_values"] = f["enum_values"][:20]
+            safe_field["enum_values"] = [
+                (v[:50] + "..." if len(v) > 50 else v) for v in f["enum_values"][:20]
+            ]
         sanitized.append(safe_field)
     return sanitized
 ```

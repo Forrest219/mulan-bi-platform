@@ -71,11 +71,11 @@ def estimate_tokens(text: str, encoder=None) -> int:
     if encoder is not None:
         return len(encoder.encode(text))
 
-    # 保守估算：无 tiktoken 时的回退方案
+    # 保守估算（Spec v1.2 §3.2 废弃声明）：无 tiktoken 时使用 2.0 token/字
+    # 原 1.5/1.3 估算已被废弃，禁止使用
     chinese_chars = sum(1 for c in text if ord(c) > 127)
     english_chars = len(text) - chinese_chars
-    # 估算：中文 1.5 token/字，英文 1.3 token/字
-    return int(chinese_chars * 1.5 + english_chars * 1.3)
+    return int(chinese_chars * 2.0 + english_chars * 1.3)
 
 
 def _classify_priority(field: Dict[str, Any]) -> str:
@@ -175,10 +175,12 @@ def sanitize_fields_for_llm(
             "formula": f.get("formula"),  # 公式是元数据，允许
         }
 
-        # 枚举值截断（Spec 12 §9.2：最多 20 个示例值）
+        # 枚举值截断（Spec v1.2 §5.1 + §8.2：最多 20 个，单个值最大 50 字符）
         enum_values = f.get("enum_values")
         if enum_values:
-            safe_field["enum_values"] = enum_values[:20]
+            safe_field["enum_values"] = [
+                (v[:50] + "..." if len(v) > 50 else v) for v in enum_values[:20]
+            ]
 
         sanitized.append(safe_field)
 
