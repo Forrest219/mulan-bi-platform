@@ -45,7 +45,9 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; message: string }>;
   logout: () => Promise<void>;
+  logoutAll: () => Promise<void>;  // 退出所有设备
   checkAuth: () => Promise<void>;
+  refreshToken: () => Promise<boolean>;  // 主动刷新 Token
   isAdmin: boolean;
   isDataAdmin: boolean;
   isAnalyst: boolean;
@@ -53,11 +55,56 @@ interface AuthContextType {
   updateUser: (user: User) => void;
 }
 
+// Access Token 剩余多少秒时触发 proactive refresh
+const ACCESS_TOKEN_REFRESH_THRESHOLD_SECONDS = 5 * 60; // 5 分钟
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  // Access Token 过期时间戳（毫秒），用于 proactive refresh
+  const [tokenExpiresAt, setTokenExpiresAt] = useState<number | null>(null);
+
+  // 从登录响应中解析 JWT payload 获取 exp
+  const parseJwtExpiry = (token: string): number | null => {
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      return payload.exp * 1000; // JWT exp 是秒，转毫秒
+    } catch {
+      return null;
+    }
+  };
+
+  const refreshToken = async (): Promise<boolean> => {
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (response.ok) {
+        // 从 Set-Cookie 中获取新的 expiry（无法直接读 HTTP-only cookie）
+        // 下次 /me 调用成功时会更新 tokenExpiresAt
+        return true;
+      }
+      // Refresh 失败，说明需要重新登录
+      setUser(null);
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
+  // 检查是否需要 proactive token refresh
+  const scheduleProactiveRefresh = (expiresAt: number) => {
+    const now = Date.now();
+    const msUntilRefresh = expiresAt - now - ACCESS_TOKEN_REFRESH_THRESHOLD_SECONDS * 1000;
+    if (msUntilRefresh > 0) {
+      setTimeout(async () => {
+        await refreshToken();
+      }, msUntilRefresh);
+    }
+  };
 
   const checkAuth = async () => {
     try {
@@ -67,6 +114,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (response.ok) {
         const userData = await response.json();
         setUser(userData);
+        // 从 session cookie 中尝试读取 expiry（cookie 是 HTTP-only，
+        // 但 login 响应中我们已知 expiresAt，将其存内存）
+        // 如果没有存过，使用默认值不触发 refresh
+        if (tokenExpiresAt) {
+          scheduleProactiveRefresh(tokenExpiresAt);
+        }
+      } else if (response.status === 401) {
+        // 尝试用 refresh token 续期
+        const refreshed = await refreshToken();
+        if (refreshed) {
+          // 刷新成功，重新获取用户信息
+          await checkAuth();
+        } else {
+          setUser(null);
+        }
       } else {
         setUser(null);
       }
@@ -94,6 +156,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (response.ok && data.success) {
         setUser(data.user);
+        // 计算 Access Token 过期时间（当前时间 + JWT_EXPIRE_SECONDS）
+        // JWT_EXPIRE_SECONDS = 7 天 = 604800 秒
+        const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+        setTokenExpiresAt(expiresAt);
+        scheduleProactiveRefresh(expiresAt);
         return { success: true, message: '登录成功' };
       } else {
         return { success: false, message: data.detail || '登录失败' };
@@ -111,6 +178,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
     } finally {
       setUser(null);
+      setTokenExpiresAt(null);
+    }
+  };
+
+  // 退出所有设备：撤销所有 Refresh Token
+  const logoutAll = async () => {
+    try {
+      await fetch(`${API_BASE}/api/auth/refresh/revoke-all`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } finally {
+      setUser(null);
+      setTokenExpiresAt(null);
     }
   };
 
@@ -134,7 +215,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         login,
         logout,
+        logoutAll,
         checkAuth,
+        refreshToken,
         isAdmin: user?.role === 'admin',
         isDataAdmin: user?.role === 'data_admin',
         isAnalyst: user?.role === 'analyst',

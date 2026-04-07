@@ -1,5 +1,14 @@
 """
-认证 API
+认证 API — 支持 JWT Access Token + Refresh Token 双 Token 模式
+
+- Access Token（JWT）：存 session cookie，7天有效，前端用于 API 认证
+- Refresh Token：存 refresh_token cookie，30天 Sliding Window，用于 Access Token 续期
+
+刷新流程：
+  1. 前端检测 Access Token 接近过期（剩余 < 5 分钟）
+  2. 前端调用 POST /api/auth/refresh
+  3. 后端验证 Refresh Token，颁发新 Access Token
+  4. 前端重试原请求
 """
 import os
 import time
@@ -11,7 +20,11 @@ from fastapi import APIRouter, HTTPException, Response, Request
 from pydantic import BaseModel
 
 from services.auth import auth_service
-from app.core.constants import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRE_SECONDS, MIN_PASSWORD_LENGTH
+from app.core.constants import (
+    JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRE_SECONDS,
+    REFRESH_TOKEN_COOKIE_NAME, REFRESH_TOKEN_EXPIRE_SECONDS,
+    MIN_PASSWORD_LENGTH,
+)
 from app.core.dependencies import get_current_user as _get_current_user
 
 router = APIRouter()
@@ -19,6 +32,8 @@ router = APIRouter()
 _JWT_SECRET = JWT_SECRET
 _JWT_ALGORITHM = JWT_ALGORITHM
 _JWT_EXPIRE_SECONDS = JWT_EXPIRE_SECONDS
+_REFRESH_TOKEN_COOKIE_NAME = REFRESH_TOKEN_COOKIE_NAME
+_REFRESH_TOKEN_EXPIRE_SECONDS = REFRESH_TOKEN_EXPIRE_SECONDS
 
 # 注册速率限制：每个 IP 每 60 秒最多 5 次
 _register_attempts: dict[str, list[float]] = defaultdict(list)
@@ -89,6 +104,7 @@ async def login(request: LoginRequest, response: Response):
     if not user:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
+    # Access Token（JWT）
     token = _create_session_token(user["id"], user["username"], user["role"])
     _is_secure = os.environ.get("SECURE_COOKIES", "false").lower() == "true"
     response.set_cookie(
@@ -98,6 +114,21 @@ async def login(request: LoginRequest, response: Response):
         samesite="lax",
         secure=_is_secure,
         max_age=_JWT_EXPIRE_SECONDS
+    )
+
+    # Refresh Token（30 天 Sliding Window）
+    _device = request.headers.get("User-Agent", "")[:128]
+    refresh_token = auth_service.create_refresh_token(
+        user_id=user["id"],
+        device_fingerprint=_device,
+    )
+    response.set_cookie(
+        key=_REFRESH_TOKEN_COOKIE_NAME,
+        value=refresh_token,
+        httponly=True,
+        samesite="lax",
+        secure=_is_secure,
+        max_age=_REFRESH_TOKEN_EXPIRE_SECONDS,
     )
 
     return LoginResponse(
@@ -138,6 +169,20 @@ async def register(request: RegisterRequest, req: Request, response: Response):
         max_age=_JWT_EXPIRE_SECONDS
     )
 
+    # Refresh Token（30 天 Sliding Window）
+    refresh_token = auth_service.create_refresh_token(
+        user_id=user["id"],
+        device_fingerprint=request.client.host if request.client else "unknown",
+    )
+    response.set_cookie(
+        key=_REFRESH_TOKEN_COOKIE_NAME,
+        value=refresh_token,
+        httponly=True,
+        samesite="lax",
+        secure=_is_secure,
+        max_age=_REFRESH_TOKEN_EXPIRE_SECONDS,
+    )
+
     return LoginResponse(
         success=True,
         message="注册成功",
@@ -165,8 +210,84 @@ async def logout(request: Request, response: Response):
                 import logging
                 logging.getLogger(__name__).warning("登出日志记录失败: %s", e)
 
+    # 撤销 Refresh Token
+    refresh_token = request.cookies.get(_REFRESH_TOKEN_COOKIE_NAME)
+    if refresh_token:
+        auth_service.revoke_refresh_token(refresh_token)
+
     response.delete_cookie("session")
+    response.delete_cookie(_REFRESH_TOKEN_COOKIE_NAME)
     return {"success": True, "message": "已登出"}
+
+
+@router.post("/refresh")
+async def refresh_token(request: Request, response: Response):
+    """
+    使用 Refresh Token 换取新的 Access Token（Sliding Window）。
+
+    流程：
+    1. 从 refresh_token cookie 读取 Refresh Token
+    2. 验证 Refresh Token（未撤销、未过期）
+    3. 颁发新的 Access Token（session cookie）
+    4. 重置 Refresh Token 过期时间（Sliding Window）
+    """
+    refresh_token = request.cookies.get(_REFRESH_TOKEN_COOKIE_NAME)
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Refresh Token 不存在，请重新登录")
+
+    user = auth_service.verify_refresh_token(refresh_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Refresh Token 无效或已过期，请重新登录")
+
+    # 颁发新的 Access Token
+    new_access_token = _create_session_token(user["id"], user["username"], user["role"])
+    _is_secure = os.environ.get("SECURE_COOKIES", "false").lower() == "true"
+    response.set_cookie(
+        key="session",
+        value=new_access_token,
+        httponly=True,
+        samesite="lax",
+        secure=_is_secure,
+        max_age=_JWT_EXPIRE_SECONDS,
+    )
+
+    # Sliding Window：撤销旧 Refresh Token，颁发新的
+    auth_service.revoke_refresh_token(refresh_token)
+    _device = request.headers.get("User-Agent", "")[:128]
+    new_refresh_token = auth_service.create_refresh_token(
+        user_id=user["id"],
+        device_fingerprint=_device,
+    )
+    response.set_cookie(
+        key=_REFRESH_TOKEN_COOKIE_NAME,
+        value=new_refresh_token,
+        httponly=True,
+        samesite="lax",
+        secure=_is_secure,
+        max_age=_REFRESH_TOKEN_EXPIRE_SECONDS,
+    )
+
+    return {"success": True, "message": "Token 已刷新"}
+
+
+@router.post("/refresh/revoke-all")
+async def revoke_all_refresh_tokens(request: Request, response: Response):
+    """
+    撤销当前用户所有 Refresh Token（"退出所有设备"功能）。
+
+    保留当前 Access Token 有效，撤销所有 refresh token。
+    下次登录需要重新认证。
+    """
+    user_info = _get_current_user(request)
+    if not user_info:
+        raise HTTPException(status_code=401, detail="未登录")
+
+    revoked_count = auth_service.revoke_all_user_refresh_tokens(user_info["id"])
+    return {
+        "success": True,
+        "message": f"已撤销 {revoked_count} 个设备登录",
+        "revoked_count": revoked_count,
+    }
 
 
 @router.get("/me")

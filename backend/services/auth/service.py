@@ -1,10 +1,13 @@
 """认证服务"""
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 import hashlib
 import secrets
 
 from .models import UserDatabase, User
+
+# Refresh Token 配置
+_REFRESH_TOKEN_EXPIRE_DAYS = 30  # 30 天有效期
 
 
 class AuthService:
@@ -338,6 +341,55 @@ class AuthService:
     def get_all_available_permissions(self) -> List[Dict[str, str]]:
         """获取所有可用权限定义"""
         return self._db.get_all_permissions()
+
+    # ========== 用户标签 ==========
+
+    # ========== Refresh Token 管理 ==========
+
+    def create_refresh_token(
+        self,
+        user_id: int,
+        device_fingerprint: str = None,
+    ) -> str:
+        """
+        创建并存储 refresh token，返回原始 token（供调用方写入 HTTP-only cookie）。
+
+        存储：token_hash（SHA-256）而非原始 token，防止数据库泄漏后被滥用。
+        """
+        raw_token = secrets.token_urlsafe(32)  # 256-bit random token
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        expires_at = datetime.utcnow() + timedelta(days=_REFRESH_TOKEN_EXPIRE_DAYS)
+        self._db.create_refresh_token(
+            user_id=user_id,
+            token_hash=token_hash,
+            expires_at=expires_at,
+            device_fingerprint=device_fingerprint,
+        )
+        return raw_token
+
+    def verify_refresh_token(self, raw_token: str) -> Optional[Dict[str, Any]]:
+        """
+        验证 refresh token，返回有效用户信息。
+
+        流程：raw_token → SHA-256 hash → 查询数据库 → 验证未撤销且未过期
+        """
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        token_record = self._db.verify_refresh_token(token_hash)
+        if not token_record:
+            return None
+        user = self._db.get_user(token_record.user_id)
+        if not user or not user.is_active:
+            return None
+        return user.to_dict()
+
+    def revoke_refresh_token(self, raw_token: str) -> bool:
+        """撤销指定的 refresh token（logout 时调用）"""
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        return self._db.revoke_refresh_token(token_hash)
+
+    def revoke_all_user_refresh_tokens(self, user_id: int) -> int:
+        """撤销用户所有 refresh token（"退出所有设备"功能）"""
+        return self._db.revoke_all_user_refresh_tokens(user_id)
 
     # ========== 用户标签 ==========
 

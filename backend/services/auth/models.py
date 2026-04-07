@@ -1,7 +1,8 @@
 """用户认证数据模型"""
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Table
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Table, Text, Index
 from sqlalchemy.orm import relationship
 from app.core.database import Base, JSONB, sa_func, sa_text # 导入中央配置的 Base, JSONB, func, text
 
@@ -95,6 +96,24 @@ class GroupPermission(Base):
 
     # 关系
     group = relationship('UserGroup', back_populates='group_perms')
+
+
+class RefreshToken(Base):
+    """Refresh Token 存储表（JWT Refresh Token 持久化）"""
+    __tablename__ = "auth_refresh_tokens"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('auth_users.id', ondelete='CASCADE'), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True)  # SHA-256 hash of the raw token
+    device_fingerprint = Column(String(256), nullable=True)  # 浏览器 UA/IP 指纹（可选）
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
+    revoked_at = Column(DateTime, nullable=True)  # 撤销时间，非空表示已撤销
+
+    __table_args__ = (
+        Index("ix_refresh_tokens_user_id", "user_id"),
+        Index("ix_refresh_tokens_token_hash", "token_hash"),
+    )
 
 
 # 从中央配置导入 SessionLocal
@@ -290,6 +309,67 @@ class UserDatabase:
             {"key": "scan_logs", "label": "扫描日志", "module": "Scan Logs"},
             {"key": "user_management", "label": "用户管理", "module": "Admin"},
         ]
+
+    # ========== Refresh Token 管理 ==========
+
+    def create_refresh_token(
+        self,
+        user_id: int,
+        token_hash: str,
+        expires_at: datetime,
+        device_fingerprint: str = None,
+    ) -> "RefreshToken":
+        """创建 refresh token 记录"""
+        token = RefreshToken(
+            user_id=user_id,
+            token_hash=token_hash,
+            expires_at=expires_at,
+            device_fingerprint=device_fingerprint,
+        )
+        self.session.add(token)
+        self.session.commit()
+        return token
+
+    def verify_refresh_token(self, token_hash: str) -> Optional["RefreshToken"]:
+        """验证 refresh token hash，返回有效 token 记录"""
+        now = datetime.utcnow()
+        token = (
+            self.session.query(RefreshToken)
+            .filter(
+                RefreshToken.token_hash == token_hash,
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.expires_at > now,
+            )
+            .first()
+        )
+        return token
+
+    def revoke_refresh_token(self, token_hash: str) -> bool:
+        """撤销指定的 refresh token"""
+        token = (
+            self.session.query(RefreshToken)
+            .filter(RefreshToken.token_hash == token_hash)
+            .first()
+        )
+        if not token:
+            return False
+        token.revoked_at = datetime.utcnow()
+        self.session.commit()
+        return True
+
+    def revoke_all_user_refresh_tokens(self, user_id: int) -> int:
+        """撤销用户所有 refresh token，返回撤销数量"""
+        now = datetime.utcnow()
+        count = (
+            self.session.query(RefreshToken)
+            .filter(
+                RefreshToken.user_id == user_id,
+                RefreshToken.revoked_at.is_(None),
+            )
+            .update({"revoked_at": now})
+        )
+        self.session.commit()
+        return count
 
     # close 方法不再需要，因为 session 由 SessionLocal 管理
     # def close(self):

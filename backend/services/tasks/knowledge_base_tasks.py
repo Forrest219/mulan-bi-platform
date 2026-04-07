@@ -1,6 +1,17 @@
-"""知识库 Celery 异步任务"""
+"""
+知识库 Celery 异步任务 — 包含 Embedding 生成和 HNSW 索引维护
+
+HNSW 维护说明（Spec 14 v1.1 §5.4）：
+- pgvector 0.5+ HNSW 索引参数：m=16, ef_construction=200
+- REINDEX CONCURRENTLY 不支持 HNSW（pgvector 0.5 限制），须在维护窗口执行
+- 建议每月低峰期执行一次 REINDEX，防止索引碎片化
+"""
 import logging
 
+from celery import shared_task
+from sqlalchemy import text
+
+from app.core.database import engine
 from services.tasks import celery_app
 
 logger = logging.getLogger(__name__)
@@ -119,3 +130,106 @@ def regenerate_glossary_embedding(self, glossary_id: int):
         raise self.retry(exc=e)
     finally:
         db.close()
+
+
+# ──────────────────────────────────────────────────────────────
+# HNSW 索引维护任务（Spec 14 v1.1 §5.4）
+# ──────────────────────────────────────────────────────────────
+
+@shared_task
+def reindex_hnsw_task():
+    """
+    重建 HNSW 向量索引（ix_emb_hnsw）。
+
+    ⚠️  pgvector 0.5 不支持 REINDEX CONCURRENTLY，
+        须在维护窗口执行（需要 AccessExclusiveLock，阻塞写入）。
+
+    建议执行时间：每月第一个周日凌晨 03:00
+    """
+    try:
+        with engine.connect() as conn:
+            # 检查索引是否存在
+            result = conn.execute(
+                text("SELECT 1 FROM pg_indexes WHERE indexname = 'ix_emb_hnsw'")
+            )
+            if not result.fetchone():
+                logger.warning("ix_emb_hnsw 索引不存在，跳过重建")
+                return {"status": "skipped", "reason": "index_not_found"}
+
+            # 记录重建前索引大小
+            size_before = conn.execute(
+                text("""
+                    SELECT pg_size_pretty(pg_relation_size('ix_emb_hnsw'))
+                """)
+            ).scalar()
+
+            # 重建索引（非并发，会阻塞写入，约需数秒到数分钟）
+            conn.execute(text("REINDEX INDEX ix_emb_hnsw"))
+            conn.commit()
+
+            # 记录重建后索引大小
+            size_after = conn.execute(
+                text("""
+                    SELECT pg_size_pretty(pg_relation_size('ix_emb_hnsw'))
+                """)
+            ).scalar()
+
+            logger.info(
+                "reindex_hnsw: done. size_before=%s, size_after=%s",
+                size_before, size_after
+            )
+            return {"status": "success", "size_before": size_before, "size_after": size_after}
+
+    except Exception as e:
+        logger.error("reindex_hnsw failed: %s", e, exc_info=True)
+        raise
+
+
+@shared_task
+def vacuum_analyze_embeddings_task():
+    """
+    对 kb_embeddings 表执行 VACUUM ANALYZE。
+
+    清理已删除记录、更新统计信息，保持查询计划准确性。
+    无锁，不阻塞读写，建议每周期执行。
+
+    建议执行时间：每周日凌晨 03:00（在 reindex_hnsw_task 之后）
+    """
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("VACUUM ANALYZE kb_embeddings"))
+            conn.commit()
+
+            # 记录表统计信息
+            stats = conn.execute(
+                text("""
+                    SELECT
+                        pg_size_pretty(pg_relation_size('kb_embeddings')),
+                        pg_size_pretty(pg_total_relation_size('kb_embeddings')),
+                        n_live_tup,
+                        n_dead_tup,
+                        last_vacuum,
+                        last_autovacuum
+                    FROM pg_stat_user_tables
+                    WHERE relname = 'kb_embeddings'
+                """)
+            ).fetchone()
+
+            logger.info(
+                "vacuum_analyze_embeddings: table_size=%s, total_size=%s, "
+                "live_tuples=%s, dead_tuples=%s, last_vacuum=%s, last_autovacuum=%s",
+                stats[0], stats[1], stats[2], stats[3], stats[4], stats[5]
+            )
+            return {
+                "status": "success",
+                "table_size": stats[0],
+                "total_size": stats[1],
+                "live_tuples": stats[2],
+                "dead_tuples": stats[3],
+                "last_vacuum": str(stats[4]),
+                "last_autovacuum": str(stats[5]),
+            }
+
+    except Exception as e:
+        logger.error("vacuum_analyze_embeddings failed: %s", e, exc_info=True)
+        raise
