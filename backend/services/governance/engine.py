@@ -251,8 +251,8 @@ class QualitySQLEngine:
         elif self._dialect_name == "mssql":
             # SQL Server: DATEDIFF(HOUR, MAX(col), GETDATE())
             delay_expr = func.datediff(text("HOUR"), func.max(col), func.current_timestamp())
-        elif self._dialect_name == "postgresql":
-            # ClickHouse 也使用 PostgreSQL dialect
+        elif self._dialect_name == "clickhouse":
+            # ClickHouse: 使用 PostgreSQL dialect 兼容语法
             delay_expr = (func.now() - func.max(col)) / literal(3600)
         else:
             # 默认: EXTRACT(EPOCH FROM ...)

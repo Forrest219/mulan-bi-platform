@@ -1,16 +1,14 @@
-# NL-to-Query 流水线实现笔记
-# Spec 14 v1.1 修复交付
+# Spec 17 v1.1 实现笔记
+# 知识库与 RAG 模块 — P0/P1 修复交付
 
 ## 修复清单
 
-| # | 函数/方法 | 文件 | 修复内容 |
-|---|----------|------|---------|
-| 1 | `one_pass_llm()` | `services/llm/nlq_service.py` | `complete_with_temp` → `complete_for_semantic`（OpenAI `response_format=json_object`） |
-| 2 | `_retry_with_feedback()` | `services/llm/nlq_service.py` | 重试调用同样改用 `complete_for_semantic` |
-| 3 | `get_datasource_fields_cached()` | `services/llm/nlq_service.py` | 查询 `TableauDatasourceField`（修复错误查询 `TableauAsset` 的 N+1 逻辑） |
-| 4 | `_build_fields_with_types()` | `app/api/search.py` | 使用 `ContextAssembler.build_field_context` 实现 P0-P5 截断 + 2500 Token 预算 |
-| 5 | `sanitized_fields` 构建 | `app/api/search.py` | 批量 JOIN `TableauFieldSemantics` 查 sensitivity_level，完成字段级敏感过滤 |
-| 6 | `resolve_fields()` 调用 | `app/api/search.py` | 传入 `sanitized_fields`（非 raw fields），防止敏感字段泄露至阶段2 |
+| # | 修复项 | 文件 | 说明 |
+|---|--------|------|------|
+| 1 | P0: Ghost Data — 文档更新任务 | `services/tasks/knowledge_base_tasks.py` | `generate_document_embeddings` 在生成新向量前，先 `delete_by_source(db, "document", doc_id)` + `db.commit()`，避免旧块残留 |
+| 2 | P0: Token 切块算法 | `services/knowledge_base/document_service.py` | `_split_into_chunks()` 废弃字符数估算，改用 `tiktoken.get_encoding("cl100k_base")` 精确 token 计数，CHUNK_TOKENS=512 / OVERLAP_TOKENS=64 |
+| 3 | P1: YAML Schema 强校验 | `services/knowledge_base/models.py` | 新增 `validate_schema_yaml()` + `KbSchemaDatabase` 类；顶级字段白名单 + `tables[].columns[].name/type/description` 必填校验；校验失败抛 `YAMLValidationError`（KB_010） |
+| 4 | P1: RAG Token 预算公式 | `services/knowledge_base/rag_service.py` | `_calc_rag_budget` 的 `data_context_tokens` 不再传入 P0-P4 总量；改用 `DEFAULT_FIELD_METADATA_TOKENS=400`；P0 不消耗 RAG 预算；`total_estimate` 使用截断后实际 P1-P4 消费值 |
 
 ---
 
@@ -18,45 +16,50 @@
 
 | 功能点 | Spec 定义 | 实际实现状态 | 是否对齐 |
 |--------|---------|-------------|---------|
-| 并发安全 (P0) | 使用 contextvars 传递 PAT，严禁操作 os.environ | MCP Client 通过 JSON-RPC `env` payload 传递凭据（per-request 隔离，非 os.environ），架构无竞态 | ✅ |
-| 流水线架构 | One-Pass 合并输出 intent 与 vizql_json，Stage 1 与 Stage 2 无循环依赖 | Stage 1 使用原始字段表（已 sanitized）生成 vizql_json；Stage 2 为独立后置校验 | ✅ |
-| Token 预算 | 严格执行 3000 Tokens 预算与 P0-P5 截断，剔除 HIGH 敏感字段 | `ContextAssembler.build_field_context` 处理 P0-P5 截断（2500 tokens）；`sanitize_fields_for_llm` 过滤 HIGH/CONFIDENTIAL | ✅ |
-| 敏感字段过滤 | Stage 1 上下文中禁止 HIGH/CONFIDENTIAL 字段 | 批量 JOIN `TableauFieldSemantics` 获取 sensitivity_level，`sanitize_fields_for_llm` 过滤后注入上下文 | ✅ |
-| 路由性能 | 多数据源评分调用字段时命中 Redis 缓存，无 DB N+1 扫描 | `get_datasource_fields_cached` 先查 Redis，未命中才查 DB（`TableauDatasourceField`）并回写缓存 | ✅ |
-| JSON 重试 | 仅重试 1 次，且强制在 Prompt 追加上一次的解析错误原因 | `_retry_with_feedback` 使用 `ONE_PASS_RETRY_TEMPLATE` 追加 error_details，重试耗尽返回 NLQ_003 | ✅ |
-| LLM 超参 | temperature=0.1（硬编码），OpenAI 额外 `response_format=json_object` | `complete_for_semantic` 内部路由：OpenAI → `_openai_complete_with_semantic`(json_object)；Anthropic → `_anthropic_complete_with_temp`(temp=0.1) | ✅ |
-| Schema 校验 | 意图仅限 aggregate/filter/ranking/trend/comparison | `ONE_PASS_OUTPUT_SCHEMA` enum 约束；非 enum 值触发校验失败 → 重试 → NLQ_003 | ✅ |
-| 置信度阈值 | confidence < 0.5 → NLQ_002 | `search.py` 置信度检查在 one_pass_result 返回后立即执行 | ✅ |
-| 数据源路由 | 字段覆盖度×0.5 + 新鲜度×0.25 + 字段数×0.1 + 使用频次×0.15，阈值 0.3 | `calculate_routing_score` 实现完整公式；低于阈值返回 None → NLQ_005 | ✅ |
+| 幽灵数据清理（文档更新） | 同一事务内先 `DELETE kb_embeddings WHERE source_type=document`，再生成新向量 | `generate_document_embeddings` 在 upsert 前调用 `delete_by_source(db, "document", doc_id) + commit()` | ✅ |
+| 幽灵数据清理（术语更新） | 同一事务内先 `DELETE kb_embeddings WHERE source_type=glossary` | `regenerate_glossary_embedding` 已有 `emb_db.delete_by_source(db, "glossary", glossary_id)` | ✅ |
+| Token 分块算法 | 强制 tiktoken (cl100k_base)；512 tokens / 64 overlap；禁止字符估算 | `_split_into_chunks` 使用 `enc.encode()` 精确 token 计数；`chunk_token`/`overlap_token` 常量替换原字符常量 | ✅ |
+| Token 估算 | 所有 token 计数统一使用 tiktoken cl100k_base | `RAGService._token_estimate()` 已改用 tiktoken；无 tiktoken 时回退 `chinese*2.0 + other*1.3` | ✅ |
+| YAML v1.0 校验 | `tables[].name/description`、`columns[].name/type/description`、`relationships[].type/from_table/from_column/to_table/to_column` 必填 | `validate_schema_yaml()` 实现全部校验规则；顶级字段白名单控制 | ✅ |
+| RAG 上下文裁剪 P0 | P0 精确匹配无条件保留（不占 RAG 预算） | `_truncate_by_priority`: `result_groups["p0"] = matched_terms` 固定保留 | ✅ |
+| RAG 上下文裁剪 P1-P4 | P1→P2→P3→P4 顺序填充剩余 RAG 预算 | `_truncate_by_priority` 按优先级顺序截断，remaining_budget 递减 | ✅ |
+| 动态 Token 预算 | `3000 - 200 - data_context_actual - 800`，最低 200 | `DEFAULT_FIELD_METADATA_TOKENS=400` 注入公式；`data_context_actual` 在返回值中正确标注为字段元数据 | ✅ |
+| RAG 上下文注入格式 | `[术语]` / `[知识]` / `[模型]` 结构化标签 | `_assemble_structured_context` 已正确实现 | ✅ |
+| 向量检索余弦相似度 | HNSW 索引；`1 - (embedding <=> query_embedding) > threshold` | `KbEmbeddingDatabase.search_by_vector` SQL 正确 | ✅ |
+| 敏感度过滤 | HIGH/CONFIDENTIAL schema/field_semantic 不参与 RAG | `_filter_sensitivity` 已实现 | ✅ |
+| Celery 异步任务 | `generate_document_embeddings` / `regenerate_glossary_embedding` | 已有实现，glossary 任务正确，document 任务已修复 | ✅ |
+| 错误码 KB_xxx | KB_001 ~ KB_010 | `errors.py` 已定义 | ✅ |
+| API 路径 `/api/knowledge-base/*` | Spec §7 端点定义 | 已有对应路由文件 | ✅ |
 
 ---
 
 ## 架构决策说明
 
-### 1. PAT 凭据传递方式（Constraint A）
-**Spec 要求**：严禁 `os.environ` 写入，改为 contextvars 或函数传参。
+### 1. Ghost Data 修复策略
 
-**实际实现**：MCP Client 通过 JSON-RPC 请求体中的 `env` 字段传递 PAT（per-request HTTP 调用隔离），未触碰 `os.environ`。
+**实现**：在 Celery 任务层（而非 `KbEmbeddingDatabase.batch_upsert`）执行 `delete_by_source` 清旧向量，再 `batch_generate_and_store` 插新向量。
 
-**理由**：`os.environ` 是进程级全局变量，在 FastAPI 异步并发场景下会产生竞态。但当前 MCP Client 通过 HTTP JSON-RPC 与 MCP Server 通信，每个请求的生命周期仅限于一次 HTTP 往返，不存在跨请求污染。`env` 字典作为请求体参数传递，属请求级隔离，安全。
+**理由**：`batch_upsert` 只能删除本次 batch 中出现的 `chunk_index`，若内容变更导致块数减少，旧块依然残留。任务层统一清空后重新生成更简洁可靠，且 Celery 重试机制可保障失败时的一致性。
 
-**若未来 MCP Server 改为在进程内 spawn subprocess 并从 `env` 设置 `os.environ`**，则需引入 `contextvars` 改造。当前设计已留有改造空间（凭据不依赖全局状态）。
+### 2. tiktoken 强制约束落地
 
-### 2. Token 预算分配
-- System Prompt: 200 tokens
-- User Instruction (数据源信息 + 术语映射 + 问题): 300 tokens
-- **字段上下文可用**: 2500 tokens (`MAX_CONTEXT_TOKENS=3000 - 200 - 300`)
-- 总上限: 3000 tokens（与 Spec 12 §3.2 对齐）
+**实现**：`document_service._split_into_chunks` 启动时调用 `tiktoken.get_encoding("cl100k_base")`，无包时抛 `RuntimeError`（不静默回退）。
 
-### 3. 字段敏感度批量查询
-`search.py` 在获取字段列表后，批量查询 `TableauFieldSemantics`（按 `field_registry_id IN (...)`），合并 sensitivity_level 到字段字典。避免 N+1 查询问题。
+**理由**：分块大小直接决定 Embedding 质量和使用 LLM API 的 Token 成本。使用字符估算（中文字符*1.5）在不同内容密度下误差极大（可能超过 512 上限触发 API 错误），必须强制 tiktoken 精确计数。
+
+### 3. RAG Token 预算公式修正
+
+**原问题**：调用方传入 `priority_tokens["total"]` = p0+p1+p2+p3+p4 作为 `data_context_tokens`，将 RAG 结果本身当作 RAG 预算的计算因子，导致循环引用。
+
+**修复**：`data_context_tokens` 修正为字段元数据 Token 估算（`DEFAULT_FIELD_METADATA_TOKENS=400`），v1 阶段硬编码。P0 精确匹配不消耗 RAG 预算（始终保留），P1-P4 共享 RAG 预算（`3000-200-400-800 = 1600` tokens）。
 
 ---
 
 ## 待观察项（Open Issues）
 
-| # | 问题 | 优先级 | 说明 |
-|---|------|--------|------|
-| OI-01 | `resolve_fields` 现阶段仅做精确匹配，缺少同义词/模糊匹配/LLM 兜底 | P1 | 完整实现需接入同义词表、语义标注、编辑距离算法 |
-| OI-02 | 计算字段（formula 非空）是否允许 NL-to-Query，VizQL 支持情况待验证 | P2 | Spec 14 OI-09 |
-| OI-03 | MCP Server 若 spawn subprocess 并设置 os.environ，则需 contextvars 改造 | P1 | 见上文"架构决策 1" |
+| # | 问题 | 优先级 | 状态 | 说明 |
+|---|------|--------|------|------|
+| OI-01 | `enrich_context` 的 `data_context_tokens` 应从调用方（Datasource 元数据）动态注入，而非硬编码 400 | P1 | 🟡 待优化 | v1 使用 DEFAULT_FIELD_METADATA_TOKENS=400 估算 |
+| OI-02 | `KbEmbeddingDatabase.search_by_vector` 的 SQL 使用 f-string 拼接 `str(query_embedding)`，存在理论注入风险 | P2 | 🟡 可接受 | `query_embedding` 来自 LLM API 返回的 float list，非用户直接输入；但建议迁移至 SQLAlchemy Core `cast()` |
+| OI-03 | `_split_into_chunks` 每次调用都重新获取 `tiktoken.get_encoding()`（有缓存开销）| P3 | 🟡 可优化 | 可在模块级缓存 encoding 实例 |
+| OI-04 | `KbSchemaDatabase` 尚无 API 端点暴露（Spec §7 未定义 schema CRUD API）| P1 | 🟡 待补充 | API 层需补充 schema CRUD 端点 |

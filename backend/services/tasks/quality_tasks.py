@@ -205,9 +205,8 @@ def _build_readonly_config(ds) -> Dict[str, Any]:
         "user": ds.username,
         "password": password,
         "database": ds.database_name,
-        # 只读连接参数
+        # 只读连接参数（数据库层面通过 default_transaction_read_only=true 强制约束）
         "connect_timeout": 30,
-        "readonly": True,
     }
 
 
