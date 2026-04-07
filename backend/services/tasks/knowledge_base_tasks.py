@@ -43,6 +43,10 @@ def generate_document_embeddings(self, doc_id: int):
             return {"status": "skipped", "message": "文档内容为空"}
 
         # 批量生成 Embedding（document 类型使用原始 chunk 文本）
+        # Ghost Data Fix: 先删除旧向量，再插入新向量（同一事务外执行，由 Celery 重试保障）
+        emb_db.delete_by_source(db, "document", doc_id)
+        db.commit()
+
         import asyncio
 
         async def _batch_embed():

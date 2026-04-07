@@ -10,10 +10,10 @@ from .embedding_service import embedding_service
 
 logger = logging.getLogger(__name__)
 
-# === 文档分块常量 ===
-CHUNK_SIZE = 500          # 每块目标字符数（中文约 250 tokens）
-CHUNK_OVERLAP = 50        # 块间重叠字符数
-MAX_CHUNK_TEXT_LEN = 2000 # 单块文本上限
+# === 文档分块常量（Spec 17 §4.4 — tiktoken cl100k_base）===
+CHUNK_TOKENS = 512        # 单块最大 Token 数
+OVERLAP_TOKENS = 64       # 相邻块重叠 Token 数
+# 注意：严禁使用字符数估算（如 len(text) * 1.5），必须使用 tiktoken 精确计数
 
 
 class DocumentService:
@@ -109,55 +109,85 @@ class DocumentService:
 
     def _split_into_chunks(self, text: str) -> List[str]:
         """
-        滑动窗口分块（PRD §4.3）：
-        - 按句子/段落边界切分（优先句号、换行）
-        - 每块目标 CHUNK_SIZE 字符
-        - 块间重叠 CHUNK_OVERLAP 字符
+        按 Token 数量分块（Spec 17 §4.4 — P0 强制约束）：
+        - 必须使用 tiktoken (cl100k_base) 精确计数
+        - 每块 CHUNK_TOKENS=512，最大不超过
+        - 相邻块重叠 OVERLAP_TOKENS=64
+        - 优先按段落边界分割，最后回退到固定长度截断
         """
         if not text or not text.strip():
             return []
 
-        # 先按段落+句子分割
+        try:
+            import tiktoken
+            enc = tiktoken.get_encoding("cl100k_base")
+        except ImportError:
+            raise RuntimeError(
+                "tiktoken 未安装，请执行: pip install tiktoken"
+            )
+
+        # 按段落+句子分割（保留语义边界）
         segments = re.split(r'(?<=[。！？.!?\n])\s*', text)
-        chunks = []
-        current_chunk = ""
-        current_size = 0
+
+        chunks: List[str] = []
+        current_tokens: List[int] = []
+        current_text_parts: List[str] = []
+
+        def _finish_chunk() -> None:
+            """将当前累积的文本作为一个 chunk 并入结果列表"""
+            if current_text_parts:
+                chunks.append("".join(current_text_parts))
+                current_text_parts.clear()
+                current_tokens.clear()
+
+        def _token_count(text_parts: List[str]) -> int:
+            return len(enc.encode("".join(text_parts)))
 
         for seg in segments:
             seg = seg.strip()
             if not seg:
                 continue
 
-            seg_len = len(seg)
-            # 如果单段就超过 MAX_CHUNK_TEXT_LEN，强制截断
-            if seg_len > MAX_CHUNK_TEXT_LEN:
-                if current_chunk:
-                    chunks.append(current_chunk)
-                    # 重叠部分
-                    current_chunk = current_chunk[-CHUNK_OVERLAP:] if len(current_chunk) > CHUNK_OVERLAP else current_chunk
-                    current_size = len(current_chunk)
-                # 强制截断超长段落
-                for i in range(0, seg_len, CHUNK_SIZE - CHUNK_OVERLAP):
-                    sub = seg[i:i + CHUNK_SIZE]
-                    chunks.append(sub)
-                    current_chunk = sub
-                    current_size = len(sub)
+            seg_tokens = enc.encode(seg)
+            seg_len = len(seg_tokens)
+
+            # 单段超过 CHUNK_TOKENS：强制固定长度截断
+            if seg_len > CHUNK_TOKENS:
+                _finish_chunk()
+                # 固定长度滑动窗口截断
+                for i in range(0, seg_len, CHUNK_TOKENS - OVERLAP_TOKENS):
+                    window = seg_tokens[i:i + CHUNK_TOKENS]
+                    if window:
+                        chunks.append(enc.decode(window))
                 continue
 
-            if current_size + seg_len <= CHUNK_SIZE:
-                current_chunk += seg
-                current_size += seg_len
+            # 累加到当前块
+            if not current_tokens:
+                current_tokens.extend(seg_tokens)
+                current_text_parts.append(seg)
+                continue
+
+            # 加上本段后超限
+            if len(current_tokens) + seg_len > CHUNK_TOKENS:
+                # 当前块结束，押入结果
+                _finish_chunk()
+                # 重叠部分：从上一块末尾取 OVERLAP_TOKENS tokens
+                if chunks:
+                    last_chunk_tokens = enc.encode(chunks[-1])
+                    overlap = last_chunk_tokens[-OVERLAP_TOKENS:]
+                    current_tokens = list(overlap)
+                    current_text_parts = [enc.decode(overlap)]
+                else:
+                    current_tokens = []
+                    current_text_parts = []
+                # 重新加入本段
+                current_tokens.extend(seg_tokens)
+                current_text_parts.append(seg)
             else:
-                if current_chunk:
-                    chunks.append(current_chunk)
-                # 构建新块，保留重叠
-                overlap_text = current_chunk[-CHUNK_OVERLAP:] if len(current_chunk) > CHUNK_OVERLAP else ""
-                current_chunk = overlap_text + seg
-                current_size = len(current_chunk)
+                current_tokens.extend(seg_tokens)
+                current_text_parts.append(seg)
 
-        if current_chunk:
-            chunks.append(current_chunk)
-
+        _finish_chunk()
         return chunks
 
 

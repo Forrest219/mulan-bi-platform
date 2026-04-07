@@ -2,6 +2,7 @@
 from .models import (
     KbGlossary, KbSchema, KbDocument, KbEmbedding,
     KbGlossaryDatabase, KbDocumentDatabase, KbEmbeddingDatabase,
+    KbSchemaDatabase, YAMLValidationError,
 )
 from .glossary_service import glossary_service, GlossaryService
 from .document_service import document_service, DocumentService
@@ -13,6 +14,7 @@ __all__ = [
     # Models
     "KbGlossary", "KbSchema", "KbDocument", "KbEmbedding",
     "KbGlossaryDatabase", "KbDocumentDatabase", "KbEmbeddingDatabase",
+    "KbSchemaDatabase", "YAMLValidationError",
     # Services
     "GlossaryService", "DocumentService", "EmbeddingService", "RAGService",
     "glossary_service", "document_service", "embedding_service", "rag_service",

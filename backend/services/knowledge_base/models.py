@@ -445,3 +445,163 @@ class KbEmbeddingDatabase:
             KbEmbedding.source_id == source_id,
         ).delete(synchronize_session=False)
         db.commit()
+
+
+# === YAML Schema 验证器（Spec 17 §2.3 v1.0）===
+
+class YAMLValidationError(Exception):
+    """YAML 结构不符合 v1.0 规范（KB_010）"""
+    pass
+
+
+def validate_schema_yaml(yaml_content: str) -> dict:
+    """
+    校验 schema_yaml 内容是否符合 v1.0 规范（Spec 17 §2.3）。
+
+    校验规则：
+    - 顶级字段只允许：version, datasource_name, tables, relationships
+    - tables[].name, tables[].description, tables[].columns 必须存在
+    - columns[].name, columns[].type, columns[].description 必须存在
+    - relationships[].type, from_table, from_column, to_table, to_column 必须存在
+
+    Returns:
+        解析后的 dict（供调用方使用）
+
+    Raises:
+        YAMLValidationError: 校验失败，返回 KB_010 错误码
+    """
+    import yaml
+
+    try:
+        data = yaml.safe_load(yaml_content)
+    except yaml.YAMLError as e:
+        raise YAMLValidationError(f"YAML 语法错误: {e}")
+
+    if not isinstance(data, dict):
+        raise YAMLValidationError("YAML 根对象必须是字典")
+
+    # 顶级字段白名单
+    ALLOWED_TOP_KEYS = {"version", "datasource_name", "tables", "relationships"}
+    unknown_keys = set(data.keys()) - ALLOWED_TOP_KEYS
+    if unknown_keys:
+        raise YAMLValidationError(
+            f"不允许的顶级字段: {sorted(unknown_keys)}。v1.0 只允许: {sorted(ALLOWED_TOP_KEYS)}"
+        )
+
+    # tables 必为列表
+    tables = data.get("tables", [])
+    if not isinstance(tables, list):
+        raise YAMLValidationError("tables 必须是数组")
+
+    for i, tbl in enumerate(tables):
+        if not isinstance(tbl, dict):
+            raise YAMLValidationError(f"tables[{i}] 必须是字典")
+        if "name" not in tbl:
+            raise YAMLValidationError(f"tables[{i}].name 必填")
+        if "description" not in tbl:
+            raise YAMLValidationError(f"tables[{i}].description 必填")
+        if "columns" not in tbl:
+            raise YAMLValidationError(f"tables[{i}].columns 必填")
+        if not isinstance(tbl["columns"], list):
+            raise YAMLValidationError(f"tables[{i}].columns 必须是数组")
+
+        for j, col in enumerate(tbl["columns"]):
+            if not isinstance(col, dict):
+                raise YAMLValidationError(f"tables[{i}].columns[{j}] 必须是字典")
+            for field in ("name", "type", "description"):
+                if field not in col:
+                    raise YAMLValidationError(
+                        f"tables[{i}].columns[{j}].{field} 必填"
+                    )
+
+    # relationships 必为列表（可为空）
+    rels = data.get("relationships", [])
+    if not isinstance(rels, list):
+        raise YAMLValidationError("relationships 必须是数组")
+
+    for i, rel in enumerate(rels):
+        if not isinstance(rel, dict):
+            raise YAMLValidationError(f"relationships[{i}] 必须是字典")
+        for field in ("type", "from_table", "from_column", "to_table", "to_column"):
+            if field not in rel:
+                raise YAMLValidationError(
+                    f"relationships[{i}].{field} 必填"
+                )
+
+    return data
+
+
+class KbSchemaDatabase:
+    """kb_schemas CRUD + YAML v1.0 校验"""
+
+    def create(
+        self, db: Session, datasource_id: int, schema_yaml: str,
+        description: str = None, version: int = 1,
+        auto_generated: bool = False, created_by: int = None
+    ) -> KbSchema:
+        """
+        创建 Schema（P1 YAML 强校验）：
+        写入前必须通过 validate_schema_yaml() 校验，不通过则抛出 YAMLValidationError（KB_010）。
+        """
+        validate_schema_yaml(schema_yaml)  # 校验失败抛 YAMLValidationError
+        s = KbSchema(
+            datasource_id=datasource_id,
+            schema_yaml=schema_yaml,
+            description=description,
+            version=version,
+            auto_generated=auto_generated,
+            created_by=created_by,
+        )
+        db.add(s); db.commit(); db.refresh(s)
+        return s
+
+    def get(self, db: Session, schema_id: int) -> Optional[KbSchema]:
+        return db.query(KbSchema).filter(KbSchema.id == schema_id).first()
+
+    def get_by_datasource(
+        self, db: Session, datasource_id: int, version: int = None
+    ) -> Optional[KbSchema]:
+        q = db.query(KbSchema).filter(KbSchema.datasource_id == datasource_id)
+        if version is not None:
+            q = q.filter(KbSchema.version == version)
+        return q.order_by(KbSchema.version.desc()).first()
+
+    def update(
+        self, db: Session, schema_id: int,
+        schema_yaml: str = None, description: str = None,
+        **kwargs
+    ) -> Optional[KbSchema]:
+        """
+        更新 Schema（P1 YAML 强校验）：
+        若传入 schema_yaml 必须通过校验，不通过则抛出 YAMLValidationError。
+        """
+        s = self.get(db, schema_id)
+        if not s:
+            return None
+        if schema_yaml is not None:
+            validate_schema_yaml(schema_yaml)
+            s.schema_yaml = schema_yaml
+        if description is not None:
+            s.description = description
+        db.commit(); db.refresh(s)
+        return s
+
+    def delete(self, db: Session, schema_id: int, hard: bool = False) -> bool:
+        """
+        删除 Schema：
+        - hard=False（软删除）：admin 操作，本版本暂不实现 status 字段
+        - hard=True（硬删除）：同时清理 kb_embeddings
+        """
+        s = self.get(db, schema_id)
+        if not s:
+            return False
+        if hard:
+            from .models import KbEmbedding
+            db.query(KbEmbedding).filter(
+                KbEmbedding.source_type == "schema",
+                KbEmbedding.source_id == schema_id,
+            ).delete(synchronize_session=False)
+            db.delete(s)
+        db.commit()
+        return True
+

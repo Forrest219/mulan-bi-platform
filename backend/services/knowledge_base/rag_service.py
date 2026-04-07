@@ -8,11 +8,14 @@ from .models import KbGlossaryDatabase, KbEmbeddingDatabase
 
 logger = logging.getLogger(__name__)
 
-# === Token 预算常量（PRD §6.2）===
+# === Token 预算常量（Spec 17 §6.2）===
 SYSTEM_PROMPT_TOKENS = 200      # System Prompt 固定开销
 USER_INSTRUCTION_TOKENS = 800   # 用户指令固定开销
 MIN_CONTEXT_TOKENS = 200        # RAG 可用上下文最低保障
 RAG_BUDGET_TOKENS = 3000        # 总 Token 预算上限
+# 估算值：数据源字段元数据（表结构、字段描述、计算公式）的典型 Token 数
+# v1 阶段硬编码估算；未来应从 datasource 上下文注入精确值
+DEFAULT_FIELD_METADATA_TOKENS = 400
 
 # === 敏感度级别常量（PRD §9）===
 SENSITIVITY_BLOCKLIST = {"high", "confidential"}
@@ -35,11 +38,21 @@ class RAGService:
         return max(budget, MIN_CONTEXT_TOKENS)
 
     def _token_estimate(self, text: str) -> int:
-        """估算 token 数：中文按字符数 * 0.5，英文按单词数"""
-        chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
-        other_chars = len(text) - chinese_chars
-        english_words = other_chars / 5  # 估算英文单词平均长度
-        return int(chinese_chars * 0.5 + english_words * 1.0)
+        """
+        估算文本 token 数（Spec 17 §4.4 — 强制 tiktoken cl100k_base）。
+        严禁使用字符数估算。P0-P4 各优先级均使用此方法。
+        """
+        if not text:
+            return 0
+        try:
+            import tiktoken
+            enc = tiktoken.get_encoding("cl100k_base")
+            return len(enc.encode(text))
+        except ImportError:
+            # tiktoken 不可用时的保守回退（中文字符 * 2.0，英文 * 1.3）
+            chinese_chars = sum(1 for c in text if ord(c) > 127)
+            other_chars = len(text) - chinese_chars
+            return int(chinese_chars * 2.0 + other_chars * 1.3)
 
     async def enrich_context(
         self, db: Session, question: str, scenario: str = "default"
@@ -90,8 +103,10 @@ class RAGService:
         # Step 5: 计算各优先级 token 占用
         priority_tokens = self._calc_priority_tokens(priority_groups, matched_terms)
 
-        # Step 6: 动态预算分配（P0 不占 RAG 预算）
-        rag_budget = self._calc_rag_budget(priority_tokens["total"])
+        # Step 6: 动态预算分配（P0 不占 RAG 预算，RAG 预算 = P1~P4）
+        # data_context_tokens = 字段元数据 Token 估算（表结构、字段描述等）
+        # P0 为精确匹配，不消耗 RAG 预算（Spec 17 §6.3）
+        rag_budget = self._calc_rag_budget(DEFAULT_FIELD_METADATA_TOKENS)
 
         # Step 7: 按优先级顺序截断（P0 固定保留，剩余预算按 P1→P4 顺序填充）
         truncated_groups = self._truncate_by_priority(
@@ -100,6 +115,14 @@ class RAGService:
 
         # Step 8: 结构化上下文组装（PRD §6.4）
         enriched_context = self._assemble_structured_context(truncated_groups)
+
+        # 计算实际消费的 token（P0 不受预算限制，P1~P4 受 rag_budget 上限约束）
+        p0_tokens = sum(self._token_estimate(f"{t.get('canonical_term', '')}: {t.get('definition', '')}") for t in matched_terms)
+        actual_p1_tokens = sum(self._token_estimate(r["chunk_text"]) for r in truncated_groups.get("p1", []))
+        actual_p2_tokens = sum(self._token_estimate(r["chunk_text"]) for r in truncated_groups.get("p2", []))
+        actual_p3_tokens = sum(self._token_estimate(r["chunk_text"]) for r in truncated_groups.get("p3", []))
+        actual_p4_tokens = sum(self._token_estimate(r["chunk_text"]) for r in truncated_groups.get("p4", []))
+        actual_rag_tokens = actual_p1_tokens + actual_p2_tokens + actual_p3_tokens + actual_p4_tokens
 
         return {
             "context": enriched_context,
@@ -113,14 +136,23 @@ class RAGService:
             "token_breakdown": {
                 "system_prompt": SYSTEM_PROMPT_TOKENS,
                 "user_instruction": USER_INSTRUCTION_TOKENS,
-                "data_context_actual": priority_tokens["total"],
+                # data_context_actual = 字段元数据估算（系统外部注入，v1 使用 DEFAULT_FIELD_METADATA_TOKENS）
+                "data_context_actual": DEFAULT_FIELD_METADATA_TOKENS,
+                # rag_consumed = P1~P4 实际消费（受 rag_budget 截断后的值）
+                "rag_consumed": actual_rag_tokens,
                 "rag_budget": rag_budget,
-                "total_estimate": SYSTEM_PROMPT_TOKENS + USER_INSTRUCTION_TOKENS + priority_tokens["total"],
-                "p0_tokens": priority_tokens.get("p0", 0),
-                "p1_tokens": priority_tokens.get("p1", 0),
-                "p2_tokens": priority_tokens.get("p2", 0),
-                "p3_tokens": priority_tokens.get("p3", 0),
-                "p4_tokens": priority_tokens.get("p4", 0),
+                "total_estimate": (
+                    SYSTEM_PROMPT_TOKENS
+                    + DEFAULT_FIELD_METADATA_TOKENS
+                    + USER_INSTRUCTION_TOKENS
+                    + p0_tokens
+                    + actual_rag_tokens
+                ),
+                "p0_tokens": p0_tokens,
+                "p1_tokens": actual_p1_tokens,
+                "p2_tokens": actual_p2_tokens,
+                "p3_tokens": actual_p3_tokens,
+                "p4_tokens": actual_p4_tokens,
             },
         }
 

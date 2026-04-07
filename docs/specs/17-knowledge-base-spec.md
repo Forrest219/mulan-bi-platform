@@ -149,6 +149,61 @@
 |--------|-----|------|------|
 | `uq_schema_ds_version` | `(datasource_id, version)` | UNIQUE | 同一数据源版本唯一 |
 
+**`schema_yaml` YAML Schema 规范（v1 版本）**：
+
+`schema_yaml` 采用以下固定结构契约，不得自行扩展未列出的顶级字段：
+
+```yaml
+version: "1.0"                    # 固定为 "1.0"，供未来格式版本演进
+datasource_name: "Superstore"    # 数据源显示名，供 Embedding 文本构造使用
+
+tables:
+  - name: "orders"                # 表物理名称（必填）
+    description: "销售订单事实表"  # 表级业务描述（必填）
+    alias: "订单"                 # 业务别名（可选）
+    columns:
+      - name: "order_id"          # 列物理名称（必填）
+        type: "string"           # 数据类型（必填）
+        description: "订单唯一主键" # 列级业务描述（必填）
+        is_primary_key: true      # 是否为主键（可选，默认 false）
+        is_foreign_key: false    # 是否为外键（可选，默认 false）
+        referenced_table: null    # 若为外键，填写目标表名（可选）
+        enum_values:             # 枚举值约束（可选，无约束则不填）
+          - "pending"
+          - "shipped"
+          - "completed"
+  - name: "users"
+    description: "用户维度表"
+    alias: "用户"
+    columns:
+      - name: "user_id"
+        type: "string"
+        description: "用户唯一标识"
+        is_primary_key: true
+
+relationships:
+  - type: "many_to_one"          # 关系类型：many_to_one / one_to_many / one_to_one
+    from_table: "orders"
+    from_column: "user_id"
+    to_table: "users"
+    to_column: "user_id"
+    description: "订单归属用户"    # 关系业务含义（可选）
+```
+
+**Embedding 文本构造格式**（`source_type=schema`）：
+
+```
+{datasource_name} 数据模型:
+- 表: {table.name}（{table.alias}）：{table.description}
+  字段: {col.name}({col.type}): {col.description}
+- 关系: {relationship.description}
+```
+
+**解析约束**：
+- `schema_yaml` 内容在写入前必须通过 YAML 语法校验，校验失败返回 `KB_010`
+- `tables[].columns[].name` 和 `tables[].name` 为必填字段，缺失则视为脏数据，不生成 Embedding
+- 版本升级时（`version` 字段递增），旧版本 `schema_yaml` 保留用于历史溯源
+
 ### 2.4 `kb_documents` — 知识文档
 
 | 列 | 类型 | 约束 | 默认值 | 说明 |
@@ -267,8 +322,9 @@ erDiagram
 | 操作 | 说明 | 副作用 |
 |------|------|--------|
 | 创建术语 | 填写 term、canonical_term、definition、category，可选 synonyms、formula、related_fields | 自动触发 Embedding 生成（异步） |
-| 更新术语 | 修改任意字段，version 不单独维护（通过 `updated_at` 追踪） | 重新生成 Embedding（异步） |
-| 删除术语 | 软删除：`status → deprecated`；硬删除仅 admin | 删除关联 `kb_embeddings` 记录 |
+| 更新术语 | 修改任意字段，version 不单独维护（通过 `updated_at` 追踪） | **在同一数据库事务中，先 `DELETE FROM kb_embeddings WHERE source_type = 'glossary' AND source_id = :id`，再重新生成 Embedding（异步）** |
+| 删除术语（软删除） | `data_admin`：`status → deprecated` | 仅更新状态，**保留** `kb_embeddings` 记录（历史可查） |
+| 删除术语（硬删除） | `admin`：物理删除 | **在同一事务中，先 `DELETE FROM kb_embeddings WHERE source_type = 'glossary' AND source_id = :id`，再删除术语记录** |
 | 查询术语 | 支持按 category、status 筛选，支持关键词搜索 term + synonyms | — |
 
 ### 3.2 同义词映射
@@ -336,10 +392,13 @@ erDiagram
 | 分块大小 | 512 tokens | 单块最大 Token 数 |
 | 重叠大小 | 64 tokens | 相邻块重叠 Token 数 |
 | 分割优先级 | 段落 → 句子 → 固定长度 | 优先按自然语义边界分割 |
+| **Token 计数工具** | **tiktoken（cl100k_base 编码）** | **严禁使用字符数估算** |
 
 - Markdown 格式按 `## ` 标题分段，每段独立分块
 - 短文档（< 512 tokens）不分块，整体生成单条 Embedding
 - 分块结果写入 `kb_embeddings`，`chunk_index` 从 0 递增
+- **Token 截断算法**：`tiktoken.encoding_for_model("gpt-4")` 获取 `cl100k_base` 编码，对文本直接编码后按 token 偏移量切分。中文字符约合 1-2 tokens（取决于具体字符），严禁使用 `len(text) * 1.5` 等字符估算方式，否则不同内容密度差异会导致实际 Token 数严重偏离 512 上限
+- 重叠块边界：以 `tiktoken.encode()` 获得的 token 偏移量为准，确保相邻两块有 64 tokens 重叠
 
 ---
 
@@ -794,6 +853,39 @@ sequenceDiagram
     end
 
     Worker->>DB: UPDATE kb_documents<br/>SET chunk_count=N,<br/>last_embedded_at=now()<br/>WHERE id=5
+
+    Note over Worker,DB: 【更新文档时必须先清旧向量再插新向量】
+    Worker->>DB: DELETE FROM kb_embeddings<br/>WHERE source_type='document'<br/>AND source_id=:doc_id
+```
+
+```mermaid
+sequenceDiagram
+    participant User as 管理员
+    participant API as FastAPI 端点
+    participant DocSvc as DocumentService
+    participant DB as PostgreSQL
+    participant Worker as Celery Worker
+    participant EmbSvc as EmbeddingService
+    participant LLM as LLMService
+    participant Provider as LLM 供应商
+
+    User->>API: PUT /api/knowledge-base/documents/{id}<br/>{title, content, category}
+    API->>DocSvc: update_document(id, data)
+    DocSvc->>DB: BEGIN TRANSACTION
+    DocSvc->>DB: DELETE FROM kb_embeddings<br/>WHERE source_type='document' AND source_id=:id
+    DocSvc->>DB: UPDATE kb_documents SET ...
+    DocSvc->>DB: COMMIT
+    DocSvc->>Worker: regenerate_embeddings_task.delay<br/>(source_type="document", source_id=:id)
+    DocSvc-->>API: {id: X, message: "文档更新成功"}
+    API-->>User: 200 OK
+
+    Note over Worker: 异步处理（与创建流程相同）
+    Worker->>EmbSvc: chunk_and_embed(new_content)
+    loop 每个文本块
+        EmbSvc->>LLM: generate_embedding(chunk_text)
+        LLM-->>EmbSvc: embedding_vector
+        EmbSvc->>DB: INSERT INTO kb_embeddings
+    end
 ```
 
 ---
@@ -850,5 +942,5 @@ sequenceDiagram
 | OI-05 | `kb_glossary` 与 `tableau_field_semantics.synonyms_json` 存在数据重叠，是否需要建立同步机制？ | P2 | 待设计 |
 | OI-06 | V1 不支持文件上传（PDF/Word），后续迭代是否需要集成文档解析引擎（如 Apache Tika）？ | P3 | 待规划 |
 | OI-07 | Embedding 生成依赖 LLM 供应商在线服务，离线场景是否需要支持本地 Embedding 模型（如 sentence-transformers）？ | P2 | 待讨论 |
-| OI-08 | `kb_schemas` 的 `schema_yaml` 格式尚未标准化，需要定义 YAML Schema 规范（字段定义、关系描述等）。 | P1 | 待定义 |
+| OI-08 | `kb_schemas` 的 `schema_yaml` 格式尚未标准化，需要定义 YAML Schema 规范（字段定义、关系描述等）。 | P1 | ✅ 已解决（见 §2.3 YAML Schema 规范 v1.0） |
 | OI-09 | RAG 检索结果的相关性阈值是否需要按场景动态调整，还是固定配置即可？ | P3 | 待讨论 |
