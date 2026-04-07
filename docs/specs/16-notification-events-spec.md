@@ -388,7 +388,11 @@ sequenceDiagram
 - 存储在 `bi_notifications` 表
 - 通过 REST API 查询、标记已读
 - 前端通过轮询或未来 WebSocket 获取未读数
-- 通知保留策略：90 天后自动归档/删除（v1.0 暂不实现，规划于 Phase 2/v2.0 引入定时清理任务）
+- 通知保留策略：90 天后自动归档/删除
+  - **Sprint 3 实现**：`services.tasks.event_tasks.purge_old_events` Celery Beat 每日执行
+  - `bi_events.created_at < now() - 90 天` → DELETE（级联删除 `bi_notifications`）
+  - `bi_notifications` 孤儿记录（event_id 无对应事件）→ DELETE
+  - 每次执行记录归档数量日志
 
 ### 5.2 邮件通知（规划中）
 
@@ -753,7 +757,7 @@ sequenceDiagram
 | 编号 | 问题 | 影响 | 当前倾向 | 状态 |
 |------|------|------|----------|------|
 | Q1 | 是否需要 WebSocket 实时推送 | 用户体验（无需手动刷新） | Phase 2 引入，v1.0 使用前端 30s 轮询 | 待定 |
-| Q2 | 事件保留策略 | 存储空间 | v2.0 引入定时清理任务，90 天后归档到 `bi_events_archive`，180 天后删除 | **推迟至 v2.0** |
+| Q2 | 事件保留策略 | 存储空间 | Sprint 3 实现：90 天直接 DELETE + 级联清理孤儿通知，不再归档到中间表 | **✅ 已实现（Sprint 3）** |
 | Q3 | 通知模板是否需要可配置 | 灵活性 | v1.0 硬编码模板，v2.0 数据库配置化 | 待定 |
 | Q4 | 是否需要通知偏好设置 | 用户可选择关闭某类通知 | v2.0 引入 `bi_notification_preferences` 表 | 待定 |
 | Q5 | 广播通知的性能 | 用户量大时批量写入 | 使用 `bulk_insert_mappings` 批量写入 | 待定 |

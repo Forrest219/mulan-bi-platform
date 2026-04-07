@@ -33,6 +33,11 @@ celery_app.conf.update(
             "task": "services.tasks.quality_tasks.cleanup_old_quality_results",
             "schedule": 86400.0,  # 每天执行一次（清理 90 天前数据）
         },
+        "events-purge-old": {
+            "task": "services.tasks.event_tasks.purge_old_events",
+            "schedule": 86400.0,  # 每天凌晨 3:00 执行（实际时间由 worker 启动参数控制）
+            "options": {"expires": 3600},
+        },
     },
 )
 
