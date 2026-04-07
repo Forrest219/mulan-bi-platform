@@ -82,6 +82,8 @@ def compute_asset_health(
         total_score += 15
 
     # 4. fields_have_captions (仅对有字段的资产检查)
+    #    Spec 10 仅定义 field_caption，此处额外接受 ai_caption（AI 生成的语义中文名）
+    #    作为等价来源，因为 AI 生成后未人工确认前 field_caption 仍为空
     if fields:
         captioned = sum(1 for f in fields if getattr(f, 'field_caption', None) or getattr(f, 'ai_caption', None))
         ratio = captioned / len(fields) if fields else 0

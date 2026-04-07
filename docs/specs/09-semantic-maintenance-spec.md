@@ -56,7 +56,7 @@ backend/app/api/
 | owner | String(128) | 责任人 |
 | steward | String(128) | 数据管家 |
 | sensitivity_level | String(16) | low / medium / high / confidential |
-| tags_json | Text | JSON 标签数组 |
+| tags_json | JSONB | JSON 标签数组 |
 | status | String(32) | draft / ai_generated / reviewed / approved / published |
 | source | String(16) | sync / manual / ai / imported |
 | current_version | Integer, default=1 | 当前版本号 |
@@ -90,9 +90,9 @@ backend/app/api/
 | metric_definition | Text | 指标口径（如适用） |
 | dimension_definition | Text | 维度解释（如适用） |
 | unit | String(64) | 单位 |
-| enum_desc_json | Text | 枚举值说明 JSON |
-| tags_json | Text | JSON 标签数组 |
-| synonyms_json | Text | JSON 同义词数组 |
+| enum_desc_json | JSONB | 枚举值说明 JSON |
+| tags_json | JSONB | JSON 标签数组 |
+| synonyms_json | JSONB | JSON 同义词数组 |
 | sensitivity_level | String(16) | low / medium / high / confidential |
 | is_core_field | Boolean, default=False | 是否为核心字段 |
 | ai_confidence | Float | AI 置信度 0~1 |
@@ -209,6 +209,8 @@ draft ──→ ai_generated ──→ reviewed ──→ approved ──→ pub
 - `reviewed → rejected`：审核人驳回，返回 draft
 - `approved → published`：发布服务确认回写成功
 - `published → draft`：回滚（Rollback）。**⚠️ 分布式状态一致性说明**：回滚不仅是将 Mulan 本地数据库的状态置为 draft。本质上，这是一次使用历史快照发起的逆向 Publish 操作——**必须同步调用 Tableau REST API 还原线上资产的 caption/description**，防止 Mulan 与 Tableau 出现数据脑裂（即 Mulan 侧状态与 Tableau 侧元数据不一致）。
+
+  **回滚失败处理策略**：若 Tableau REST API 调用失败（网络超时、PAT 过期、Tableau 返回 4xx/5xx），Mulan 本地状态**不得**提前变更为 draft——应保持 `published` 状态并在 `tableau_publish_logs` 中记录一条 `status=failed` 的回滚日志，供管理员手动重试。确认 Tableau 侧还原成功后方可将本地状态置为 draft。
 
 #### 3.2.2 AI 语义生成
 
@@ -374,12 +376,14 @@ PUT /api/{version}/databases/{database-id}/tables/{table-id}/columns/{column-id}
 
 ### 5.1 状态流转权限
 
+平台四级角色：`admin > data_admin > analyst > user`（详见 [04-auth-rbac-spec.md](04-auth-rbac-spec.md)）。
+
 | 动作 | 允许角色 |
 |------|---------|
-| generate-ai | editor / admin |
-| submit-review | editor / admin |
-| approve / reject | reviewer / admin |
-| publish | publisher / admin |
+| generate-ai | data_admin / admin |
+| submit-review | data_admin / admin |
+| approve / reject | data_admin / admin |
+| publish | admin |
 | rollback | admin |
 
 ### 5.2 敏感级别权限
@@ -391,17 +395,23 @@ PUT /api/{version}/databases/{database-id}/tables/{table-id}/columns/{column-id}
 
 ## 6. 数据库迁移策略
 
-使用 SQLite ALTER TABLE，通过 `SemanticMaintenanceDatabase._ensure_columns()` 实现：
+使用 **Alembic** 管理 PostgreSQL 迁移（与项目其他模块一致，详见 [03-data-model-overview.md §8](03-data-model-overview.md)）：
 
-```python
-# 新增表（CREATE TABLE IF NOT EXISTS）
+```bash
+# 生成迁移脚本
+cd backend && alembic revision --autogenerate -m "add_semantic_maintenance_tables"
+
+# 审查后执行
+alembic upgrade head
+```
+
+新增表：
+```sql
+-- 通过 Alembic CREATE TABLE
 tableau_datasource_semantics
 tableau_field_semantics
 tableau_field_semantic_versions
 tableau_publish_log
-
-# 新增列（ALTER TABLE ADD COLUMN IF NOT EXISTS）
-# 复用现有 tableau_connections / tableau_assets / tableau_datasource_fields 的FK关系
 ```
 
 ---

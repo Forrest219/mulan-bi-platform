@@ -24,7 +24,7 @@ class User(Base):
     display_name = Column(String(128), nullable=False)
     password_hash = Column(String(256), nullable=False)
     email = Column(String(128), unique=True, nullable=False, index=True)  # 邮箱作为登录账号
-    role = Column(String(32), default="user", server_default=sa_text("'user'"))  # admin, user
+    role = Column(String(32), default="user", server_default=sa_text("'user'"))  # admin, data_admin, analyst, user
     permissions = Column(JSONB, nullable=True)  # JSON array: 用户单独权限, 改为 JSONB
     is_active = Column(Boolean, default=True, server_default=sa_text('true')) # Boolean 默认值
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值

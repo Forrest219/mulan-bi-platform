@@ -30,7 +30,7 @@
 
 ---
 
-## 3. 表清单 (23 张)
+## 3. 表清单 (24 张)
 
 ### 3.1 认证模块 `auth_` (4 张)
 
@@ -239,7 +239,7 @@
 
 ---
 
-### 3.4 Tableau 模块 `tableau_` (10 张)
+### 3.4 Tableau 模块 `tableau_` (11 张)
 
 #### `tableau_connections`
 
@@ -263,6 +263,8 @@
 | last_sync_at | TIMESTAMP | NULLABLE | - | 最后同步时间 |
 | last_sync_duration_sec | INTEGER | NULLABLE | - | 同步耗时(秒) |
 | sync_status | VARCHAR(16) | - | `'idle'` | idle/running/failed |
+| mcp_direct_enabled | BOOLEAN | - | `false` | 是否启用 V2 直连模式（Spec 13） |
+| mcp_server_url | VARCHAR(512) | NULLABLE | - | V2 MCP Server 地址（当 mcp_direct_enabled=true 时必填） |
 | created_at | TIMESTAMP | NOT NULL | `now()` | 创建时间 |
 | updated_at | TIMESTAMP | - | `now()` | 更新时间 |
 
@@ -447,6 +449,29 @@
 | operator | INTEGER | NULLABLE | - | 操作者 |
 | created_at | TIMESTAMP | NOT NULL | `now()` | 创建时间 |
 
+#### `tableau_mcp_query_logs`
+
+V2 直连模式查询日志（详见 [Spec 13](13-tableau-mcp-v2-direct-connect-spec.md)）。
+
+| 列 | 类型 | 约束 | 默认值 | 说明 |
+|----|------|------|--------|------|
+| id | INTEGER | PK, AUTO | - | 主键 |
+| connection_id | INTEGER | NOT NULL, FK→tableau_connections.id (CASCADE) | - | 连接 |
+| datasource_luid | VARCHAR(256) | NOT NULL | - | 数据源 LUID |
+| query_type | VARCHAR(32) | NOT NULL | - | query/metadata/preview |
+| query_payload | JSONB | NULLABLE | - | 请求 payload |
+| row_count | INTEGER | NULLABLE | - | 返回行数 |
+| duration_ms | INTEGER | NULLABLE | - | 查询耗时 (ms) |
+| status | VARCHAR(16) | NOT NULL | `'success'` | success/failed/timeout |
+| error_code | VARCHAR(32) | NULLABLE | - | 失败时的错误码 |
+| error_message | TEXT | NULLABLE | - | 失败原因 |
+| requested_by | INTEGER | NULLABLE | - | 请求用户 ID |
+| created_at | TIMESTAMP | NOT NULL | `now()` | 查询时间 |
+
+**索引**：
+- `ix_mcp_query_log_conn_created` = `(connection_id, created_at)`
+- `ix_mcp_query_log_status` = `status`
+
 ---
 
 ## 4. ER 关系图
@@ -519,6 +544,7 @@ erDiagram
 erDiagram
     tableau_connections ||--o{ tableau_assets : "syncs"
     tableau_connections ||--o{ tableau_sync_logs : "logs"
+    tableau_connections ||--o{ tableau_mcp_query_logs : "v2 queries"
     tableau_assets ||--o{ tableau_asset_datasources : "uses"
     tableau_assets ||--o{ tableau_datasource_fields : "has fields"
 
@@ -527,6 +553,8 @@ erDiagram
         varchar name
         varchar connection_type
         varchar sync_status
+        boolean mcp_direct_enabled
+        varchar mcp_server_url
     }
     tableau_assets {
         int id PK
@@ -549,6 +577,13 @@ erDiagram
         int id PK
         int asset_id FK
         varchar field_name
+    }
+    tableau_mcp_query_logs {
+        int id PK
+        int connection_id FK
+        varchar datasource_luid
+        varchar query_type
+        varchar status
     }
 ```
 
@@ -619,6 +654,8 @@ erDiagram
 | tableau_*_semantic_versions | ix_*_ver_sem_id | *_semantic_id | BTREE | 版本查询 |
 | tableau_publish_logs | ix_publish_log_conn_status | (connection_id, status) | BTREE | 日志过滤 |
 | tableau_publish_logs | ix_publish_log_object | (object_type, object_id) | BTREE | 对象查询 |
+| tableau_mcp_query_logs | ix_mcp_query_log_conn_created | (connection_id, created_at) | BTREE | 查询历史 |
+| tableau_mcp_query_logs | ix_mcp_query_log_status | status | BTREE | 状态过滤 |
 
 ---
 

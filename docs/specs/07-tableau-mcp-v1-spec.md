@@ -997,33 +997,12 @@ for conn in get_all_active_connections():
 
 ### 4.3 健康评分引擎
 
-#### 4.3.1 评分因子
+健康评分算法（7 因子定义、权重、特殊计算规则、健康等级划分）统一定义于 [健康评分规格书 Spec 10](10-tableau-health-scoring-spec.md)，本文档不再重复。
 
-| # | 检查项 (key) | 标签 | 权重 | 判定逻辑 |
-|---|-------------|------|------|---------|
-| 1 | has_description | 有描述信息 | 20 | `description` 非空且非纯空白 |
-| 2 | has_owner | 有所有者 | 15 | `owner_name` 非空且非纯空白 |
-| 3 | has_datasource_link | 有关联数据源 | 15 | `tableau_asset_datasources` 中存在至少一条记录 |
-| 4 | fields_have_captions | 字段有中文名 | 20 | 超过 50% 的字段有 `field_caption` 或 `ai_caption`；无字段时跳过（给满分） |
-| 5 | is_certified | 已认证 | 10 | `is_certified == true` |
-| 6 | naming_convention | 命名规范 | 10 | 名称不以数字开头，不含 `@ # $ !` 特殊字符 |
-| 7 | not_stale | 近期有更新 | 10 | `updated_on_server` 在 90 天以内 |
-
-**权重总计**：100 分
-
-#### 4.3.2 特殊计算规则
-
-- **fields_have_captions**：当 `ratio >= 0.5` 时 passed=true，但实际加分为 `20 * min(1.0, ratio)`（渐进式加分）
-- **fields_have_captions（无字段）**：跳过检查，给满分 20 分（不惩罚无字段数据的资产）
-
-#### 4.3.3 健康等级
-
-| 等级 | 分数范围 | 含义 |
-|------|---------|------|
-| excellent | >= 80 | 优秀，元数据完善 |
-| good | >= 60 | 良好，有改进空间 |
-| warning | >= 40 | 警告，需要关注 |
-| poor | < 40 | 较差，急需治理 |
+本模块的职责是：
+1. 调用 `HealthScoringEngine.compute_asset_health(asset, datasources, fields)` 获取评分结果
+2. 将计算结果缓存至 `tableau_assets.health_score` 和 `health_details`
+3. 通过 `GET /assets/{asset_id}/health` 和 `GET /connections/{conn_id}/health-overview` 接口暴露评分数据
 
 #### 4.3.4 返回结构
 
@@ -1072,18 +1051,22 @@ for conn in get_all_active_connections():
 
 ## 5. 错误码
 
-| 错误码 | HTTP 状态码 | 说明 | 处理建议 |
-|--------|-----------|------|---------|
-| TAB_001 | 400 | connection_type 无效（非 mcp/tsc） | 检查请求参数 |
-| TAB_002 | 403 | 无权访问该连接（IDOR 防护） | 仅连接所有者或 admin 可访问 |
-| TAB_003 | 403 | 需要管理员或数据管理员权限 | 联系管理员提升角色 |
-| TAB_004 | 404 | 连接不存在 | 检查 conn_id 是否正确 |
-| TAB_005 | 404 | 资产不存在（已删除或不存在） | 可能已被同步标记为删除 |
-| TAB_006 | 404 | 同步日志不存在 | 检查 log_id 是否正确 |
-| TAB_007 | 500 | Token 解密失败（密钥变更） | 重新保存 PAT Token |
-| TAB_008 | 500 | Tableau 连接超时 | 检查 Server URL 是否可达 |
-| TAB_009 | 500 | Tableau 认证失败 | 检查 PAT Token 是否过期 |
-| TAB_010 | 500 | LLM 服务不可用 | 检查 LLM 配置或稍后重试 |
+本模块错误码定义详见 [统一错误码标准 §5.5 TAB](01-error-codes-standard.md#55-tab---tableau-mcp-集成)。
+
+以下为本模块**常见触发场景**快速参考（HTTP 状态码以 Spec 01 为准）：
+
+| 错误码 | 常见触发场景 |
+|--------|-------------|
+| TAB_001 | 按 ID 查询连接未找到（conn_id 不存在） |
+| TAB_002 | 非所有者且无共享权限尝试访问连接 |
+| TAB_003 | PAT Token 无效或已过期 |
+| TAB_004 | 网络不通或 Tableau Server 宕机 |
+| TAB_005 | 同步任务已在运行，重复触发 |
+| TAB_006 | 请求的工作簿/视图/数据源在 Tableau 中未找到 |
+| TAB_007 | Tableau REST API 调用返回错误（同步失败） |
+| TAB_008 | 提供了不支持的 connection_type 值 |
+| TAB_009 | 通过 MCP 协议查询 Tableau 数据失败 |
+| TAB_010 | 按 ID 查询同步日志未找到 |
 
 ---
 

@@ -355,7 +355,7 @@ LLM 调用时，语义上下文按以下优先级组装：
 - **引擎**：PostgreSQL 16（JSONB、全文搜索、连接池）
 - **ORM**：SQLAlchemy 2.x + Alembic 迁移
 - **连接池**：`pool_size=10`(dev) / `20`(prod)，`max_overflow=20`(dev) / `40`(prod)，`pool_pre_ping=True`，`pool_recycle=3600`
-- **当前表数**：23 张（4 个前缀分组）
+- **当前表数**：24 张（4 个前缀分组）
 - **规划表数**：5 张（数据治理、知识库、事件）
 
 ### 7.2 前缀分组
@@ -365,7 +365,7 @@ LLM 调用时，语义上下文按以下优先级组装：
 | `auth_` | 用户认证 | 4 | `auth_users`, `auth_user_groups`, `auth_group_permissions`, `auth_user_group_members` |
 | `bi_` | 核心业务 | 9 | `bi_data_sources`, `bi_scan_logs`, `bi_rule_configs`, `bi_requirements`, `bi_health_scan_records` |
 | `ai_` | LLM/AI | 1 | `ai_llm_configs` |
-| `tableau_` | Tableau 集成 | 9 | `tableau_connections`, `tableau_assets`, `tableau_field_semantics`, `tableau_publish_logs` |
+| `tableau_` | Tableau 集成 | 11 | `tableau_connections`, `tableau_assets`, `tableau_field_semantics`, `tableau_publish_logs`, `tableau_mcp_query_logs` |
 
 ### 7.3 核心 ER 关系
 
@@ -571,10 +571,10 @@ sequenceDiagram
 
 | 级别 | 代码 | 处理规则 |
 |------|------|---------|
-| 公开 | `PUBLIC` | 可发布到 Tableau，可被 NL-to-Query 使用 |
-| 内部 | `INTERNAL` | 可发布，仅内部可见 |
-| 高敏感 | `HIGH` | 禁止发布到 Tableau，禁止 LLM 处理 |
-| 机密 | `CONFIDENTIAL` | 禁止发布，禁止 LLM，禁止导出 |
+| 公开 | `low` | 可发布到 Tableau，可被 NL-to-Query 使用 |
+| 内部 | `medium` | 可发布，仅内部可见 |
+| 高敏感 | `high` | 禁止发布到 Tableau，禁止 LLM 处理 |
+| 机密 | `confidential` | 禁止发布，禁止 LLM，禁止导出 |
 
 发布服务白名单控制：
 ```python
@@ -582,7 +582,7 @@ WRITABLE_FIELDS = {
     "datasource": ["description", "isCertified"],
     "field": ["caption", "description"],
 }
-BLOCKED_SENSITIVITY = {SensitivityLevel.HIGH, SensitivityLevel.CONFIDENTIAL}
+BLOCKED_SENSITIVITY = {SensitivityLevel.high, SensitivityLevel.confidential}
 ```
 
 ### 9.5 安全红线

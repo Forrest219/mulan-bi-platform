@@ -20,7 +20,7 @@
 | 评估对象 | Tableau 资产元数据 | 目标数据库表结构 |
 | 数据来源 | 已同步的 tableau_assets | 直连目标数据库 |
 | 执行方式 | 同步计算（API 请求时） | 异步 Celery 任务 |
-| 存储 | 不持久化，按需计算 | bi_health_scan_records |
+| 存储 | 计算结果缓存至 `tableau_assets.health_score` / `health_details`（见 §4.2） | bi_health_scan_records |
 
 ### 1.4 关联文档
 - [07-tableau-mcp-v1-spec.md](07-tableau-mcp-v1-spec.md) — Tableau 资产模型
@@ -117,7 +117,7 @@ GET /api/tableau/assets/{asset_id}
 ### 4.2 计算时机
 
 - **请求时计算**：每次访问资产详情时实时计算
-- **不持久化**：评分结果不存储到数据库
+- **结果缓存**：评分结果写入 `tableau_assets.health_score`（Float）和 `health_details`（JSONB），供列表页快速显示和连接级健康总览聚合使用
 - **输入来源**：`tableau_assets` + `tableau_asset_datasources` + `tableau_datasource_fields`
 
 ---

@@ -13,6 +13,7 @@ import contextvars
 import json
 import logging
 import threading
+import time
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -32,7 +33,7 @@ class _CachedTableauConnection:
 
     __slots__ = (
         "id", "server_url", "site", "token_name", "token_encrypted",
-        "is_active", "last_test_success",
+        "is_active", "last_test_success", "mcp_direct_enabled", "mcp_server_url",
     )
 
     def __init__(
@@ -44,6 +45,8 @@ class _CachedTableauConnection:
         token_encrypted: str,
         is_active: bool,
         last_test_success: bool,
+        mcp_direct_enabled: bool = False,
+        mcp_server_url: str = None,
     ):
         self.id = id
         self.server_url = server_url
@@ -52,6 +55,8 @@ class _CachedTableauConnection:
         self.token_encrypted = token_encrypted
         self.is_active = is_active
         self.last_test_success = last_test_success
+        self.mcp_direct_enabled = mcp_direct_enabled
+        self.mcp_server_url = mcp_server_url
 
 logger = logging.getLogger(__name__)
 
@@ -136,20 +141,60 @@ class TableauMCPClient:
     _instances: Dict[int, "TableauMCPClient"] = {}
     _instances_lock = threading.Lock()
     _MAX_INSTANCES = 200  # P1 OOM 防护：限制最大实例数
+    _IDLE_TIMEOUT = 300   # Spec 13 §2.2: 300s 空闲超时
+    _last_access: Dict[int, float] = {}  # connection_id → last access timestamp
+
+    @classmethod
+    def cleanup_idle(cls) -> int:
+        """清理空闲超过 _IDLE_TIMEOUT 的实例（Spec 13 §2.2）。返回清理数量。"""
+        now = time.monotonic()
+        removed = 0
+        with cls._instances_lock:
+            expired = [
+                cid for cid, ts in cls._last_access.items()
+                if now - ts > cls._IDLE_TIMEOUT
+            ]
+            for cid in expired:
+                cls._instances.pop(cid, None)
+                cls._last_access.pop(cid, None)
+                removed += 1
+        if removed:
+            logger.info("cleanup_idle: 清理 %d 个空闲 MCP client 实例", removed)
+        return removed
+
+    @classmethod
+    def invalidate(cls, connection_id: int) -> None:
+        """主动失效指定连接的 client 实例（Spec 13 §2.2）。"""
+        with cls._instances_lock:
+            cls._instances.pop(connection_id, None)
+            cls._last_access.pop(connection_id, None)
 
     def __new__(cls, connection_id: int) -> "TableauMCPClient":
-        # P1 OOM 防护：超过最大实例数时，清空最老的 half
+        # 先清理空闲实例，再检查是否超限
         with cls._instances_lock:
+            now = time.monotonic()
+            # 空闲清理优先于 FIFO 清理
+            expired = [
+                cid for cid, ts in cls._last_access.items()
+                if now - ts > cls._IDLE_TIMEOUT
+            ]
+            for cid in expired:
+                cls._instances.pop(cid, None)
+                cls._last_access.pop(cid, None)
+            if expired:
+                logger.info("__new__: 清理 %d 个空闲实例", len(expired))
+
+            # OOM 防护：仍超限时 FIFO 清理最老的 half
             if len(cls._instances) >= cls._MAX_INSTANCES:
-                # FIFO 清理：保留最新的 half
                 keys_to_remove = list(cls._instances.keys())[: len(cls._instances) // 2]
                 for k in keys_to_remove:
                     del cls._instances[k]
+                    cls._last_access.pop(k, None)
                 logger.warning("TableauMCPClient 实例数超限，已清理 %d 个旧实例", len(keys_to_remove))
-        if connection_id not in cls._instances:
-            with cls._instances_lock:
-                if connection_id not in cls._instances:
-                    cls._instances[connection_id] = super().__new__(cls)
+
+            if connection_id not in cls._instances:
+                cls._instances[connection_id] = super().__new__(cls)
+            cls._last_access[connection_id] = now
         return cls._instances[connection_id]
 
     def __init__(self, connection_id: int):
@@ -215,6 +260,8 @@ class TableauMCPClient:
                 "token_encrypted": conn.token_encrypted,
                 "is_active": conn.is_active,
                 "last_test_success": conn.last_test_success,
+                "mcp_direct_enabled": getattr(conn, "mcp_direct_enabled", False),
+                "mcp_server_url": getattr(conn, "mcp_server_url", None),
             }
         finally:
             session.close()
@@ -288,6 +335,14 @@ class TableauMCPClient:
                     code="NLQ_009",
                     message="Tableau 连接测试失败，请联系管理员",
                     details={"datasource_luid": datasource_luid},
+                )
+
+            # 3. 校验 V2 直连开关（Spec 13 §6.1 降级策略）
+            if not getattr(conn, "mcp_direct_enabled", False):
+                raise TableauMCPError(
+                    code="MCP_010",
+                    message="连接未开启 V2 直连模式，请使用 V1 API",
+                    details={"connection_id": connection_id},
                 )
 
             # 3. 解密 PAT（约束 A）

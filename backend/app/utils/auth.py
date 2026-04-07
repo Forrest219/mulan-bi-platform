@@ -1,7 +1,7 @@
 """Tableau 连接权限验证工具"""
-from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from services.tableau.models import TableauConnection
+from app.core.errors import TABError
 
 
 def verify_connection_access(connection_id: int, user: dict, db: Session) -> None:
@@ -11,7 +11,7 @@ def verify_connection_access(connection_id: int, user: dict, db: Session) -> Non
     """
     conn = db.query(TableauConnection).filter(TableauConnection.id == connection_id).first()
     if not conn:
-        raise HTTPException(status_code=404, detail="连接不存在")
+        raise TABError.connection_not_found()
     # admin 可访问所有连接，非 admin 只能访问自己的
     if user["role"] != "admin" and conn.owner_id != user["id"]:
-        raise HTTPException(status_code=403, detail="无权访问该连接")
+        raise TABError.access_denied()

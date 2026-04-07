@@ -5,13 +5,11 @@
 ## ⚠️ Gemini MCP 使用规则
 
 模型优先级（按顺序）：
-1. **Gemini 3 Flash** — 首选
-2. **Gemini 3.1 Flash Lite** — 次选
-3. **Gemini 2.5 Flash** — 最后备选
+1. **Gemini 3 Flash** (`gemini-3-flash`) — 首选，已配置为 MCP 默认模型
+2. **Gemini 3 Flash Lite** (`gemini-3-flash-lite`) — 次选，当首选 quota 耗尽或失败时使用
 
 - **NEVER** use `gemini-2.5-pro` via MCP. It causes quota errors on this API key.
-- **ALWAYS** specify `model` 参数 when calling Gemini MCP tools.
-- If `gemini_codebase_analyzer` fails due to quota, fallback to reading files manually and using current session model for analysis.
+- If `gemini_codebase_analyzer` fails due to quota/model error with `gemini-3-flash`, retry with `gemini-3-flash-lite` or fallback to reading files manually.
 - The API key `AIzaSyAoHsKF8oO_z2Y1uXtihi0BgdvjjKBfz_A` is on free tier — use Flash models only.
 
 ## 技术栈

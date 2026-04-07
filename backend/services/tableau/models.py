@@ -30,6 +30,9 @@ class TableauConnection(Base):
     last_sync_at = Column(DateTime, nullable=True)
     last_sync_duration_sec = Column(Integer, nullable=True)
     sync_status = Column(String(16), default="idle", server_default=sa_text("'idle'"))  # idle / running / failed
+    # MCP V2 直连配置（Spec 13 §9.1）
+    mcp_direct_enabled = Column(Boolean, default=False, server_default=sa_text('false'))
+    mcp_server_url = Column(String(512), nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
     updated_at = Column(DateTime, server_default=sa_func.now(), onupdate=sa_func.now()) # DateTime 默认值和更新
 
@@ -63,6 +66,8 @@ class TableauConnection(Base):
             "last_sync_at": self.last_sync_at.strftime("%Y-%m-%d %H:%M:%S") if self.last_sync_at else None,
             "last_sync_duration_sec": self.last_sync_duration_sec,
             "sync_status": self.sync_status or "idle",
+            "mcp_direct_enabled": self.mcp_direct_enabled or False,
+            "mcp_server_url": self.mcp_server_url,
             "next_sync_at": next_sync_at,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
             "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,

@@ -94,7 +94,8 @@
 | `AUTH` | 认证与权限 (RBAC) | AUTH_001 - AUTH_099 | 登录、注册、角色权限 |
 | `DS` | 数据源管理 | DS_001 - DS_099 | 数据源 CRUD、连接测试 |
 | `DDL` | DDL 合规检查 | DDL_001 - DDL_099 | DDL 语法检查、规则管理 |
-| `TAB` | Tableau MCP 集成 | TAB_001 - TAB_099 | Tableau 连接、同步、MCP 查询 |
+| `TAB` | Tableau MCP 集成 (V1) | TAB_001 - TAB_099 | Tableau 连接、同步、V1 MCP 查询 |
+| `MCP` | Tableau MCP V2 直连 | MCP_001 - MCP_099 | V2 直连查询、MCPClientPool、VizQL 查询 |
 | `SM` | 语义维护 | SM_001 - SM_099 | 语义标注、审批、发布 |
 | `LLM` | LLM 能力层 | LLM_001 - LLM_099 | LLM 配置、调用、解析 |
 | `HS` | 健康扫描 | HS_001 - HS_099 | 数据源健康检查、扫描任务 |
@@ -208,6 +209,21 @@
 | `SEARCH_003` | 404 | 未匹配到相关字段 | 自然语言查询无法映射到任何已知字段 |
 | `SEARCH_004` | 502 | 查询执行失败 | 生成的 SQL 执行出错 |
 | `SEARCH_005` | 409 | 歧义：匹配到多个数据源 | 用户查询命中多个数据源，需要用户消歧 |
+
+### 5.10 MCP - Tableau MCP V2 直连
+
+| 错误码 | HTTP | 描述 | 触发场景 |
+|---|---|---|---|
+| `MCP_001` | 400 | VizQL 查询 JSON 格式错误 | query 参数不符合 VizQL Schema |
+| `MCP_002` | 400 | 查询引用了不存在的字段 | 字段名不在目标数据源的字段列表中 |
+| `MCP_003` | 503 | MCP 服务不可用 | MCP Server 进程未运行或不可达 |
+| `MCP_004` | 504 | MCP 查询超时（30s） | 查询复杂或数据量过大 |
+| `MCP_005` | 401 | MCP 认证失败（PAT 过期） | PAT Token 已过期，需管理员更新 |
+| `MCP_006` | 400 | 数据源 LUID 无效 | datasource_luid 不存在或已删除 |
+| `MCP_007` | 400 | 查询 limit 超出允许范围 | limit 必须在 1–10000 之间 |
+| `MCP_008` | 429 | MCP 请求频率超限 | 短时间内请求过多，稍后重试 |
+| `MCP_009` | 500 | MCP 响应解析失败 | MCP Server 版本不兼容或响应格式异常 |
+| `MCP_010` | 400 | 目标资产不是 datasource 类型 | metadata/preview 接口仅支持 datasource |
 
 ---
 
@@ -498,3 +514,13 @@ sequenceDiagram
 | SEARCH_003 | 404 | 搜索 | 未匹配到相关字段 |
 | SEARCH_004 | 502 | 搜索 | 查询执行失败 |
 | SEARCH_005 | 409 | 搜索 | 歧义：匹配到多个数据源 |
+| MCP_001 | 400 | MCP V2 | VizQL 查询 JSON 格式错误 |
+| MCP_002 | 400 | MCP V2 | 查询引用了不存在的字段 |
+| MCP_003 | 503 | MCP V2 | MCP 服务不可用 |
+| MCP_004 | 504 | MCP V2 | MCP 查询超时（30s） |
+| MCP_005 | 401 | MCP V2 | MCP 认证失败（PAT 过期） |
+| MCP_006 | 400 | MCP V2 | 数据源 LUID 无效 |
+| MCP_007 | 400 | MCP V2 | 查询 limit 超出允许范围 |
+| MCP_008 | 429 | MCP V2 | MCP 请求频率超限 |
+| MCP_009 | 500 | MCP V2 | MCP 响应解析失败 |
+| MCP_010 | 400 | MCP V2 | 目标资产不是 datasource 类型 |

@@ -126,27 +126,30 @@ class SemanticMaintenanceService:
         ds_before = self.db.get_datasource_semantics_by_id(ds_id)
         was_published = ds_before.published_to_tableau if ds_before else False
 
-        # Step 1: DB 层回滚
+        # Step 1: 如果曾发布到 Tableau，先执行 REST 回滚（Spec 09 §3.2.1 原子性要求）
+        # REST 必须先于 DB 变更，失败时保持本地状态不变，避免数据裂脑
+        if was_published and ds_before and ds_before.connection_id:
+            rest_ok, rest_err = self._rollback_tableau_publish(ds_before, user_id)
+            if not rest_ok:
+                return False, f"Tableau REST 回滚失败，本地状态保持不变: {rest_err}"
+
+        # Step 2: REST 成功（或无需 REST 回滚），执行 DB 层回滚
         success, err = self.db.rollback_datasource_semantic(ds_id, version_id, user_id)
         if not success:
             return False, err
         updated = self.db.get_datasource_semantics_by_id(ds_id)
-
-        # Step 2: 如果旧版本曾发布到 Tableau，触发 REST API 回滚
-        if was_published and updated and updated.connection_id:
-            try:
-                self._rollback_tableau_publish(updated, user_id)
-            except Exception as e:
-                logger.warning("REST 回滚失败（DB 回滚已成功）: %s", e, exc_info=True)
-
         return True, updated.to_dict()
 
-    def _rollback_tableau_publish(self, ds, user_id: int = None) -> None:
+    def _rollback_tableau_publish(self, ds, user_id: int = None) -> tuple:
         """
         查询并回滚 Tableau REST API 发布记录。
 
         查找该数据源关联的最新一条 SUCCESS 状态的发布日志，
         调用 PublishService.rollback_publish() 撤销 Tableau 侧变更。
+
+        Returns:
+            (True, None) — 回滚成功或无需回滚（无发布日志）
+            (False, "error") — 回滚失败
         """
         from .models import PublishStatus
         from services.tableau.models import TableauDatabase
@@ -161,20 +164,19 @@ class SemanticMaintenanceService:
             page_size=1,
         )
         if not logs:
-            return
+            return True, None
 
         latest_log = logs[0]
         # 确保是该数据源的日志
         if latest_log.object_type != "datasource" or latest_log.object_id != ds.id:
-            return
+            return True, None
 
         # 获取 Tableau 连接凭证
         tableau_db = TableauDatabase()
         try:
             conn = tableau_db.get_connection(ds.connection_id)
             if not conn or not conn.is_active:
-                logger.warning("无法获取 Tableau 连接（id=%s）", ds.connection_id)
-                return
+                return False, f"Tableau 连接不可用（id={ds.connection_id}）"
 
             crypto = get_tableau_crypto()
             token_value = crypto.decrypt(conn.token_encrypted)
@@ -189,11 +191,16 @@ class SemanticMaintenanceService:
             )
             try:
                 if not publish_svc.connect():
-                    logger.warning("Tableau REST 认证失败，无法执行回滚")
-                    return
-                publish_svc.rollback_publish(log_id=latest_log.id, operator=user_id)
+                    return False, "Tableau REST 认证失败"
+                result, err = publish_svc.rollback_publish(log_id=latest_log.id, operator=user_id)
+                if err:
+                    return False, err
+                return True, None
             finally:
                 publish_svc.disconnect()
+        except Exception as e:
+            logger.error("_rollback_tableau_publish 异常: %s", e, exc_info=True)
+            return False, str(e)
         finally:
             tableau_db.session.close()
 
@@ -331,27 +338,29 @@ class SemanticMaintenanceService:
         field_before = self.db.get_field_semantics_by_id(field_id)
         was_published = field_before.published_to_tableau if field_before else False
 
-        # Step 1: DB 层回滚
+        # Step 1: 如果曾发布到 Tableau，先执行 REST 回滚（Spec 09 §3.2.1 原子性要求）
+        if was_published and field_before and field_before.connection_id:
+            rest_ok, rest_err = self._rollback_tableau_field_publish(field_before, user_id)
+            if not rest_ok:
+                return False, f"Tableau REST 回滚失败，本地状态保持不变: {rest_err}"
+
+        # Step 2: REST 成功（或无需 REST 回滚），执行 DB 层回滚
         success, err = self.db.rollback_field_semantic(field_id, version_id, user_id)
         if not success:
             return False, err
         updated = self.db.get_field_semantics_by_id(field_id)
-
-        # Step 2: 如果旧版本曾发布到 Tableau，触发 REST API 回滚
-        if was_published and updated and updated.connection_id:
-            try:
-                self._rollback_tableau_field_publish(updated, user_id)
-            except Exception as e:
-                logger.warning("字段 REST 回滚失败（DB 回滚已成功）: %s", e, exc_info=True)
-
         return True, updated.to_dict()
 
-    def _rollback_tableau_field_publish(self, field, user_id: int = None) -> None:
+    def _rollback_tableau_field_publish(self, field, user_id: int = None) -> tuple:
         """
         查询并回滚 Tableau REST API 字段发布记录。
 
         查找该字段关联的最新一条 SUCCESS 状态的发布日志，
         调用 PublishService.rollback_publish() 撤销 Tableau 侧变更。
+
+        Returns:
+            (True, None) — 回滚成功或无需回滚（无发布日志）
+            (False, "error") — 回滚失败
         """
         from .models import PublishStatus
         from services.tableau.models import TableauDatabase
@@ -366,19 +375,18 @@ class SemanticMaintenanceService:
             page_size=1,
         )
         if not logs:
-            return
+            return True, None
 
         latest_log = logs[0]
         if latest_log.object_type != "field" or latest_log.object_id != field.id:
-            return
+            return True, None
 
         # 获取 Tableau 连接凭证
         tableau_db = TableauDatabase()
         try:
             conn = tableau_db.get_connection(field.connection_id)
             if not conn or not conn.is_active:
-                logger.warning("无法获取 Tableau 连接（id=%s）", field.connection_id)
-                return
+                return False, f"Tableau 连接不可用（id={field.connection_id}）"
 
             crypto = get_tableau_crypto()
             token_value = crypto.decrypt(conn.token_encrypted)
@@ -392,11 +400,16 @@ class SemanticMaintenanceService:
             )
             try:
                 if not publish_svc.connect():
-                    logger.warning("Tableau REST 认证失败，无法执行字段回滚")
-                    return
-                publish_svc.rollback_publish(log_id=latest_log.id, operator=user_id)
+                    return False, "Tableau REST 认证失败"
+                result, err = publish_svc.rollback_publish(log_id=latest_log.id, operator=user_id)
+                if err:
+                    return False, err
+                return True, None
             finally:
                 publish_svc.disconnect()
+        except Exception as e:
+            logger.error("_rollback_tableau_field_publish 异常: %s", e, exc_info=True)
+            return False, str(e)
         finally:
             tableau_db.session.close()
 
