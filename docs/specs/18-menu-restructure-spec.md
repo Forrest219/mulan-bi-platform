@@ -205,6 +205,18 @@ interface MenuPermission {
 | `/admin/tableau/connections` | `/assets/tableau-connections` | 301 |
 | `/knowledge/:sub` | `/analytics/knowledge` | 301 |
 
+> ### ⚠️ 强制约束：前后端路由解耦
+>
+> **本次重构仅限于前端视图路由（React Router 路径），绝对禁止修改后端 API 路径。**
+>
+> 前端 `src/api/` 目录下所有通过 Axios / Fetch 调用的后端接口 URL（如 `/api/admin/datasources`、`/api/governance/quality/rules` 等）必须**保持原样**，不得因批量 Search & Replace 路由路径而被错误替换。
+>
+> 判断规则：
+> - 路径以 `/api/` 开头 → **不动**
+> - 路径以 `/dev/`、`/governance/`、`/assets/`、`/analytics/`、`/system/` 开头 → **是前端视图路由，可以迁移**
+>
+> 违规后果：批量替换后端 API 路径将导致所有数据接口 404，是 P0 级生产故障。
+
 ### 4.2 React Router v7 路由定义
 
 ```typescript
@@ -366,6 +378,8 @@ interface MenuItem {
   children?: MenuItem[];
   /** 是否在菜单中隐藏（详情页等动态路由） */
   hidden?: boolean;
+  /** 是否置灰禁用（待开发功能，hover 显示 tooltip 提示"功能开发中，敬请期待"） */
+  disabled?: boolean;
   /** 角标数字（如待审核数量） */
   badge?: number;
 }
@@ -397,7 +411,7 @@ const menuConfig: MenuDomain[] = [
     defaultOpen: false,
     items: [
       { key: 'ddl-validator', label: 'DDL 检查', icon: 'ri-code-s-slash-line', path: '/dev/ddl-validator' },
-      { key: 'ddl-generator', label: 'DDL 生成器', icon: 'ri-file-code-line', path: '/dev/ddl-generator' },
+      { key: 'ddl-generator', label: 'DDL 生成器', icon: 'ri-file-code-line', path: '/dev/ddl-generator', permission: { requiredRole: 'analyst' }, disabled: true },
       { key: 'rule-config', label: '规则配置', icon: 'ri-settings-3-line', path: '/dev/rule-config',
         permission: { requiredRole: 'data_admin' } },
     ],
@@ -414,7 +428,7 @@ const menuConfig: MenuDomain[] = [
       { key: 'quality', label: '质量监控', icon: 'ri-shield-check-line', path: '/governance/quality' },
       { key: 'semantic-ds', label: '语义 - 数据源', icon: 'ri-database-2-line', path: '/governance/semantic/datasources' },
       { key: 'semantic-fields', label: '语义 - 字段', icon: 'ri-list-settings-line', path: '/governance/semantic/fields' },
-      { key: 'publish-logs', label: '发布日志', icon: 'ri-file-list-3-line', path: '/governance/semantic/publish-logs' },
+      { key: 'publish-logs', label: '发布日志', icon: 'ri-file-list-3-line', path: '/governance/semantic/publish-logs', disabled: true },
     ],
   },
   {
@@ -440,7 +454,7 @@ const menuConfig: MenuDomain[] = [
     description: 'AI 驱动的数据分析与知识管理',
     defaultOpen: false,
     items: [
-      { key: 'nl-query', label: '自然语言查询', icon: 'ri-chat-search-line', path: '/analytics/nl-query' },
+      { key: 'nl-query', label: '自然语言查询', icon: 'ri-chat-search-line', path: '/analytics/nl-query', permission: { requiredRole: 'analyst' }, disabled: true },
       { key: 'knowledge', label: '知识库', icon: 'ri-book-open-line', path: '/analytics/knowledge' },
     ],
   },
@@ -541,6 +555,6 @@ tests/smoke/
 | 1 | "数据源管理"从系统管理移至"数据资产"域，是否需要同步调整 RBAC 权限标识？ | 待定 | 待讨论 |
 | 2 | 旧路由兼容重定向的保留期限（建议 3 个月），到期后是否自动移除？ | 前端负责人 | 待定 |
 | 3 | 折叠态侧边栏是否需要二级 popover 菜单（类似 VS Code）？ | UX 设计 | 待定 |
-| 4 | DDL 生成器、自然语言查询等"待开发"页面，是否在菜单中显示为 disabled 占位？ | 产品经理 | 待定 |
+| 4 | DDL 生成器、自然语言查询等"待开发"页面，是否在菜单中显示为 disabled 占位？ | 产品经理 | ✅ 已解决（见 §5.2 MenuItem.disabled=true + tooltip 提示） |
 | 5 | 是否需要支持用户自定义域展开顺序（拖拽排序）？ | 产品经理 | 暂不考虑 |
 | 6 | `Tableau 连接`同时出现在"数据资产"和原"系统管理"中，去重后是否影响现有运维习惯？ | 运维团队 | 待定 |
