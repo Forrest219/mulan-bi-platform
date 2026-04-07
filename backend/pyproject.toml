@@ -10,3 +10,49 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["app*", "services*"]
+
+# =====================================================================
+# Ruff — 架构红线静态扫描
+# =====================================================================
+[tool.ruff]
+# 配置文件路径（同一目录下的 .ruff.toml）
+config = ".ruff.toml"
+
+[tool.ruff.lint]
+# 启用所有规则组
+rules = [
+  "F",           # Pyflakes（未使用变量、import 等）
+  "E",           # pycodestyle errors
+  "W",           # pycodestyle warnings
+  "I",           # isort 导入顺序
+  "D",           # pydocstyle 文档
+  "C4",          # kombu 缓存（无关）
+  "PLC",         # pylint convention
+  "PLE",         # pylint errors
+  "PLR",         # pylint refactor
+  "PLW",         # pylint warnings
+]
+select = "ALL"
+ignore = [
+  "E501",        # line-too-long（由 formatter 处理）
+  "D100",        # missing-docstring-in-public-module
+  "D104",        # missing-docstring-in-public-package
+  "PLR0913",     # too-many-arguments（允许按需配置）
+  "PLR2004",     # magic-value-comparison（阈值常量除外）
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["*"]
+"app/main.py" = ["F401", "D"]
+"tests/**/*.py" = ["F401", "D", "PLR2004"]
+"alembic/**/*.py" = ["*"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "services"]
+force-single-line = true
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
+line-ending = "lf"
+line-length = 120

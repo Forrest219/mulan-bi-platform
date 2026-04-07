@@ -215,6 +215,136 @@ def classify_intent(question: str) -> Optional[IntentResult]:
     return None
 
 
+# === 阶段 2/1 一致性校验（Spec 14 v1.1 §6 — 防止 LLM hallucinate fieldCaption）===
+
+_FIELD_CONSISTENCY_RETRY_TEMPLATE = """你生成的 VizQL JSON 中以下 fieldCaption 在数据源中不存在：
+
+不存在的字段：{missing_fields}
+
+数据源可用字段：
+{available_fields}
+
+请重新生成 JSON，确保 vizql_json.fields 中的所有 fieldCaption 都必须来自上述可用字段列表。
+如果需要使用的度量字段没有对应的可用字段，请使用 SUM(某字段) 格式或选择最接近的字段。
+不要虚构任何不在可用列表中的 fieldCaption。
+
+直接输出 JSON，不要包含任何解释文字："""
+
+
+def validate_field_captions_consistency(
+    parsed: dict,
+    datasource_luid: str,
+) -> tuple:
+    """
+    校验 One-Pass LLM 输出的 fieldCaption 是否在真实数据源中存在（阶段 2/1 契约）。
+
+    Spec 14 v1.1 §6 P1 问题：
+    LLM 可能 hallucinate 不存在的 fieldCaption，导致 Stage 3 MCP 查询失败（NLQ_006）。
+    此校验在 JSON Schema 校验后、MCP 执行前拦截。
+
+    策略：
+    - 获取数据源真实 fieldCaption 列表（Redis 缓存，1h TTL）
+    - 若 LLM 输出的任意 fieldCaption 不在真实列表中 → 校验失败
+    - 缺失严重（>50% 或关键字段）时触发带可用字段列表的重试
+
+    Returns:
+        (is_valid: bool, missing_fields: list, available_fields: list)
+
+    Raises:
+        NLQError(NLQ_004): 校验失败且重试后仍不通过
+    """
+    vizql = parsed.get("vizql_json", {})
+    llm_fields: list = vizql.get("fields", [])
+
+    if not llm_fields:
+        return True, [], []  # schema 校验已拦截空字段
+
+    # 获取数据源真实字段（强制走 Redis 缓存）
+    from services.tableau.models import TableauDatabase, TableauAsset
+
+    db = TableauDatabase()
+    session = db.session
+    asset = session.query(TableauAsset).filter(
+        TableauAsset.datasource_luid == datasource_luid
+    ).first()
+    session.close()
+
+    if not asset:
+        # 无法获取资产信息时跳过校验（fail-open，不阻断查询）
+        logger.warning("无法获取 datasource_luid=%s 对应的 asset，跳过 fieldCaption 一致性校验", datasource_luid)
+        return True, [], []
+
+    actual_captions = get_datasource_fields_cached(asset.id)
+    available_fields_str = "\n".join(
+        f"- {fc}" for fc in actual_captions
+    )
+
+    # 检查每个 LLM 输出的 fieldCaption
+    missing_fields = []
+    for f in llm_fields:
+        caption = f.get("fieldCaption", "")
+        if caption and caption not in actual_captions:
+            missing_fields.append(caption)
+
+    if missing_fields:
+        logger.warning(
+            "Stage 2/1 fieldCaption 一致性校验失败: datasource_luid=%s, missing=%s",
+            datasource_luid, missing_fields,
+        )
+
+    return False, missing_fields, actual_captions
+
+
+async def _retry_field_consistency(
+    parsed: dict,
+    missing_fields: list,
+    available_fields: list,
+    prompt: str,
+    system_prompt: str,
+) -> tuple:
+    """
+    带可用字段列表的 fieldCaption 一致性重试。
+
+    将缺失字段 + 可用字段列表注入 Prompt，引导 LLM 重新生成合法的 fieldCaption。
+    """
+    available_fields_str = "\n".join(f"- {fc}" for fc in available_fields)
+    retry_prompt = _FIELD_CONSISTENCY_RETRY_TEMPLATE.format(
+        missing_fields=", ".join(f"'{f}'" for f in missing_fields),
+        available_fields=available_fields_str,
+    ) + "\n\n原始问题：\n" + prompt
+
+    result = await llm_service.complete_for_semantic(
+        prompt=retry_prompt,
+        system=system_prompt,
+        timeout=30,
+    )
+
+    if "error" in result:
+        return None, f"一致性重试 LLM 调用失败：{result['error']}"
+
+    content = result["content"]
+    parsed_retry, parse_err = parse_json_from_response(content)
+    if parse_err:
+        return None, f"一致性重试 JSON 解析失败：{parse_err}"
+
+    is_valid, validation_err = validate_one_pass_output(parsed_retry)
+    if not is_valid:
+        return None, f"一致性重试 JSON 校验仍失败：{validation_err}"
+
+    # 再次校验一致性
+    is_ok, still_missing, _ = validate_field_captions_consistency(
+        parsed_retry,
+        parsed_retry.get("datasource_luid", ""),
+    )
+    if not is_ok:
+        return None, (
+            f"重试后 fieldCaption 仍存在未知字段：{still_missing}。"
+            f"无法生成合法的 VizQL JSON。"
+        )
+
+    return parsed_retry, None
+
+
 # === JSON Schema 校验 ===
 def validate_one_pass_output(raw: Any) -> Tuple[bool, Optional[str]]:
     """
@@ -341,6 +471,27 @@ async def one_pass_llm(
         )
         if validation_err:
             raise NLQError("NLQ_003", message=f"JSON 校验失败：{validation_err}")
+
+    # ── 阶段 2/1 一致性校验（Spec 14 v1.1 §6 P1 修复）──────────────
+    # Schema 校验通过后，检查 fieldCaption 是否在真实数据源中存在
+    is_consistent, missing_fields, available_fields = validate_field_captions_consistency(
+        parsed, datasource_luid
+    )
+    if not is_consistent:
+        logger.info(
+            "Stage 2/1 fieldCaption 不一致触发重试: datasource_luid=%s, missing=%s",
+            datasource_luid, missing_fields,
+        )
+        # 带可用字段列表重试
+        parsed, consistency_err = await _retry_field_consistency(
+            parsed=parsed,
+            missing_fields=missing_fields,
+            available_fields=available_fields,
+            prompt=prompt,
+            system_prompt=system_prompt,
+        )
+        if consistency_err:
+            raise NLQError("NLQ_004", message=f"fieldCaption 一致性重试失败：{consistency_err}")
 
     return parsed
 

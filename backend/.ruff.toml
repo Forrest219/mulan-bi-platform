@@ -1,0 +1,84 @@
+# =====================================================================
+# 木兰 BI 平台 — Ruff 架构红线规则
+# =====================================================================
+# Ruff 内置规则码（不含插件），重点覆盖：
+#   F   Pyflakes       — 未使用变量/import、undefined name
+#   E   pycodestyle    — 代码错误
+#   W   pycodestyle    — 代码警告
+#   I   isort          — 导入顺序
+#   D   pydocstyle     — 文档缺失
+#   PLC pylint-convention / PLE / PLR / PLW
+#
+# 架构红线通过 extend-select + extend-ignore 组合实现
+# =====================================================================
+
+line-length = 120
+target-version = "py311"
+src = ["backend"]
+extend-exclude = ["tests/", "alembic/", "data/"]
+
+# -----------------------------------------------------------------------
+# 规则选择（ALL 但排除不适用的）
+# -----------------------------------------------------------------------
+[lint]
+# 全部启用
+select = [
+  "F",           # Pyflakes
+  "E",           # pycodestyle errors
+  "W",           # pycodestyle warnings
+  "I",           # isort
+  "D",           # pydocstyle
+  "PLC",         # pylint convention
+  "PLE",         # pylint errors
+  "PLR",         # pylint refactor
+  "PLW",         # pylint warnings
+]
+
+# 忽略 line-too-long（由 formatter 处理）
+# 忽略过于严格的 pylint 规则
+ignore = [
+  "E501",        # line-too-long（formatter 处理）
+  "D100",        # missing-docstring-in-public-module
+  "D104",        # missing-docstring-in-public-package
+  "PLR0913",     # too-many-arguments（业务对象常超过）
+  "PLR2004",     # magic-value-comparison（阈值常量例外）
+  "PLR0912",     # too-many-branches
+  "PLR0915",     # too-many-public-methods
+  "PLW0108",     # useless-alias-inside-loop
+]
+
+# -----------------------------------------------------------------------
+# 架构红线：按目录的 import 限制
+# -----------------------------------------------------------------------
+[lint.per-file-ignores]
+# __init__.py 允许所有
+"__init__.py" = []
+# config.py / main.py 允许 os.environ
+"app/main.py" = ["F401", "D"]
+"app/core/config.py" = ["F401", "D"]
+# Celery tasks 允许 celery 导入
+"app/api/tableau_tasks.py" = ["F401"]
+# tests 目录放宽
+"tests/**/*.py" = ["F401", "D", "PLE", "PLR", "PLW", "PLR2004"]
+"alembic/**/*.py" = []
+
+# -----------------------------------------------------------------------
+# 导入顺序（isort）
+# -----------------------------------------------------------------------
+[lint.isort]
+known-first-party = ["app", "services"]
+force-single-line = false
+
+# -----------------------------------------------------------------------
+# 复杂度上限
+# -----------------------------------------------------------------------
+[lint.mccabe]
+max-complexity = 15
+
+# -----------------------------------------------------------------------
+# 格式化
+# -----------------------------------------------------------------------
+[format]
+quote-style = "single"
+indent-style = "space"
+line-ending = "lf"

@@ -1,55 +1,137 @@
 """LLM 调用服务（异步）"""
-import os
 import logging
-from typing import Optional
+import time
+from typing import Optional, Tuple
 
 from .models import LLMConfigDatabase
 from services.common.crypto import CryptoHelper
+from services.common.settings import get_encryption_key
 
 logger = logging.getLogger(__name__)
 
-# 加密密钥（优先 LLM_ENCRYPTION_KEY，回退 DATASOURCE_ENCRYPTION_KEY）
-_ENCRYPTION_KEY = os.environ.get("LLM_ENCRYPTION_KEY") or os.environ.get("DATASOURCE_ENCRYPTION_KEY")
-if not _ENCRYPTION_KEY:
-    raise RuntimeError("LLM_ENCRYPTION_KEY or DATASOURCE_ENCRYPTION_KEY must be set")
+# =============================================================================
+# 加密工具（惰性加载，缓存清除后下次调用重新初始化）
+# =============================================================================
 
-_crypto = CryptoHelper(_ENCRYPTION_KEY)
-_encrypt = _crypto.encrypt
-_decrypt = _crypto.decrypt
+_crypto_helper: Optional[CryptoHelper] = None
+_crypto_helper_key_hash: Optional[str] = None  # 追踪当前加密密钥，防止 key rotation 后旧缓存
+
+
+def _get_crypto() -> Tuple[CryptoHelper, str]:
+    """
+    获取 CryptoHelper 实例（惰性单例）。
+    返回：(crypto_instance, key_hash) 元组。
+    当密钥轮换后（key_hash 变化），重新初始化 CryptoHelper。
+    """
+    global _crypto_helper, _crypto_helper_key_hash
+    current_key = get_encryption_key()
+    key_hash = hash(current_key)  # 用 hash 而非明文比较
+
+    if _crypto_helper is None or _crypto_helper_key_hash != key_hash:
+        _crypto_helper = CryptoHelper(current_key)
+        _crypto_helper_key_hash = key_hash
+        logger.info("CryptoHelper 初始化完成（密钥 hash: %s）", key_hash)
+
+    return _crypto_helper, key_hash
+
+
+def _encrypt(plaintext: str) -> str:
+    return _get_crypto()[0].encrypt(plaintext)
+
+
+def _decrypt(ciphertext: str) -> str:
+    return _get_crypto()[0].decrypt(ciphertext)
+
+
+def clear_crypto_cache() -> None:
+    """运维用：清除加密工具缓存（强制重新初始化，适用于密钥轮换）"""
+    global _crypto_helper, _crypto_helper_key_hash
+    _crypto_helper = None
+    _crypto_helper_key_hash = None
+
+
+# =============================================================================
+# LLM Client 缓存（带 TTL 的 LRU，防止 API Key rotation 后旧 Client 卡死）
+# =============================================================================
+
+_CLIENT_CACHE_TTL_SECONDS = 300  # 5 分钟
+
+
+class _TimedClientCache:
+    """
+    带 TTL 的 LLM Client 缓存。
+
+    问题背景：若将 API Key 直接作为 client 缓存键，
+    密钥轮换后旧 client 仍持有旧密钥导致 401。
+    修复：按 (base_url, model) 缓存 client，
+    并在每次 complete() 调用前检查 TTL 过期，过期则驱逐并重建。
+    """
+
+    def __init__(self, ttl_seconds: int = _CLIENT_CACHE_TTL_SECONDS):
+        self._cache: dict = {}
+        self._timestamps: dict = {}
+        self._ttl = ttl_seconds
+
+    def _make_key(self, provider: str, base_url: str, model: str) -> str:
+        return f"{provider}:{base_url}:{model}"
+
+    def get(self, provider: str, base_url: str, model: str):
+        key = self._make_key(provider, base_url, model)
+        if key in self._cache:
+            # 检查 TTL
+            if time.time() - self._timestamps.get(key, 0) > self._ttl:
+                self._evict(key)
+                return None
+            return self._cache[key]
+        return None
+
+    def set(self, provider: str, base_url: str, model: str, client):
+        key = self._make_key(provider, base_url, model)
+        self._cache[key] = client
+        self._timestamps[key] = time.time()
+
+    def _evict(self, key: str):
+        self._cache.pop(key, None)
+        self._timestamps.pop(key, None)
+
+    def clear(self):
+        self._cache.clear()
+        self._timestamps.clear()
+
+
+_client_cache = _TimedClientCache()
 
 
 class LLMService:
-    """LLM 调用服务 — 单例，异步接口，客户端单例缓存"""
+    """LLM 调用服务 — 单例，异步接口，客户端带 TTL 缓存"""
     _instance = None
-    _clients: dict = {}
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._config_db = LLMConfigDatabase()
-            cls._instance._clients = {}
         return cls._instance
 
     def _load_config(self):
         return self._config_db.get_config()
 
-    def _get_openai_client(self, api_key: str, base_url: str, timeout: int):
+    def _get_openai_client(self, api_key: str, base_url: str, model: str, timeout: int):
         from openai import AsyncOpenAI
-        key = f"openai:{base_url}"
-        if key not in self._clients:
-            self._clients[key] = AsyncOpenAI(
-                api_key=api_key, base_url=base_url, timeout=timeout,
-            )
-        return self._clients[key]
+        cached = _client_cache.get("openai", base_url, model)
+        if cached is not None:
+            return cached
+        client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+        _client_cache.set("openai", base_url, model, client)
+        return client
 
-    def _get_anthropic_client(self, api_key: str, base_url: str, timeout: int):
+    def _get_anthropic_client(self, api_key: str, base_url: str, model: str, timeout: int):
         from anthropic import AsyncAnthropic
-        key = f"anthropic:{base_url}"
-        if key not in self._clients:
-            self._clients[key] = AsyncAnthropic(
-                api_key=api_key, base_url=base_url, timeout=timeout,
-            )
-        return self._clients[key]
+        cached = _client_cache.get("anthropic", base_url, model)
+        if cached is not None:
+            return cached
+        client = AsyncAnthropic(api_key=api_key, base_url=base_url, timeout=timeout)
+        _client_cache.set("anthropic", base_url, model, client)
+        return client
 
     async def complete(self, prompt: str, system: str = None, timeout: int = 15) -> dict:
         """
@@ -147,7 +229,7 @@ class LLMService:
         """
         OpenAI 语义生成专用路径：temperature=0.1 + response_format=json_object。
         """
-        client = self._get_openai_client(api_key, config.base_url, timeout)
+        client = self._get_openai_client(api_key, config.base_url, config.model, timeout)
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -169,7 +251,7 @@ class LLMService:
     async def _openai_complete_with_temp(
         self, api_key: str, config, prompt: str, system: str, timeout: int, temperature: float
     ) -> dict:
-        client = self._get_openai_client(api_key, config.base_url, timeout)
+        client = self._get_openai_client(api_key, config.base_url, config.model, timeout)
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -191,7 +273,7 @@ class LLMService:
         self, api_key: str, config, prompt: str, system: str, timeout: int, temperature: float
     ) -> dict:
         base_url = config.base_url or "https://api.minimaxi.com/anthropic"
-        client = self._get_anthropic_client(api_key, base_url, timeout)
+        client = self._get_anthropic_client(api_key, base_url, config.model, timeout)
         messages = []
         if system:
             messages.append({"role": "user", "content": f"<system>{system}</system>\n\n{prompt}"})
@@ -223,7 +305,7 @@ class LLMService:
         return {"content": content}
 
     async def _openai_complete(self, api_key: str, config, prompt: str, system: str, timeout: int) -> dict:
-        client = self._get_openai_client(api_key, config.base_url, timeout)
+        client = self._get_openai_client(api_key, config.base_url, config.model, timeout)
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -240,7 +322,7 @@ class LLMService:
 
     async def _anthropic_complete(self, api_key: str, config, prompt: str, system: str, timeout: int) -> dict:
         base_url = config.base_url or "https://api.minimaxi.com/anthropic"
-        client = self._get_anthropic_client(api_key, base_url, timeout)
+        client = self._get_anthropic_client(api_key, base_url, config.model, timeout)
         messages = []
         if system:
             messages.append({"role": "user", "content": f"<system>{system}</system>\n\n{prompt}"})
@@ -380,7 +462,7 @@ class LLMService:
             return {"error": "LLM 认证配置错误"}
 
         try:
-            client = self._get_openai_client(api_key, config.base_url, timeout)
+            client = self._get_openai_client(api_key, config.base_url, config.model, timeout)
             logger.info("Embedding 调用：model=%s, text_len=%d", model, len(text))
             response = await client.embeddings.create(
                 model=model,

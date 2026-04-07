@@ -3,6 +3,8 @@ import json
 import logging
 from typing import Dict, Any, Optional, List
 
+from services.common.settings import get_redis_url
+
 logger = logging.getLogger(__name__)
 
 # 缓存键前缀
@@ -14,9 +16,7 @@ def _get_redis_client():
     """获取 Redis 客户端"""
     try:
         import redis
-        import os
-        redis_url = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
-        return redis.from_url(redis_url, decode_responses=True)
+        return redis.from_url(get_redis_url(), decode_responses=True)
     except Exception as e:
         logger.warning("Redis 连接失败: %s", e)
         return None

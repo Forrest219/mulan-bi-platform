@@ -1,21 +1,21 @@
 """Redis 缓存工具（供 NL-to-Query 路由防抖用）"""
-import os
 import json
 import logging
 from typing import Optional, List
 
+from services.common.settings import get_redis_url
+
 logger = logging.getLogger(__name__)
 
-# Redis 连接配置（复用 Celery 的 Redis 地址）
-_REDIS_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
-_CACHE_TTL_SECONDS = 3600  # 1小时
+# 缓存 TTL（1小时）
+_CACHE_TTL_SECONDS = 3600
 
 
 def _get_redis_client():
     """获取 Redis 客户端（延迟导入）"""
     try:
         import redis
-        return redis.from_url(_REDIS_URL, decode_responses=True)
+        return redis.from_url(get_redis_url(), decode_responses=True)
     except Exception as e:
         logger.warning("Redis 连接失败，缓存将降级为内存: %s", e)
         return None

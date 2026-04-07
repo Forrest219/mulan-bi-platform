@@ -10,24 +10,17 @@ MCP Server 通信：JSON-RPC 2.0 over HTTP
 """
 import json
 import logging
-import os
 import threading
+from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
 import requests
 
 from app.core.crypto import get_tableau_crypto
+from services.common.settings import get_tableau_mcp_server_url, get_tableau_mcp_timeout
 from services.tableau.models import TableauConnection, TableauAsset
 
 logger = logging.getLogger(__name__)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# MCP Server 配置
-# ─────────────────────────────────────────────────────────────────────────────
-
-# MCP Server HTTP 端点（环境变量配置）
-_MCP_SERVER_URL = os.environ.get("TABLEAU_MCP_SERVER_URL", "http://localhost:8080/mcp")
-_MCP_TIMEOUT = int(os.environ.get("TABLEAU_MCP_TIMEOUT", "30"))
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 单例 Session 管理器（约束 B：长连接复用）
@@ -261,7 +254,7 @@ class TableauMCPClient:
         for attempt in range(2):
             try:
                 resp = self._session.post(
-                    f"{_MCP_SERVER_URL}/query-datasource",
+                    f"{get_tableau_mcp_server_url()}/query-datasource",
                     json=payload,
                     headers=headers,
                     timeout=timeout,
@@ -288,7 +281,7 @@ class TableauMCPClient:
                 raise TableauMCPError(
                     code="NLQ_006",
                     message="MCP 服务不可用",
-                    details={"mcp_server_url": _MCP_SERVER_URL},
+                    details={"mcp_server_url": get_tableau_mcp_server_url()},
                 )
             except Exception as e:
                 logger.error("MCP 请求异常: %s", e)

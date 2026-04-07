@@ -1,0 +1,43 @@
+name: Deploy — NLQ Cache Warmup
+
+# 部署流水线：在 FastAPI 和 Celery Worker 重启后执行
+# 触发条件：推送到 main 分支（CI 测试通过后）
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  warmup:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start Redis
+        uses: supercharge/redis-github-action@1.8.0
+        with:
+          redis-version: 7
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install backend deps
+        run: pip install -r backend/requirements.txt
+
+      - name: NLQ Cache Warmup (Dry Run)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CELERY_BROKER_URL: redis://localhost:6379/0
+        run: python scripts/warmup_nlq_cache.py --dry-run
+
+      - name: NLQ Cache Warmup (Live)
+        if: github.ref == 'refs/heads/main'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CELERY_BROKER_URL: redis://localhost:6379/0
+        run: python scripts/warmup_nlq_cache.py

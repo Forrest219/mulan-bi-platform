@@ -67,9 +67,9 @@ class AuthService:
 
     def _ensure_admin(self):
         """确保存在管理员账户（从环境变量读取账号密码）"""
-        import os
-        admin_username = os.environ.get("ADMIN_USERNAME", "admin")
-        admin_password = os.environ.get("ADMIN_PASSWORD")
+        from services.common.settings import get_admin_username, get_admin_password
+        admin_username = get_admin_username()
+        admin_password = get_admin_password()
 
         if not admin_password:
             # 未配置管理员密码时跳过自动创建（生产模式）

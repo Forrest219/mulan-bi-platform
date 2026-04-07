@@ -63,6 +63,48 @@ jobs:
       - name: Python syntax check
         run: python3 -m py_compile $(find backend -name "*.py")
 
+      - name: Ruff architecture red-line scan
+        run: |
+          pip install ruff
+          # P0-1: 检查 services/ 是否引入了 Web 框架（FastAPI/Starlette/uVicorn）
+          echo "=== [P0] 检查 services/ 跨层依赖 ==="
+          ! grep -r "from fastapi\|from starlette\|from uvicorn\|import FastAPI\|import Starlette\|import uvicorn" \
+            backend/services/ --include="*.py" && echo "PASS: 无 Web 框架引入 services/" \
+            || { echo "FAIL: services/ 引入了 Web 框架依赖！"; exit 1; }
+
+          # P0-2: 检查是否存在 os.environ 直接调用
+          # 排除：services/common/settings.py（中央配置读取层，os.environ 仅在此文件内合法）
+          echo "=== [P0] 检查 os.environ 直接访问 ==="
+          VIOLATIONS=$(grep -rn "os\.environ\|os\.getenv" \
+            backend/services/ --include="*.py" \
+            --exclude="settings.py" 2>/dev/null || true)
+          if [ -n "$VIOLATIONS" ]; then
+            echo "FAIL: services/ 发现 os.environ 调用："
+            echo "$VIOLATIONS"
+            exit 1
+          else
+            echo "PASS: services/ 无 os.environ（settings.py 除外）"
+          fi
+
+          # P0-3: 检查 src.tableau 错误 import 路径
+          echo "=== [P0] 检查错误 import 路径 ==="
+          ! grep -rn "from src\.\|import src\." \
+            backend/services/ --include="*.py" && echo "PASS: 无 src.* 错误导入" \
+            || { echo "FAIL: services/ 发现 src.* 错误导入！"; exit 1; }
+
+          # P0-4: Append-Only 表禁止 UPSERT（bi_quality_scores）
+          echo "=== [P0] 检查 Append-Only 表 UPSERT ==="
+          ! grep -rn "on_conflict_do\|ON CONFLICT\|INSERT.*ON.*CONFLICT" \
+            backend/services/ --include="*.py" && echo "PASS: 无 UPSERT" \
+            || { echo "FAIL: services/ 发现 UPSERT 模式！"; exit 1; }
+
+          # Ruff 代码风格（warn 级别，不阻断 CI）
+          echo "=== [P2] Ruff 代码风格（warn only）==="
+          ruff check backend/ \
+            --output-format=concise \
+            --ignore=D100,D104,D203,D211,D212,D400,D401,D415 \
+            --max-warnings=200 || true
+
       - name: Verify backend app imports
         env:
           DATABASE_URL: postgresql://mulan:mulan@localhost:5432/mulan_bi_test

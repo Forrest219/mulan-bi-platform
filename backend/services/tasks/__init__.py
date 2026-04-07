@@ -1,17 +1,19 @@
 """
 Celery 任务队列 — Mulan BI Platform
-"""
-import os
 
+⚠️ 架构说明：
+Celery worker 启动时会 import 本模块，此时 broker/backend URL 必须可用。
+因此本文件使用 services.common.settings 中的 lru_cache 惰性读取，
+在 celery worker 进程内首次调用时读取一次并缓存（worker 进程不退出会一直有效）。
+"""
 from celery import Celery
 
-CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
-CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
+from services.common.settings import get_celery_broker_url, get_celery_result_backend
 
 celery_app = Celery(
     "mulan_bi",
-    broker=CELERY_BROKER_URL,
-    backend=CELERY_RESULT_BACKEND,
+    broker=get_celery_broker_url(),
+    backend=get_celery_result_backend(),
 )
 
 celery_app.conf.update(
