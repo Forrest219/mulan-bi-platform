@@ -208,7 +208,7 @@ draft ──→ ai_generated ──→ reviewed ──→ approved ──→ pub
 - `reviewed → approved`：审核人点击通过
 - `reviewed → rejected`：审核人驳回，返回 draft
 - `approved → published`：发布服务确认回写成功
-- `published → draft`：回滚后降级
+- `published → draft`：回滚（Rollback）。**⚠️ 分布式状态一致性说明**：回滚不仅是将 Mulan 本地数据库的状态置为 draft。本质上，这是一次使用历史快照发起的逆向 Publish 操作——**必须同步调用 Tableau REST API 还原线上资产的 caption/description**，防止 Mulan 与 Tableau 出现数据脑裂（即 Mulan 侧状态与 Tableau 侧元数据不一致）。
 
 #### 3.2.2 AI 语义生成
 

@@ -16,12 +16,14 @@
 | 索引类型 | HNSW（层次可导航小世界图） | |
 | 向量操作符 | `vector_cosine_ops` | 余弦距离 |
 | 向量存储类型 | JSONB（1536 维 float 数组） | 查询时 cast to `::vector` |
-| m（每层连接数） | 16 | pgvector 0.5 默认值 |
+| m（每层连接数） | 16 | pgvector 0.6+ 默认值 |
 | ef_construction | 200 | 构建时的动态列表大小 |
 | 表名 | `kb_embeddings` |  |
 | 数据来源 | `document`, `glossary` |  |
 
-**关键警告：`REINDEX CONCURRENTLY` 不支持 HNSW 索引（pgvector 0.5 限制）。执行 REINDEX 时会持有 `AccessExclusiveLock`，阻塞所有写入操作。**
+**系统基线要求：pgvector 0.6+**
+
+由于系统已强制要求升级至 pgvector 0.6+，HNSW 索引支持 `REINDEX INDEX CONCURRENTLY`，可实现**零停机重建**，彻底避免 `AccessExclusiveLock` 阻塞知识库的写入操作。
 
 ### 1.2 索引用途
 
@@ -57,7 +59,7 @@ def reindex_hnsw_task():
             text("SELECT 1 FROM pg_indexes WHERE indexname = 'ix_emb_hnsw'")
         )
         # ...
-        conn.execute(text("REINDEX INDEX ix_emb_hnsw"))
+        conn.execute(text("REINDEX INDEX CONCURRENTLY ix_emb_hnsw"))
         conn.commit()
 ```
 
@@ -108,8 +110,8 @@ WHERE indexname = 'ix_emb_hnsw';
 -- 查看表行数
 SELECT COUNT(*) FROM kb_embeddings;
 
--- 执行重建（⚠️ 会阻塞写入，建议在维护窗口执行）
-REINDEX INDEX ix_emb_hnsw;
+-- 执行重建（零停机，pgvector 0.6+ 支持 CONCURRENTLY）
+REINDEX INDEX CONCURRENTLY ix_emb_hnsw;
 
 -- 重建后再次检查大小
 SELECT
@@ -174,10 +176,10 @@ FROM kb_embeddings;
 | pgvector 版本 | REINDEX CONCURRENTLY | HNSW 支持 |
 |--------------|----------------------|-----------|
 | 0.4.x | ❌ 不支持 | ✅ 支持 |
-| 0.5.x（当前） | ❌ 不支持 | ✅ 支持 |
-| 0.6.x+ | ✅ 支持 | ✅ 支持 |
+| 0.5.x（已废弃） | ❌ 不支持 | ✅ 支持 |
+| **0.6.x+（基线要求）** | ✅ 支持 | ✅ 支持 |
 
-**升级 pgvector 到 0.6+ 后，可改用 `REINDEX INDEX CONCURRENTLY ix_emb_hnsw`，实现零停机重建。**
+**当前系统已强制基线升级至 pgvector 0.6+，维护任务统一使用 `REINDEX INDEX CONCURRENTLY ix_emb_hnsw` 实现零停机重建。**
 
 ---
 
@@ -216,9 +218,9 @@ FROM kb_embeddings;
 
 ## 7. 故障处理
 
-### REINDEX 期间写入阻塞
+### REINDEX CONCURRENTLY 期间健康监控
 
-**现象**：写入超时，`AccessExclusiveLock` 等待
+> **注意**：pgvector 0.6+ 使用 `REINDEX CONCURRENTLY`，不会阻塞写入。如发现写入延迟仍需检查。
 
 **处理**：
 1. 检查 `pg_locks` 确认锁状态：

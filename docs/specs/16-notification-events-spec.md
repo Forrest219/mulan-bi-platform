@@ -48,6 +48,12 @@ Mulan BI Platform 当前各模块（Tableau 同步、语义治理、健康扫描
 
 基于 [03-data-model-overview.md](03-data-model-overview.md) 第 7 节规划表扩展设计。
 
+**高频表治理策略**：
+
+> `bi_events` 为 Append-Only 的高频写入表，必须采用 PostgreSQL `PARTITION BY RANGE (created_at)` **按月分区**机制。严禁使用直接的 `DELETE` 语句清理历史数据，否则会触发全表锁导致写入阻塞。
+>
+> 依赖 Celery Beat 调度，增加每月自动 `DROP` 90天+历史分区的任务，实现分区级清理而非行级删除。
+
 | 列 | 类型 | 约束 | 默认值 | 说明 |
 |----|------|------|--------|------|
 | id | BIGINT | PK, AUTO | - | 主键（使用 BIGINT 支持高频写入） |
@@ -58,6 +64,10 @@ Mulan BI Platform 当前各模块（Tableau 同步、语义治理、健康扫描
 | actor_id | INTEGER | NULLABLE, FK→auth_users.id | - | 触发者用户 ID（系统事件为 NULL） |
 | payload_json | JSONB | NOT NULL | `'{}'` | 事件载荷数据 |
 | created_at | TIMESTAMP | NOT NULL, INDEX | `now()` | 事件发生时间 |
+
+**分区策略**：
+- 按 `created_at` 月分区（如 `bi_events_2026_01`、`bi_events_2026_02`）
+- Alembic 迁移中创建初始分区，Celery Beat 每月自动创建新分区并 `DROP` 90天+历史分区
 
 **索引策略：**
 
@@ -390,7 +400,7 @@ sequenceDiagram
 - 前端通过轮询或未来 WebSocket 获取未读数
 - 通知保留策略：90 天后自动归档/删除
   - **Sprint 3 实现**：`services.tasks.event_tasks.purge_old_events` Celery Beat 每日执行
-  - `bi_events.created_at < now() - 90 天` → DELETE（级联删除 `bi_notifications`）
+  - ⚠️ **禁止直接 DELETE**：`bi_events` 已启用按月分区，`purge_old_events` 必须通过 `DROP TABLE IF EXISTS bi_events_YYYY_MM` 分区级清理，**严禁使用行级 DELETE**
   - `bi_notifications` 孤儿记录（event_id 无对应事件）→ DELETE
   - 每次执行记录归档数量日志
 

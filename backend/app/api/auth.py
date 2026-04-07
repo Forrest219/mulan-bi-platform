@@ -81,11 +81,23 @@ class RegisterRequest(BaseModel):
     display_name: Optional[str] = None
 
 
+class MFAVerifyRequest(BaseModel):
+    """MFA 验证请求（setup / disable 时使用）"""
+    code: str  # 6 位 TOTP Code 或备用码
+
+
+class MFADisableRequest(BaseModel):
+    """禁用 MFA 请求"""
+    password: str
+    code: str  # MFA 验证码
+
+
 class LoginResponse(BaseModel):
     """登录响应"""
     success: bool
     message: str
     user: Optional[dict] = None
+    mfa_required: bool = False  # MFA 已启用，需要输入验证码
 
 
 def get_session_user(request: Request) -> Optional[dict]:
@@ -104,7 +116,26 @@ async def login(request: LoginRequest, response: Response):
     if not user:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
-    # Access Token（JWT）
+    # 检查 MFA 是否启用
+    if user.get("mfa_enabled"):
+        # MFA 启用：颁发临时 session cookie，但返回 MFA challenge
+        token = _create_session_token(user["id"], user["username"], user["role"])
+        _is_secure = os.environ.get("SECURE_COOKIES", "false").lower() == "true"
+        response.set_cookie(
+            key="session",
+            value=token,
+            httponly=True,
+            samesite="lax",
+            secure=_is_secure,
+            max_age=_JWT_EXPIRE_SECONDS
+        )
+        return LoginResponse(
+            success=True,
+            message="请输入 MFA 验证码完成登录",
+            user=user
+        )
+
+    # MFA 未启用：完整登录流程
     token = _create_session_token(user["id"], user["username"], user["role"])
     _is_secure = os.environ.get("SECURE_COOKIES", "false").lower() == "true"
     response.set_cookie(
@@ -218,6 +249,135 @@ async def logout(request: Request, response: Response):
     response.delete_cookie("session")
     response.delete_cookie(_REFRESH_TOKEN_COOKIE_NAME)
     return {"success": True, "message": "已登出"}
+
+
+# ──────────────────────────────────────────────────────────────
+# MFA（TOTP）端点
+# ──────────────────────────────────────────────────────────────
+
+@router.post("/mfa/setup")
+async def mfa_setup(request: Request, response: Response):
+    """
+    生成 MFA 验证码（Setup Flow）。
+
+    1. 用户在个人设置页面请求开启 MFA
+    2. 后端生成 TOTP Secret 和 QR Code URI
+    3. 前端显示 QR 码供用户扫描
+    4. 用户输入扫描后的第一个 Code 调用 /mfa/verify-setup 完成启用
+    """
+    user_info = _get_current_user(request)
+    if not user_info:
+        raise HTTPException(status_code=401, detail="未登录")
+
+    result = auth_service.generate_mfa_secret(user_info["id"])
+    if not result:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    secret, qr_uri, backup_codes = result
+
+    # 临时存储 encrypted secret（验证后才正式启用）
+    encrypted_secret = auth_service._encrypt_mfa_field(secret)
+    auth_service._db.set_mfa_secret(user_info["id"], encrypted_secret)
+
+    return {
+        "secret": secret,
+        "qr_uri": qr_uri,
+        "backup_codes": backup_codes,
+        "message": "请使用 authenticator 应用扫描上方二维码，然后输入验证码完成启用",
+    }
+
+
+@router.post("/mfa/verify-setup")
+async def mfa_verify_setup(request: MFAVerifyRequest, response: Response):
+    """
+    验证 MFA Setup Code 并启用 MFA。
+
+    需要先调用 /mfa/setup 获取 secret 和 backup codes。
+    """
+    user_info = _get_current_user(request)
+    if not user_info:
+        raise HTTPException(status_code=401, detail="未登录")
+
+    success, data = auth_service.setup_mfa(user_info["id"], request.code)
+    if not success:
+        raise HTTPException(status_code=400, detail=data)
+
+    return {
+        "success": True,
+        "message": "MFA 已成功启用，请妥善保管备用码",
+        "backup_codes": data["backup_codes"],
+    }
+
+
+@router.post("/mfa/disable")
+async def mfa_disable(request: MFADisableRequest, response: Response):
+    """
+    禁用 MFA（需要密码 + MFA 验证码双重验证）。
+    """
+    user_info = _get_current_user(request)
+    if not user_info:
+        raise HTTPException(status_code=401, detail="未登录")
+
+    success, message = auth_service.disable_mfa(
+        user_id=user_info["id"],
+        password=request.password,
+        code=request.code,
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+
+    return {"success": True, "message": message}
+
+
+@router.get("/mfa/status")
+async def mfa_status(request: Request):
+    """查询当前用户的 MFA 启用状态"""
+    user_info = _get_current_user(request)
+    if not user_info:
+        raise HTTPException(status_code=401, detail="未登录")
+
+    mfa_enabled = auth_service._db.get_mfa_enabled(user_info["id"])
+    return {"mfa_enabled": mfa_enabled}
+
+
+@router.post("/mfa/verify")
+async def mfa_verify(request: MFAVerifyRequest, response: Response):
+    """
+    完成 MFA 登录验证（登录流程的第二步）。
+
+    在登录返回 mfa_required=True 后，前端调用此接口验证 TOTP Code。
+    验证成功后颁发 Refresh Token 完成登录。
+    """
+    user_info = _get_current_user(request)
+    if not user_info:
+        raise HTTPException(status_code=401, detail="会话已过期，请重新登录")
+
+    if not auth_service.verify_mfa_code(user_info["id"], request.code):
+        raise HTTPException(status_code=400, detail="MFA 验证码不正确")
+
+    # MFA 验证成功：颁发 Refresh Token 完成登录
+    _device = request.headers.get("User-Agent", "")[:128]
+    refresh_token = auth_service.create_refresh_token(
+        user_id=user_info["id"],
+        device_fingerprint=_device,
+    )
+    _is_secure = os.environ.get("SECURE_COOKIES", "false").lower() == "true"
+    response.set_cookie(
+        key=_REFRESH_TOKEN_COOKIE_NAME,
+        value=refresh_token,
+        httponly=True,
+        samesite="lax",
+        secure=_is_secure,
+        max_age=_REFRESH_TOKEN_EXPIRE_SECONDS,
+    )
+
+    user = auth_service.get_user(user_info["id"])
+    return LoginResponse(
+        success=True,
+        message="MFA 验证成功",
+        user=user,
+        mfa_required=False,
+    )
 
 
 @router.post("/refresh")

@@ -75,7 +75,9 @@ DELETE /api/llm/config           # 删除配置（恢复默认状态）
 
 #### 加密存储
 
-`api_key` 使用 Fernet 加密（复用 `DATASOURCE_ENCRYPTION_KEY`），解密仅在后端内存中使用，不暴露给前端。
+`api_key` 使用 Fernet 加密（使用独立的 `LLM_ENCRYPTION_KEY`），解密仅在后端内存中使用，不暴露给前端。
+>
+> **⚠️ 密钥隔离规范**：严禁复用 `DATASOURCE_ENCRYPTION_KEY` 或任何其他密钥。LLM 配置必须使用专属的 `LLM_ENCRYPTION_KEY`，严格对齐 `ARCHITECTURE.md` 的四把密钥物理隔离规范。
 
 ### 2.2 标准化 LLM 调用服务（P0）
 

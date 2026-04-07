@@ -43,7 +43,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<{ success: boolean; message: string }>;
+  login: (email: string, password: string) => Promise<{ success: boolean; message: string; mfa_required?: boolean }>;
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;  // 退出所有设备
   checkAuth: () => Promise<void>;
@@ -155,6 +155,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await response.json();
 
       if (response.ok && data.success) {
+        if (data.mfa_required) {
+          // MFA enabled — 返回 MFA challenge，不设置用户上下文（验证未完成）
+          return { success: true, message: data.message || '请输入 MFA 验证码', mfa_required: true };
+        }
+        // 正常登录完成
         setUser(data.user);
         // 计算 Access Token 过期时间（当前时间 + JWT_EXPIRE_SECONDS）
         // JWT_EXPIRE_SECONDS = 7 天 = 604800 秒

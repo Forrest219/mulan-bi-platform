@@ -344,7 +344,132 @@ class AuthService:
 
     # ========== 用户标签 ==========
 
-    # ========== Refresh Token 管理 ==========
+    # ========== MFA（TOTP）管理 ==========
+
+    def generate_mfa_secret(self, user_id: int) -> Optional[tuple]:
+        """
+        为用户生成 MFA TOTP Secret 和备用码。
+
+        返回 (secret, qr_uri, backup_codes_plaintext) 元组。
+        调用方负责加密存储 secret 和 backup codes。
+        """
+        user = self._db.get_user(user_id)
+        if not user:
+            return None
+
+        import pyotp
+        secret = pyotp.random_base32()
+        totp = pyotp.TOTP(secret)
+        issuer = "MulanBI"
+        qr_uri = totp.provisioning_uri(name=user.email, issuer_name=issuer)
+
+        # 生成 8 个备用码（一次性密码）
+        import secrets
+        backup_codes = [secrets.token_hex(4).upper() for _ in range(8)]
+
+        return secret, qr_uri, backup_codes
+
+    def _encrypt_mfa_field(self, plaintext: str) -> str:
+        """使用 LLM CryptoHelper 加密 MFA 敏感字段"""
+        from app.core.crypto import get_llm_crypto
+        crypto = get_llm_crypto()
+        return crypto.encrypt(plaintext.encode()).decode()
+
+    def _decrypt_mfa_field(self, ciphertext: str) -> str:
+        """解密 MFA 敏感字段"""
+        from app.core.crypto import get_llm_crypto
+        crypto = get_llm_crypto()
+        return crypto.decrypt(ciphertext.encode()).decode()
+
+    def verify_mfa_code(self, user_id: int, code: str) -> bool:
+        """
+        验证用户输入的 TOTP MFA Code。
+
+        也检查是否为未使用的备用码，若是则标记为已使用。
+        """
+        encrypted_secret = self._db.get_mfa_secret_encrypted(user_id)
+        if not encrypted_secret:
+            return False
+
+        try:
+            secret = self._decrypt_mfa_field(encrypted_secret)
+        except Exception:
+            return False
+
+        import pyotp
+
+        # 验证 TOTP（允许 ±1 窗口，防止时钟漂移）
+        totp = pyotp.TOTP(secret)
+        if totp.verify(code, valid_window=1):
+            return True
+
+        # 检查备用码
+        encrypted_backup = self._db.get_backup_codes_encrypted(user_id)
+        if encrypted_backup:
+            try:
+                backup_list = self._decrypt_mfa_field(encrypted_backup)
+                import json
+                codes: list = json.loads(backup_list)
+                if code.upper() in codes:
+                    # 标记备用码为已使用（替换为 None）
+                    codes = [c if c != code.upper() else None for c in codes]
+                    new_encrypted = self._encrypt_mfa_field(json.dumps(codes))
+                    self._db.enable_mfa(user_id, encrypted_secret, new_encrypted)
+                    return True
+            except Exception:
+                pass
+
+        return False
+
+    def setup_mfa(self, user_id: int, code: str) -> tuple:
+        """
+        设置 MFA：验证初始 Code 后启用 MFA。
+
+        返回 (success, secret_or_error_message)
+        success=True 时返回 secret（明文，仅此时展示给用户）
+        """
+        # 生成 secret（如果还没有）
+        result = self.generate_mfa_secret(user_id)
+        if not result:
+            return False, "用户不存在"
+        secret, qr_uri, backup_codes_plaintext = result
+
+        # 验证输入的 code 是否正确
+        encrypted_secret = self._encrypt_mfa_field(secret)
+        # 临时存储 secret 以便验证
+        self._db.set_mfa_secret(user_id, encrypted_secret)
+
+        if not self.verify_mfa_code(user_id, code):
+            # 验证失败，清除临时 secret
+            self._db.set_mfa_secret(user_id, "")
+            return False, "验证码不正确，请确认 authenticator 应用已同步"
+
+        # 验证通过，启用 MFA
+        import json
+        backup_codes_encrypted = self._encrypt_mfa_field(json.dumps(backup_codes_plaintext))
+        self._db.enable_mfa(user_id, encrypted_secret, backup_codes_encrypted)
+
+        return True, {"secret": secret, "qr_uri": qr_uri, "backup_codes": backup_codes_plaintext}
+
+    def disable_mfa(self, user_id: int, password: str, code: str) -> tuple:
+        """
+        禁用 MFA：验证密码 + MFA Code 后禁用。
+
+        返回 (success, message)
+        """
+        # 验证密码
+        user = self._db.get_user(user_id)
+        if not user:
+            return False, "用户不存在"
+        if not self.verify_password(password, user.password_hash):
+            return False, "密码不正确"
+
+        # 验证 MFA Code
+        if not self.verify_mfa_code(user_id, code):
+            return False, "MFA 验证码不正确"
+
+        self._db.disable_mfa(user_id)
+        return True, "MFA 已禁用"
 
     def create_refresh_token(
         self,

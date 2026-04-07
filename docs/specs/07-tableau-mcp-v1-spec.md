@@ -3,6 +3,7 @@
 | 版本 | 日期 | 状态 |
 |------|------|------|
 | v1.0 | 2026-04-03 | Draft |
+| v1.1 | 2026-04-06 | Draft |
 
 ---
 
@@ -150,8 +151,29 @@ Mulan BI Platform 需要与 Tableau Server/Cloud 深度集成，实现 BI 资产
                              │ ai_role                        │
                              │ ai_confidence                  │
                              │ ai_annotated_at                │
-                             └────────────────────────────────┘
+                             └─────────────┬──────────────────┘
+                                           │ 1:1 (Spec 12)
+                                           │ (field_registry_id → id)
+                                           ▼
+                             ┌──────────────────────────────────────────┐
+                             │  tableau_field_semantics (Spec 12)         │
+                             │───────────────────────────────────────────│
+                             │  id (PK)                                  │
+                             │  field_registry_id (FK) ────────────────▶│ ← 表边界：Spec 07 写入 asset_id/field_name
+                             │  connection_id (FK)                        │   Spec 12 负责 sensitivity_level / canonical_name
+                             │  sensitivity_level  │──── low / medium /    │
+                             │                    │       high / confidential │
+                             │  canonical_name                              │
+                             │  semantic_tags (JSONB)                       │
+                             │  annotated_at                                │
+                             │  annotated_by                                │
+                             └──────────────────────────────────────────┘
 ```
+
+> **表边界说明（Spec 07 ↔ Spec 12）**
+> - `tableau_datasource_fields`：由 Spec 07 同步流程写入（字段元数据来自 Tableau Metadata API）
+> - `tableau_field_semantics`：由 Spec 12 语义维护流程管理，`field_registry_id` 指向 `tableau_datasource_fields.id`
+> - 两个表通过 `(field_registry_id, connection_id)` 关联，不直接外键约束（跨模块解耦）
 
 ### 2.2 表定义详情
 
@@ -621,6 +643,20 @@ GET /assets/search
 
 **搜索策略**：基于 `ILIKE` 模糊匹配 name、project_name、owner_name 三个字段。
 
+> **🛑 P0 安全修复：强制多租户隔离（IDOR 防护）**
+>
+> 如果当前用户**非 admin** 且请求中**未指定 `connection_id`**：
+> ```sql
+> WHERE connection_id IN (
+>     SELECT id FROM tableau_connections
+>     WHERE owner_id = :current_user_id
+> )
+> ```
+> 即：自动将搜索范围限定为当前用户自己创建的连接。
+>
+> 禁止出现 `SELECT * FROM tableau_assets WHERE ...` 不带 connection_id 过滤的查询。
+> 该约束同样适用于 `GET /assets`（3.3.1）接口。
+
 #### 3.3.3 获取资产详情
 
 ```
@@ -877,9 +913,17 @@ POST /assets/{asset_id}/explain
 2. **拉取工作簿**：分页获取所有 workbooks，同时拉取每个 workbook 的关联数据源
 3. **拉取视图**：分页获取所有 views，根据 `sheetType` 区分 view 和 dashboard，关联父 workbook
 4. **拉取数据源**：分页获取所有独立 datasources
-5. **UPSERT**：基于 `(connection_id, tableau_id)` 唯一键执行 INSERT OR UPDATE
-6. **软删除**：将本次未出现在同步结果中的资产标记为 `is_deleted = true`
-7. **日志记录**：更新 sync_log 的计数和状态
+5. **拉取字段级元数据**（⚠️ P0 修复，Spec 12 边界）：对每个 datasource 资产调用 Tableau Metadata API 或 REST API，解析字段元数据（`field_name`、`data_type`、`role`、`description`、`formula`），批量写入 `tableau_datasource_fields` 表
+6. **UPSERT**：基于 `(connection_id, tableau_id)` 唯一键执行 INSERT OR UPDATE
+7. **软删除**：将本次未出现在同步结果中的资产标记为 `is_deleted = true`
+8. **日志记录**：更新 sync_log 的计数和状态
+
+> **⚠️ 字段元数据同步说明（Spec 12 边界）**
+> - 数据源字段是 Spec 12 语义标注和 Spec 14 NL-to-Query 的上游依赖
+> - 字段元数据必须在本步骤完整拉取，否则健康度评分因子 4（`fields_have_captions`）无法生效
+> - Tableau Metadata API：推荐使用 GraphQL endpoint `/api/metadata/graphql`；fallback 至 REST `/api/{version}/datasources/{datasource_luid}/fields`
+> - 每个数据源的字段应做 UPSERT（按 `asset_id + field_name` 唯一键），支持增量同步
+> - 字段表 `tableau_datasource_fields` 写入后方可被 Spec 12 的 `TableauFieldSemantics` 关联标注
 
 #### 4.1.3 UPSERT 逻辑
 
@@ -1111,9 +1155,17 @@ decrypted = crypto.decrypt(encrypted)     # 使用时解密
 |------|------|
 | ORM | SQLAlchemy 2.x |
 | 数据库 | PostgreSQL 16 |
-| Session 管理 | 中央 `SessionLocal`（`app.core.database`），每次操作创建新 session 并 `expire_all()` |
+| Session 管理 | **API 层**：FastAPI `Depends(get_db)` 注入（请求级生命周期，自动 commit/rollback）；**Celery 任务层**：上下文管理器 `with get_db_context() as db:`（任务级生命周期） |
 | 迁移 | Alembic 管理 DDL |
 | JSONB | 原生 PostgreSQL JSONB 类型（tags, raw_metadata, health_details, details, metadata_json） |
+
+> **⚠️ Session 管理约束（P1）**
+>
+> 现有代码中每次 DB 操作创建新 session 并 `expire_all()` 的模式，在高并发（Celery 多 worker + FastAPI 多 worker）场景下存在连接池耗尽风险。统一规范：
+>
+> 1. **API 层**（FastAPI 路由 / 依赖服务）：使用 `get_db()` 依赖注入，由框架管理 session 生命周期（begin → commit → close）
+> 2. **Celery 异步任务层**：使用 `with get_db_context() as db:` 上下文管理器，不自行创建 session
+> 3. **禁止**：在异步任务中调用 `db.session.close()` 或 `expire_all()`，由上下文管理器统一清理
 
 ### 7.4 Tableau Server
 
@@ -1255,18 +1307,18 @@ Celery Beat (每60s)          scheduled_sync_all          PostgreSQL         syn
 
 ## 10. 开放问题
 
-| # | 问题 | 影响 | 优先级 | 建议 |
-|---|------|------|--------|------|
-| 1 | `TableauDatabase` 每次操作创建新 Session 并 `expire_all()`，高并发下可能有性能问题 | 性能 | P1 | 考虑引入请求级 session 生命周期管理，与 FastAPI `Depends(get_db)` 统一 |
-| 2 | 同步服务中 `sync_service.py:145` 引用了旧路径 `from src.tableau.models`，生产环境可能报错 | 功能 | P0 | 修正为 `from services.tableau.models` |
-| 3 | `health-overview` 对所有资产逐一计算健康评分，资产量大时响应缓慢 | 性能 | P2 | 考虑使用缓存的 `health_score` 字段，仅重新计算过期或无缓存的资产 |
-| 4 | 搜索接口使用 `ILIKE` 模糊匹配，未限制非 admin 用户跨连接搜索的场景 | 安全 | P1 | 当 `connection_id` 为 null 时，应自动限定为用户有权访问的连接 |
-| 5 | MCP REST 模式的分页解析器对多种响应格式做了兼容处理，但缺少 XML 响应的处理 | 兼容性 | P2 | Tableau REST API 默认返回 JSON（需要 Accept: application/json header），但部分旧版本可能返回 XML |
-| 6 | `tags` 字段在同步时使用 `json.dumps()` 写入，但 JSONB 列类型可直接接受 Python list | 代码质量 | P3 | 统一为直接传入 list，移除不必要的 `json.dumps()` |
-| 7 | 缺少字段级元数据的自动拉取（当前 `tableau_datasource_fields` 依赖外部填入） | 功能 | P1 | 在同步流程中增加 Metadata API 调用，自动拉取字段元数据 |
-| 8 | AI 解读的缓存策略为固定 1 小时，无法根据资产变更动态失效 | 功能 | P3 | 考虑在 synced_at 更新时清除 ai_explain 缓存 |
-| 9 | Celery Beat 任务 `scheduled_sync_all` 无防重入机制 | 可靠性 | P2 | 如果前一次 scheduled_sync_all 执行超过 60 秒，可能产生重叠执行 |
-| 10 | 缺少 WebSocket/SSE 推送，前端只能轮询同步状态 | 用户体验 | P3 | 考虑在 V2 中引入实时推送 |
+| # | 问题 | 影响 | 优先级 | 状态 | 修复说明 |
+|---|------|------|--------|------|---------|
+| 1 | `TableauDatabase` 每次操作创建新 Session 并 `expire_all()`，高并发下可能有性能问题 | 性能 | P1 | ✅ 已约束 | §7.3 明确 API 层用 `Depends(get_db)`、Celery 层用 `get_db_context()` |
+| 2 | 同步服务中 `sync_service.py:145` 引用了旧路径 `from src.tableau.models`，生产环境可能报错 | 功能 | P0 | 🔴 待修复 | 需修正为 `from services.tableau.models` |
+| 3 | `health-overview` 对所有资产逐一计算健康评分，资产量大时响应缓慢 | 性能 | P2 | 🟡 待优化 | 考虑使用缓存的 `health_score` 字段，仅重新计算过期或无缓存的资产 |
+| 4 | 搜索接口使用 `ILIKE` 模糊匹配，未限制非 admin 用户跨连接搜索（IDOR） | 安全 | P0 | ✅ 已约束 | §3.3.2 增加强制 tenant isolation，非 admin 不带 connection_id 时自动限定为自己创建的连接 |
+| 5 | MCP REST 模式的分页解析器对多种响应格式做了兼容处理，但缺少 XML 响应的处理 | 兼容性 | P2 | 🟡 待确认 | Tableau REST API 默认返回 JSON（需要 Accept: application/json header），但部分旧版本可能返回 XML |
+| 6 | `tags` 字段在同步时使用 `json.dumps()` 写入，但 JSONB 列类型可直接接受 Python list | 代码质量 | P3 | 🟡 可优化 | 统一为直接传入 list，移除不必要的 `json.dumps()` |
+| 7 | 缺少字段级元数据的自动拉取（`tableau_datasource_fields` 依赖外部填入） | 功能 | P0 | ✅ 已修复 | §4.1.2 同步流程增加 Step 5：调用 Tableau Metadata API 拉取字段元数据并写入 `tableau_datasource_fields` |
+| 8 | AI 解读的缓存策略为固定 1 小时，无法根据资产变更动态失效 | 功能 | P3 | 🟡 可优化 | 考虑在 synced_at 更新时清除 ai_explain 缓存 |
+| 9 | Celery Beat 任务 `scheduled_sync_all` 无防重入机制 | 可靠性 | P2 | 🟡 待优化 | 如果前一次 scheduled_sync_all 执行超过 60 秒，可能产生重叠执行 |
+| 10 | 缺少 WebSocket/SSE 推送，前端只能轮询同步状态 | 用户体验 | P3 | 🟡 V2 规划 | 考虑在 V2 中引入实时推送 |
 
 ---
 

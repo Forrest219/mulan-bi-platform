@@ -11,7 +11,7 @@
 
 ### 1.2 范围
 - **包含**：登录/注册/登出、JWT 会话、RBAC 四级角色、用户 CRUD、用户组管理、权限配置、活动标签
-- **不含**：OAuth2/SSO 集成、MFA 多因子认证（规划中）
+- **不含**：OAuth2/SSO 集成（规划中）；MFA 已实现（见 §6.3）
 
 ### 1.3 关联文档
 - [02-api-conventions.md](02-api-conventions.md) — 认证守卫约定
@@ -93,11 +93,18 @@ erDiagram
 
 | Method | Path | Auth | 说明 |
 |--------|------|------|------|
-| POST | `/api/auth/login` | 无 | 用户登录（用户名或邮箱） |
+| POST | `/api/auth/login` | 无 | 用户登录（用户名或邮箱），MFA 启用时返回 `{ mfa_required: true }` |
 | POST | `/api/auth/register` | 无 | 用户自助注册 |
-| POST | `/api/auth/logout` | Cookie | 登出（清除 Cookie） |
+| POST | `/api/auth/logout` | Cookie | 登出（清除 Cookie + 撤销 Refresh Token） |
+| POST | `/api/auth/refresh` | Cookie | 使用 Refresh Token 刷新 Access Token（Sliding Window） |
+| POST | `/api/auth/refresh/revoke-all` | Cookie | 撤销当前用户所有 Refresh Token |
 | GET | `/api/auth/me` | Cookie | 获取当前用户信息 |
 | GET | `/api/auth/verify` | Cookie | 验证会话有效性 |
+| GET | `/api/auth/mfa/status` | Cookie | 查询 MFA 启用状态 |
+| POST | `/api/auth/mfa/setup` | Cookie | 生成 TOTP Secret 和 QR Code |
+| POST | `/api/auth/mfa/verify-setup` | Cookie | 验证首个 Code 完成 MFA 启用 |
+| POST | `/api/auth/mfa/verify` | Cookie | 登录流程第二步：验证 TOTP Code |
+| POST | `/api/auth/mfa/disable` | Cookie | 禁用 MFA（需密码+MFA Code） |
 
 #### POST /api/auth/login
 
@@ -115,6 +122,7 @@ erDiagram
 {
   "success": true,
   "message": "登录成功",
+  "mfa_required": false,
   "user": {
     "id": 1,
     "username": "admin",
@@ -125,12 +133,16 @@ erDiagram
     "group_ids": [1],
     "group_names": ["核心团队"],
     "is_active": true,
+    "mfa_enabled": false,
     "created_at": "2026-04-01 00:00:00",
     "last_login": "2026-04-03 10:30:00"
   }
 }
 ```
-> 同时设置 `Set-Cookie: session=<JWT>; HttpOnly; SameSite=Lax; Max-Age=604800`
+> 若用户已启用 MFA，`mfa_required` 为 `true`，`message` 为"请输入 MFA 验证码完成登录"，session cookie 已预置。
+> 同时设置两个 HTTP-only Cookie：
+> - `session=<JWT>`：Access Token，7 天有效（`Max-Age=604800`）
+> - `refresh_token=<Token>`：Refresh Token，30 天 Sliding Window（`Max-Age=2592000`）
 
 #### POST /api/auth/register
 
@@ -146,6 +158,49 @@ erDiagram
 **Response (200):** 同 login，自动登录并设置 Cookie。
 
 **限流**：同一 IP 60 秒内最多 5 次，超限返回 429。
+
+#### POST /api/auth/refresh
+
+**说明**：使用 Refresh Token 换取新的 Access Token（Sliding Window 机制）。
+
+**Request**: 无 Body，从 Cookie 自动读取 `refresh_token`。
+
+**Response (200):**
+```json
+{ "success": true, "message": "Token 已刷新" }
+```
+同时颁发新的 `session` Cookie 和 `refresh_token` Cookie（轮换）。
+
+**Response (401)**: Refresh Token 无效或已过期。
+
+#### POST /api/auth/refresh/revoke-all
+
+**说明**：撤销当前用户所有 Refresh Token（"退出所有设备"功能）。
+
+**Response (200):**
+```json
+{ "success": true, "message": "已撤销 3 个设备登录", "revoked_count": 3 }
+```
+
+#### POST /api/auth/mfa/verify
+
+**说明**：登录 MFA Challenge 的第二步。登录接口在 MFA 启用时返回 `mfa_required: true` 并预置 session cookie，前端调用此接口完成验证。
+
+**Request:**
+```json
+{ "code": "123456" }
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "MFA 验证成功",
+  "user": { ... },
+  "mfa_required": false
+}
+```
+同时颁发 `refresh_token` Cookie 完成登录流程。
 
 ### 3.2 用户管理端点 (`/api/users`) — 仅 admin
 
@@ -334,6 +389,28 @@ admin 角色自动拥有全部权限，无需额外检查。
 - 管理员不可自降角色、不可删除自己
 - `password_hash` 不出现在 API 响应中（`to_dict()` 不包含）
 
+### 6.3 MFA（TOTP）
+
+**实现状态**：✅ 已实现（Sprint 3）
+
+**功能概述**：
+- 用户可在个人设置中启用/禁用 TOTP MFA
+- 启用时生成随机 Base32 Secret，QR Code URI 通过 `pyotp` 生成
+- Secret 和备用码（8个）使用 Fernet（`LLM_ENCRYPTION_KEY`）加密存储
+- 登录流程支持 MFA Challenge：`/api/auth/login` 验证密码后，若 `mfa_enabled=true` 返回 `{ mfa_required: true }` 并预置 session cookie，前端显示 MFA 验证码输入框
+
+**API 端点**：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET /api/auth/mfa/status` | 查询 MFA 启用状态 |
+| `POST /api/auth/mfa/setup` | 生成 TOTP Secret 和 QR Code URI |
+| `POST /api/auth/mfa/verify-setup` | 验证首个 Code 完成 MFA 启用 |
+| `POST /api/auth/mfa/verify` | 登录流程第二步：验证 TOTP Code |
+| `POST /api/auth/mfa/disable` | 禁用 MFA（需密码+MFA Code 双重验证） |
+
+**备用码**：8个一次性备用码，加密存储，使用后标记为 `None`
+
 ---
 
 ## 7. 集成点
@@ -431,7 +508,7 @@ sequenceDiagram
 | # | 问题 | 状态 |
 |---|------|------|
 | 1 | 是否引入 OAuth2/SSO（如 LDAP、企业微信） | 规划中 |
-| 2 | 是否增加 MFA（TOTP/WebAuthn） | 规划中 |
-| 3 | JWT Token 刷新机制（当前 7 天一刀切） | 待讨论 |
+| 2 | 是否增加 MFA（TOTP/WebAuthn） | ✅ 已实现 TOTP（Sprint 3） |
+| 3 | JWT Token 刷新机制（当前 7 天一刀切） | ✅ 已实现 Refresh Token（Sprint 3） |
 | 4 | 密码策略是否需要加强（复杂度、过期） | 待讨论 |
 | 5 | 权限键是否需要细粒度化（如 `tableau:read` vs `tableau:write`） | 待讨论 |

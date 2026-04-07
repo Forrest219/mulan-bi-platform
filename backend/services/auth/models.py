@@ -29,6 +29,10 @@ class User(Base):
     is_active = Column(Boolean, default=True, server_default=sa_text('true')) # Boolean 默认值
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
     last_login = Column(DateTime, nullable=True)
+    # MFA 字段
+    mfa_enabled = Column(Boolean, default=False, server_default=sa_text('false'))
+    mfa_secret_encrypted = Column(String(256), nullable=True)  # Fernet 加密存储
+    mfa_backup_codes_encrypted = Column(String(1024), nullable=True)  # 加密 JSON 数组
 
     # 关联
     groups = relationship('UserGroup', secondary=user_group_members, back_populates='members')
@@ -44,6 +48,7 @@ class User(Base):
             "group_ids": [g.id for g in self.groups] if self.groups else [],
             "group_names": [g.name for g in self.groups] if self.groups else [],
             "is_active": self.is_active,
+            "mfa_enabled": self.mfa_enabled,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
             "last_login": self.last_login.strftime("%Y-%m-%d %H:%M:%S") if self.last_login else None,
         }
@@ -370,6 +375,54 @@ class UserDatabase:
         )
         self.session.commit()
         return count
+
+    # ========== MFA 管理 ==========
+
+    def get_mfa_enabled(self, user_id: int) -> bool:
+        """检查用户是否开启了 MFA"""
+        user = self.get_user(user_id)
+        return user.mfa_enabled if user else False
+
+    def get_mfa_secret_encrypted(self, user_id: int) -> Optional[str]:
+        """获取用户加密存储的 MFA secret"""
+        user = self.get_user(user_id)
+        return user.mfa_secret_encrypted if user else None
+
+    def set_mfa_secret(self, user_id: int, encrypted_secret: str) -> bool:
+        """设置用户 MFA secret（加密存储）"""
+        user = self.get_user(user_id)
+        if not user:
+            return False
+        user.mfa_secret_encrypted = encrypted_secret
+        self.session.commit()
+        return True
+
+    def enable_mfa(self, user_id: int, encrypted_secret: str, backup_codes_encrypted: str) -> bool:
+        """启用 MFA（设置 secret 和备用码）"""
+        user = self.get_user(user_id)
+        if not user:
+            return False
+        user.mfa_enabled = True
+        user.mfa_secret_encrypted = encrypted_secret
+        user.mfa_backup_codes_encrypted = backup_codes_encrypted
+        self.session.commit()
+        return True
+
+    def disable_mfa(self, user_id: int) -> bool:
+        """禁用 MFA（清除 secret）"""
+        user = self.get_user(user_id)
+        if not user:
+            return False
+        user.mfa_enabled = False
+        user.mfa_secret_encrypted = None
+        user.mfa_backup_codes_encrypted = None
+        self.session.commit()
+        return True
+
+    def get_backup_codes_encrypted(self, user_id: int) -> Optional[str]:
+        """获取用户加密存储的备用码"""
+        user = self.get_user(user_id)
+        return user.mfa_backup_codes_encrypted if user else None
 
     # close 方法不再需要，因为 session 由 SessionLocal 管理
     # def close(self):
