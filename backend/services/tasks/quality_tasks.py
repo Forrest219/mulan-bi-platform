@@ -43,24 +43,26 @@ def execute_quality_rules_task(
     from services.governance.engine import QualitySQLEngine, validate_custom_sql, check_scan_row_limit, SQLGenerationError
     from services.governance.scorer import calculate_quality_score
     from services.datasources.models import DataSource, DataSourceDatabase
+    from app.core.database import SessionLocal
 
     qdb = QualityDatabase()
     started_at = datetime.now()
 
+    db = SessionLocal()
     try:
         # 1. 获取数据源信息
         ds_db = DataSourceDatabase()
-        ds = ds_db.get(datasource_id)
+        ds = ds_db.get(db, datasource_id)
         if not ds:
             logger.error(f"execute_quality_rules_task: datasource {datasource_id} not found")
             return {"status": "failed", "error": "GOV_010: 数据源不存在或未激活"}
 
         # 2. 获取待执行规则
         if rule_ids:
-            rules = [qdb.get_rule(rid) for rid in rule_ids]
+            rules = [qdb.get_rule(db, rid) for rid in rule_ids]
             rules = [r for r in rules if r and r.enabled]
         else:
-            rules = qdb.get_enabled_rules(datasource_id=datasource_id)
+            rules = qdb.get_enabled_rules(db, datasource_id=datasource_id)
 
         if not rules:
             logger.info(f"execute_quality_rules_task: no enabled rules for datasource {datasource_id}")
@@ -90,6 +92,7 @@ def execute_quality_rules_task(
                         "datasource_id": datasource_id,
                         "table_name": rule.table_name,
                         "field_name": rule.field_name,
+                        "rule_type": rule.rule_type,
                         "executed_at": datetime.now(),
                         "passed": True,  # 熔断跳过视为通过
                         "actual_value": None,
@@ -124,6 +127,7 @@ def execute_quality_rules_task(
                     "datasource_id": datasource_id,
                     "table_name": rule.table_name,
                     "field_name": rule.field_name,
+                    "rule_type": rule.rule_type,
                     "executed_at": datetime.now(),
                     "passed": passed,
                     "actual_value": actual_value,
@@ -139,6 +143,7 @@ def execute_quality_rules_task(
                     "datasource_id": datasource_id,
                     "table_name": rule.table_name,
                     "field_name": rule.field_name,
+                    "rule_type": rule.rule_type,
                     "executed_at": datetime.now(),
                     "passed": False,
                     "actual_value": None,
@@ -154,6 +159,7 @@ def execute_quality_rules_task(
                     "datasource_id": datasource_id,
                     "table_name": rule.table_name,
                     "field_name": rule.field_name,
+                    "rule_type": rule.rule_type,
                     "executed_at": datetime.now(),
                     "passed": False,
                     "actual_value": None,
@@ -168,10 +174,10 @@ def execute_quality_rules_task(
 
         # 6. 批量写入检测结果
         if results_to_insert:
-            qdb.batch_create_results(results_to_insert)
+            qdb.batch_create_results(db, results_to_insert)
 
         # 7. 计算并追加评分
-        _calculate_and_append_score(qdb, datasource_id, started_at)
+        _calculate_and_append_score(qdb, db, datasource_id, started_at)
 
         passed_count = sum(1 for r in results_to_insert if r["passed"])
         failed_count = len(results_to_insert) - passed_count
@@ -191,6 +197,8 @@ def execute_quality_rules_task(
     except Exception as e:
         logger.error(f"execute_quality_rules_task failed: {e}", exc_info=True)
         return {"status": "failed", "error": str(e)}
+    finally:
+        db.close()
 
 
 def _build_readonly_config(ds) -> Dict[str, Any]:
@@ -312,18 +320,18 @@ def _execute_sql(conn, sql: str, rule_type: str, db_type: str, threshold: Dict[s
         raise
 
 
-def _calculate_and_append_score(qdb, datasource_id: int, executed_at: datetime):
+def _calculate_and_append_score(qdb, db, datasource_id: int, executed_at: datetime):
     """计算质量评分并追加到 bi_quality_scores（Append-Only）"""
     from services.governance.scorer import calculate_quality_score
 
     # 获取本次执行的规则最新结果
-    rule_results = qdb.get_latest_results(datasource_id=datasource_id)
+    rule_results = qdb.get_latest_results(db, datasource_id=datasource_id)
 
     # 获取健康扫描评分（Spec 11 集成）
-    health_scan_score = qdb.get_health_scan_score(datasource_id)
+    health_scan_score = qdb.get_health_scan_score(db, datasource_id)
 
     # 获取 DDL 合规评分（Spec 06 集成）
-    ddl_compliance_score = qdb.get_ddl_compliance_score(datasource_id)
+    ddl_compliance_score = qdb.get_ddl_compliance_score(db, datasource_id)
 
     # 计算评分
     score_dict = calculate_quality_score(
@@ -334,6 +342,7 @@ def _calculate_and_append_score(qdb, datasource_id: int, executed_at: datetime):
 
     # Append-Only 追加评分快照
     qdb.append_score(
+        db,
         datasource_id=datasource_id,
         scope_type="datasource",
         scope_name=f"datasource_{datasource_id}",
@@ -367,6 +376,7 @@ def cleanup_old_quality_results():
                 text("DELETE FROM bi_quality_results WHERE executed_at < :cutoff"),
                 {"cutoff": cutoff}
             )
+            # P1 修复：SQLAlchemy 2.0 Core DML 默认不自动提交，须显式 commit
             conn.commit()
             logger.info(f"cleanup_old_quality_results: deleted {result.rowcount} rows older than {retention_days} days")
 

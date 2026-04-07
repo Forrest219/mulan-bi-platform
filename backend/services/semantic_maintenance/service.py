@@ -116,12 +116,99 @@ class SemanticMaintenanceService:
     def rollback_datasource_semantic(
         self, ds_id: int, version_id: int, user_id: int = None
     ) -> tuple:
-        """回滚数据源语义到指定版本"""
+        """
+        回滚数据源语义到指定版本（DB + REST 双重回滚）。
+
+        注意：如果被回滚的版本曾经发布到 Tableau（published_to_tableau=True），
+        则会自动触发 REST API 回滚，将 Tableau 侧的变更也一并撤销。
+        """
+        # 获取回滚前的 published_to_tableau 状态（用于判断是否需要 REST 回滚）
+        ds_before = self.db.get_datasource_semantics_by_id(ds_id)
+        was_published = ds_before.published_to_tableau if ds_before else False
+
+        # Step 1: DB 层回滚
         success, err = self.db.rollback_datasource_semantic(ds_id, version_id, user_id)
         if not success:
             return False, err
         updated = self.db.get_datasource_semantics_by_id(ds_id)
+
+        # Step 2: 如果旧版本曾发布到 Tableau，触发 REST API 回滚
+        if was_published and updated and updated.connection_id:
+            try:
+                self._rollback_tableau_publish(updated, user_id)
+            except Exception as e:
+                logger.warning("REST 回滚失败（DB 回滚已成功）: %s", e, exc_info=True)
+
         return True, updated.to_dict()
+
+    def _rollback_tableau_publish(self, ds, user_id: int = None) -> None:
+        """
+        查询并回滚 Tableau REST API 发布记录。
+
+        查找该数据源关联的最新一条 SUCCESS 状态的发布日志，
+        调用 PublishService.rollback_publish() 撤销 Tableau 侧变更。
+        """
+        from .models import PublishStatus
+        from services.tableau.models import TableauDatabase
+        from app.core.crypto import get_tableau_crypto
+
+        # 查找该数据源关联的最新 SUCCESS 发布日志
+        logs, _ = self.db.list_publish_logs(
+            connection_id=ds.connection_id,
+            object_type="datasource",
+            status=PublishStatus.SUCCESS,
+            page=1,
+            page_size=1,
+        )
+        if not logs:
+            return
+
+        latest_log = logs[0]
+        # 确保是该数据源的日志
+        if latest_log.object_type != "datasource" or latest_log.object_id != ds.id:
+            return
+
+        # 获取 Tableau 连接凭证
+        tableau_db = TableauDatabase()
+        try:
+            conn = tableau_db.get_connection(ds.connection_id)
+            if not conn or not conn.is_active:
+                logger.warning("无法获取 Tableau 连接（id=%s）", ds.connection_id)
+                return
+
+            crypto = get_tableau_crypto()
+            token_value = crypto.decrypt(conn.token_encrypted)
+
+            # 实例化 PublishService 并执行回滚
+            publish_svc = self._build_publish_service(
+                server_url=conn.server_url,
+                site_content_url=conn.site,
+                token_name=conn.token_name,
+                token_value=token_value,
+                api_version=conn.api_version or "3.21",
+            )
+            try:
+                if not publish_svc.connect():
+                    logger.warning("Tableau REST 认证失败，无法执行回滚")
+                    return
+                publish_svc.rollback_publish(log_id=latest_log.id, operator=user_id)
+            finally:
+                publish_svc.disconnect()
+        finally:
+            tableau_db.session.close()
+
+    def _build_publish_service(self, server_url: str, site_content_url: str,
+                                token_name: str, token_value: str,
+                                api_version: str) -> "PublishService":
+        """构建 PublishService 实例（延迟导入避免循环依赖）"""
+        from .publish_service import PublishService
+        return PublishService(
+            server_url=server_url,
+            site_content_url=site_content_url,
+            token_name=token_name,
+            token_value=token_value,
+            api_version=api_version,
+        )
 
     # ============================================================
     # 字段语义
@@ -234,12 +321,84 @@ class SemanticMaintenanceService:
     def rollback_field_semantic(
         self, field_id: int, version_id: int, user_id: int = None
     ) -> tuple:
-        """回滚字段语义到指定版本"""
+        """
+        回滚字段语义到指定版本（DB + REST 双重回滚）。
+
+        注意：如果被回滚的版本曾经发布到 Tableau（published_to_tableau=True），
+        则会自动触发 REST API 回滚，将 Tableau 侧的变更也一并撤销。
+        """
+        # 获取回滚前的 published_to_tableau 状态（用于判断是否需要 REST 回滚）
+        field_before = self.db.get_field_semantics_by_id(field_id)
+        was_published = field_before.published_to_tableau if field_before else False
+
+        # Step 1: DB 层回滚
         success, err = self.db.rollback_field_semantic(field_id, version_id, user_id)
         if not success:
             return False, err
         updated = self.db.get_field_semantics_by_id(field_id)
+
+        # Step 2: 如果旧版本曾发布到 Tableau，触发 REST API 回滚
+        if was_published and updated and updated.connection_id:
+            try:
+                self._rollback_tableau_field_publish(updated, user_id)
+            except Exception as e:
+                logger.warning("字段 REST 回滚失败（DB 回滚已成功）: %s", e, exc_info=True)
+
         return True, updated.to_dict()
+
+    def _rollback_tableau_field_publish(self, field, user_id: int = None) -> None:
+        """
+        查询并回滚 Tableau REST API 字段发布记录。
+
+        查找该字段关联的最新一条 SUCCESS 状态的发布日志，
+        调用 PublishService.rollback_publish() 撤销 Tableau 侧变更。
+        """
+        from .models import PublishStatus
+        from services.tableau.models import TableauDatabase
+        from app.core.crypto import get_tableau_crypto
+
+        # 查找该字段关联的最新 SUCCESS 发布日志
+        logs, _ = self.db.list_publish_logs(
+            connection_id=field.connection_id,
+            object_type="field",
+            status=PublishStatus.SUCCESS,
+            page=1,
+            page_size=1,
+        )
+        if not logs:
+            return
+
+        latest_log = logs[0]
+        if latest_log.object_type != "field" or latest_log.object_id != field.id:
+            return
+
+        # 获取 Tableau 连接凭证
+        tableau_db = TableauDatabase()
+        try:
+            conn = tableau_db.get_connection(field.connection_id)
+            if not conn or not conn.is_active:
+                logger.warning("无法获取 Tableau 连接（id=%s）", field.connection_id)
+                return
+
+            crypto = get_tableau_crypto()
+            token_value = crypto.decrypt(conn.token_encrypted)
+
+            publish_svc = self._build_publish_service(
+                server_url=conn.server_url,
+                site_content_url=conn.site,
+                token_name=conn.token_name,
+                token_value=token_value,
+                api_version=conn.api_version or "3.21",
+            )
+            try:
+                if not publish_svc.connect():
+                    logger.warning("Tableau REST 认证失败，无法执行字段回滚")
+                    return
+                publish_svc.rollback_publish(log_id=latest_log.id, operator=user_id)
+            finally:
+                publish_svc.disconnect()
+        finally:
+            tableau_db.session.close()
 
     # ============================================================
     # AI 语义生成（Spec 12 §5 — ContextAssembler 驱动）
@@ -478,3 +637,80 @@ class SemanticMaintenanceService:
     def get_publish_log(self, log_id: int) -> Optional[Dict[str, Any]]:
         log = self.db.get_publish_log(log_id)
         return log.to_dict() if log else None
+
+    # ============================================================
+    # 定时清理任务
+    # ============================================================
+
+    def cleanup_stale_reviews(self, stale_days: int = 7) -> Dict[str, Any]:
+        """
+        清理长期处于 reviewed 状态的记录（自动降级为 draft）。
+
+        查询条件：
+        - status = 'reviewed'
+        - updated_at < now() - stale_days
+
+        降级后记录 audit 日志（类型 = 'cleanup_stale_review'）。
+        """
+        from datetime import datetime, timedelta
+
+        stale_threshold = datetime.now() - timedelta(days=stale_days)
+        cleaned_datasources = 0
+        cleaned_fields = 0
+
+        try:
+            cleaned_ds, cleaned_f = self._cleanup_stale_reviewed_sql(stale_threshold)
+            cleaned_datasources = cleaned_ds
+            cleaned_fields = cleaned_f
+        except Exception as e:
+            logger.error("清理 stale reviewed 记录失败: %s", e, exc_info=True)
+
+        result = {
+            "cleaned_datasources": cleaned_datasources,
+            "cleaned_fields": cleaned_fields,
+            "stale_days": stale_days,
+            "threshold": stale_threshold.isoformat(),
+        }
+        logger.info("cleanup_stale_reviews 完成: %s", result)
+        return result
+
+    def _cleanup_stale_reviewed_sql(self, stale_threshold: datetime) -> tuple:
+        """
+        通过 SQL 直接批量清理 stale reviewed 记录。
+
+        返回 (cleaned_datasources, cleaned_fields) 元组。
+        """
+        from app.core.database import SessionLocal
+        from services.semantic_maintenance.models import (
+            TableauDatasourceSemantics,
+            TableauFieldSemantics,
+        )
+
+        session = SessionLocal()
+        try:
+            # 批量重置数据源语义
+            ds_result = session.query(TableauDatasourceSemantics).filter(
+                TableauDatasourceSemantics.status == SemanticStatus.REVIEWED,
+                TableauDatasourceSemantics.updated_at < stale_threshold,
+            ).update(
+                {"status": SemanticStatus.DRAFT},
+                synchronize_session=False,
+            )
+
+            # 批量重置字段语义
+            field_result = session.query(TableauFieldSemantics).filter(
+                TableauFieldSemantics.status == SemanticStatus.REVIEWED,
+                TableauFieldSemantics.updated_at < stale_threshold,
+            ).update(
+                {"status": SemanticStatus.DRAFT},
+                synchronize_session=False,
+            )
+
+            session.commit()
+            logger.info(
+                "批量清理 stale reviewed: 数据源 %d 条，字段 %d 条",
+                ds_result, field_result,
+            )
+            return ds_result, field_result
+        finally:
+            session.close()

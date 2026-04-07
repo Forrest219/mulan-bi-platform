@@ -4,6 +4,7 @@
 import json
 import logging
 import re
+import tiktoken
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -19,6 +20,7 @@ def execute_query(
     vizql_json: Dict[str, Any],
     limit: int = 1000,
     timeout: int = 30,
+    connection_id: int = None,
 ) -> Dict[str, Any]:
     """
     Stage 3：查询执行。
@@ -35,6 +37,7 @@ def execute_query(
         vizql_json: One-Pass LLM 生成的 VizQL JSON
         limit: 最大返回行数（默认 1000）
         timeout: 查询超时秒数
+        connection_id: 租户连接 ID（必填，用于 MCP 路由到正确的 Tableau Site）
 
     返回：
         {"fields": [...], "rows": [[...], ...]}
@@ -44,13 +47,16 @@ def execute_query(
     """
     from services.tableau.mcp_client import get_tableau_mcp_client, TableauMCPError
 
-    client = get_tableau_mcp_client()
+    if connection_id is None:
+        raise NLQError("NLQ_005", message="execute_query 必须传入 connection_id 参数")
+    client = get_tableau_mcp_client(connection_id=connection_id)
     try:
         result = client.query_datasource(
             datasource_luid=datasource_luid,
             query=vizql_json,
             limit=limit,
             timeout=timeout,
+            connection_id=connection_id,
         )
         return result
     except TableauMCPError as e:
@@ -424,6 +430,24 @@ async def one_pass_llm(
     5. 校验失败 → 带反馈重试（最多 1 次）
     6. 返回 {intent, confidence, vizql_json}
     """
+    # ── Token 预算检查（P1 修复：防止宽表字段过多导致 prompt 爆炸）────────
+    MAX_FIELDS_WITH_TYPES_TOKENS = 2000
+    enc = tiktoken.get_encoding("cl100k_base")
+    fields_tokens = enc.encode(fields_with_types)
+    if len(fields_tokens) > MAX_FIELDS_WITH_TYPES_TOKENS:
+        # 按行截断（保留前 N 行）
+        lines = fields_with_types.split("\n")
+        truncated_lines = []
+        token_count = 0
+        for line in lines:
+            line_tokens = enc.encode(line)
+            if token_count + len(line_tokens) > MAX_FIELDS_WITH_TYPES_TOKENS:
+                break
+            truncated_lines.append(line)
+            token_count += len(line_tokens)
+        fields_with_types = "\n".join(truncated_lines)
+        logger.warning("宽表字段过多，已触发 Token 截断（原始 > %d tokens）", len(fields_tokens))
+
     # 组装 Prompt
     prompt = ONE_PASS_NL_TO_QUERY_TEMPLATE.format(
         datasource_luid=datasource_luid,

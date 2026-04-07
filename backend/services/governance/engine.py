@@ -193,14 +193,25 @@ class QualitySQLEngine:
 
         仅支持简单比较：field >= field, field > field, field = field 等
         不支持复杂函数调用或子查询
+
+        P1 修复：先白名单校验 expression 字符安全，再拼接字段名，最后 text()。
+        防止 1=1; DROP TABLE users; 等 SQL 注入。
         """
-        # 安全验证：expression 中只能出现白名单字段名
+        # 白名单字符校验：去除空格和白名单化字段名后，剩余字符必须全是安全操作符/数字
+        safe_chars = set("><=!()+-.0123456789")
+        raw_chars = set(expression.replace(" ", "").replace("\n", ""))
         for f in fields:
-            # 替换字段名为 column 对象
+            raw_chars = raw_chars - set(f)
+        if not raw_chars.issubset(safe_chars):
+            raise SQLGenerationError(
+                f"GOV_005: cross_field 表达式包含非法字符，仅支持 >= <= != = > < + - * / ( ) 和数字，rule_expression={expression!r}"
+            )
+
+        # 白名单化字段名
+        for f in fields:
             expression = re.sub(rf'\b{re.escape(f)}\b', f, expression)
 
-        # 使用 text() 安全构造表达式（字段名已白名单验证）
-        # 支持: >=, <=, !=, =, >, <
+        # 使用 text() 构造表达式（字段名已白名单验证，字符集已校验）
         return text(expression)
 
     def _value_range_sql(self, rule: QualityRule) -> str:

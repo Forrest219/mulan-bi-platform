@@ -31,7 +31,16 @@ class DatabaseConnector:
         """
         try:
             connection_string = self._build_connection_string()
-            self.engine = create_engine(connection_string, echo=False)
+            connect_args = {}
+            db_type = self.config.get("db_type", "mysql")
+            # P1 修复：网络数据库（MySQL/PostgreSQL）添加 10 秒连接超时，防止黑洞 IP 雪崩
+            if db_type in ("mysql", "postgresql"):
+                connect_args["connect_timeout"] = 10
+            self.engine = create_engine(
+                connection_string,
+                echo=False,
+                connect_args=connect_args if connect_args else None,
+            )
             self.inspector = inspect(self.engine)
             return True
         except Exception as e:

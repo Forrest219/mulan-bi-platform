@@ -79,7 +79,7 @@ async def create_rule(body: CreateRuleRequest, request: Request, db: Session = D
 
     # 验证数据源存在且活跃
     ds_db = DataSourceDatabase()
-    ds = ds_db.get(body.datasource_id)
+    ds = ds_db.get(db, body.datasource_id)
     if not ds or not ds.is_active:
         raise HTTPException(status_code=400, detail="GOV_010: 数据源不存在或未激活")
 
@@ -103,7 +103,7 @@ async def create_rule(body: CreateRuleRequest, request: Request, db: Session = D
             raise HTTPException(status_code=400, detail="GOV_005: 自定义 SQL 必须为 SELECT 语句且不包含禁止关键字")
 
     # 检查重复规则
-    if qdb.rule_exists(body.datasource_id, body.table_name, body.field_name, body.rule_type):
+    if qdb.rule_exists(db, body.datasource_id, body.table_name, body.field_name, body.rule_type):
         raise HTTPException(status_code=409, detail="GOV_006: 同一数据源+表+字段+规则类型已存在相同规则")
 
     # 非 admin 只能为自己的数据源创建规则
@@ -111,6 +111,7 @@ async def create_rule(body: CreateRuleRequest, request: Request, db: Session = D
         raise HTTPException(status_code=403, detail="GOV_001: 无权为此数据源创建规则")
 
     rule = qdb.create_rule(
+        db,
         name=body.name,
         description=body.description,
         datasource_id=body.datasource_id,
@@ -139,11 +140,13 @@ async def list_rules(
     enabled: Optional[bool] = None,
     page: int = 1,
     page_size: int = 20,
+    db: Session = Depends(get_db),
 ):
     """规则列表（支持筛选）- 已认证"""
     get_current_user(request)
     qdb = QualityDatabase()
     return qdb.list_rules(
+        db,
         datasource_id=datasource_id,
         table_name=table_name,
         enabled=enabled,
@@ -153,11 +156,11 @@ async def list_rules(
 
 
 @router.get("/rules/{rule_id}")
-async def get_rule(rule_id: int, request: Request):
+async def get_rule(rule_id: int, request: Request, db: Session = Depends(get_db)):
     """规则详情 - 已认证"""
     get_current_user(request)
     qdb = QualityDatabase()
-    rule = qdb.get_rule(rule_id)
+    rule = qdb.get_rule(db, rule_id)
     if not rule:
         raise HTTPException(status_code=404, detail="GOV_001: 质量规则不存在")
     return rule.to_dict()
@@ -170,7 +173,7 @@ async def update_rule(rule_id: int, body: UpdateRuleRequest, request: Request, d
     require_roles(request, ["admin", "data_admin"], db)
 
     qdb = QualityDatabase()
-    rule = qdb.get_rule(rule_id)
+    rule = qdb.get_rule(db, rule_id)
     if not rule:
         raise HTTPException(status_code=404, detail="GOV_001: 质量规则不存在")
 
@@ -188,8 +191,8 @@ async def update_rule(rule_id: int, body: UpdateRuleRequest, request: Request, d
     update_fields = body.model_dump(exclude_unset=True, exclude={"id", "created_by", "datasource_id", "table_name", "field_name", "rule_type"})
     update_fields["updated_by"] = user["id"]
 
-    qdb.update_rule(rule_id, **update_fields)
-    updated_rule = qdb.get_rule(rule_id)
+    qdb.update_rule(db, rule_id, **update_fields)
+    updated_rule = qdb.get_rule(db, rule_id)
     return {"rule": updated_rule.to_dict(), "message": "质量规则更新成功"}
 
 
@@ -200,10 +203,10 @@ async def delete_rule(rule_id: int, request: Request, db: Session = Depends(get_
     require_roles(request, ["admin", "data_admin"], db)
 
     qdb = QualityDatabase()
-    if not qdb.get_rule(rule_id):
+    if not qdb.get_rule(db, rule_id):
         raise HTTPException(status_code=404, detail="GOV_001: 质量规则不存在")
 
-    qdb.delete_rule(rule_id)
+    qdb.delete_rule(db, rule_id)
     return {"message": "质量规则删除成功"}
 
 
@@ -214,7 +217,7 @@ async def toggle_rule(rule_id: int, request: Request, db: Session = Depends(get_
     require_roles(request, ["admin", "data_admin"], db)
 
     qdb = QualityDatabase()
-    new_state = qdb.toggle_rule(rule_id)
+    new_state = qdb.toggle_rule(db, rule_id)
     if new_state is None:
         raise HTTPException(status_code=404, detail="GOV_001: 质量规则不存在")
 
@@ -239,7 +242,7 @@ async def execute_quality_checks(body: ExecuteRequest, request: Request, db: Ses
     # 验证数据源
     if datasource_id:
         ds_db = DataSourceDatabase()
-        ds = ds_db.get(datasource_id)
+        ds = ds_db.get(db, datasource_id)
         if not ds or not ds.is_active:
             raise HTTPException(status_code=400, detail="GOV_010: 数据源不存在或未激活")
 
@@ -279,12 +282,12 @@ async def execute_single_rule(rule_id: int, request: Request, db: Session = Depe
     require_roles(request, ["admin", "data_admin"], db)
 
     qdb = QualityDatabase()
-    rule = qdb.get_rule(rule_id)
+    rule = qdb.get_rule(db, rule_id)
     if not rule:
         raise HTTPException(status_code=404, detail="GOV_001: 质量规则不存在")
 
     ds_db = DataSourceDatabase()
-    ds = ds_db.get(rule.datasource_id)
+    ds = ds_db.get(db, rule.datasource_id)
     if not ds or not ds.is_active:
         raise HTTPException(status_code=400, detail="GOV_010: 数据源不存在或未激活")
 
@@ -318,6 +321,7 @@ async def list_results(
     end_date: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
+    db: Session = Depends(get_db),
 ):
     """检测结果列表 - 已认证"""
     get_current_user(request)
@@ -327,6 +331,7 @@ async def list_results(
 
     qdb = QualityDatabase()
     return qdb.list_results(
+        db,
         datasource_id=datasource_id,
         rule_id=rule_id,
         passed=passed,
@@ -338,11 +343,11 @@ async def list_results(
 
 
 @router.get("/results/latest")
-async def get_latest_results(request: Request, datasource_id: Optional[int] = None):
+async def get_latest_results(request: Request, datasource_id: Optional[int] = None, db: Session = Depends(get_db)):
     """各规则最新检测结果 - 已认证"""
     get_current_user(request)
     qdb = QualityDatabase()
-    results = qdb.get_latest_results(datasource_id=datasource_id)
+    results = qdb.get_latest_results(db, datasource_id=datasource_id)
     return {"results": [r.to_dict() for r in results]}
 
 
@@ -354,11 +359,12 @@ async def get_scores(
     datasource_id: int,
     scope_type: Optional[str] = None,
     scope_name: Optional[str] = None,
+    db: Session = Depends(get_db),
 ):
     """质量评分查询（最新评分）- 已认证"""
     get_current_user(request)
     qdb = QualityDatabase()
-    scores = qdb.get_latest_scores(datasource_id=datasource_id, scope_type=scope_type, scope_name=scope_name)
+    scores = qdb.get_latest_scores(db, datasource_id=datasource_id, scope_type=scope_type, scope_name=scope_name)
     return {"scores": [s.to_dict() for s in scores]}
 
 
@@ -369,11 +375,12 @@ async def get_score_trend(
     scope_type: Optional[str] = None,
     scope_name: Optional[str] = None,
     days: int = 30,
+    db: Session = Depends(get_db),
 ):
     """评分趋势（近 N 天历史）- 已认证"""
     get_current_user(request)
     qdb = QualityDatabase()
-    trend = qdb.get_score_trend(datasource_id=datasource_id, scope_type=scope_type, scope_name=scope_name, days=days)
+    trend = qdb.get_score_trend(db, datasource_id=datasource_id, scope_type=scope_type, scope_name=scope_name, days=days)
     return {
         "trend": trend,
         "datasource_id": datasource_id,
@@ -385,13 +392,13 @@ async def get_score_trend(
 # ==================== 质量看板 ====================
 
 @router.get("/dashboard")
-async def get_dashboard(request: Request):
+async def get_dashboard(request: Request, db: Session = Depends(get_db)):
     """质量看板数据 - 已认证"""
     get_current_user(request)
     qdb = QualityDatabase()
 
-    summary = qdb.get_dashboard_summary()
-    top_failures = qdb.get_top_failures(limit=10)
+    summary = qdb.get_dashboard_summary(db)
+    top_failures = qdb.get_top_failures(db, limit=10)
 
     # 各数据源最新评分
     from services.governance.database import QualityDatabase
@@ -420,7 +427,7 @@ async def get_dashboard(request: Request):
         for sc in latest_scores:
             ds = s.query(DataSource).filter(DataSource.id == sc.datasource_id).first()
             # 计算趋势
-            trend = qdb.get_score_trend(sc.datasource_id, days=7)
+            trend = qdb.get_score_trend(db, sc.datasource_id, days=7)
             trend_direction = "up" if len(trend) >= 2 and trend[-1]["overall_score"] > trend[0]["overall_score"] else "down"
 
             datasource_scores.append({

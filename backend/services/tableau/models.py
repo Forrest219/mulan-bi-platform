@@ -271,21 +271,38 @@ from app.core.database import SessionLocal
 from sqlalchemy.orm import Session
 
 class TableauDatabase:
-    """Tableau 数据库管理 - 不再是单例，直接使用中央 SessionLocal"""
+    """
+    Tableau 数据库管理类。
 
-    def __init__(self, db_path: str = None):
-        """db_path 参数不再使用，保留签名以兼容旧代码"""
-        pass
+    Session 管理规范（Spec 07 §7.3 P1）：
+    - API 层：传入外部注入的 db session（由 FastAPI Depends(get_db) 管理），
+      以确保同一请求内所有操作共享同一事务上下文。
+    - Celery 任务层：使用 get_db_context() 上下文管理器创建 session，
+      禁止自行 new Session 或调用 expire_all()。
+    - 兼容模式（向后兼容）：不传 session 时，使用 SessionLocal()（每次创建新 session）。
+    """
 
-    # _ensure_columns 方法是针对 SQLite 迁移的，在 PostgreSQL 环境中由 Alembic 管理，因此移除
-    # def _ensure_columns(self):
-    #     pass
+    def __init__(self, db_path: str = None, session: Session = None):
+        """
+        Args:
+            db_path: 已废弃，仅保留签名兼容性。
+            session: 可选。外部注入的 SQLAlchemy Session。
+                     若传入，则所有 DB 操作使用此 session（不创建新 session）。
+                     若为 None，则创建新的 SessionLocal()（向后兼容模式）。
+        """
+        self._external_session: Optional[Session] = session
 
     @property
     def session(self) -> Session:
-        """每次访问获取当前线程的 session，并刷新缓存避免脏读"""
+        """
+        返回当前 DB session。
+        - 若外部注入了 session，直接返回（不复用、不 expire_all）。
+        - 若无注入，每次创建新的 SessionLocal()（向后兼容模式）。
+        """
+        if self._external_session is not None:
+            return self._external_session
+        # 向后兼容：每次创建新 session（不建议在新代码中使用）
         s = SessionLocal()
-        s.expire_all()
         return s
 
     # close 方法不再需要
@@ -423,12 +440,28 @@ class TableauDatabase:
         return self.session.query(TableauAsset).filter(TableauAsset.id == asset_id).first()
 
     def search_assets(self, connection_id: int = None, query: str = None,
-                      asset_type: str = None, page: int = 1, page_size: int = 50) -> tuple:
-        """搜索资产"""
+                      asset_type: str = None, page: int = 1, page_size: int = 50,
+                      owner_id: int = None) -> tuple:
+        """
+        搜索资产。
+
+        安全约束（Spec 07 §3.3.2 P0 IDOR 修复）：
+        - 若传入 owner_id（非 None），自动限定为该用户创建的连接下的资产。
+        - 此过滤与 connection_id 过滤为 AND 关系，共同生效。
+        """
         from sqlalchemy import or_
         q = self.session.query(TableauAsset).filter(TableauAsset.is_deleted == False)
         if connection_id:
             q = q.filter(TableauAsset.connection_id == connection_id)
+        if owner_id is not None:
+            # 强制多租户隔离：仅查询该 owner 创建的连接下的资产
+            q = q.filter(
+                TableauAsset.connection_id.in_(
+                    self.session.query(TableauConnection.id).filter(
+                        TableauConnection.owner_id == owner_id
+                    )
+                )
+            )
         if asset_type:
             q = q.filter(TableauAsset.asset_type == asset_type)
         if query:

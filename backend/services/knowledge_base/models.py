@@ -372,17 +372,22 @@ class KbEmbeddingDatabase:
         return e
 
     def batch_upsert(self, db: Session, records: List[Dict]) -> int:
-        """批量写入 Embedding 记录"""
+        """批量写入 Embedding 记录（P0 幽灵向量修复：先清后插，同一事务）"""
         if not records:
             return 0
-        for r in records:
-            db.query(KbEmbedding).filter(
-                KbEmbedding.source_type == r["source_type"],
-                KbEmbedding.source_id == r["source_id"],
-                KbEmbedding.chunk_index == r["chunk_index"],
-            ).delete(synchronize_session=False)
+        # 提取单一实体标识（batch_upsert 按实体粒度调用，所有记录同源）
+        first = records[0]
+        type_ = first["source_type"]
+        id_ = first["source_id"]
+        # 先一次性清空该实体所有旧向量，防止内容缩减后残留幽灵向量
+        db.query(KbEmbedding).filter(
+            KbEmbedding.source_type == type_,
+            KbEmbedding.source_id == id_,
+        ).delete(synchronize_session=False)
+        # 插入新记录，同一事务完成
         objs = [KbEmbedding(**r) for r in records]
-        db.bulk_save_objects(objs); db.commit()
+        db.bulk_save_objects(objs)
+        db.commit()
         return len(records)
 
     def search_by_vector(self, db: Session, query_embedding: list,

@@ -13,6 +13,7 @@ import requests
 
 from .database import SemanticMaintenanceDatabase
 from .models import SemanticStatus, PublishStatus, SensitivityLevel
+from .context import set_semantic_auth, get_semantic_auth, clear_semantic_auth
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +39,13 @@ class PublishService:
         self.token_value = token_value
         self.api_version = api_version
         self.db = SemanticMaintenanceDatabase(db_path=db_path)
-        self._auth_token: Optional[str] = None
-        self._site_id: Optional[str] = None
         self._session = requests.Session()
 
     def _headers(self) -> Dict[str, str]:
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
-        if self._auth_token:
-            headers["X-Tableau-Auth"] = self._auth_token
+        auth_token, _ = get_semantic_auth()
+        if auth_token:
+            headers["X-Tableau-Auth"] = auth_token
         return headers
 
     def connect(self) -> bool:
@@ -65,10 +65,12 @@ class PublishService:
             )
             if resp.status_code == 200:
                 data = resp.json()
-                self._auth_token = data.get("credentials", {}).get("token", "")
+                auth_token = data.get("credentials", {}).get("token", "")
                 site_creds = data.get("credentials", {}).get("site", {})
-                self._site_id = site_creds.get("id", "")
-                logger.info("Publish REST auth success: site_id=%s", self._site_id)
+                site_id = site_creds.get("id", "")
+                # 存入 ContextVar（协程/线程安全）
+                set_semantic_auth(auth_token, site_id)
+                logger.info("Publish REST auth success: site_id=%s", site_id)
                 return True
             return False
         except Exception as e:
@@ -76,17 +78,17 @@ class PublishService:
             return False
 
     def disconnect(self):
-        if self._auth_token:
+        auth_token, _ = get_semantic_auth()
+        if auth_token:
             try:
                 self._session.post(
                     f"{self.server_url}/api/{self.api_version}/auth/signout",
-                    headers={"X-Tableau-Auth": self._auth_token},
+                    headers={"X-Tableau-Auth": auth_token},
                     timeout=5,
                 )
             except Exception:
                 pass
-            self._auth_token = None
-            self._site_id = None
+            clear_semantic_auth()
 
     def _build_diff(
         self, tableau_current: Dict[str, Any],
@@ -180,12 +182,13 @@ class PublishService:
 
     def _fetch_datasource_from_tableau(self, tableau_datasource_id: str) -> Dict[str, Any]:
         """通过 REST API 获取 Tableau 数据源当前 metadata"""
-        if not self._auth_token or not self._site_id:
+        auth_token, site_id = get_semantic_auth()
+        if not auth_token or not site_id:
             return {}
         try:
             url = (
                 f"{self.server_url}/api/{self.api_version}"
-                f"/sites/{self._site_id}/datasources/{tableau_datasource_id}"
+                f"/sites/{site_id}/datasources/{tableau_datasource_id}"
             )
             resp = self._session.get(url, headers=self._headers(), timeout=15)
             if resp.status_code != 200:
@@ -206,13 +209,14 @@ class PublishService:
 
     def _fetch_field_from_tableau(self, tableau_field_id: str, datasource_luid: str = None) -> Dict[str, Any]:
         """通过 REST API 获取 Tableau 字段当前 caption/description"""
-        if not self._auth_token or not self._site_id:
+        auth_token, site_id = get_semantic_auth()
+        if not auth_token or not site_id:
             return {}
         try:
             if datasource_luid:
                 url = (
                     f"{self.server_url}/api/{self.api_version}"
-                    f"/sites/{self._site_id}/datasources/{datasource_luid}/fields"
+                    f"/sites/{site_id}/datasources/{datasource_luid}/fields"
                 )
                 resp = self._session.get(url, headers=self._headers(), timeout=15)
                 if resp.status_code != 200:
@@ -250,7 +254,8 @@ class PublishService:
 
         Returns: (result_dict, error_message)
         """
-        if not self._auth_token:
+        auth_token, site_id = get_semantic_auth()
+        if not auth_token:
             return {}, "未连接，请先调用 connect()"
 
         ds = self.db.get_datasource_semantics_by_id(ds_id)
@@ -297,7 +302,7 @@ class PublishService:
         # 执行 REST API 回写
         url = (
             f"{self.server_url}/api/{self.api_version}"
-            f"/sites/{self._site_id}/datasources/{ds.tableau_datasource_id}"
+            f"/sites/{site_id}/datasources/{ds.tableau_datasource_id}"
         )
         update_payload = {
             "datasource": {
@@ -338,7 +343,8 @@ class PublishService:
         simulate: bool = False,
     ) -> Tuple[Dict[str, Any], Optional[str]]:
         """批量发布字段语义"""
-        if not self._auth_token:
+        auth_token, _ = get_semantic_auth()
+        if not auth_token:
             return {}, "未连接"
 
         results = {"succeeded": [], "failed": [], "skipped": [], "not_supported": []}
@@ -482,10 +488,11 @@ class PublishService:
         )
 
         # 实际回写（逆向操作）
+        _, site_id = get_semantic_auth()
         if log.object_type == "datasource":
             url = (
                 f"{self.server_url}/api/{self.api_version}"
-                f"/sites/{self._site_id}/datasources/{log.tableau_object_id}"
+                f"/sites/{site_id}/datasources/{log.tableau_object_id}"
             )
             payload = {"datasource": rollback_payload}
         else:

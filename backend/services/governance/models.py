@@ -74,6 +74,8 @@ class QualityResult(Base):
     datasource_id = Column(Integer, nullable=False, index=True)
     table_name = Column(String(128), nullable=False)
     field_name = Column(String(128), nullable=True)
+    # P1 修复：冗余存储 rule_type，支持 scorer.py 维度聚合计算（无需 JOIN 查询）
+    rule_type = Column(String(32), nullable=False)
     executed_at = Column(DateTime, nullable=False, server_default=sa_func.now())  # 分区键
     passed = Column(Boolean, nullable=False)
     actual_value = Column(Float, nullable=True)
@@ -96,6 +98,7 @@ class QualityResult(Base):
             "datasource_id": self.datasource_id,
             "table_name": self.table_name,
             "field_name": self.field_name,
+            "rule_type": self.rule_type,
             "executed_at": self.executed_at.strftime("%Y-%m-%d %H:%M:%S") if self.executed_at else None,
             "passed": self.passed,
             "actual_value": self.actual_value,

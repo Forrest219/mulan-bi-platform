@@ -142,7 +142,7 @@ class TableauSyncService:
                 workbook_id = getattr(view, 'workbook_id', None)
                 workbook_name = None
                 if workbook_id:
-                    from src.tableau.models import TableauAsset
+                    from services.tableau.models import TableauAsset
                     parent = db.session.query(TableauAsset).filter(
                         TableauAsset.connection_id == connection_id,
                         TableauAsset.tableau_id == workbook_id,
@@ -380,6 +380,40 @@ class TableauRestSyncService:
     def _get_datasources(self) -> List[Dict]:
         return list(self._get_all_items(f"sites/{self._site_id}/datasources", page_size=100))
 
+    def _get_datasource_fields(self, datasource_luid: str) -> List[Dict]:
+        """通过 REST API 获取数据源的字段级元数据（Spec 07 §4.1.2 Step 5）"""
+        try:
+            url = f"{self.server_url}/api/{self.api_version}/sites/{self._site_id}/datasources/{datasource_luid}/fields"
+            resp = self._session.get(url, headers=self._headers(), timeout=30)
+            if resp.status_code != 200:
+                logger.warning("REST _get_datasource_fields %s returned %s", datasource_luid, resp.status_code)
+                return []
+            data = resp.json()
+            # Tableau REST API 返回格式: { "fields": { "field": [...] } } 或直接 { "field": [...] }
+            fields_data = data.get("fields", {}) if isinstance(data, dict) else {}
+            if isinstance(fields_data, dict):
+                return fields_data.get("field", []) or []
+            elif isinstance(fields_data, list):
+                return fields_data
+            return []
+        except Exception as e:
+            logger.warning("REST _get_datasource_fields %s error: %s", datasource_luid, e)
+            return []
+
+    def _parse_field_metadata(self, field: Dict) -> Dict[str, Any]:
+        """解析单个字段元数据，返回标准字段字典"""
+        return {
+            "field_name": field.get("name", "") or field.get("field-name", "") or "",
+            "field_caption": field.get("caption") or field.get("alias") or "",
+            "data_type": field.get("type") or field.get("dataType") or field.get("data_type") or "",
+            "role": field.get("role") or "",  # dimension / measure
+            "description": field.get("description") or "",
+            "formula": field.get("formula") or field.get("expression") or "",
+            "aggregation": field.get("aggregation") or "",
+            "is_calculated": bool(field.get("formula") or field.get("expression")),
+            "metadata_json": field,
+        }
+
     def _build_url(self, base: str = None) -> str:
         if base:
             return f"{self.server_url}/api/{self.api_version}/{base.replace('{site_id}', self._site_id or '')}"
@@ -526,6 +560,19 @@ class TableauRestSyncService:
                     tags=json.dumps([t.get("label", t) for t in ds.get("tags", [])]) if ds.get("tags") else None,
                 )
                 synced_ids["datasource"].append(ds_id)
+
+                # Step 5: 拉取字段级元数据（Spec 07 §4.1.2 P0 修复）
+                try:
+                    raw_fields = self._get_datasource_fields(ds_id)
+                    if raw_fields:
+                        parsed_fields = [self._parse_field_metadata(f) for f in raw_fields]
+                        if parsed_fields:
+                            db.upsert_datasource_fields(asset.id, ds_id, parsed_fields)
+                            logger.info("REST sync: upserted %d fields for datasource %s", len(parsed_fields), ds_id)
+                except Exception as field_err:
+                    logger.warning("REST datasource fields sync error for %s: %s", ds_id, field_err)
+                    errors.append(f"Datasource {ds_id} fields: {field_err}")
+
         except Exception as e:
             logger.error("REST datasource sync error: %s", e, exc_info=True)
             errors.append(f"Datasource sync: {e}")

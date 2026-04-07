@@ -78,6 +78,32 @@ def get_db() -> Generator:
     finally:
         session.close()
 
+
+class DatabaseContext:
+    """
+    Celery 任务级数据库上下文管理器（Spec 07 §7.3 P1 修复）。
+    使用方式：
+        with get_db_context() as db:
+            ...
+    禁止在异步任务中自行 new Session 或调用 expire_all()。
+    """
+    def __enter__(self):
+        self.session = SessionLocal()
+        return self.session
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.session is not None:
+            self.session.close()
+        return False
+
+
+def get_db_context():
+    """
+    Celery 任务专用上下文管理器工厂函数（Spec 07 §7.3 P1 修复）。
+    返回 DatabaseContext 实例，供 `with` 语句使用。
+    """
+    return DatabaseContext()
+
 # 导出 PostgreSQL 特定的 JSONB 类型和 SQL 函数/文本表达式
 JSONB = PG_JSONB
 sa_func = func

@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 
 from .models import LLMConfigDatabase
 from services.common.crypto import CryptoHelper
-from services.common.settings import get_encryption_key
+from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,10 @@ def _get_crypto() -> Tuple[CryptoHelper, str]:
     当密钥轮换后（key_hash 变化），重新初始化 CryptoHelper。
     """
     global _crypto_helper, _crypto_helper_key_hash
-    current_key = get_encryption_key()
+    settings = get_settings()
+    current_key = settings.LLM_ENCRYPTION_KEY
+    if not current_key:
+        raise RuntimeError("LLM_ENCRYPTION_KEY 未配置，禁止启动 LLM 服务")
     key_hash = hash(current_key)  # 用 hash 而非明文比较
 
     if _crypto_helper is None or _crypto_helper_key_hash != key_hash:
@@ -72,11 +75,11 @@ class _TimedClientCache:
         self._timestamps: dict = {}
         self._ttl = ttl_seconds
 
-    def _make_key(self, provider: str, base_url: str, model: str) -> str:
-        return f"{provider}:{base_url}:{model}"
+    def _make_key(self, provider: str, base_url: str, model: str, api_key: str) -> str:
+        return f"{provider}:{base_url}:{model}:{hash(api_key)}"
 
-    def get(self, provider: str, base_url: str, model: str):
-        key = self._make_key(provider, base_url, model)
+    def get(self, provider: str, base_url: str, model: str, api_key: str):
+        key = self._make_key(provider, base_url, model, api_key)
         if key in self._cache:
             # 检查 TTL
             if time.time() - self._timestamps.get(key, 0) > self._ttl:
@@ -85,8 +88,8 @@ class _TimedClientCache:
             return self._cache[key]
         return None
 
-    def set(self, provider: str, base_url: str, model: str, client):
-        key = self._make_key(provider, base_url, model)
+    def set(self, provider: str, base_url: str, model: str, api_key: str, client):
+        key = self._make_key(provider, base_url, model, api_key)
         self._cache[key] = client
         self._timestamps[key] = time.time()
 
@@ -117,20 +120,20 @@ class LLMService:
 
     def _get_openai_client(self, api_key: str, base_url: str, model: str, timeout: int):
         from openai import AsyncOpenAI
-        cached = _client_cache.get("openai", base_url, model)
+        cached = _client_cache.get("openai", base_url, model, api_key)
         if cached is not None:
             return cached
         client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
-        _client_cache.set("openai", base_url, model, client)
+        _client_cache.set("openai", base_url, model, api_key, client)
         return client
 
     def _get_anthropic_client(self, api_key: str, base_url: str, model: str, timeout: int):
         from anthropic import AsyncAnthropic
-        cached = _client_cache.get("anthropic", base_url, model)
+        cached = _client_cache.get("anthropic", base_url, model, api_key)
         if cached is not None:
             return cached
         client = AsyncAnthropic(api_key=api_key, base_url=base_url, timeout=timeout)
-        _client_cache.set("anthropic", base_url, model, client)
+        _client_cache.set("anthropic", base_url, model, api_key, client)
         return client
 
     async def complete(self, prompt: str, system: str = None, timeout: int = 15) -> dict:

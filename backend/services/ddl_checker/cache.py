@@ -11,15 +11,21 @@ logger = logging.getLogger(__name__)
 RULES_CACHE_PREFIX = "ddl:rules:"
 RULES_CACHE_TTL = 300  # 5 分钟
 
+# P0 修复：Redis 客户端单例，避免连接池泄露
+_redis_client = None
+
 
 def _get_redis_client():
-    """获取 Redis 客户端"""
-    try:
-        import redis
-        return redis.from_url(get_redis_url(), decode_responses=True)
-    except Exception as e:
-        logger.warning("Redis 连接失败: %s", e)
-        return None
+    """获取 Redis 客户端（单例模式）"""
+    global _redis_client
+    if _redis_client is None:
+        try:
+            import redis
+            _redis_client = redis.from_url(get_redis_url(), decode_responses=True)
+        except Exception as e:
+            logger.warning("Redis 连接失败: %s", e)
+            return None
+    return _redis_client
 
 
 class RuleCache:

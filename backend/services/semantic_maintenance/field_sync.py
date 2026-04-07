@@ -13,6 +13,7 @@ import requests
 
 from .database import SemanticMaintenanceDatabase
 from .models import SemanticStatus
+from .context import set_semantic_auth, get_semantic_auth, clear_semantic_auth
 
 logger = logging.getLogger(__name__)
 
@@ -29,14 +30,13 @@ class FieldSyncService:
         self.token_value = token_value
         self.api_version = api_version
         self.db = SemanticMaintenanceDatabase(db_path=db_path)
-        self._auth_token: Optional[str] = None
-        self._site_id: Optional[str] = None
         self._session = requests.Session()
 
     def _headers(self) -> Dict[str, str]:
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
-        if self._auth_token:
-            headers["X-Tableau-Auth"] = self._auth_token
+        auth_token, _ = get_semantic_auth()
+        if auth_token:
+            headers["X-Tableau-Auth"] = auth_token
         return headers
 
     def connect(self) -> bool:
@@ -56,10 +56,12 @@ class FieldSyncService:
             )
             if resp.status_code == 200:
                 data = resp.json()
-                self._auth_token = data.get("credentials", {}).get("token", "")
+                auth_token = data.get("credentials", {}).get("token", "")
                 site_creds = data.get("credentials", {}).get("site", {})
-                self._site_id = site_creds.get("id", "")
-                logger.info("FieldSync REST auth success: site_id=%s", self._site_id)
+                site_id = site_creds.get("id", "")
+                # 存入 ContextVar（协程/线程安全）
+                set_semantic_auth(auth_token, site_id)
+                logger.info("FieldSync REST auth success: site_id=%s", site_id)
                 return True
             logger.warning("FieldSync REST auth failed: HTTP %s", resp.status_code)
             return False
@@ -69,17 +71,17 @@ class FieldSyncService:
 
     def disconnect(self):
         """登出清理"""
-        if self._auth_token:
+        auth_token, _ = get_semantic_auth()
+        if auth_token:
             try:
                 self._session.post(
                     f"{self.server_url}/api/{self.api_version}/auth/signout",
-                    headers={"X-Tableau-Auth": self._auth_token},
+                    headers={"X-Tableau-Auth": auth_token},
                     timeout=5,
                 )
             except Exception:
                 pass
-            self._auth_token = None
-            self._site_id = None
+            clear_semantic_auth()
 
     def _get_field_hash(self, field: Dict) -> str:
         """计算字段语义哈希，用于变更检测"""
@@ -109,7 +111,8 @@ class FieldSyncService:
         datasource_luid: str,  # Tableau 数据源 LUID
     ) -> Dict[str, Any]:
         """同步数据源的所有字段，返回同步结果"""
-        if not self._auth_token:
+        auth_token, site_id = get_semantic_auth()
+        if not auth_token:
             raise Exception("未连接，请先调用 connect()")
 
         errors = []
@@ -119,7 +122,7 @@ class FieldSyncService:
         # 通过 REST API 获取字段元数据
         url = (
             f"{self.server_url}/api/{self.api_version}"
-            f"/sites/{self._site_id}/datasources/{datasource_luid}/fields"
+            f"/sites/{site_id}/datasources/{datasource_luid}/fields"
         )
 
         try:

@@ -122,8 +122,8 @@ def _test_connection_rest(server_url: str, site: str, token_name: str,
 @router.get("/connections")
 async def list_connections(request: Request, db: Session = Depends(get_db), include_inactive: bool = False):
     """获取 Tableau 连接列表"""
-    user = get_current_user(request, db) # 传递 db
-    _db = TableauDatabase() # 不再需要 db_path
+    user = get_current_user(request, db)
+    _db = TableauDatabase(session=db)
 
     if user["role"] == "admin":
         connections = _db.get_all_connections(include_inactive=include_inactive)
@@ -136,8 +136,8 @@ async def list_connections(request: Request, db: Session = Depends(get_db), incl
 @router.post("/connections")
 async def create_connection(req: CreateConnectionRequest, request: Request, db: Session = Depends(get_db)):
     """创建 Tableau 连接"""
-    user = require_roles(request, ["admin", "data_admin"], db) # 传递 db
-    _db = TableauDatabase() # 不再需要 db_path
+    user = require_roles(request, ["admin", "data_admin"], db)
+    _db = TableauDatabase(session=db)
 
     if req.connection_type not in ("mcp", "tsc"):
         raise HTTPException(status_code=400, detail="connection_type 必须为 'mcp' 或 'tsc'")
@@ -161,8 +161,8 @@ async def create_connection(req: CreateConnectionRequest, request: Request, db: 
 @router.put("/connections/{conn_id}")
 async def update_connection(conn_id: int, req: UpdateConnectionRequest, request: Request, db: Session = Depends(get_db)):
     """更新 Tableau 连接"""
-    user = require_roles(request, ["admin", "data_admin"], db) # 传递 db
-    _db = TableauDatabase() # 不再需要 db_path
+    user = require_roles(request, ["admin", "data_admin"], db)
+    _db = TableauDatabase(session=db)
 
     # 使用统一的权限验证函数
     verify_connection_access(conn_id, user, db)
@@ -185,8 +185,8 @@ async def update_connection(conn_id: int, req: UpdateConnectionRequest, request:
 @router.delete("/connections/{conn_id}")
 async def delete_connection(conn_id: int, request: Request, db: Session = Depends(get_db)):
     """删除 Tableau 连接"""
-    user = require_roles(request, ["admin", "data_admin"], db) # 传递 db
-    _db = TableauDatabase() # 不再需要 db_path
+    user = require_roles(request, ["admin", "data_admin"], db)
+    _db = TableauDatabase(session=db)
 
     # 使用统一的权限验证函数
     verify_connection_access(conn_id, user, db)
@@ -198,14 +198,14 @@ async def delete_connection(conn_id: int, request: Request, db: Session = Depend
 @router.post("/connections/{conn_id}/test")
 async def test_connection(conn_id: int, request: Request, db: Session = Depends(get_db)):
     """测试 Tableau 连接"""
-    user = require_roles(request, ["admin", "data_admin"], db) # 传递 db
-    _db = TableauDatabase() # 不再需要 db_path
+    user = require_roles(request, ["admin", "data_admin"], db)
+    _db = TableauDatabase(session=db)
 
     # 使用统一的权限验证函数
     verify_connection_access(conn_id, user, db)
 
-    conn = _db.get_connection(conn_id) # 从 _db 获取连接对象
-    if not conn: # 再次检查，虽然 verify_connection_access 已经检查过
+    conn = _db.get_connection(conn_id)
+    if not conn:
         raise HTTPException(status_code=404, detail="连接不存在")
 
     from cryptography.fernet import InvalidToken as FernetInvalidToken
@@ -259,7 +259,7 @@ async def test_connection(conn_id: int, request: Request, db: Session = Depends(
 async def sync_connection(conn_id: int, request: Request, db: Session = Depends(get_db)):
     """触发 Tableau 资产同步（Celery 异步任务）"""
     user = require_roles(request, ["admin", "data_admin"], db)
-    _db = TableauDatabase()
+    _db = TableauDatabase(session=db)
 
     verify_connection_access(conn_id, user, db)
 
@@ -282,11 +282,11 @@ async def list_assets(
     asset_type: Optional[str] = Query(None, description="资产类型: workbook, view, datasource"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
-    db: Session = Depends(get_db) # 注入 db
+    db: Session = Depends(get_db)
 ):
     """获取资产列表（分页）"""
-    user = get_current_user(request, db) # 传递 db
-    _db = TableauDatabase() # 不再需要 db_path
+    user = get_current_user(request, db)
+    _db = TableauDatabase(session=db)
 
     # 验证用户有权访问该连接
     verify_connection_access(connection_id, user, db)
@@ -315,22 +315,36 @@ async def search_assets(
     asset_type: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
-    db: Session = Depends(get_db) # 注入 db
+    db: Session = Depends(get_db)
 ):
-    """搜索资产"""
-    user = get_current_user(request, db) # 传递 db
-    _db = TableauDatabase() # 不再需要 db_path
+    """
+    搜索资产。
+
+    多租户隔离约束（Spec 07 §3.3.2 P0 IDOR 修复）：
+    - admin 用户：可不指定 connection_id（搜索所有可访问连接）。
+    - 非 admin 用户：
+        - 指定 connection_id：仅返回该连接下的资产（需有访问权）。
+        - 未指定 connection_id：强制限定为当前用户自己创建的连接（owner_id 过滤）。
+    """
+    user = get_current_user(request, db)
+    _db = TableauDatabase(session=db)
 
     # 如果指定了 connection_id，验证用户有权访问
     if connection_id is not None:
         verify_connection_access(connection_id, user, db)
+
+    # 非 admin 且未指定 connection_id 时，强制按 owner_id 过滤（IDOR 防护）
+    owner_id_filter: Optional[int] = None
+    if user["role"] != "admin" and connection_id is None:
+        owner_id_filter = user["id"]
 
     assets, total = _db.search_assets(
         connection_id=connection_id,
         query=q,
         asset_type=asset_type,
         page=page,
-        page_size=page_size
+        page_size=page_size,
+        owner_id=owner_id_filter,
     )
 
     return {
@@ -344,8 +358,8 @@ async def search_assets(
 @router.get("/assets/{asset_id}")
 async def get_asset(asset_id: int, request: Request, db: Session = Depends(get_db)):
     """获取资产详情"""
-    user = get_current_user(request, db) # 传递 db
-    _db = TableauDatabase() # 不再需要 db_path
+    user = get_current_user(request, db)
+    _db = TableauDatabase(session=db)
 
     asset = _db.get_asset(asset_id)
     if not asset or asset.is_deleted:
@@ -372,11 +386,11 @@ async def get_asset(asset_id: int, request: Request, db: Session = Depends(get_d
 async def get_projects(
     request: Request,
     connection_id: int = Query(..., description="连接 ID"),
-    db: Session = Depends(get_db) # 注入 db
+    db: Session = Depends(get_db)
 ):
     """获取项目树"""
-    user = get_current_user(request, db) # 传递 db
-    _db = TableauDatabase() # 不再需要 db_path
+    user = get_current_user(request, db)
+    _db = TableauDatabase(session=db)
 
     # 验证用户有权访问该连接
     verify_connection_access(connection_id, user, db)
@@ -393,11 +407,11 @@ async def list_sync_logs(
     request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db) # 注入 db
+    db: Session = Depends(get_db)
 ):
     """获取同步日志列表"""
-    user = get_current_user(request, db) # 传递 db
-    _db = TableauDatabase() # 不再需要 db_path
+    user = get_current_user(request, db)
+    _db = TableauDatabase(session=db)
     verify_connection_access(conn_id, user, db)
 
     logs, total = _db.get_sync_logs(conn_id, page=page, page_size=page_size)
@@ -413,8 +427,8 @@ async def list_sync_logs(
 @router.get("/connections/{conn_id}/sync-logs/{log_id}")
 async def get_sync_log(conn_id: int, log_id: int, request: Request, db: Session = Depends(get_db)):
     """获取同步日志详情"""
-    user = get_current_user(request, db) # 传递 db
-    _db = TableauDatabase() # 不再需要 db_path
+    user = get_current_user(request, db)
+    _db = TableauDatabase(session=db)
     verify_connection_access(conn_id, user, db)
 
     log = _db.get_sync_log(log_id)
@@ -426,8 +440,8 @@ async def get_sync_log(conn_id: int, log_id: int, request: Request, db: Session 
 @router.get("/connections/{conn_id}/sync-status")
 async def get_sync_status(conn_id: int, request: Request, db: Session = Depends(get_db)):
     """获取连接同步状态"""
-    user = get_current_user(request, db) # 传递 db
-    _db = TableauDatabase() # 不再需要 db_path
+    user = get_current_user(request, db)
+    _db = TableauDatabase(session=db)
     verify_connection_access(conn_id, user, db)
 
     conn = _db.get_connection(conn_id)
@@ -459,7 +473,7 @@ async def get_sync_status(conn_id: int, request: Request, db: Session = Depends(
 async def get_asset_children(asset_id: int, request: Request, db: Session = Depends(get_db)):
     """获取 workbook 下属的 view/dashboard"""
     user = get_current_user(request, db) # 传递 db
-    _db = TableauDatabase() # 不再需要 db_path
+    _db = TableauDatabase(session=db)
 
     asset = _db.get_asset(asset_id)
     if not asset or asset.is_deleted:
@@ -477,7 +491,7 @@ async def get_asset_children(asset_id: int, request: Request, db: Session = Depe
 async def get_asset_parent(asset_id: int, request: Request, db: Session = Depends(get_db)):
     """获取 view/dashboard 的父 workbook"""
     user = get_current_user(request, db) # 传递 db
-    _db = TableauDatabase() # 不再需要 db_path
+    _db = TableauDatabase(session=db)
 
     asset = _db.get_asset(asset_id)
     if not asset or asset.is_deleted:
@@ -498,7 +512,7 @@ class ExplainRequest(BaseModel):
 async def explain_asset(asset_id: int, req: ExplainRequest, request: Request, db: Session = Depends(get_db)):
     """生成/获取深度 AI 解读"""
     user = get_current_user(request, db) # 传递 db
-    _db = TableauDatabase() # 不再需要 db_path
+    _db = TableauDatabase(session=db)
 
     asset = _db.get_asset(asset_id)
     if not asset or asset.is_deleted:
@@ -600,7 +614,7 @@ async def explain_asset(asset_id: int, req: ExplainRequest, request: Request, db
 async def get_asset_health(asset_id: int, request: Request, db: Session = Depends(get_db)):
     """获取资产健康评分"""
     user = get_current_user(request, db) # 传递 db
-    _db = TableauDatabase() # 不再需要 db_path
+    _db = TableauDatabase(session=db)
     asset = _db.get_asset(asset_id)
     if not asset or asset.is_deleted:
         raise HTTPException(status_code=404, detail="资产不存在")
@@ -622,7 +636,7 @@ async def get_asset_health(asset_id: int, request: Request, db: Session = Depend
 async def get_connection_health_overview(conn_id: int, request: Request, db: Session = Depends(get_db)):
     """连接级健康总览"""
     user = get_current_user(request, db) # 传递 db
-    _db = TableauDatabase() # 不再需要 db_path
+    _db = TableauDatabase(session=db)
     conn = _db.get_connection(conn_id)
     if not conn:
         raise HTTPException(status_code=404, detail="连接不存在")

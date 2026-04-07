@@ -29,7 +29,7 @@ async def trigger_scan(body: ScanRequest, request: Request, db: Session = Depend
     require_roles(request, ["admin", "data_admin"], db)
 
     ds_db = DataSourceDatabase()
-    ds = ds_db.get(body.datasource_id)
+    ds = ds_db.get(db, body.datasource_id)
     if not ds:
         raise HTTPException(status_code=404, detail="数据源不存在")
 

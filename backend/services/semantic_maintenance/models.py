@@ -76,7 +76,7 @@ class TableauDatasourceSemantics(Base):
     owner = Column(String(128), nullable=True)
     steward = Column(String(128), nullable=True)
     sensitivity_level = Column(String(16), default=SensitivityLevel.LOW, server_default=sa_text(f"'{SensitivityLevel.LOW}'"))
-    tags_json = Column(JSONB, nullable=True)  # JSON array, 改为 JSONB
+    tags_json = Column(JSONB, nullable=True, server_default=sa_text("'[]'::jsonb"))  # JSON array, P0 修复: 统一 server_default
     status = Column(String(32), default=SemanticStatus.DRAFT, server_default=sa_text(f"'{SemanticStatus.DRAFT}'"))
     source = Column(String(16), default=SemanticSource.MANUAL, server_default=sa_text(f"'{SemanticSource.MANUAL}'"))
     current_version = Column(Integer, default=1, server_default=sa_func.cast(1, Integer()))
@@ -123,7 +123,7 @@ class TableauDatasourceSemanticVersion(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     datasource_semantic_id = Column(Integer, ForeignKey("tableau_datasource_semantics.id", ondelete="CASCADE"), nullable=False)
     version = Column(Integer, nullable=False)
-    snapshot_json = Column(JSONB, nullable=False) # 完整快照 JSON, 改为 JSONB
+    snapshot_json = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"))  # P1 修复: 统一 JSONB 默认值（对象字典）
     changed_by = Column(Integer, nullable=True)
     change_reason = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
@@ -162,9 +162,9 @@ class TableauFieldSemantics(Base):
     metric_definition = Column(Text, nullable=True)
     dimension_definition = Column(Text, nullable=True)
     unit = Column(String(64), nullable=True)
-    enum_desc_json = Column(JSONB, nullable=True) # 改为 JSONB
-    tags_json = Column(JSONB, nullable=True) # 改为 JSONB
-    synonyms_json = Column(JSONB, nullable=True) # 改为 JSONB
+    enum_desc_json = Column(JSONB, nullable=True, server_default=sa_text("'[]'::jsonb"))   # P1 修复: 统一 JSONB 默认值（数组）
+    tags_json = Column(JSONB, nullable=True, server_default=sa_text("'[]'::jsonb"))          # P1 修复: 统一 JSONB 默认值（数组）
+    synonyms_json = Column(JSONB, nullable=True, server_default=sa_text("'[]'::jsonb"))    # P1 修复: 统一 JSONB 默认值（数组）
     sensitivity_level = Column(String(16), default=SensitivityLevel.LOW, server_default=sa_text(f"'{SensitivityLevel.LOW}'"))
     is_core_field = Column(Boolean, default=False, server_default=sa_text('false')) # Boolean 默认值
     ai_confidence = Column(Float, nullable=True)
@@ -219,7 +219,7 @@ class TableauFieldSemanticVersion(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     field_semantic_id = Column(Integer, ForeignKey("tableau_field_semantics.id", ondelete="CASCADE"), nullable=False)
     version = Column(Integer, nullable=False)
-    snapshot_json = Column(JSONB, nullable=False)  # 完整快照 JSON, 改为 JSONB
+    snapshot_json = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"))  # P1 修复: 统一 JSONB 默认值（对象字典）
     changed_by = Column(Integer, nullable=True)
     change_reason = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
@@ -252,8 +252,8 @@ class TableauPublishLog(Base):
     object_id = Column(Integer, nullable=False)
     tableau_object_id = Column(String(256), nullable=True)
     target_system = Column(String(32), default="tableau", server_default=sa_text("'tableau'"))
-    publish_payload_json = Column(JSONB, nullable=True) # 改为 JSONB
-    diff_json = Column(JSONB, nullable=True) # 改为 JSONB
+    publish_payload_json = Column(JSONB, nullable=True, server_default=sa_text("'{}'::jsonb"))  # P1 修复: 统一 JSONB 默认值（对象字典）
+    diff_json = Column(JSONB, nullable=True, server_default=sa_text("'{}'::jsonb"))            # P1 修复: 统一 JSONB 默认值（对象字典）
     status = Column(String(16), default=PublishStatus.PENDING, server_default=sa_text(f"'{PublishStatus.PENDING}'"))
     response_summary = Column(Text, nullable=True)
     operator = Column(Integer, nullable=True)

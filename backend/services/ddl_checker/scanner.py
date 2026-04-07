@@ -186,7 +186,8 @@ class DDLScanner:
 
             self.validator = DDLValidator()
 
-            table_info = DDLParser.parse_create_table(sql)
+            parser = DDLParser()
+            table_info, parse_mode = parser.parse_create_table(sql)
             if not table_info:
                 return DDLScanResult(success=False, error="无法解析 SQL 语句")
 

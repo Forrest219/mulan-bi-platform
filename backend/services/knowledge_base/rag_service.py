@@ -1,5 +1,6 @@
 """RAG 服务（知识库 §6）"""
 import logging
+import tiktoken
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 
@@ -30,29 +31,25 @@ class RAGService:
 
     def _calc_rag_budget(self, data_context_tokens: int) -> int:
         """
-        动态 RAG Token 预算公式（PRD §6.2）：
-        RAG可用预算 = 3000 - SystemPrompt(200) - 数据上下文实际占用 - 用户指令(800)
-        最低保障 200 tokens。
+        动态 RAG Token 预算公式（Spec 17 §6.2 v1.1）：
+        RAG可用预算 = 2000 - 数据上下文实际占用
+        预算可压缩至 0（高优截断），不允许为负或强行保底。
         """
-        budget = RAG_BUDGET_TOKENS - SYSTEM_PROMPT_TOKENS - data_context_tokens - USER_INSTRUCTION_TOKENS
-        return max(budget, MIN_CONTEXT_TOKENS)
+        budget = max(0, 2000 - data_context_tokens)
+        if budget == 0:
+            logger.warning("数据上下文占用过大，RAG 预算被压缩至 0，触发高优截断")
+        return budget
 
     def _token_estimate(self, text: str) -> int:
         """
         估算文本 token 数（Spec 17 §4.4 — 强制 tiktoken cl100k_base）。
         严禁使用字符数估算。P0-P4 各优先级均使用此方法。
+        tiktoken 为强制依赖，若未安装则直接抛出 RuntimeError。
         """
         if not text:
             return 0
-        try:
-            import tiktoken
-            enc = tiktoken.get_encoding("cl100k_base")
-            return len(enc.encode(text))
-        except ImportError:
-            # tiktoken 不可用时的保守回退（中文字符 * 2.0，英文 * 1.3）
-            chinese_chars = sum(1 for c in text if ord(c) > 127)
-            other_chars = len(text) - chinese_chars
-            return int(chinese_chars * 2.0 + other_chars * 1.3)
+        enc = tiktoken.get_encoding("cl100k_base")
+        return len(enc.encode(text))
 
     async def enrich_context(
         self, db: Session, question: str, scenario: str = "default"
