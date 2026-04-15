@@ -9,8 +9,8 @@
  * ⚠️ 强制约束：src/api/ 目录下的后端 API 请求路径（如 /api/admin/datasources）
  * 绝对禁止修改！本次重构仅限于前端视图路由（React Router 路径）。
  */
-import { lazy, type RouteObject } from 'react-router-dom';
-import { Navigate } from 'react-router-dom';
+import { lazy } from 'react';
+import { type RouteObject, Navigate } from 'react-router-dom';
 import NotFound from '../pages/NotFound';
 import Home from '../pages/home/page';
 import LoginPage from '../pages/login/page';

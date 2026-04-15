@@ -1,7 +1,7 @@
 """add_quality_governance_tables
 
 Revision ID: add_quality_tables_v1
-Revises: a1b2c3d4e5f6
+Revises: add_mfa_fields
 Create Date: 2026-04-05 00:00:00.000000
 
 遵循 Spec 15 v1.1 数据治理与质量监控技术规格书：
@@ -17,7 +17,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = 'add_quality_tables_v1'
-down_revision: Union[str, None] = 'a1b2c3d4e5f6'
+down_revision: Union[str, None] = 'add_mfa_fields'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -33,10 +33,10 @@ def upgrade() -> None:
         sa.Column('table_name', sa.String(length=128), nullable=False),
         sa.Column('field_name', sa.String(length=128), nullable=True),
         sa.Column('rule_type', sa.String(length=32), nullable=False),
-        sa.Column('operator', sa.String(length=16), nullable=False, server_default="'lte'"),
-        sa.Column('threshold', postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default="'{}'"),
-        sa.Column('severity', sa.String(length=16), nullable=False, server_default="'MEDIUM'"),
-        sa.Column('execution_mode', sa.String(length=16), nullable=False, server_default="'scheduled'"),
+        sa.Column('operator', sa.String(length=16), nullable=False, server_default='lte'),
+        sa.Column('threshold', postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default='{}'),
+        sa.Column('severity', sa.String(length=16), nullable=False, server_default='MEDIUM'),
+        sa.Column('execution_mode', sa.String(length=16), nullable=False, server_default='scheduled'),
         sa.Column('cron', sa.String(length=64), nullable=True),
         sa.Column('custom_sql', sa.Text(), nullable=True),
         sa.Column('enabled', sa.Boolean(), nullable=False, server_default='true'),

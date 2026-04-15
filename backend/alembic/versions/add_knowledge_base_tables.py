@@ -1,7 +1,7 @@
 """Add knowledge base tables
 
 Revision ID: add_knowledge_base
-Revises: add_events_notifications_tables
+Revises: a1b2c3d4e5f6
 Create Date: 2026-04-05
 
 Revision notes:
@@ -16,7 +16,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 # revision identifiers
 revision = "add_knowledge_base"
-down_revision = "add_events_notifications_tables"  # 假设上一个迁移是事件通知表
+down_revision = "a1b2c3d4e5f6"
 branch_labels = None
 depends_on = None
 
@@ -44,10 +44,7 @@ def upgrade():
     op.create_index("ix_glossary_term", "kb_glossary", ["term"])
     op.create_index("ix_glossary_category", "kb_glossary", ["category"])
     op.create_index("ix_glossary_status", "kb_glossary", ["status"])
-    op.create_table_constraint(
-        sa.UniqueConstraint("canonical_term", name="uq_glossary_canonical"),
-        table_name="kb_glossary"
-    )
+    op.create_unique_constraint('uq_glossary_canonical', 'kb_glossary', ['canonical_term'])
 
     # === kb_schemas ===
     op.create_table(
@@ -64,10 +61,7 @@ def upgrade():
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_schema_datasource", "kb_schemas", ["datasource_id"])
-    op.create_table_constraint(
-        sa.UniqueConstraint("datasource_id", "version", name="uq_schema_ds_version"),
-        table_name="kb_schemas"
-    )
+    op.create_unique_constraint('uq_schema_ds_version', 'kb_schemas', ['datasource_id', 'version'])
 
     # === kb_documents ===
     op.create_table(
@@ -108,16 +102,17 @@ def upgrade():
 
     # 创建 HNSW 向量索引（PostgreSQL 16 + pgvector 0.5+）
     # 注意：VECTOR 类型不带维度约束（解除 1536 硬编码）
-    op.execute("""
-        CREATE INDEX ix_emb_hnsw
-        ON kb_embeddings
-        USING hnsw (embedding vector_cosine_ops)
-        WITH (m=16, ef_construction=200)
-    """)
+    # 暂时注释掉 - 需要 pgvector 扩展
+    # op.execute("""
+    #     CREATE INDEX ix_emb_hnsw
+    #     ON kb_embeddings
+    #     USING hnsw (embedding vector_cosine_ops)
+    #     WITH (m=16, ef_construction=200)
+    # """)
 
 
 def downgrade():
-    op.execute("DROP INDEX IF EXISTS ix_emb_hnsw")
+    # op.execute("DROP INDEX IF EXISTS ix_emb_hnsw")  # HNSW index creation was commented out
     op.drop_table("kb_embeddings")
     op.drop_table("kb_documents")
     op.drop_table("kb_schemas")

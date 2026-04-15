@@ -1,7 +1,7 @@
 """add_ddl_compliance_fields
 
 Revision ID: add_ddl_compliance_fields
-Revises: 07c4d16b8335_add_rule_configs_and_operator_id
+Revises: 07c4d16b8335
 Create Date: 2026-04-06 00:01:00.000000
 
 """
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers
 revision = 'add_ddl_compliance_fields'
-down_revision = '07c4d16b8335_add_rule_configs_and_operator_id'
+down_revision = '07c4d16b8335'
 branch_labels = None
 depends_on = None
 

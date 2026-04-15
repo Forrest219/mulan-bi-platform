@@ -109,7 +109,7 @@ def get_session_user(request: Request) -> Optional[dict]:
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(request: LoginRequest, response: Response):
+async def login(request: LoginRequest, response: Response, http_request: Request):
     """用户登录"""
     user = auth_service.authenticate(request.username, request.password)
 
@@ -148,7 +148,7 @@ async def login(request: LoginRequest, response: Response):
     )
 
     # Refresh Token（30 天 Sliding Window）
-    _device = request.headers.get("User-Agent", "")[:128]
+    _device = http_request.headers.get("User-Agent", "")[:128]
     refresh_token = auth_service.create_refresh_token(
         user_id=user["id"],
         device_fingerprint=_device,
