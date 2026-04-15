@@ -297,7 +297,7 @@ def validate_field_captions_consistency(
     if missing_fields:
         logger.warning(
             "Stage 2/1 fieldCaption 一致性校验失败: datasource_luid=%s, missing=%s, trace=%s",
-            datasource_luid, missing_fields,
+            datasource_luid, missing_fields, get_trace_id(),
         )
 
     return False, missing_fields, actual_captions

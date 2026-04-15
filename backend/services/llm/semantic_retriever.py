@@ -44,14 +44,14 @@ async def recall_fields(
     where_ds = ""
     params: dict[str, Any] = {"query_vec": str(query_vec), "top_k": min(top_k, MAX_CONTEXT_FIELDS)}
     if datasource_ids:
-        where_ds = "AND datasource_id = ANY(:dsids)"
+        where_ds = "AND connection_id = ANY(:dsids)"
         params["dsids"] = datasource_ids
 
     # Use 1 - (embedding <=> query_vec) for cosine similarity
     sql = text(f"""
         SELECT
             id,
-            datasource_id,
+            connection_id,
             semantic_name,
             semantic_name_zh,
             metric_definition,

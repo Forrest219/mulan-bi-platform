@@ -55,5 +55,8 @@ export async function askQuestion(req: AskQuestionRequest): Promise<SearchAnswer
     const msg = err?.detail?.message || err?.message || `HTTP ${resp.status}`;
     throw new SearchError(code, msg);
   }
-  return resp.json();
+  const json = await resp.json();
+  // Normalize backend response: map response_type → type
+  const { response_type, ...rest } = json;
+  return { type: response_type, ...rest };
 }

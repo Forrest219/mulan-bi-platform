@@ -319,8 +319,10 @@ def _ensure_session(timeout: int = 30) -> str:
         ):
             return _mcp_session_state.session_id
 
-        # 重置状态，触发完整初始化
-        _mcp_session_state.reset()
+        # 重置状态，触发完整初始化（inline 而非调用 reset() 避免重入锁死锁）
+        _mcp_session_state.session_id = None
+        _mcp_session_state.last_activity = 0.0
+        _mcp_session_state._initialized = False
         _mcp_session_state.protocol_version = protocol_ver
 
     base_url = get_tableau_mcp_server_url()
@@ -555,7 +557,7 @@ class TableauMCPClient:
             asset = session.query(TableauAsset).filter(
                 TableauAsset.datasource_luid == datasource_luid,
                 TableauAsset.connection_id == connection_id,
-                not TableauAsset.is_deleted,
+                TableauAsset.is_deleted == False,
             ).first()
 
             if not asset:

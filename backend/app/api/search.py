@@ -87,7 +87,7 @@ def _get_asset_by_luid(datasource_luid: str):
     session = db.session
     asset = session.query(TableauAsset).filter(
         TableauAsset.datasource_luid == datasource_luid,
-        not TableauAsset.is_deleted,
+        TableauAsset.is_deleted == False,
     ).first()
     session.close()
     return asset
@@ -113,9 +113,25 @@ async def query(
     limit = options.get("limit", 1000)
     timeout = options.get("timeout", 30)
 
+    # === PRD §10.1 审计日志：提前创建，确保 HTTPException 路径也被记录 ===
+    user_id = user.get("id") or 0
+    audit_record = InvocationRecord(
+        trace_id=new_trace_id(),
+        principal_id=user.get("id") or 0,
+        principal_role=user.get("role") or "user",
+        capability="query_metric",
+        params_jsonb={
+            "question_length": len(question or ""),
+            "datasource_luid": datasource_luid,
+            "connection_id": connection_id,
+        },
+    )
+
+    import time
+    t0 = time.time()
+
     # === PRD §10.2 参数校验（顺序：限速 → 长度 → 敏感度）===
     # 1. 限速检查（单用户 20 次/分钟）
-    user_id = user.get("id") or 0
     if not check_rate_limit(user_id):
         raise _nlq_error_response("NLQ_010", "查询过于频繁，请稍后再试")
 
@@ -138,22 +154,6 @@ async def query(
     _log_error: str = None
     _log_question: str = question
     _log_user_id: int = user_id
-
-    import time
-    t0 = time.time()
-
-    # Capability audit record (P4 T3)
-    audit_record = InvocationRecord(
-        trace_id=new_trace_id(),
-        principal_id=user.get("id") or 0,
-        principal_role=user.get("role") or "user",
-        capability="query_metric",
-        params_jsonb={
-            "question_length": len(question or ""),
-            "datasource_luid": datasource_luid,
-            "connection_id": connection_id,
-        },
-    )
 
     try:
         # === 阶段1：意图分类 + 查询构建（One-Pass LLM）===
@@ -183,7 +183,7 @@ async def query(
         session = db.session
         asset = session.query(TableauAsset).filter(
             TableauAsset.datasource_luid == ds_luid,
-            not TableauAsset.is_deleted,
+            TableauAsset.is_deleted == False,
         ).first()
         session.close()
 
