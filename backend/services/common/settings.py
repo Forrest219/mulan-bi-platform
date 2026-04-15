@@ -81,7 +81,7 @@ def get_celery_result_backend() -> str:
 
 @lru_cache(maxsize=1)
 def get_tableau_mcp_server_url() -> str:
-    return os.environ.get("TABLEAU_MCP_SERVER_URL", "http://localhost:8080/mcp")
+    return os.environ.get("TABLEAU_MCP_SERVER_URL", "http://localhost:3927/tableau-mcp")
 
 
 @lru_cache(maxsize=1)
@@ -89,10 +89,16 @@ def get_tableau_mcp_timeout() -> int:
     return int(os.environ.get("TABLEAU_MCP_TIMEOUT", "30"))
 
 
+@lru_cache(maxsize=1)
+def get_tableau_mcp_protocol_version() -> str:
+    return os.environ.get("TABLEAU_MCP_PROTOCOL_VERSION", "2025-06-18")
+
+
 def clear_tableau_mcp_cache() -> None:
     """运维用：清除 Tableau MCP 配置缓存"""
     get_tableau_mcp_server_url.cache_clear()
     get_tableau_mcp_timeout.cache_clear()
+    get_tableau_mcp_protocol_version.cache_clear()
 
 
 # =============================================================================

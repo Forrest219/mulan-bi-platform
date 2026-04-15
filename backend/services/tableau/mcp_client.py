@@ -1,25 +1,37 @@
 """
-Tableau MCP 查询客户端（Stage 3 执行层）
+Tableau MCP 查询客户端（Stage 3 执行层）— T-R1 重写
 
 PRD §5.5 契约实现：
-- 约束 A：环境变量完整性（PAT 解密后注入）
-- 约束 B：MCP ClientSession 长连接复用（单例模式）
+- 约束 A：环境变量完整性（PAT 解密后注入）→ 移至 MCP server 进程 env（已由官方 server 持有）
+- 约束 B：MCP ClientSession 长连接复用（单例模式）→ 重写为 streamable-http + session-id 管理
 - 约束 C：VizQL JSON 与字段元数据一致性校验
 - 约束 D（新增 P0）：connection_id 贯穿上下文，禁止跨租户 client 缓存
 
-MCP Server 通信：JSON-RPC 2.0 over HTTP
+MCP Server 通信：标准 MCP Streamable-HTTP over JSON-RPC 2.0
+协议参考：https://modelcontextprotocol.io/specification/2025-06-18
+工具实现：@tableau/mcp-server@1.18.1
+
+T-R1 变更摘要：
+- 删除自定义 REST 传输（`POST /query-datasource` + `env` 注入）
+- 改为标准 MCP 传输：`initialize` → `notifications/initialized` → `tools/call`
+- 新增模块级 MCP session 生命周期管理（session-id header、过期重建、DELETE 释放）
+- 新增 SSE 解析（`event: message\ndata: {...}`）
+- 保留：per-connection_id 实例缓存、contextvars 隔离、OOM 防护、idle 清理、错误码映射
 """
 import contextvars
 import json
 import logging
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import requests
 
 from app.core.crypto import get_tableau_crypto
-from services.common.settings import get_tableau_mcp_server_url, get_tableau_mcp_timeout
+from services.common.settings import (
+    get_tableau_mcp_server_url,
+    get_tableau_mcp_protocol_version,
+)
 from services.tableau.models import TableauConnection, TableauAsset
 
 
@@ -58,6 +70,7 @@ class _CachedTableauConnection:
         self.mcp_direct_enabled = mcp_direct_enabled
         self.mcp_server_url = mcp_server_url
 
+
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -77,34 +90,358 @@ def get_mcp_connection_id() -> Optional[int]:
     """获取当前上下文的 connection_id"""
     return _connection_id_var.get()
 
+
 # ─────────────────────────────────────────────────────────────────────────────
-# 单例 Session 管理器（约束 B：长连接复用）
+# 模块级 HTTP Session 管理（约束 B：连接池复用）
 # ─────────────────────────────────────────────────────────────────────────────
 
-_session_lock = threading.Lock()
-_session_cache: Optional[requests.Session] = None
+_http_session_lock = threading.Lock()
+_http_session: Optional[requests.Session] = None
 
 
-def _get_shared_session() -> requests.Session:
-    """
-    获取共享的 requests.Session（单例）。
-    requests.Session 会自动维护 TCP 连接池和 Connection Reuse，
-    避免每次请求都新建 TCP 连接。
-    """
-    global _session_cache
-    if _session_cache is None:
-        with _session_lock:
-            if _session_cache is None:
-                _session_cache = requests.Session()
-                # 配置连接池参数
+def _get_http_session() -> requests.Session:
+    """获取共享的 requests.Session（单例）。"""
+    global _http_session
+    if _http_session is None:
+        with _http_session_lock:
+            if _http_session is None:
+                s = requests.Session()
                 adapter = requests.adapters.HTTPAdapter(
                     pool_connections=10,
                     pool_maxsize=20,
                     max_retries=0,  # 重试由上层控制
                 )
-                _session_cache.mount("http://", adapter)
-                _session_cache.mount("https://", adapter)
-    return _session_cache
+                s.mount("http://", adapter)
+                s.mount("https://", adapter)
+                _http_session = s
+    return _http_session
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 模块级 MCP Session 状态（进程级共享，MVP 单 Tableau Site）
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _MCPSessionState:
+    """
+    MCP session 生命周期状态。
+
+    MVP 约束：所有 connection_id 共享同一个 MCP server 进程，
+    因此 session 是进程级共享资源（非 per-connection_id）。
+    多租户场景（P2+）改造成 {site → _MCPSessionState} 映射。
+    """
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.session_id: Optional[str] = None
+        self.last_activity: float = 0.0
+        self.protocol_version: str = "2025-06-18"
+        self._initialized = False
+
+    def reset(self) -> None:
+        with self.lock:
+            self.session_id = None
+            self.last_activity = 0.0
+            self._initialized = False
+
+
+_mcp_session_state = _MCPSessionState()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MCP Session 管理函数
+# ─────────────────────────────────────────────────────────────────────────────
+
+_jsonrpc_id_counter = 0
+_id_lock = threading.Lock()
+
+
+def _next_id() -> int:
+    """生成自增 JSON-RPC id（线程安全）。"""
+    global _jsonrpc_id_counter
+    with _id_lock:
+        _jsonrpc_id_counter += 1
+        return _jsonrpc_id_counter
+
+
+def _build_headers(with_session: bool = True) -> Dict[str, str]:
+    """构建 MCP HTTP 请求头。"""
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "MCP-Protocol-Version": _mcp_session_state.protocol_version,
+    }
+    if with_session and _mcp_session_state.session_id:
+        headers["mcp-session-id"] = _mcp_session_state.session_id
+    return headers
+
+
+def _parse_sse(response_text: str) -> Dict[str, Any]:
+    """
+    解析 SSE 响应体。
+
+    MCP streamable-http 响应格式：
+        event: message
+        data: {"jsonrpc":"2.0","id":1,"result":{...}}
+
+    规则：
+        1. 按行分割
+        2. 找 "data: " 开头的行（注意空格）
+        3. 剥前缀，json.loads
+        4. 多 data 行时用 \\n 连接（MCP 允许多行；Tableau server 目前单行足够）
+    """
+    lines = response_text.split("\n")
+    data_lines = [
+        line[6:] for line in lines
+        if line.startswith("data: ")
+    ]
+    if not data_lines:
+        raise TableauMCPError(
+            code="NLQ_006",
+            message="MCP SSE 响应无 data 字段",
+            details={"raw": response_text[:500]},
+        )
+    payload = "\n".join(data_lines)
+    return json.loads(payload)
+
+
+def _post_mcp(
+    payload: Dict[str, Any],
+    method: str,
+    timeout: int = 30,
+    expect_sse: bool = True,
+) -> Dict[str, Any]:
+    """
+    发送 MCP JSON-RPC 请求，返回解析后的响应体。
+
+    参数：
+        method: 用于日志的 MCP method 名（如 "initialize"）
+        timeout: 请求超时秒数
+        expect_sse: 是否解析 SSE 响应（False 用于 initialize 握手）
+
+    重试策略：
+        - 网络错误 / 5xx：重试 1 次，间隔 1s
+        - 4xx：不重试
+        - session 过期（HTTP 400 + "No valid session ID"）：由调用方处理（_ensure_session）
+    """
+    url = get_tableau_mcp_server_url()
+    headers = _build_headers(with_session=True)
+    last_error: Optional[Exception] = None
+
+    for attempt in range(2):
+        try:
+            resp = _get_http_session().post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=timeout,
+            )
+            # Session 过期检测：HTTP 400 + "No valid session ID"
+            if resp.status_code == 400 and "No valid session ID" in resp.text:
+                # 抛出特殊标记，让 _ensure_session 处理
+                raise _SessionExpiredError("Session expired or invalid")
+
+            if resp.status_code >= 500 and attempt == 0:
+                time.sleep(1)
+                continue
+            if resp.status_code >= 400:
+                raise TableauMCPError(
+                    code="NLQ_006",
+                    message=f"MCP 请求失败（HTTP {resp.status_code}）",
+                    details={"method": method, "status_code": resp.status_code},
+                )
+
+            if expect_sse:
+                return _parse_sse(resp.text)
+            else:
+                # initialize 响应也是 SSE，但格式更简单
+                try:
+                    return _parse_sse(resp.text)
+                except (json.JSONDecodeError, TableauMCPError):
+                    # 某些 server 实现在 initialize 成功时返回空或纯文本
+                    logger.debug("initialize 响应非标准 SSE: %s", resp.text[:200])
+                    return {}
+
+        except _SessionExpiredError:
+            raise  # 不重试，直接让调用方处理
+        except requests.exceptions.Timeout:
+            raise TableauMCPError(
+                code="NLQ_007",
+                message=f"MCP 查询超时（{timeout}s）",
+                details={"method": method, "timeout": timeout},
+            )
+        except TableauMCPError:
+            raise  # 已构造好，直接透传
+        except Exception as e:
+            last_error = e
+            if attempt == 0:
+                time.sleep(1)
+                continue
+            logger.error("MCP 请求异常（%s）: %s", method, e)
+
+    # 两次尝试均失败
+    raise TableauMCPError(
+        code="NLQ_006",
+        message=f"MCP 服务不可用（{method}）",
+        details={"method": method, "error": str(last_error)},
+    )
+
+
+class _SessionExpiredError(Exception):
+    """Session 过期标记（不在外层重试，由 _ensure_session 内部重建）"""
+    pass
+
+
+def _ensure_session(timeout: int = 30) -> str:
+    """
+    确保 MCP session 已建立。
+
+    流程：
+        1. 若 session 已活跃（last_activity < 5min），直接返回 session_id
+        2. 若未初始化或过期，发起 initialize + notifications/initialized
+        3. 收到 session 过期 HTTP 400，清空 session_id 后重建
+
+    返回：
+        有效的 session_id
+
+    注意：
+        这是模块级共享函数，所有 connection_id 共用同一个 MCP session。
+        线程安全（自旋锁保护）。
+    """
+    protocol_ver = get_tableau_mcp_protocol_version()
+    now = time.monotonic()
+    idle_timeout = 300  # 5 分钟，与 _IDLE_TIMEOUT 保持一致
+
+    with _mcp_session_state.lock:
+        # 检查活跃 session
+        if (
+            _mcp_session_state.session_id
+            and _mcp_session_state._initialized
+            and (now - _mcp_session_state.last_activity) < idle_timeout
+        ):
+            return _mcp_session_state.session_id
+
+        # 重置状态，触发完整初始化
+        _mcp_session_state.reset()
+        _mcp_session_state.protocol_version = protocol_ver
+
+    base_url = get_tableau_mcp_server_url()
+    headers_base = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "MCP-Protocol-Version": protocol_ver,
+    }
+
+    # Step 1: initialize
+    init_payload = {
+        "jsonrpc": "2.0",
+        "id": _next_id(),
+        "method": "initialize",
+        "params": {
+            "protocolVersion": protocol_ver,
+            "capabilities": {},
+            "clientInfo": {
+                "name": "mulan-bi-mcp-client",
+                "version": "1.0.0",
+            },
+        },
+    }
+
+    resp = _get_http_session().post(
+        base_url,
+        json=init_payload,
+        headers=headers_base,
+        timeout=timeout,
+    )
+
+    if resp.status_code == 400 and "No valid session ID" in resp.text:
+        raise TableauMCPError(
+            code="NLQ_006",
+            message="MCP initialize 失败：session 初始化被拒绝",
+            details={"status_code": resp.status_code, "body": resp.text[:200]},
+        )
+
+    if resp.status_code >= 400:
+        raise TableauMCPError(
+            code="NLQ_006",
+            message=f"MCP initialize 失败（HTTP {resp.status_code}）",
+            details={"status_code": resp.status_code},
+        )
+
+    # 抽取 session_id 从响应 header
+    session_id = None
+    for k, v in resp.headers.items():
+        if k.lower() == "mcp-session-id":
+            session_id = v
+            break
+
+    if not session_id:
+        # 某些实现可能把 session_id 放 body 里
+        try:
+            body = json.loads(resp.text)
+            session_id = body.get("sessionId") or body.get("session_id")
+        except (json.JSONDecodeError, Exception):
+            pass
+
+    if not session_id:
+        raise TableauMCPError(
+            code="NLQ_006",
+            message="MCP initialize 成功但响应中无 session-id",
+            details={"body": resp.text[:500]},
+        )
+
+    # Step 2: notifications/initialized（告知 server 端握手完成）
+    notif_payload = {
+        "jsonrpc": "2.0",
+        "id": _next_id(),
+        "method": "notifications/initialized",
+        "params": {},
+    }
+    notif_headers = {
+        **headers_base,
+        "mcp-session-id": session_id,
+    }
+    # notifications/initialized 期望 202 Accepted，server 不返回 body
+    try:
+        notif_resp = _get_http_session().post(
+            base_url,
+            json=notif_payload,
+            headers=notif_headers,
+            timeout=timeout,
+        )
+        logger.debug("notifications/initialized 响应: %d %s", notif_resp.status_code, notif_resp.text[:200])
+    except Exception as e:
+        logger.warning("notifications/initialized 失败（不影响主流程）: %s", e)
+
+    # 写入状态
+    with _mcp_session_state.lock:
+        _mcp_session_state.session_id = session_id
+        _mcp_session_state.last_activity = time.monotonic()
+        _mcp_session_state._initialized = True
+
+    logger.info("MCP session 建立成功，session_id=%s", session_id[:16] + "...")
+    return session_id
+
+
+def _invalidate_session() -> None:
+    """主动释放 MCP session（发 DELETE，然后清状态）。"""
+    session_id = _mcp_session_state.session_id
+    if not session_id:
+        _mcp_session_state.reset()
+        return
+
+    base_url = get_tableau_mcp_server_url()
+    headers = _build_headers(with_session=True)
+
+    try:
+        resp = _get_http_session().delete(
+            base_url,
+            headers=headers,
+            timeout=10,
+        )
+        logger.debug("MCP DELETE session 响应: %d %s", resp.status_code, resp.text[:200])
+    except Exception as e:
+        logger.warning("MCP DELETE session 失败（非致命）: %s", e)
+    finally:
+        _mcp_session_state.reset()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -131,22 +468,20 @@ class TableauMCPClient:
         client = get_tableau_mcp_client(connection_id=conn_id)
         result = client.query_datasource(datasource_luid, vizql_json, connection_id=conn_id, timeout=30)
 
-    ⚡ 长连接复用（约束 B）：内部使用共享 Session，
-    不会每次调用都新建 TCP 连接。
-    ⚡ 租户隔离（约束 D）：client 按 connection_id 隔离。
-    ⚡ 内存安全（P1）：_instances 和 _ds_connection_cache 均有最大容量限制，防止 OOM。
+    T-R1 变更：传输层从自定义 REST 改为标准 MCP streamable-http。
+    MCP session 是进程级共享资源（所有 connection_id 共用）。
     """
 
-    # 按 connection_id 隔离的 client 实例缓存（替代全局单例）
+    # 按 connection_id 隔离的 client 实例缓存
     _instances: Dict[int, "TableauMCPClient"] = {}
     _instances_lock = threading.Lock()
-    _MAX_INSTANCES = 200  # P1 OOM 防护：限制最大实例数
-    _IDLE_TIMEOUT = 300   # Spec 13 §2.2: 300s 空闲超时
-    _last_access: Dict[int, float] = {}  # connection_id → last access timestamp
+    _MAX_INSTANCES = 200  # OOM 防护
+    _IDLE_TIMEOUT = 300   # 5 分钟空闲超时
+    _last_access: Dict[int, float] = {}
 
     @classmethod
     def cleanup_idle(cls) -> int:
-        """清理空闲超过 _IDLE_TIMEOUT 的实例（Spec 13 §2.2）。返回清理数量。"""
+        """清理空闲超过 _IDLE_TIMEOUT 的实例。返回清理数量。"""
         now = time.monotonic()
         removed = 0
         with cls._instances_lock:
@@ -164,16 +499,15 @@ class TableauMCPClient:
 
     @classmethod
     def invalidate(cls, connection_id: int) -> None:
-        """主动失效指定连接的 client 实例（Spec 13 §2.2）。"""
+        """主动失效指定连接的 client 实例。"""
         with cls._instances_lock:
             cls._instances.pop(connection_id, None)
             cls._last_access.pop(connection_id, None)
 
     def __new__(cls, connection_id: int) -> "TableauMCPClient":
-        # 先清理空闲实例，再检查是否超限
         with cls._instances_lock:
             now = time.monotonic()
-            # 空闲清理优先于 FIFO 清理
+            # 空闲清理
             expired = [
                 cid for cid, ts in cls._last_access.items()
                 if now - ts > cls._IDLE_TIMEOUT
@@ -184,7 +518,7 @@ class TableauMCPClient:
             if expired:
                 logger.info("__new__: 清理 %d 个空闲实例", len(expired))
 
-            # OOM 防护：仍超限时 FIFO 清理最老的 half
+            # FIFO OOM 防护
             if len(cls._instances) >= cls._MAX_INSTANCES:
                 keys_to_remove = list(cls._instances.keys())[: len(cls._instances) // 2]
                 for k in keys_to_remove:
@@ -202,33 +536,26 @@ class TableauMCPClient:
             return
         self._initialized = True
         self._connection_id = connection_id
-        self._session = _get_shared_session()
-        # Cache key = (connection_id, datasource_luid)，防止跨租户串签
-        # P1 OOM 防护：限制最大缓存条目数
+        self._session = _get_http_session()
         self._ds_connection_cache: Dict[str, "TableauConnection|_CachedTableauConnection"] = {}
         self._MAX_CACHE_SIZE = 500
 
-    def _get_connection_by_luid(self, datasource_luid: str, connection_id: int) -> "TableauConnection|_CachedTableauConnection":
-        """
-        通过 datasource_luid 查找对应的 TableauConnection（带内存缓存，cache key 含 connection_id）。
-
-        P0 修复：使用 try...finally 确保 Session 在查询全部完成后才关闭，
-        并在关闭前将 conn 所需属性全部读取为原始类型（脱管对象安全访问）。
-        """
+    def _get_connection_by_luid(
+        self, datasource_luid: str, connection_id: int,
+    ) -> "TableauConnection|_CachedTableauConnection":
+        """通过 datasource_luid 查找对应的 TableauConnection（带内存缓存）。"""
         cache_key = f"{connection_id}:{datasource_luid}"
         if cache_key in self._ds_connection_cache:
             return self._ds_connection_cache[cache_key]
 
-        # P1 合规修复：使用标准 SessionLocal 而非废弃的 TableauDatabase()
         from app.core.database import SessionLocal
         session = SessionLocal()
         conn = None
         try:
-            # 精确匹配：必须同时满足 connection_id 和 datasource_luid
             asset = session.query(TableauAsset).filter(
                 TableauAsset.datasource_luid == datasource_luid,
                 TableauAsset.connection_id == connection_id,
-                TableauAsset.is_deleted == False,
+                not TableauAsset.is_deleted,
             ).first()
 
             if not asset:
@@ -249,9 +576,6 @@ class TableauMCPClient:
                     details={"datasource_luid": datasource_luid, "connection_id": connection_id},
                 )
 
-            # P0 修复：在 session 关闭前，提前读取所有后续所需的属性，
-            # 将 SQLAlchemy 托管对象转换为普通 Python 原始类型，
-            # 避免脱管后访问触发 DetachedInstanceError。
             conn_attrs = {
                 "id": conn.id,
                 "server_url": conn.server_url,
@@ -266,14 +590,12 @@ class TableauMCPClient:
         finally:
             session.close()
 
-        # P1 OOM 防护：缓存超过最大容量时，清空最老的 half
         if len(self._ds_connection_cache) >= self._MAX_CACHE_SIZE:
             keys_to_remove = list(self._ds_connection_cache.keys())[: len(self._ds_connection_cache) // 2]
             for k in keys_to_remove:
                 del self._ds_connection_cache[k]
             logger.warning("连接缓存超限，已清理 %d 条旧缓存", len(keys_to_remove))
 
-        # 重建为普通对象存入缓存（不再绑定到已关闭 session）
         cached_conn = _CachedTableauConnection(**conn_attrs)
         self._ds_connection_cache[cache_key] = cached_conn
         return cached_conn
@@ -291,7 +613,7 @@ class TableauMCPClient:
         connection_id: int = None,
     ) -> Dict[str, Any]:
         """
-        通过 Tableau MCP 查询数据源（Stage 3 执行）。
+        通过 Tableau MCP 查询数据源（标准 MCP tools/call）。
 
         参数：
             datasource_luid: Tableau 数据源 LUID
@@ -304,11 +626,10 @@ class TableauMCPClient:
             {"fields": [...], "rows": [[...], ...]}（符合 PRD §5.5.3 格式）
 
         异常：
-            TableauMCPError: NLQ_006 / NLQ_007 / NLQ_009
+            TableauMCPError: NLQ_006 / NLQ_007 / NLQ_009 / MCP_010
 
-        约束 A：环境变量从 TableauConnection 解密注入
-        约束 B：Session 长连接复用
-        约束 D：connection_id 必须传入，用于 cache key 隔离
+        T-R1 变更：调用标准 MCP tools/call 接口，session 生命周期由模块级管理。
+        PAT 不再通过 env 注入（由 MCP server 进程持有）。
         """
         if connection_id is None:
             raise TableauMCPError(
@@ -317,13 +638,11 @@ class TableauMCPClient:
                 details={"datasource_luid": datasource_luid},
             )
 
-        # P2 修复：捕获 ContextVar Token，确保请求结束后清理，防止线程污染
         token = _connection_id_var.set(connection_id)
         try:
-            # 1. 获取连接信息（带缓存，cache key 含 connection_id）
             conn = self._get_connection_by_luid(datasource_luid, connection_id)
 
-            # 2. 校验连接可用性（PRD §5.5.4）
+            # 校验连接可用性
             if not conn.is_active:
                 raise TableauMCPError(
                     code="NLQ_009",
@@ -337,7 +656,7 @@ class TableauMCPClient:
                     details={"datasource_luid": datasource_luid},
                 )
 
-            # 3. 校验 V2 直连开关（Spec 13 §6.1 降级策略）
+            # 校验 V2 直连开关
             if not getattr(conn, "mcp_direct_enabled", False):
                 raise TableauMCPError(
                     code="MCP_010",
@@ -345,27 +664,16 @@ class TableauMCPClient:
                     details={"connection_id": connection_id},
                 )
 
-            # 3. 解密 PAT（约束 A）
-            pat_value = self._decrypt_pat(conn)
-            env_vars = {
-                "TABLEAU_SERVER_URL": conn.server_url,
-                "TABLEAU_SITE": conn.site,
-                "TABLEAU_PAT_NAME": conn.token_name,
-                "TABLEAU_PAT_VALUE": pat_value,
-            }
-
-            # 4. 组装 MCP JSON-RPC 请求
+            # 组装 MCP tools/call 请求（limit 在 arguments 顶层，verified by tools/list）
             payload = self._build_jsonrpc_request(
                 datasource_luid=datasource_luid,
                 query=query,
                 limit=limit,
-                env_vars=env_vars,
             )
 
-            # 5. 发送请求（约束 B：复用 Session）
+            # 发送并处理响应（含 session 过期自动重建）
             response = self._send_jsonrpc(payload, timeout=timeout)
 
-            # 6. 解析响应
             return self._parse_jsonrpc_response(response)
         finally:
             _connection_id_var.reset(token)
@@ -375,7 +683,7 @@ class TableauMCPClient:
     # ─────────────────────────────────────────────────────────────────────────
 
     def _decrypt_pat(self, conn) -> str:
-        """解密 PAT Secret（约束 A）"""
+        """解密 PAT Secret（为多租户预留，本次 MVP 不调用）。"""
         try:
             crypto = get_tableau_crypto()
             return crypto.decrypt(conn.token_encrypted)
@@ -392,137 +700,158 @@ class TableauMCPClient:
         datasource_luid: str,
         query: Dict[str, Any],
         limit: int,
-        env_vars: Dict[str, str],
     ) -> dict:
-        """组装 MCP JSON-RPC 2.0 请求"""
+        """
+        组装 MCP tools/call JSON-RPC 请求。
+
+        T-R1：使用标准 MCP method "tools/call"，
+        替代旧版自定义 REST "query-datasource"。
+        注意：PAT 不再通过 env 字段注入，由 MCP server 进程 env 持有。
+        """
         return {
             "jsonrpc": "2.0",
-            "id": 1,
-            "method": "query-datasource",
+            "id": _next_id(),
+            "method": "tools/call",
             "params": {
-                "datasourceLuid": datasource_luid,
-                "query": query,
-                "limit": limit,
-                # 环境变量注入（约束 A）
-                "env": env_vars,
+                "name": "query-datasource",
+                "arguments": {
+                    "datasourceLuid": datasource_luid,
+                    "query": query,
+                    "limit": limit,
+                },
             },
         }
 
     def _send_jsonrpc(self, payload: dict, timeout: int) -> dict:
         """
-        发送 JSON-RPC 请求。
+        发送 MCP JSON-RPC 请求（内部处理 session 生命周期）。
 
-        重试策略（PRD §5.5.5）：
-        - 网络错误 / 5xx：重试 1 次，间隔 1s
-        - 4xx：直接返回，不重试
+        重试策略：
+            - 网络错误 / 5xx：重试 1 次，间隔 1s
+            - 4xx：不重试
+            - session 过期：自动重建 session + 重试 1 次（不计入外层重试）
         """
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
+        method = payload.get("method", "unknown")
 
         for attempt in range(2):
             try:
-                resp = self._session.post(
-                    f"{get_tableau_mcp_server_url()}/query-datasource",
-                    json=payload,
-                    headers=headers,
-                    timeout=timeout,
-                )
-                if resp.status_code >= 500 and attempt == 0:
-                    # 5xx：重试一次
-                    import time
-                    time.sleep(1)
-                    continue
-                # P1 修复：5xx 响应可能是 HTML 错误页，JSON 解析会崩溃
-                try:
-                    body = resp.json()
-                except (ValueError, json.JSONDecodeError):
-                    body = {}
-                return {"status_code": resp.status_code, "body": body, "raw": resp.text}
+                # 确保 session 已建立（懒加载）
+                _ensure_session(timeout=timeout)
 
-            except requests.exceptions.Timeout:
-                raise TableauMCPError(
-                    code="NLQ_007",
-                    message=f"查询超时（{timeout}s）",
-                    details={"timeout": timeout},
-                )
-            except requests.exceptions.ConnectionError as e:
-                if attempt == 0:
-                    import time
-                    time.sleep(1)
-                    continue
-                logger.error("MCP 连接失败: %s", e)
-                raise TableauMCPError(
-                    code="NLQ_006",
-                    message="MCP 服务不可用",
-                    details={"mcp_server_url": get_tableau_mcp_server_url()},
-                )
-            except Exception as e:
-                logger.error("MCP 请求异常: %s", e)
-                raise TableauMCPError(
-                    code="NLQ_006",
-                    message=f"MCP 请求失败: {str(e)}",
-                    details={},
-                )
+                # 更新最后活跃时间（每次成功建立 session 后）
+                with _mcp_session_state.lock:
+                    _mcp_session_state.last_activity = time.monotonic()
 
-        # 最后一次尝试（已经处理过 5xx 重试）
-        try:
-            body = resp.json()
-        except (ValueError, json.JSONDecodeError):
-            body = {}
-        return {"status_code": resp.status_code, "body": body, "raw": resp.text}
+                return _post_mcp(payload, method=method, timeout=timeout, expect_sse=True)
 
-    def _parse_jsonrpc_response(self, response: dict) -> dict:
-        """解析 MCP JSON-RPC 响应"""
-        status_code = response["status_code"]
+            except _SessionExpiredError:
+                # Session 过期：清空并重建，不计入外层重试
+                logger.warning("MCP session 过期，尝试重建: %s", method)
+                _mcp_session_state.reset()
+                _ensure_session(timeout=timeout)
+                with _mcp_session_state.lock:
+                    _mcp_session_state.last_activity = time.monotonic()
+                # 重试 1 次（这次用新 session）
+                return _post_mcp(payload, method=method, timeout=timeout, expect_sse=True)
 
-        # 处理 HTTP 错误状态码
-        if status_code == 400:
-            body = response.get("body", {})
-            error_msg = body.get("error", {}).get("message", "VizQL 语法错误")
-            raise TableauMCPError(
-                code="NLQ_006",
-                message=f"VizQL 查询语法错误: {error_msg}",
-                details={"body": body},
-            )
-        elif status_code == 403:
-            raise TableauMCPError(
-                code="NLQ_009",
-                message="数据源访问被拒绝（无权限）",
-                details={"status_code": 403},
-            )
-        elif status_code == 404:
-            raise TableauMCPError(
-                code="NLQ_009",
-                message="数据源不存在",
-                details={"status_code": 404},
-            )
-        elif status_code >= 400:
-            raise TableauMCPError(
-                code="NLQ_006",
-                message=f"MCP 查询失败（HTTP {status_code}）",
-                details={"status_code": status_code},
-            )
+            except TableauMCPError:
+                raise  # 已构造好，直接透传
 
-        # 解析 JSON-RPC 响应体
-        body = response.get("body", {})
+    def _parse_jsonrpc_response(self, body: dict) -> dict:
+        """
+        解析 MCP tools/call JSON-RPC 响应。
+
+        MCP 协议下 query-datasource 的响应结构：
+            {
+              "jsonrpc": "2.0",
+              "id": N,
+              "result": {
+                "content": [{"type": "text", "text": "{\"fields\":[...],\"rows\":[[...]]}"}],
+                "isError": false
+              }
+            }
+
+        映射到 PRD §5.5.3 契约：
+            - content[0].text 是 Tableau 返回的 JSON 字符串（fields + rows）
+            - 解析该 JSON 返回 {"fields": [...], "rows": [[...], ...]}
+        """
         if "error" in body:
             err = body["error"]
             raise TableauMCPError(
-                code=err.get("code", "NLQ_006"),
+                code=_map_mcp_error(err.get("code")),
                 message=err.get("message", "MCP 返回错误"),
                 details=err.get("data", {}),
             )
 
         result = body.get("result", {})
-        return result
+
+        # tools/call 的工具级错误走 isError + content
+        if result.get("isError"):
+            error_text = _extract_text(result.get("content", []))
+            raise TableauMCPError(
+                code="NLQ_006",
+                message=f"MCP 工具执行失败: {error_text[:200]}",
+                details={"tool": "query-datasource", "raw": error_text[:500]},
+            )
+
+        content = result.get("content", [])
+        text_payload = _extract_text(content)
+
+        try:
+            data = json.loads(text_payload)
+        except json.JSONDecodeError as e:
+            raise TableauMCPError(
+                code="NLQ_006",
+                message="query-datasource 返回非 JSON 文本",
+                details={"raw": text_payload[:500], "json_error": str(e)},
+            )
+
+        # data 期望结构 {"fields": [...], "rows": [[...]]}
+        if not isinstance(data, dict):
+            raise TableauMCPError(
+                code="NLQ_006",
+                message="query-datasource 返回值不是对象",
+                details={"type": type(data).__name__},
+            )
+        return data
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 辅助函数
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _extract_text(content: list) -> str:
+    """从 MCP content[] 数组中提取 text 类型的值（拼接，兼容多段）。"""
+    parts = [c.get("text", "") for c in content if c.get("type") == "text"]
+    return "".join(parts)
+
+
+def _map_mcp_error(code: Any) -> str:
+    """
+    将 MCP 错误码映射为 NLQ 系列错误码。
+
+    规则：
+        - Tableau/LLM 相关错误 → NLQ_006
+        - 权限/不存在 → NLQ_009
+        - 其他 → NLQ_006
+    """
+    if code is None:
+        return "NLQ_006"
+    code_str = str(code)
+    # 常见 VizQL 错误码
+    if code_str in ("forbidden", "unauthorized") or code == 403:
+        return "NLQ_009"
+    if code_str in ("not_found", "notexists") or code == 404:
+        return "NLQ_009"
+    # Tableau VizQL 特定错误
+    if code_str.startswith("VIZQL_") or code_str.startswith("VIZQL-"):
+        return "NLQ_006"
+    return "NLQ_006"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 模块级 per-connection_id 访问器（约束 D）
 # ─────────────────────────────────────────────────────────────────────────────
-
 
 def get_tableau_mcp_client(connection_id: int) -> TableauMCPClient:
     """
