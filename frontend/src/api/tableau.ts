@@ -18,6 +18,7 @@ export interface TableauConnection {
   last_sync_at: string | null;
   last_sync_duration_sec: number | null;
   sync_status: 'idle' | 'running' | 'failed';
+  next_sync_at: string | null;
   created_at: string;
   updated_at: string;
 }

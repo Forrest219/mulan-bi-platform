@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
+from services.capability.audit import get_trace_id
 from services.llm.service import llm_service
 from services.llm.prompts import ONE_PASS_NL_TO_QUERY_TEMPLATE, ONE_PASS_RETRY_TEMPLATE
 from services.tableau.models import TableauDatabase, TableauAsset
@@ -277,7 +278,8 @@ def validate_field_captions_consistency(
 
     if not asset:
         # 无法获取资产信息时跳过校验（fail-open，不阻断查询）
-        logger.warning("无法获取 datasource_luid=%s 对应的 asset，跳过 fieldCaption 一致性校验", datasource_luid)
+        logger.warning("无法获取 datasource_luid=%s 对应的 asset，跳过 fieldCaption 一致性校验, trace=%s",
+                       datasource_luid, get_trace_id())
         return True, [], []
 
     actual_captions = get_datasource_fields_cached(asset.id)
@@ -294,7 +296,7 @@ def validate_field_captions_consistency(
 
     if missing_fields:
         logger.warning(
-            "Stage 2/1 fieldCaption 一致性校验失败: datasource_luid=%s, missing=%s",
+            "Stage 2/1 fieldCaption 一致性校验失败: datasource_luid=%s, missing=%s, trace=%s",
             datasource_luid, missing_fields,
         )
 
@@ -446,7 +448,8 @@ async def one_pass_llm(
             truncated_lines.append(line)
             token_count += len(line_tokens)
         fields_with_types = "\n".join(truncated_lines)
-        logger.warning("宽表字段过多，已触发 Token 截断（原始 > %d tokens）", len(fields_tokens))
+        logger.warning("宽表字段过多，已触发 Token 截断（原始 > %d tokens, trace=%s）",
+                       len(fields_tokens), get_trace_id())
 
     # 组装 Prompt
     prompt = ONE_PASS_NL_TO_QUERY_TEMPLATE.format(
@@ -503,8 +506,8 @@ async def one_pass_llm(
     )
     if not is_consistent:
         logger.info(
-            "Stage 2/1 fieldCaption 不一致触发重试: datasource_luid=%s, missing=%s",
-            datasource_luid, missing_fields,
+            "Stage 2/1 fieldCaption 不一致触发重试: datasource_luid=%s, missing=%s, trace=%s",
+            datasource_luid, missing_fields, get_trace_id(),
         )
         # 带可用字段列表重试
         parsed, consistency_err = await _retry_field_consistency(

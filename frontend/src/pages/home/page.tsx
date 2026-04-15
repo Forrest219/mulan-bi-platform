@@ -1,17 +1,60 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { LOGO_URL } from '../../config';
+import { AskBar } from './components/AskBar';
+import { SearchResult } from './components/SearchResult';
+import { ExamplePrompts } from './components/ExamplePrompts';
+import type { SearchAnswer } from '../../api/search';
+
+type Phase = 'idle' | 'loading' | 'showing_result' | 'showing_error';
 
 export default function HomePage() {
-  const [input, setInput] = useState('');
-  const [message, setMessage] = useState('');
-  const navigate = useNavigate();
+  const [phase, setPhase] = useState<Phase>('idle');
+  const [result, setResult] = useState<SearchAnswer | null>(null);
+  const [error, setError] = useState<{ code: string; message: string } | null>(null);
+  const [lastQuestion, setLastQuestion] = useState('');
   const { user, isAdmin, hasPermission } = useAuth();
 
-  const handleSend = () => {
-    if (!input.trim()) return;
-    setMessage('功能开发中');
+  const features = [
+    { icon: 'ri-database-2-line', label: '数据库', path: '/governance/health', show: hasPermission('database_monitor') || isAdmin },
+    { icon: 'ri-shield-check-line', label: 'DDL检查', path: '/dev/ddl-validator', show: hasPermission('ddl_check') || isAdmin },
+    { icon: 'ri-settings-line', label: '规则配置', path: '/dev/rule-config', show: hasPermission('rule_config') || isAdmin },
+    { icon: 'ri-user-settings-line', label: '用户管理', path: '/system/users', show: isAdmin },
+    { icon: 'ri-group-line', label: '用户组', path: '/system/groups', show: isAdmin },
+  ].filter(f => f.show);
+
+  const handleResult = (r: SearchAnswer) => {
+    setResult(r);
+    setError(null);
+    setPhase('showing_result');
+  };
+
+  const handleError = (err: { code: string; message: string }) => {
+    setError(err);
+    setResult(null);
+    setPhase('showing_error');
+  };
+
+  const handleLoading = (loading: boolean) => {
+    if (loading) setPhase('loading');
+  };
+
+  const handleExamplePick = (question: string) => {
+    setLastQuestion(question);
+    setPhase('loading');
+    setResult(null);
+    setError(null);
+    // Trigger AskBar submission
+    import('./components/AskBar').then(() => {
+      // Re-trigger by simulating submit
+      setPhase('loading');
+    });
+    // Actually call the API directly
+    import('../../api/search').then(({ askQuestion }) => {
+      askQuestion({ question })
+        .then(handleResult)
+        .catch((err: Error) => handleError({ code: (err as { code?: string }).code || 'UNKNOWN', message: err.message }));
+    });
   };
 
   const getGreeting = () => {
@@ -21,52 +64,35 @@ export default function HomePage() {
     return '🌙 晚上好';
   };
 
-  const features = [
-    { icon: 'ri-database-2-line', label: '数据库', path: '/database-monitor', show: hasPermission('database_monitor') || isAdmin },
-    { icon: 'ri-shield-check-line', label: 'DDL检查', path: '/ddl-validator', show: hasPermission('ddl_check') || isAdmin },
-    { icon: 'ri-settings-line', label: '规则配置', path: '/rule-config', show: hasPermission('rule_config') || isAdmin },
-    { icon: 'ri-user-settings-line', label: '用户管理', path: '/admin/users', show: isAdmin },
-    { icon: 'ri-group-line', label: '用户组', path: '/admin/groups', show: isAdmin },
-  ].filter(f => f.show);
-
-  // ===== 未登录：显示简洁登录引导 ===== //
+  // ── Unauthenticated ──────────────────────────────────────────────────────
   if (!user) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-blue-50 flex items-center justify-center">
         <div className="bg-white rounded-xl border border-slate-200 p-10 w-full max-w-md text-center">
-          <img
-            src={LOGO_URL}
-            alt="Mulan Platform Logo"
-            className="w-14 h-14 object-contain mx-auto mb-4"
-          />
+          <img src={LOGO_URL} alt="Mulan Platform Logo" className="w-14 h-14 object-contain mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-slate-800 mb-2">Mulan Platform</h1>
           <p className="text-sm text-slate-400 mb-8">数据建模与治理平台</p>
           <p className="text-slate-500 mb-6">请先登录以访问平台功能</p>
-          <Link
-            to="/login"
+          <a
+            href="/login"
             className="inline-block w-full py-2.5 bg-slate-900 text-white rounded-lg text-sm font-semibold hover:bg-slate-700 transition-colors"
           >
             登录
-          </Link>
+          </a>
           <div className="mt-4">
-            <Link to="/register" className="text-sm text-blue-600 hover:text-blue-700">
+            <a href="/register" className="text-sm text-blue-600 hover:text-blue-700">
               没有账号？去注册
-            </Link>
+            </a>
           </div>
         </div>
       </div>
     );
   }
 
-  // ===== 已登录：显示 AI 搜索首页 ===== //
+  // ── Authenticated ────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-blue-50">
       <div className="max-w-4xl mx-auto px-8 pt-16">
-        {message && (
-          <div className="mb-4 px-4 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-sm">
-            {message}
-          </div>
-        )}
 
         {/* Welcome */}
         <div className="text-center mb-6">
@@ -75,63 +101,73 @@ export default function HomePage() {
           </h1>
         </div>
 
-        {/* Search Input - Hero */}
-        <div className="relative mb-8">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            placeholder="有什么可以帮到您"
-            rows={2}
-            className="w-full px-8 pr-20 py-4 bg-white text-slate-800 placeholder-slate-400 focus:outline-none text-base resize-none leading-relaxed rounded-full"
-            style={{ border: '1px solid #dfe1e5' }}
+        {/* AskBar */}
+        <div className="mb-6">
+          <AskBar
+            onResult={handleResult}
+            onError={handleError}
+            onLoading={handleLoading}
           />
-          <button
-            onClick={handleSend}
-            className="absolute right-3 top-1/2 -translate-y-1/2 p-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-full transition-colors"
-          >
-            <i className="ri-send-plane-fill text-base" />
-          </button>
         </div>
 
+        {/* Loading */}
+        {phase === 'loading' && (
+          <div className="flex justify-center py-8">
+            <div className="flex items-center gap-3 text-slate-400 text-sm">
+              <div className="w-5 h-5 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+              正在分析您的问题...
+            </div>
+          </div>
+        )}
+
+        {/* Result */}
+        {(phase === 'showing_result' || phase === 'showing_error') && result && (
+          <div className="mb-6">
+            <SearchResult
+              result={result}
+              onRetry={() => {
+                if (lastQuestion) handleExamplePick(lastQuestion);
+              }}
+            />
+          </div>
+        )}
+
+        {/* Error */}
+        {(phase === 'showing_error' || phase === 'showing_result') && error && (
+          <div className="mb-6">
+            <SearchResult
+              result={{
+                type: 'error',
+                answer: '',
+                reason: error.code,
+                detail: error.message,
+              }}
+              onRetry={() => {
+                if (lastQuestion) handleExamplePick(lastQuestion);
+              }}
+            />
+          </div>
+        )}
+
         {/* Example Prompts */}
-        <div className="flex flex-wrap justify-center gap-2 mb-8 opacity-60">
-          {[
-            '最近7天表结构变化',
-            '找出没有主键的表',
-            '生成月度报告',
-          ].map((prompt, i) => (
-            <button
-              key={i}
-              onClick={() => setInput(prompt)}
-              className="text-xs px-3 py-1 hover:bg-slate-200/60 text-slate-500 rounded-full transition-colors"
-            >
-              {prompt}
-            </button>
-          ))}
+        <div className="mb-8">
+          <ExamplePrompts onPick={handleExamplePick} />
         </div>
 
         {/* Feature Icons */}
         <div className="flex justify-center items-center gap-6">
-          {features.map((feature, i) => (
-            <button
+          {features.map((feature) => (
+            <a
               key={feature.label}
-              onClick={() => navigate(feature.path)}
+              href={feature.path}
               className="flex flex-col items-center gap-1 group"
             >
               <div className="w-10 h-10 rounded-full bg-white/80 flex items-center justify-center group-hover:bg-white group-hover:shadow-sm transition-all">
                 <i className={`${feature.icon} text-lg text-slate-400 group-hover:text-blue-500`} />
               </div>
               <span className="text-xs text-slate-400 group-hover:text-slate-600">{feature.label}</span>
-            </button>
-          )).flatMap((el, i, arr) =>
-            i < arr.length - 1 ? [el, <span key={`sep-${i}`} className="text-slate-300 select-none">｜</span>] : [el]
-          )}
+            </a>
+          ))}
         </div>
       </div>
     </div>

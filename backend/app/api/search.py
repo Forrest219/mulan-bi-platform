@@ -1,28 +1,34 @@
 """NL-to-Query 搜索 API（PRD §14 §6）"""
 import logging
 from typing import Dict, Optional
-from pydantic import BaseModel
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_current_user
 from app.core.database import get_db
-from services.llm.nlq_service import (
-    NLQError, one_pass_llm, route_datasource,
-    resolve_fields, format_response, classify_intent,
-    execute_query,
-    is_datasource_sensitivity_blocked,
-    MAX_QUERY_LENGTH,
-)
-from services.llm.models import log_nlq_query
+from app.core.dependencies import get_current_user
+from services.capability.audit import InvocationRecord, new_trace_id, write_audit
 from services.common.redis_cache import check_rate_limit
-from services.tableau.models import TableauDatabase, TableauAsset
 from services.knowledge_base.glossary_service import glossary_service
+from services.llm.models import log_nlq_query
+from services.llm.nlq_service import (
+    MAX_QUERY_LENGTH,
+    NLQError,
+    classify_intent,
+    execute_query,
+    format_response,
+    is_datasource_sensitivity_blocked,
+    one_pass_llm,
+    resolve_fields,
+    route_datasource,
+)
+from services.llm.semantic_retriever import recall_fields
 from services.semantic_maintenance.context_assembler import (
     ContextAssembler,
     sanitize_fields_for_llm,
 )
+from services.tableau.models import TableauAsset, TableauDatabase
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -30,6 +36,7 @@ router = APIRouter()
 
 class QueryRequest(BaseModel):
     """POST /api/search/query 请求体（PRD §6.2）"""
+
     question: str
     datasource_luid: Optional[str] = None
     connection_id: Optional[int] = None
@@ -46,8 +53,7 @@ def _require_role(user, min_role: str) -> None:
 
 
 def _build_fields_with_types(fields: list) -> str:
-    """
-    将已 sanitized 的字段列表格式化为 LLM 上下文字符串（Spec 14 v1.1 §5.1 Token 预算管理）。
+    """将已 sanitized 的字段列表格式化为 LLM 上下文字符串（Spec 14 v1.1 §5.1 Token 预算管理）。
 
     注意：本函数假设输入 fields 已经过 sanitize_fields_for_llm 过滤。
     本函数只负责 P0-P5 优先级截断 + Token 预算（ContextAssembler）。
@@ -81,7 +87,7 @@ def _get_asset_by_luid(datasource_luid: str):
     session = db.session
     asset = session.query(TableauAsset).filter(
         TableauAsset.datasource_luid == datasource_luid,
-        TableauAsset.is_deleted == False,
+        not TableauAsset.is_deleted,
     ).first()
     session.close()
     return asset
@@ -93,8 +99,7 @@ async def query(
     body: QueryRequest,
     db: Session = Depends(get_db),
 ):
-    """
-    自然语言查询（PRD §6.2）POST /api/search/query — analyst+
+    """自然语言查询（PRD §6.2）POST /api/search/query — analyst+
     将用户自然语言问题转换为数据查询并返回结果。
     """
     user = get_current_user(request=None, db=db)
@@ -137,6 +142,19 @@ async def query(
     import time
     t0 = time.time()
 
+    # Capability audit record (P4 T3)
+    audit_record = InvocationRecord(
+        trace_id=new_trace_id(),
+        principal_id=user.get("id") or 0,
+        principal_role=user.get("role") or "user",
+        capability="query_metric",
+        params_jsonb={
+            "question_length": len(question or ""),
+            "datasource_luid": datasource_luid,
+            "connection_id": connection_id,
+        },
+    )
+
     try:
         # === 阶段1：意图分类 + 查询构建（One-Pass LLM）===
         # 1a. 规则快速路径
@@ -165,7 +183,7 @@ async def query(
         session = db.session
         asset = session.query(TableauAsset).filter(
             TableauAsset.datasource_luid == ds_luid,
-            TableauAsset.is_deleted == False,
+            not TableauAsset.is_deleted,
         ).first()
         session.close()
 
@@ -215,6 +233,28 @@ async def query(
         # sanitize_fields_for_llm 会过滤 HIGH/CONFIDENTIAL 字段，
         # 截断 enum_values（≤20条，每条≤50字符），仅保留字段元数据
         sanitized_fields = sanitize_fields_for_llm(fields)
+
+        # Step 1b: 基于 embedding 语义召回字段，提升相关字段优先级（P3 T6）
+        try:
+            recalled = await recall_fields(
+                question,
+                datasource_ids=[asset.connection_id],
+                top_k=20,
+            )
+            if recalled:
+                # Build similarity map keyed by field_caption
+                recalled_map: dict[str, float] = {
+                    r["semantic_name_zh"] or r["semantic_name"]: r["similarity"]
+                    for r in recalled
+                }
+                # Re-sort sanitized_fields: recalled fields first (by similarity desc), then rest
+                recalled_captions = set(recalled_map.keys())
+                recalled_fields = [f for f in sanitized_fields if f.get("field_caption") in recalled_captions]
+                other_fields = [f for f in sanitized_fields if f.get("field_caption") not in recalled_captions]
+                recalled_fields.sort(key=lambda f: recalled_map.get(f.get("field_caption") or "", 0), reverse=True)
+                sanitized_fields = recalled_fields + other_fields
+        except Exception as e:
+            logger.warning("语义召回失败，使用原始字段顺序: %s", e)
 
         # _build_fields_with_types 内部再次使用 ContextAssembler 做 P0-P5 截断（2500 tokens）
         fields_with_types = _build_fields_with_types(sanitized_fields)
@@ -285,8 +325,6 @@ async def query(
                 value = mcp_rows[0][0]
             else:
                 value = mcp_rows[0] if mcp_rows else None
-            label = mcp_fields[0].get("fieldCaption", "") if mcp_fields else ""
-            unit = ""
             if isinstance(value, (int, float)):
                 formatted = f"{value:,.2f}" if isinstance(value, float) else str(value)
             else:
@@ -336,6 +374,9 @@ async def query(
         _log_response_type = api_data.get("response_type", "table" if mcp_rows else "text")
         _log_exec_ms = round((time.time() - t0) * 1000)
 
+        audit_record.status = "ok"
+        audit_record.latency_ms = _log_exec_ms
+
         return {
             "success": True,
             "response_type": api_data.get("response_type", "table" if mcp_rows else "text"),
@@ -361,13 +402,29 @@ async def query(
             },
         }
 
-    except HTTPException:
+    except HTTPException as exc:
         # HTTPException 继续上抛，不吞掉
         _log_error = "NLQ_FAILED"
         _log_exec_ms = round((time.time() - t0) * 1000)
+        detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+        audit_record.status = "denied" if exc.status_code in (401, 403) else "failed"
+        audit_record.error_code = detail.get("code")
+        audit_record.error_detail = detail.get("message")
+        audit_record.latency_ms = _log_exec_ms
+        raise
+
+    except Exception as exc:
+        _log_error = "INTERNAL"
+        _log_exec_ms = round((time.time() - t0) * 1000)
+        audit_record.status = "failed"
+        audit_record.error_code = "INTERNAL"
+        audit_record.error_detail = str(exc)[:1000]
+        audit_record.latency_ms = _log_exec_ms
         raise
 
     finally:
+        # Capability audit: Append-Only（写入失败不阻塞主链路）
+        write_audit(audit_record)
         # PRD §10.1：fire-and-forget 审计日志（无论成功/失败均记录）
         log_nlq_query(
             user_id=_log_user_id,
@@ -387,8 +444,7 @@ async def suggestions(
     connection_id: int = None,
     db: Session = Depends(get_db),
 ):
-    """
-    查询建议（自动补全，PRD §6.3）GET /api/search/suggestions — analyst+
+    """查询建议（自动补全，PRD §6.3）GET /api/search/suggestions — analyst+
     """
     user = get_current_user(request=None, db=db)
     _require_role(user, "analyst")
@@ -405,8 +461,7 @@ async def suggestions(
 
 @router.get("/history")
 async def history(db: Session = Depends(get_db)):
-    """
-    查询历史（PRD §6.4）GET /api/search/history — analyst+
+    """查询历史（PRD §6.4）GET /api/search/history — analyst+
     """
     user = get_current_user(request=None, db=db)
     _require_role(user, "analyst")
