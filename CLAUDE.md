@@ -2,15 +2,11 @@
 
 数据建模与治理平台 — 面向 BI 团队的数据质量、DDL 规范、Tableau 资产治理、语义维护工具。
 
-## ⚠️ Gemini MCP 使用规则
+## ⚠️ Codex MCP 使用规则
 
-模型优先级（按顺序）：
-1. **Gemini 3 Flash** (`gemini-3-flash`) — 首选，已配置为 MCP 默认模型
-2. **Gemini 3 Flash Lite** (`gemini-3-flash-lite`) — 次选，当首选 quota 耗尽或失败时使用
+Codex CLI 已配置为默认 MCP server。
 
-- **NEVER** use `gemini-2.5-pro` via MCP. It causes quota errors on this API key.
-- If `gemini_codebase_analyzer` fails due to quota/model error with `gemini-3-flash`, retry with `gemini-3-flash-lite` or fallback to reading files manually.
-- The API key `AIzaSyAoHsKF8oO_z2Y1uXtihi0BgdvjjKBfz_A` is on free tier — use Flash models only.
+## 技术栈
 
 ## 技术栈
 
