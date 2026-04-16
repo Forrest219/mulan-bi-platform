@@ -19,6 +19,7 @@ import { useState, useMemo, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useConversations, type Conversation } from '../../../store/conversationStore';
 import { ConfirmModal } from '../../../components/ConfirmModal';
+import { useAuth } from '../../../context/AuthContext';
 
 const PAGE_SIZE = 100;
 
@@ -51,9 +52,10 @@ const GROUP_ORDER: TimeGroup[] = ['今天', '昨天', '过去 7 天', '更早'];
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ConversationBar({ collapsed, onToggleCollapse }: ConversationBarProps) {
+export function ConversationBar({ collapsed: _collapsed, onToggleCollapse }: ConversationBarProps) {
   const { conversations, addConversation, deleteConversation, updateConversationTitle } =
     useConversations();
+  const { user, logout } = useAuth();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
@@ -194,16 +196,45 @@ export function ConversationBar({ collapsed, onToggleCollapse }: ConversationBar
         )}
       </div>
 
-      {/* 底部快捷导航 */}
-      <div className="border-t border-slate-200 px-3 py-3">
+      {/* 底部：用户信息 + 设置 + 退出 */}
+      <div className="border-t border-slate-200 px-3 py-3 space-y-1">
+        {/* 用户信息行 */}
+        <div className="flex items-center gap-2 px-2 py-1.5">
+          <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+            <span className="text-[11px] text-blue-600 font-semibold">
+              {user?.display_name?.[0] ?? user?.username?.[0] ?? '?'}
+            </span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[13px] text-slate-700 font-medium truncate">
+              {user?.display_name ?? user?.username ?? '未知用户'}
+            </div>
+            <div className="text-[11px] text-slate-400">{user?.role ?? 'user'}</div>
+          </div>
+        </div>
+
+        {/* 设置入口 */}
         <a
-          href="/governance/health"
+          href="/system/users"
           className="flex items-center gap-2 px-2 py-1.5 text-sm text-slate-500
                      rounded-lg hover:bg-slate-100 hover:text-slate-700 transition-colors"
         >
-          <i className="ri-shield-check-line text-base" />
-          数据治理
+          <i className="ri-settings-3-line text-base" />
+          设置
         </a>
+
+        {/* 退出登录 */}
+        <button
+          onClick={async () => {
+            await logout();
+            navigate('/login');
+          }}
+          className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-slate-500
+                     rounded-lg hover:bg-slate-100 hover:text-slate-700 transition-colors"
+        >
+          <i className="ri-logout-box-line text-base" />
+          退出登录
+        </button>
       </div>
 
       {/* 删除确认弹窗 */}

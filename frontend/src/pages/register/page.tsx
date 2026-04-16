@@ -49,7 +49,7 @@ export default function RegisterPage() {
         const data = await response.json();
         setError(data.detail || '注册失败');
       }
-    } catch (err) {
+    } catch (_err) {
       setError('网络错误，请稍后重试');
     } finally {
       setLoading(false);

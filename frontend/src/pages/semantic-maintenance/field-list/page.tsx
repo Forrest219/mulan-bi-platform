@@ -2,13 +2,18 @@ import { useState, useEffect } from 'react';
 import {
   listFieldSemantics, updateFieldSemantics,
   submitFieldForReview, approveField, rejectField,
-  generateFieldAI, getFieldVersions, rollbackField,
   getStatusBadge, getSensitivityBadge,
   SemanticField, SemanticStatus, SensitivityLevel,
-  previewFieldDiff, publishFields, syncFields,
+  publishFields, syncFields,
 } from '../../../api/semantic-maintenance';
 import { listConnections, TableauConnection } from '../../../api/tableau';
 import { ConfirmModal } from '../../../components/ConfirmModal';
+
+type ActionResult = { message?: string };
+
+const getErrorMessage = (error: unknown, fallback = '操作失败'): string => {
+  return error instanceof Error ? error.message : fallback;
+};
 
 export default function SemanticFieldListPage() {
   const [connections, setConnections] = useState<TableauConnection[]>([]);
@@ -17,7 +22,7 @@ export default function SemanticFieldListPage() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<SemanticStatus | ''>('');
-  const [dsFilter, setDsFilter] = useState<number | ''>('');
+  const [dsFilter] = useState<number | ''>('');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
@@ -32,7 +37,7 @@ export default function SemanticFieldListPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Partial<SemanticField>>({});
   const [syncingConnId, setSyncingConnId] = useState<number | null>(null);
-  const [syncResult, setSyncResult] = useState<any>(null);
+  const [syncResult, setSyncResult] = useState<{ synced: number; skipped: number; errors?: string[] } | null>(null);
   const [selectedFields, setSelectedFields] = useState<Set<number>>(new Set());
   const [batchLoading, setBatchLoading] = useState(false);
 
@@ -68,21 +73,21 @@ export default function SemanticFieldListPage() {
       setFields(data.items);
       setTotal(data.total);
       setTotalPages(data.pages);
-    } catch (e: any) {
-      setLoadError(e.message || '加载失败');
+    } catch (e: unknown) {
+      setLoadError(getErrorMessage(e, '加载失败'));
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAction = async (id: number, fn: (id: number) => Promise<any>, successMsg: string) => {
+  const handleAction = async (id: number, fn: (id: number) => Promise<ActionResult>, successMsg: string) => {
     setActionLoading(id);
     try {
       const result = await fn(id);
       setModalNotify({ success: true, message: result.message || successMsg });
       loadFields();
-    } catch (e: any) {
-      setModalNotify({ success: false, message: e.message || '操作失败' });
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: getErrorMessage(e) });
     } finally {
       setActionLoading(null);
     }
@@ -97,8 +102,8 @@ export default function SemanticFieldListPage() {
       const result = await syncFields(selectedConnId, '');
       setSyncResult(result);
       if (result.synced > 0) loadFields();
-    } catch (e: any) {
-      setModalNotify({ success: false, message: e.message });
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: getErrorMessage(e) });
     } finally {
       setSyncingConnId(null);
     }
@@ -124,8 +129,8 @@ export default function SemanticFieldListPage() {
       setModalNotify({ success: true, message: result.message });
       setEditingId(null);
       loadFields();
-    } catch (e: any) {
-      setModalNotify({ success: false, message: e.message });
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: getErrorMessage(e) });
     } finally {
       setActionLoading(null);
     }
@@ -142,8 +147,8 @@ export default function SemanticFieldListPage() {
       });
       setSelectedFields(new Set());
       loadFields();
-    } catch (e: any) {
-      setModalNotify({ success: false, message: e.message });
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: getErrorMessage(e) });
     } finally {
       setBatchLoading(false);
     }
@@ -173,8 +178,6 @@ export default function SemanticFieldListPage() {
     { value: 'rejected', label: '已驳回' },
     { value: 'published', label: '已发布' },
   ];
-
-  const formatDate = (str: string | null) => str ? new Date(str).toLocaleString() : '-';
 
   return (
     <div className="p-6">

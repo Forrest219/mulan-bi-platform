@@ -32,13 +32,12 @@ const DataQualityPage     = lazy(() => import('../pages/data-governance/quality/
 const TableauAssetBrowserPage = lazy(() => import('../pages/tableau/assets/page'));
 const TableauAssetDetailPage  = lazy(() => import('../pages/tableau/asset-detail/page'));
 const TableauHealthPage   = lazy(() => import('../pages/tableau/health/page'));
-const TableauConnectionsPage = lazy(() => import('../pages/tableau/connections/page'));
+const ConnectionCenterPage = lazy(() => import('../pages/assets/connection-center/page'));
 const SyncLogsPage        = lazy(() => import('../pages/tableau/sync-logs/page'));
 const SemanticDatasourceListPage  = lazy(() => import('../pages/semantic-maintenance/datasource-list/page'));
 const SemanticDatasourceDetailPage = lazy(() => import('../pages/semantic-maintenance/datasource-detail/page'));
 const SemanticFieldListPage = lazy(() => import('../pages/semantic-maintenance/field-list/page'));
 const KnowledgePage        = lazy(() => import('../pages/knowledge/page'));
-const AdminDatasourcesPage = lazy(() => import('../pages/admin/datasources/page'));
 const UsersAdminPage       = lazy(() => import('../pages/admin/user-management/page'));
 const GroupsAdminPage      = lazy(() => import('../pages/admin/groups/page'));
 const PermissionsAdminPage = lazy(() => import('../pages/admin/permissions/page'));
@@ -192,10 +191,18 @@ const routes: RouteObject[] = [
             ),
           },
           {
+            path: 'connection-center',
+            element: (
+              <ProtectedRoute>
+                <ConnectionCenterPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
             path: 'datasources',
             element: (
               <ProtectedRoute requiredPermission="database_monitor">
-                <AdminDatasourcesPage />
+                <Navigate to="/assets/connection-center?type=db" replace />
               </ProtectedRoute>
             ),
           },
@@ -203,7 +210,7 @@ const routes: RouteObject[] = [
             path: 'tableau-connections',
             element: (
               <ProtectedRoute requiredPermission="tableau">
-                <TableauConnectionsPage />
+                <Navigate to="/assets/connection-center?type=tableau" replace />
               </ProtectedRoute>
             ),
           },

@@ -14,7 +14,6 @@ import {
   type MenuDomain,
   type MenuItem,
   hasRoleLevel,
-  STORAGE_KEY_SIDEBAR_COLLAPSED,
   STORAGE_KEY_DOMAIN_OPEN,
 } from '../../config/menu';
 
@@ -221,7 +220,9 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY_DOMAIN_OPEN, JSON.stringify(domainOpenMap));
-    } catch {}
+    } catch (_err) {
+      // ignore localStorage write failures
+    }
   }, [domainOpenMap]);
 
   const toggleDomain = (key: string) => {
@@ -237,8 +238,10 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
           (location.pathname === item.path ||
             location.pathname.startsWith(item.path + '/'))
       );
-      if (hasActive && !domainOpenMap[domain.key]) {
-        setDomainOpenMap((prev) => ({ ...prev, [domain.key]: true }));
+      if (hasActive) {
+        setDomainOpenMap((prev) => (
+          prev[domain.key] ? prev : { ...prev, [domain.key]: true }
+        ));
       }
     }
   }, [location.pathname]);

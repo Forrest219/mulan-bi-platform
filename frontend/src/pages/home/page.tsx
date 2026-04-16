@@ -8,7 +8,7 @@
  *
  * 对话历史存 localStorage（C2），由 HomeLayout 提供的 ConversationProvider 管理。
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { LOGO_URL } from '../../config';
 import { AskBar } from './components/AskBar';
@@ -18,10 +18,11 @@ import { SuggestionGrid } from './components/SuggestionGrid';
 import { useConversations } from '../../store/conversationStore';
 import type { SearchAnswer } from '../../api/search';
 
-type Phase = 'idle' | 'loading' | 'showing_result' | 'showing_error';
+type HomeUiState = 'HOME_IDLE' | 'HOME_SUBMITTING' | 'HOME_RESULT' | 'HOME_ERROR' | 'HOME_OFFLINE';
 
 export default function HomePage() {
-  const [phase, setPhase] = useState<Phase>('idle');
+  const [homeState, setHomeState] = useState<HomeUiState>('HOME_IDLE');
+  const stateBeforeOfflineRef = useRef<HomeUiState>('HOME_IDLE');
   const [result, setResult] = useState<SearchAnswer | null>(null);
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
   const [lastQuestion, setLastQuestion] = useState('');
@@ -29,6 +30,33 @@ export default function HomePage() {
 
   const { user } = useAuth();
   const { addConversation, appendMessage } = useConversations();
+
+  useEffect(() => {
+    if (homeState !== 'HOME_OFFLINE') {
+      stateBeforeOfflineRef.current = homeState;
+    }
+  }, [homeState]);
+
+  useEffect(() => {
+    const handleOffline = () => {
+      setHomeState('HOME_OFFLINE');
+    };
+    const handleOnline = () => {
+      setHomeState(stateBeforeOfflineRef.current);
+    };
+
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+
+    if (!navigator.onLine) {
+      handleOffline();
+    }
+
+    return () => {
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, []);
 
   // ── 未登录态 ─────────────────────────────────────────────────────────────
   if (!user) {
@@ -60,7 +88,7 @@ export default function HomePage() {
   const handleResult = async (r: SearchAnswer, question: string) => {
     setResult(r);
     setError(null);
-    setPhase('showing_result');
+    setHomeState('HOME_RESULT');
 
     // 追加到对话历史（C2）
     let convId = currentConversationId;
@@ -80,16 +108,18 @@ export default function HomePage() {
   const handleError = (err: { code: string; message: string }) => {
     setError(err);
     setResult(null);
-    setPhase('showing_error');
+    setHomeState('HOME_ERROR');
   };
 
   const handleLoading = (loading: boolean) => {
-    if (loading) setPhase('loading');
+    if (loading) {
+      setHomeState('HOME_SUBMITTING');
+    }
   };
 
   const handleExamplePick = (question: string) => {
     setLastQuestion(question);
-    setPhase('loading');
+    setHomeState('HOME_SUBMITTING');
     setResult(null);
     setError(null);
     import('../../api/search').then(({ askQuestion }) => {
@@ -113,13 +143,19 @@ export default function HomePage() {
   // ── 渲染 ──────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen">
-      <div className="max-w-3xl mx-auto px-6 pb-16">
+      <div className="max-w-3xl mx-auto px-6 pb-36">
 
         {/* WelcomeHero（始终展示） */}
         <WelcomeHero />
 
+        {homeState === 'HOME_OFFLINE' && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            当前网络不可用，恢复后将继续显示上次状态。
+          </div>
+        )}
+
         {/* SearchResult（有结果/错误时） */}
-        {(phase === 'showing_result' || phase === 'showing_error') && result && (
+        {homeState === 'HOME_RESULT' && result && (
           <div className="mb-6">
             <SearchResult
               result={result}
@@ -129,7 +165,7 @@ export default function HomePage() {
             />
           </div>
         )}
-        {(phase === 'showing_error' || phase === 'showing_result') && error && (
+        {homeState === 'HOME_ERROR' && error && (
           <div className="mb-6">
             <SearchResult
               result={{
@@ -146,7 +182,7 @@ export default function HomePage() {
         )}
 
         {/* Loading */}
-        {phase === 'loading' && (
+        {homeState === 'HOME_SUBMITTING' && (
           <div className="flex justify-center py-6">
             <div className="flex items-center gap-3 text-slate-400 text-sm">
               <div className="w-5 h-5 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
@@ -156,20 +192,22 @@ export default function HomePage() {
         )}
 
         {/* AskBar（始终可用，C1） */}
-        <div className="mb-6">
-          <AskBar
-            onResult={handleAskBarResult}
-            onError={handleError}
-            onLoading={(loading) => {
-              handleLoading(loading);
-            }}
-            onQuestionChange={(q) => setLastQuestion(q)}
-            conversationId={currentConversationId ?? undefined}
-          />
+        <div className="fixed bottom-0 left-0 right-0 border-t border-slate-200 bg-white/95 backdrop-blur z-20">
+          <div className="max-w-3xl mx-auto px-6 py-4">
+            <AskBar
+              onResult={handleAskBarResult}
+              onError={handleError}
+              onLoading={(loading) => {
+                handleLoading(loading);
+              }}
+              onQuestionChange={(q) => setLastQuestion(q)}
+              conversationId={currentConversationId ?? undefined}
+            />
+          </div>
         </div>
 
         {/* SuggestionGrid（idle 态展示） */}
-        {phase === 'idle' && (
+        {homeState === 'HOME_IDLE' && (
           <SuggestionGrid onPick={handleExamplePick} />
         )}
 

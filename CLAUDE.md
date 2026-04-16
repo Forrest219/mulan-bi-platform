@@ -103,7 +103,19 @@ PostgreSQL 16 — 单库统一管理，表名按模块前缀分类：
 
 ## 🤖 Agent 协作流水线规则（强制执行）
 
-本项目使用多模型分工流水线（详见 `AGENT_PIPELINE.md`）。以下三条为**铁律**，所有阶段必须遵守：
+本项目使用角色驱动分工流水线（详见 `AGENT_PIPELINE.md`）。以下为**铁律**，所有阶段必须遵守：
+
+### 角色速查
+
+| 短名 | 职责 |
+|------|------|
+| **pm** | 需求、范围、PRD、用户故事、优先级 |
+| **designer** | 体验、交互、页面结构、视觉方向、文案 |
+| **architect** | 技术架构、spec、任务拆分、验收标准 |
+| **coder** | 主力开发 |
+| **fixer** | 补测试、修 bug、处理 review 意见 |
+| **reviewer** | 独立代码复核，优先 Codex MCP |
+| **shipper** | 发布检查、release notes、回滚方案 |
 
 ---
 
@@ -111,32 +123,29 @@ PostgreSQL 16 — 单库统一管理，表名按模块前缀分类：
 
 每个阶段必须产出文档，不得仅将上下文留在对话里。
 
-| 必须产出的文件 | 适用阶段 |
-|--------------|---------|
-| `Context_Summary.md` | 阶段一前置 |
-| `SPEC.md` | 阶段一 |
-| `SPEC_GAP_REPORT.md` | 阶段二（如有） |
-| `IMPLEMENTATION_NOTES.md` | 阶段二 |
-| `Refactor_Instructions.md` | 阶段四返工（如有） |
+| 必须产出的文件 | 执行者 | 适用阶段 |
+|--------------|--------|---------|
+| `PRD.md` | pm | 阶段 0 |
+| `Context_Summary.md` | architect | 阶段一前置 |
+| `SPEC.md` | architect | 阶段一 |
+| `SPEC_GAP_REPORT.md` | coder | 阶段二（如有） |
+| `IMPLEMENTATION_NOTES.md` | coder | 阶段二 |
+| `Refactor_Instructions.md` | reviewer | 阶段四返工（如有） |
 
 > 不以文件形式留痕的决策，视为未发生。
 
 ---
 
-### 规则 2：Final Approval 必须输出两维独立报告
-
-Opus 终审不得只检查"是否符合 SPEC"，还必须验证：
+### 规则 2：reviewer 必须输出两维独立报告
 
 - **SPEC Compliance Check** — 代码是否按 SPEC 实现
 - **Real-World Risk Check** — SPEC 本身是否遗漏关键真实约束
 
-现实常见问题不是"实现没照 SPEC 做"，而是"SPEC 自己漏了坑"。两维报告缺一不可。
+两维报告缺一不可。
 
 ---
 
-### 规则 3：Opus 修改权限严格量化，禁止模糊地带
-
-Opus 在终审阶段可执行的动作：
+### 规则 3：reviewer 修改权限严格量化，禁止模糊地带
 
 | ✅ 允许 | ❌ 禁止 |
 |---------|---------|
@@ -152,10 +161,10 @@ Opus 在终审阶段可执行的动作：
 
 ### 铁规则汇总
 
-1. **MiniMax 可以修实现，不可以私改 SPEC**
-2. **Human 确认 PRD 前，Opus 不得进入实现阶段**
+1. **coder 可以修实现，不可以私改 SPEC**
+2. **Human 确认 PRD 前，coder 不得进入实现阶段**
 3. **所有交接均为文件交接，不以口头上下文传递**
-4. **Opus 终审不得做大规模代码修改（量化标准见上方规则 3）**
+4. **reviewer 不得做大规模代码修改（量化标准见上方规则 3）**
 5. **Final Approval 必须输出 SPEC 合规 + 真实风险两维报告**
 
 ---

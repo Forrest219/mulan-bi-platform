@@ -31,7 +31,9 @@ export default function HomeLayout() {
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, String(collapsed));
-    } catch {}
+    } catch {
+      /* localStorage not available — silently ignore */
+    }
   }, [collapsed]);
 
   // 全局快捷键（P2-4）
@@ -78,18 +80,6 @@ export default function HomeLayout() {
             />
           </div>
         </div>
-
-        {/* 折叠时显示展开按钮 */}
-        {collapsed && (
-          <button
-            onClick={() => setCollapsed(false)}
-            className="fixed left-2 top-1/2 -translate-y-1/2 z-10 w-6 h-12 bg-white border border-slate-200
-                       rounded-r-md flex items-center justify-center hover:bg-slate-50 transition-colors shadow-sm"
-            aria-label="展开对话历史"
-          >
-            <i className="ri-arrow-right-s-line text-slate-400 text-sm" />
-          </button>
-        )}
 
         {/* 右侧主内容区 */}
         <div className="flex-1 min-w-0">

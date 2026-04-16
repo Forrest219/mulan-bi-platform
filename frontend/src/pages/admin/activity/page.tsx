@@ -22,13 +22,20 @@ interface Log {
   details: string;
 }
 
+interface ActivityStats {
+  total_users: number;
+  active_users: number;
+  active_rate: number;
+  tag_counts?: Record<string, number>;
+}
+
 type TimeRange = '7d' | '30d' | 'all';
 type OpType = 'all' | 'login' | 'logout' | 'other';
 
 export default function ActivityPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [logs, setLogs] = useState<Log[]>([]);
-  const [stats, setStats] = useState<any>(null);
+  const [stats, setStats] = useState<ActivityStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<TimeRange>('7d');
   const [opTypeFilter, setOpTypeFilter] = useState<OpType>('all');
@@ -110,21 +117,6 @@ export default function ActivityPage() {
       red: 'bg-red-50'
     };
     return map[color] || 'bg-slate-50';
-  };
-
-  const formatTime = (dateStr: string) => {
-    if (!dateStr) return '-';
-    const date = new Date(dateStr.replace(' ', 'T'));
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-
-    if (minutes < 1) return '刚刚';
-    if (minutes < 60) return `${minutes}分钟前`;
-    if (hours < 24) return `${hours}小时前`;
-    return `${days}天前`;
   };
 
   const formatDate = (dateStr: string) => {

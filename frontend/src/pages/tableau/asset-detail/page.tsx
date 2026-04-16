@@ -131,7 +131,9 @@ export default function TableauAssetDetailPage() {
     try {
       const data = await getAssetHealth(Number(id));
       setHealthData(data);
-    } catch {}
+    } catch (_err) {
+      // ignore health load failures on detail page
+    }
     setHealthLoading(false);
   }
 

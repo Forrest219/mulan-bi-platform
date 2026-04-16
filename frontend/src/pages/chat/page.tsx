@@ -10,10 +10,11 @@
  * - 右上角导出按钮（P2-3）
  */
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { conversationsApi, type ConversationDetail, type ConversationMessageAPI } from '../../api/conversations';
 import { askQuestion, type SearchAnswer } from '../../api/search';
 import { SearchResult } from '../home/components/SearchResult';
+import { DataUsedFooter } from '../home/components/DataUsedFooter';
 import { useConversations } from '../../store/conversationStore';
 import { listConnections, type TableauConnection } from '../../api/tableau';
 
@@ -36,19 +37,26 @@ function MessageSkeleton() {
 
 // ─── Assistant Message Content ────────────────────────────────────────────────
 
-function AssistantMessageContent({ content }: { content: string }) {
+function AssistantMessageContent({ content, createdAt }: { content: string; createdAt: string }) {
   const parsed = useMemo(() => {
     try {
       const obj = JSON.parse(content);
       if (obj && typeof obj === 'object' && typeof obj.type === 'string') {
         return obj as SearchAnswer;
       }
-    } catch {}
+    } catch (_err) {
+      // ignore: assistant message may be plain text
+    }
     return null;
   }, [content]);
 
   if (parsed) {
-    return <SearchResult result={parsed} onRetry={() => {}} />;
+    return (
+      <>
+        <SearchResult result={parsed} onRetry={() => {}} />
+        <DataUsedFooter result={parsed} timestamp={createdAt} />
+      </>
+    );
   }
   return (
     <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-md px-4 py-3">
@@ -87,7 +95,7 @@ function MessageBubble({ msg }: MessageBubbleProps) {
           </div>
           <span className="text-xs text-slate-400">Mulan AI</span>
         </div>
-        <AssistantMessageContent content={msg.content} />
+        <AssistantMessageContent content={msg.content} createdAt={msg.created_at} />
         <p className="text-[10px] text-slate-400 mt-1 ml-1">
           {new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
         </p>
@@ -98,13 +106,27 @@ function MessageBubble({ msg }: MessageBubbleProps) {
 
 // ─── Export helper ─────────────────────────────────────────────────────────────
 
+function getAssistantExportText(content: string): string {
+  try {
+    const parsed = JSON.parse(content) as SearchAnswer;
+    if (parsed && typeof parsed === 'object' && typeof parsed.type === 'string') {
+      if (parsed.type === 'text') return parsed.answer;
+      if (parsed.type === 'error') return `[错误] ${parsed.detail ?? parsed.reason ?? ''}`;
+      return JSON.stringify(parsed.data ?? parsed.answer ?? '', null, 2);
+    }
+  } catch (_err) {
+    // ignore: exported content may be plain text
+  }
+  return content;
+}
+
 function exportConversationMarkdown(conv: ConversationDetail) {
   const lines: string[] = [`# ${conv.title}`, '', `> 导出时间：${new Date().toLocaleString('zh-CN')}`, ''];
   for (const msg of conv.messages) {
     if (msg.role === 'user') {
       lines.push(`**You:** ${msg.content}`, '');
     } else {
-      lines.push(`**Assistant:** ${msg.content}`, '');
+      lines.push(`**Assistant:** ${getAssistantExportText(msg.content)}`, '');
     }
   }
   const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
@@ -120,18 +142,25 @@ function exportConversationMarkdown(conv: ConversationDetail) {
 
 // ─── ChatPage ─────────────────────────────────────────────────────────────────
 
+type ChatState =
+  | 'CHAT_LOADING'
+  | 'CHAT_READY'
+  | 'CHAT_SENDING'
+  | 'CHAT_APPEND_ERROR'
+  | 'CHAT_NOT_FOUND'
+  | 'CHAT_OFFLINE';
+
 export default function ChatPage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const { appendMessage } = useConversations();
 
   const [conv, setConv] = useState<ConversationDetail | null>(null);
-  const [loadingConv, setLoadingConv] = useState(true);
-  const [notFound, setNotFound] = useState(false);
+  const [chatState, setChatState] = useState<ChatState>('CHAT_LOADING');
+  const stateBeforeOfflineRef = useRef<ChatState>('CHAT_LOADING');
 
   const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [lastFailedQuestion, setLastFailedQuestion] = useState<string | null>(null);
   // P2-1：追问上下文标识（首次成功查询后置为 true）
   const [hasQueryContext, setHasQueryContext] = useState(false);
   // P2-1：缓存 datasource_luid，避免并发写入时后端读取 DB 出现竞态
@@ -147,29 +176,53 @@ export default function ChatPage() {
   // 加载对话
   useEffect(() => {
     if (!id) return;
-    setLoadingConv(true);
-    setNotFound(false);
+    setChatState('CHAT_LOADING');
     conversationsApi
       .get(id)
       .then(async (data) => {
         setConv(data);
+        setChatState('CHAT_READY');
         // 初始化追问上下文状态：检查后端是否保存了查询上下文
         try {
           const ctxResp = await fetch(`/api/conversations/${id}/context`, { credentials: 'include' });
           if (ctxResp.ok) {
             const ctxData = await ctxResp.json();
             if (ctxData.context) {
-            setHasQueryContext(true);
-            if (ctxData.context.datasource_luid) {
-              setCachedDatasourceLuid(ctxData.context.datasource_luid);
+              setHasQueryContext(true);
+              if (ctxData.context.datasource_luid) {
+                setCachedDatasourceLuid(ctxData.context.datasource_luid);
+              }
             }
           }
-          }
-        } catch {}
+        } catch (_err) {
+          // ignore context bootstrap failures; chat can still work
+        }
       })
-      .catch(() => setNotFound(true))
-      .finally(() => setLoadingConv(false));
+      .catch(() => setChatState('CHAT_NOT_FOUND'));
   }, [id]);
+
+  useEffect(() => {
+    if (chatState !== 'CHAT_OFFLINE') {
+      stateBeforeOfflineRef.current = chatState;
+    }
+  }, [chatState]);
+
+  useEffect(() => {
+    const handleOffline = () => setChatState('CHAT_OFFLINE');
+    const handleOnline = () => setChatState(stateBeforeOfflineRef.current);
+
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+
+    if (!navigator.onLine) {
+      handleOffline();
+    }
+
+    return () => {
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, []);
 
   // 加载连接列表
   useEffect(() => {
@@ -199,11 +252,21 @@ export default function ChatPage() {
   }, []);
 
   const handleSend = useCallback(async () => {
-    if (!input.trim() || sending || !id) return;
+    if (
+      !input.trim() ||
+      chatState === 'CHAT_SENDING' ||
+      chatState === 'CHAT_LOADING' ||
+      chatState === 'CHAT_NOT_FOUND' ||
+      chatState === 'CHAT_OFFLINE' ||
+      !id
+    ) {
+      return;
+    }
     const question = input.trim();
     setInput('');
-    setSending(true);
+    setChatState('CHAT_SENDING');
     setSendError(null);
+    setLastFailedQuestion(null);
 
     // 乐观追加用户消息
     const userMsg: ConversationMessageAPI = {
@@ -226,22 +289,18 @@ export default function ChatPage() {
         datasource_luid: hasQueryContext ? cachedDatasourceLuid : undefined,
       });
 
-      const answerText =
-        result.type === 'text' ? result.answer :
-        result.type === 'error' ? `[错误] ${result.detail ?? result.reason ?? ''}` :
-        result.type === 'number' ? String((result.data as { value?: number })?.value ?? result.data) :
-        JSON.stringify(result.data ?? result.answer ?? '');
+      const assistantPayload = JSON.stringify(result);
 
       const assistantMsg: ConversationMessageAPI = {
         id: `local-${Date.now()}-a`,
         role: 'assistant',
-        content: answerText,
+        content: assistantPayload,
         created_at: new Date().toISOString(),
       };
       setConv((prev) =>
         prev ? { ...prev, messages: [...prev.messages, assistantMsg] } : prev
       );
-      appendMessage(id, { role: 'assistant', content: answerText });
+      appendMessage(id, { role: 'assistant', content: assistantPayload });
       // P2-1：标记已有上下文，下次追问自动继承
       if (result.type !== 'error' && result.type !== 'ambiguous') {
         setHasQueryContext(true);
@@ -250,16 +309,25 @@ export default function ChatPage() {
           setCachedDatasourceLuid(result.datasource_luid);
         }
       }
+      setChatState('CHAT_READY');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setSendError(msg);
-    } finally {
-      setSending(false);
+      setLastFailedQuestion(question);
+      setChatState('CHAT_APPEND_ERROR');
     }
-  }, [input, sending, id, selectedConnectionId, hasQueryContext, cachedDatasourceLuid, appendMessage]);
+  }, [
+    appendMessage,
+    cachedDatasourceLuid,
+    chatState,
+    hasQueryContext,
+    id,
+    input,
+    selectedConnectionId,
+  ]);
 
   // ── 错误态 ──────────────────────────────────────────────────────────────
-  if (notFound) {
+  if (chatState === 'CHAT_NOT_FOUND') {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -278,7 +346,7 @@ export default function ChatPage() {
   }
 
   // ── 加载态 ──────────────────────────────────────────────────────────────
-  if (loadingConv) {
+  if (chatState === 'CHAT_LOADING') {
     return (
       <div className="min-h-screen flex flex-col">
         <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-200 bg-white">
@@ -321,6 +389,12 @@ export default function ChatPage() {
         )}
       </div>
 
+      {chatState === 'CHAT_OFFLINE' && (
+        <div className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-sm text-amber-700">
+          当前离线中，无法发送消息。
+        </div>
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-6 py-6 space-y-6">
@@ -332,7 +406,7 @@ export default function ChatPage() {
           {conv?.messages.map((msg) => (
             <MessageBubble key={msg.id} msg={msg} />
           ))}
-          {sending && (
+          {chatState === 'CHAT_SENDING' && (
             <div className="flex justify-start">
               <div className="flex items-center gap-2 px-4 py-3 bg-white border border-slate-200 rounded-2xl rounded-tl-md">
                 <div className="flex gap-1">
@@ -348,10 +422,22 @@ export default function ChatPage() {
               </div>
             </div>
           )}
-          {sendError && (
+          {chatState === 'CHAT_APPEND_ERROR' && sendError && (
             <div className="flex justify-center">
-              <div className="px-4 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
-                发送失败：{sendError}
+              <div className="px-4 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600 flex items-center gap-3">
+                <span>发送失败：{sendError}</span>
+                {lastFailedQuestion && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInput(lastFailedQuestion);
+                      setChatState('CHAT_READY');
+                    }}
+                    className="text-red-700 hover:text-red-800 underline"
+                  >
+                    重试
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -387,6 +473,7 @@ export default function ChatPage() {
             <textarea
               ref={inputRef}
               data-askbar-input
+              aria-label="输入你的数据问题"
               value={input}
               onChange={(e) => setInput(e.target.value.slice(0, 500))}
               onKeyDown={(e) => {
@@ -397,10 +484,9 @@ export default function ChatPage() {
               }}
               placeholder="追问... (Enter 发送，Shift+Enter 换行)"
               rows={2}
-              disabled={sending}
               className={`w-full px-4 pr-16 py-3 bg-white border border-slate-200 rounded-xl
                          text-sm resize-none focus:outline-none focus:border-blue-300
-                         placeholder-slate-400 disabled:opacity-60
+                         placeholder-slate-400
                          ${showConnectionSelect ? 'pl-32' : ''}`}
             />
             {/* 快捷键提示 */}
@@ -409,13 +495,13 @@ export default function ChatPage() {
             </span>
             <button
               onClick={handleSend}
-              disabled={sending || !input.trim()}
+              disabled={chatState === 'CHAT_SENDING' || !input.trim() || chatState === 'CHAT_OFFLINE'}
               className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 bg-slate-900
                          hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg
                          flex items-center justify-center transition-colors"
               aria-label="发送"
             >
-              {sending ? (
+              {chatState === 'CHAT_SENDING' ? (
                 <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
               ) : (
                 <i className="ri-send-plane-fill text-sm" />

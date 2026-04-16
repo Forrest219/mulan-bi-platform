@@ -192,6 +192,11 @@ function TableResult({ data }: TableResultProps) {
           metricCol={data.columns[1]}
         />
         {/* 可折叠的原始表格 */}
+        {truncated && (
+          <div className="px-4 py-2 text-xs text-slate-400 bg-slate-50 border-t border-slate-100">
+            共 {data.rows.length} 行，已截断显示前 10 行
+          </div>
+        )}
         <div className="border-t border-slate-100">
           <button
             onClick={() => setTableExpanded((v) => !v)}

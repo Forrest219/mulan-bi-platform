@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../../context/AuthContext';
-import { getLLMConfig, saveLLMConfig, testLLMConnection, deleteLLMConfig, LLMConfig } from '../../../api/llm';
+import { getLLMConfig, saveLLMConfig, testLLMConnection, deleteLLMConfig } from '../../../api/llm';
 import { ConfirmModal } from '../../../components/ConfirmModal';
+
+const getErrorMessage = (error: unknown, fallback = '操作失败'): string => {
+  return error instanceof Error ? error.message : fallback;
+};
 
 export default function LLMAdminPage() {
   const { user, hasPermission } = useAuth();
@@ -57,8 +61,8 @@ export default function LLMAdminPage() {
           is_active: data.config.is_active,
         });
       }
-    } catch (e: any) {
-      setMessage({ type: 'error', text: e.message });
+    } catch (e: unknown) {
+      setMessage({ type: 'error', text: getErrorMessage(e) });
     } finally {
       setLoading(false);
     }
@@ -75,8 +79,8 @@ export default function LLMAdminPage() {
       await saveLLMConfig(form);
       setMessage({ type: 'success', text: 'LLM 配置保存成功' });
       setForm({ ...form, api_key: '' }); // 清空 api_key 字段
-    } catch (e: any) {
-      setMessage({ type: 'error', text: e.message });
+    } catch (e: unknown) {
+      setMessage({ type: 'error', text: getErrorMessage(e) });
     } finally {
       setSaving(false);
     }
@@ -89,8 +93,8 @@ export default function LLMAdminPage() {
     try {
       const result = await testLLMConnection();
       setTestResult(result.success ? `✅ 成功: ${result.message}` : `❌ 失败: ${result.message}`);
-    } catch (e: any) {
-      setTestResult(`❌ 错误: ${e.message}`);
+    } catch (e: unknown) {
+      setTestResult(`❌ 错误: ${getErrorMessage(e)}`);
     } finally {
       setTesting(false);
     }
@@ -109,8 +113,8 @@ export default function LLMAdminPage() {
         is_active: true,
       });
       setMessage({ type: 'success', text: 'LLM 配置已删除' });
-    } catch (e: any) {
-      setMessage({ type: 'error', text: e.message });
+    } catch (e: unknown) {
+      setMessage({ type: 'error', text: getErrorMessage(e) });
     }
   }
 

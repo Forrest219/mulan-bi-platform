@@ -66,6 +66,7 @@ export const AskBar = forwardRef<HTMLTextAreaElement, AskBarProps>(
       if (!input.trim() || loading) return;
       const question = input.trim().slice(0, MAX_LENGTH);
       onQuestionChange?.(question);
+      setInput('');
       setLoading(true);
       onLoading(true);
       try {
@@ -91,10 +92,10 @@ export const AskBar = forwardRef<HTMLTextAreaElement, AskBarProps>(
     const showConnectionSelect = connections.length > 1;
 
     return (
-      <div className="relative">
+      <div className="relative rounded-2xl border border-slate-200 bg-white shadow-sm px-3 py-3">
         {/* 连接选择器（多连接时，左下角 inline） */}
         {showConnectionSelect && (
-          <div className="absolute left-3 bottom-3 z-10">
+          <div className="absolute left-5 bottom-4 z-10">
             <select
               value={selectedConnectionId ?? ''}
               onChange={(e) => setSelectedConnectionId(Number(e.target.value))}
@@ -111,6 +112,7 @@ export const AskBar = forwardRef<HTMLTextAreaElement, AskBarProps>(
         <textarea
           ref={textareaRef}
           data-askbar-input
+          aria-label="输入你的数据问题"
           value={input}
           onChange={(e) => {
             const val = e.target.value.slice(0, MAX_LENGTH);
@@ -123,26 +125,24 @@ export const AskBar = forwardRef<HTMLTextAreaElement, AskBarProps>(
               submit();
             }
           }}
-          placeholder="有什么可以帮到您"
+          placeholder="输入你的数据问题…（Enter 发送，Shift+Enter 换行）"
           rows={2}
           disabled={loading}
-          className={`w-full pr-20 py-4 bg-white text-slate-800 placeholder-slate-400
-                     focus:outline-none text-base resize-none leading-relaxed rounded-full
-                     disabled:opacity-60
-                     ${showConnectionSelect ? 'pl-36 px-8' : 'px-8'}`}
-          style={{ border: '1px solid #dfe1e5' }}
+          className={`w-full pr-20 py-3 bg-white text-slate-800 placeholder-slate-400
+                     focus:outline-none text-sm resize-none leading-relaxed rounded-xl
+                     ${showConnectionSelect ? 'pl-36 px-4' : 'px-4'}`}
         />
 
         {/* 快捷键提示 */}
-        <span className="absolute right-14 top-1/2 -translate-y-1/2 text-[10px] text-slate-300 select-none pointer-events-none">
+        <span className="absolute right-14 bottom-4 text-[10px] text-slate-300 select-none pointer-events-none">
           ⌘K
         </span>
 
         <button
           onClick={submit}
           disabled={loading || !input.trim()}
-          className="absolute right-3 top-1/2 -translate-y-1/2 p-2.5 bg-slate-900
-                     hover:bg-slate-800 disabled:opacity-40 text-white rounded-full transition-colors"
+          className="absolute right-4 top-1/2 -translate-y-1/2 p-2.5 bg-slate-900
+                     hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg transition-colors"
           aria-label="发送"
         >
           {loading ? (

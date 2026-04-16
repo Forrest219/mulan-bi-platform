@@ -18,11 +18,6 @@ interface User {
   display_name: string;
 }
 
-interface PendingPermissionChange {
-  groupId: number;
-  permissions: string[];
-}
-
 export default function GroupsPage() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -154,11 +149,6 @@ export default function GroupsPage() {
 
   const togglePermission = (permKey: string, perms: string[]) =>
     perms.includes(permKey) ? perms.filter(p => p !== permKey) : [...perms, permKey];
-
-  const getPermissionLabel = (key: string) => {
-    const perm = ALL_PERMISSIONS.find(p => p.key === key);
-    return perm ? perm.label : key;
-  };
 
   // 获取权限变更状态：'added' | 'removed' | 'unchanged'
   const getPermChangeStatus = (group: Group, permKey: string) => {

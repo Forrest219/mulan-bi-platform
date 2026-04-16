@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { API_BASE } from '../config';
 
 export const ALL_PERMISSIONS = [
@@ -66,17 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Access Token 过期时间戳（毫秒），用于 proactive refresh
   const [tokenExpiresAt, setTokenExpiresAt] = useState<number | null>(null);
 
-  // 从登录响应中解析 JWT payload 获取 exp
-  const parseJwtExpiry = (token: string): number | null => {
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      return payload.exp * 1000; // JWT exp 是秒，转毫秒
-    } catch {
-      return null;
-    }
-  };
-
-  const refreshToken = async (): Promise<boolean> => {
+  const refreshToken = useCallback(async (): Promise<boolean> => {
     try {
       const response = await fetch(`${API_BASE}/api/auth/refresh`, {
         method: 'POST',
@@ -93,10 +83,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       return false;
     }
-  };
+  }, []);
 
   // 检查是否需要 proactive token refresh
-  const scheduleProactiveRefresh = (expiresAt: number) => {
+  const scheduleProactiveRefresh = useCallback((expiresAt: number) => {
     const now = Date.now();
     const msUntilRefresh = expiresAt - now - ACCESS_TOKEN_REFRESH_THRESHOLD_SECONDS * 1000;
     if (msUntilRefresh > 0) {
@@ -104,9 +94,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await refreshToken();
       }, msUntilRefresh);
     }
-  };
+  }, [refreshToken]);
 
-  const checkAuth = async () => {
+  const checkAuth = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE}/api/auth/me`, {
         credentials: 'include',
@@ -137,11 +127,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [refreshToken, scheduleProactiveRefresh, tokenExpiresAt]);
 
   useEffect(() => {
     checkAuth();
-  }, []);
+  }, [checkAuth]);
 
   const login = async (email: string, password: string) => {
     try {

@@ -58,7 +58,9 @@ function loadFromStorage(): Conversation[] {
 function saveToStorage(conversations: Conversation[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
-  } catch {}
+  } catch (_err) {
+    // ignore localStorage write failures
+  }
 }
 
 function generateId(): string {
@@ -234,7 +236,6 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    // eslint-disable-next-line react/jsx-no-constructed-context-values
     <ConversationContext.Provider
       value={{
         conversations,

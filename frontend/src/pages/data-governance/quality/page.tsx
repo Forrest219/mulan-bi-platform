@@ -75,19 +75,6 @@ const ruleTypeLabels: Record<string, string> = {
   custom: '自定义规则',
 };
 
-function ScoreBar({ score }: { score: number }) {
-  const color = score >= 90 ? 'bg-emerald-500' : score >= 75 ? 'bg-amber-400' : 'bg-red-500';
-  const textColor = score >= 90 ? 'text-emerald-600' : score >= 75 ? 'text-amber-600' : 'text-red-500';
-  return (
-    <div className="flex items-center gap-2">
-      <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${score}%` }} />
-      </div>
-      <span className={`text-[11px] font-semibold w-7 text-right ${textColor}`}>{score}</span>
-    </div>
-  );
-}
-
 export default function DataQualityPage() {
   const [selectedRuleType, setSelectedRuleType] = useState<string>('');
   const [selectedStatus, setSelectedStatus] = useState<string>('');

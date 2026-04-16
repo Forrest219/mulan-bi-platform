@@ -64,11 +64,6 @@ export default function PermissionsPage() {
     return group.permissions && group.permissions.includes(permKey);
   };
 
-  const getPermissionLabel = (key: string) => {
-    const perm = ALL_PERMISSIONS.find(p => p.key === key);
-    return perm ? perm.label : key;
-  };
-
   if (loading) return <div className="p-8 text-center text-slate-400">加载中...</div>;
 
   return (

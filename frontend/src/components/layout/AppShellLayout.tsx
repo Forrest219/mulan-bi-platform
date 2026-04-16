@@ -36,7 +36,9 @@ export default function AppShellLayout() {
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY_SIDEBAR_COLLAPSED, String(sidebarCollapsed));
-    } catch {}
+    } catch (_err) {
+      // ignore localStorage write failures
+    }
   }, [sidebarCollapsed]);
 
   // 响应式控制：< 768px 移动端通过 hamburger 切换

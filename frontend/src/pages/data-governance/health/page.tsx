@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { triggerScan, getHealthSummary, getScan, getScanIssues, listScans, downloadScanReport } from '@/api/health-scan';
 import type { HealthScan, HealthIssue } from '@/api/health-scan';
 import { listDataSources } from '@/api/datasources';
@@ -65,13 +65,6 @@ export default function DataHealthPage() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
-  // Load issues when activeScan or filters change
-  useEffect(() => {
-    if (activeScan && activeScan.status === 'success') {
-      loadIssues(activeScan.id);
-    }
-  }, [activeScan?.id, filterSeverity, issuePage]);
-
   async function loadSummary() {
     setLoading(true);
     try {
@@ -92,10 +85,12 @@ export default function DataHealthPage() {
     try {
       const res = await listDataSources();
       setDatasources(Array.isArray(res) ? res : res.datasources || []);
-    } catch {}
+    } catch (_err) {
+      // ignore datasource load errors
+    }
   }
 
-  async function loadIssues(scanId: number) {
+  const loadIssues = useCallback(async (scanId: number) => {
     try {
       const data = await getScanIssues(scanId, {
         severity: filterSeverity || undefined,
@@ -104,20 +99,31 @@ export default function DataHealthPage() {
       });
       setIssues(data.issues);
       setIssueTotal(data.total);
-    } catch {}
-  }
+    } catch (_err) {
+      // ignore issues loading errors to keep page usable
+    }
+  }, [filterSeverity, issuePage]);
 
-  async function loadHistory() {
+  const loadHistory = useCallback(async () => {
     try {
       const data = await listScans({ page: historyPage, page_size: 20 });
       setHistory(data.scans);
       setHistoryTotal(data.total);
-    } catch {}
-  }
+    } catch (_err) {
+      // ignore history loading errors to keep page usable
+    }
+  }, [historyPage]);
+
+  // Load issues when activeScan or filters change
+  useEffect(() => {
+    if (activeScan && activeScan.status === 'success') {
+      loadIssues(activeScan.id);
+    }
+  }, [activeScan, loadIssues]);
 
   useEffect(() => {
     if (tab === 'history') loadHistory();
-  }, [tab, historyPage]);
+  }, [tab, loadHistory]);
 
   async function handleExportReport() {
     if (!activeScan) return;
@@ -149,7 +155,9 @@ export default function DataHealthPage() {
             setActiveScan(scan);
             loadSummary();
           }
-        } catch {}
+        } catch (_err) {
+          // ignore transient polling errors
+        }
       }, 3000);
     } catch (e: any) {
       setScanning(false);
@@ -445,7 +453,13 @@ export default function DataHealthPage() {
                             >查看</button>
                             {s.status === 'success' && (
                               <button
-                                onClick={async () => { try { await downloadScanReport(s.id); } catch {} }}
+                                onClick={async () => {
+                                  try {
+                                    await downloadScanReport(s.id);
+                                  } catch (_err) {
+                                    // ignore export failure in history row action
+                                  }
+                                }}
                                 className="text-[11px] text-slate-500 hover:underline"
                               >导出</button>
                             )}

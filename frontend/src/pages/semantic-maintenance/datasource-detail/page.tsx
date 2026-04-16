@@ -10,6 +10,17 @@ import {
 import { ConfirmModal } from '../../../components/ConfirmModal';
 
 type Tab = 'metadata' | 'semantic' | 'publish';
+type DatasourceDiffPreview = {
+  tableau_current?: unknown;
+  mulan_pending?: unknown;
+  diff?: Record<string, unknown>;
+};
+
+type ActionResult = { message?: string };
+
+const getErrorMessage = (error: unknown, fallback = '操作失败'): string => {
+  return error instanceof Error ? error.message : fallback;
+};
 
 export default function SemanticDatasourceDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -29,10 +40,10 @@ export default function SemanticDatasourceDetailPage() {
   } | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<Partial<SemanticDatasource>>({});
-  const [showDiff, setShowDiff] = useState<{ open: boolean; diff: any } | null>(null);
+  const [showDiff, setShowDiff] = useState<{ open: boolean; diff: DatasourceDiffPreview } | null>(null);
   const [generatingAI, setGeneratingAI] = useState(false);
   const [logsPage, setLogsPage] = useState(1);
-  const [logsTotal, setLogsTotal] = useState(0);
+  const [, setLogsTotal] = useState(0);
   const [logsPages, setLogsPages] = useState(1);
 
   const dsId = parseInt(id || '0', 10);
@@ -61,8 +72,8 @@ export default function SemanticDatasourceDetailPage() {
         dimension_definition: dsData.dimension_definition,
         sensitivity_level: dsData.sensitivity_level,
       });
-    } catch (e: any) {
-      setError(e.message || '加载失败');
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, '加载失败'));
     } finally {
       setLoading(false);
     }
@@ -82,7 +93,7 @@ export default function SemanticDatasourceDetailPage() {
       setLogsTotal(data.total);
       setLogsPages(Math.ceil(data.total / 20));
       setLogsPage(page);
-    } catch (e: any) {
+    } catch (_e) {
       // silent fail for logs
     }
   };
@@ -95,14 +106,14 @@ export default function SemanticDatasourceDetailPage() {
   }, [activeTab, ds]);
   /* eslint-enable react-hooks/exhaustive-deps */
 
-  const handleAction = async (action: string, fn: (id: number) => Promise<any>, successMsg: string) => {
+  const handleAction = async (_action: string, fn: (id: number) => Promise<ActionResult>, successMsg: string) => {
     setActionLoading(true);
     try {
       const result = await fn(dsId);
       setModalNotify({ success: true, message: result.message || successMsg });
       loadData();
-    } catch (e: any) {
-      setModalNotify({ success: false, message: e.message || '操作失败' });
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: getErrorMessage(e) });
     } finally {
       setActionLoading(false);
     }
@@ -115,8 +126,8 @@ export default function SemanticDatasourceDetailPage() {
       setModalNotify({ success: true, message: result.message });
       setIsEditing(false);
       loadData();
-    } catch (e: any) {
-      setModalNotify({ success: false, message: e.message });
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: getErrorMessage(e) });
     } finally {
       setActionLoading(false);
     }
@@ -128,8 +139,8 @@ export default function SemanticDatasourceDetailPage() {
       const result = await generateDatasourceAI(dsId);
       setModalNotify({ success: true, message: result.message });
       loadData();
-    } catch (e: any) {
-      setModalNotify({ success: false, message: e.message });
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: getErrorMessage(e) });
     } finally {
       setGeneratingAI(false);
     }
@@ -140,8 +151,8 @@ export default function SemanticDatasourceDetailPage() {
       const result = await rollbackDatasource(dsId, versionId);
       setModalNotify({ success: true, message: result.message });
       loadData();
-    } catch (e: any) {
-      setModalNotify({ success: false, message: e.message });
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: getErrorMessage(e) });
     }
   };
 
@@ -150,8 +161,8 @@ export default function SemanticDatasourceDetailPage() {
     try {
       const diff = await previewDatasourceDiff(ds.connection_id, dsId);
       setShowDiff({ open: true, diff });
-    } catch (e: any) {
-      setModalNotify({ success: false, message: e.message });
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: getErrorMessage(e) });
     }
   };
 
@@ -164,8 +175,8 @@ export default function SemanticDatasourceDetailPage() {
         message: simulate ? '模拟发布完成' : (result.message || '发布成功'),
       });
       if (!simulate) loadData();
-    } catch (e: any) {
-      setModalNotify({ success: false, message: e.message });
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: getErrorMessage(e) });
     }
   };
 

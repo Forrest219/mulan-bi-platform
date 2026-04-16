@@ -6,6 +6,10 @@ import {
 } from '../../../api/datasources';
 import { ConfirmModal } from '../../../components/ConfirmModal';
 
+const getErrorMessage = (error: unknown, fallback = '操作失败'): string => {
+  return error instanceof Error ? error.message : fallback;
+};
+
 export default function AdminDatasourcesPage() {
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,8 +36,8 @@ export default function AdminDatasourcesPage() {
     try {
       const data = await listDataSources();
       setDataSources(data.datasources);
-    } catch (e: any) {
-      setLoadError(e.message || '加载失败');
+    } catch (e: unknown) {
+      setLoadError(getErrorMessage(e, '加载失败'));
     } finally {
       setLoading(false);
     }
@@ -98,8 +102,8 @@ export default function AdminDatasourcesPage() {
       setShowModal(false);
       resetForm();
       fetchDataSources();
-    } catch (e: any) {
-      setFormError(e.message);
+    } catch (e: unknown) {
+      setFormError(getErrorMessage(e));
     }
   };
 
@@ -108,9 +112,9 @@ export default function AdminDatasourcesPage() {
       await deleteDataSource(id);
       setConfirmModal(null);
       fetchDataSources();
-    } catch (e: any) {
+    } catch (e: unknown) {
       setConfirmModal(null);
-      setLoadError(e.message);
+      setLoadError(getErrorMessage(e));
     }
   };
 
@@ -120,8 +124,8 @@ export default function AdminDatasourcesPage() {
     try {
       const result = await testDataSource(id);
       setTestResult(result);
-    } catch (e: any) {
-      setTestResult({ success: false, message: e.message });
+    } catch (e: unknown) {
+      setTestResult({ success: false, message: getErrorMessage(e) });
     } finally {
       setTestingId(null);
     }

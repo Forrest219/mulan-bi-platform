@@ -3,12 +3,26 @@ import { useNavigate } from 'react-router-dom';
 import {
   listDatasourceSemantics, updateDatasourceSemantics,
   submitDatasourceForReview, approveDatasource, rejectDatasource,
-  generateDatasourceAI, getStatusBadge, getSensitivityBadge,
+  getStatusBadge, getSensitivityBadge,
   SemanticDatasource, SemanticStatus, SensitivityLevel,
   previewDatasourceDiff, publishDatasource,
 } from '../../../api/semantic-maintenance';
 import { listConnections, TableauConnection } from '../../../api/tableau';
 import { ConfirmModal } from '../../../components/ConfirmModal';
+
+type DatasourceDiffPreview = {
+  tableau_current?: unknown;
+  mulan_pending?: unknown;
+  diff?: Record<string, unknown>;
+  can_publish?: boolean;
+  sensitivity_level?: SensitivityLevel;
+};
+
+type ActionResult = { message?: string };
+
+const getErrorMessage = (error: unknown, fallback = '操作失败'): string => {
+  return error instanceof Error ? error.message : fallback;
+};
 
 export default function SemanticDatasourceListPage() {
   const navigate = useNavigate();
@@ -31,7 +45,7 @@ export default function SemanticDatasourceListPage() {
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Partial<SemanticDatasource>>({});
-  const [showDiff, setShowDiff] = useState<{ open: boolean; diff: any; ds: SemanticDatasource } | null>(null);
+  const [showDiff, setShowDiff] = useState<{ open: boolean; diff: DatasourceDiffPreview; ds: SemanticDatasource } | null>(null);
 
   // Load connections on mount
   /* eslint-disable react-hooks/exhaustive-deps -- listConnections 稳定引用，故意不放入 deps */
@@ -66,21 +80,21 @@ export default function SemanticDatasourceListPage() {
       setDatasources(data.items);
       setTotal(data.total);
       setTotalPages(data.pages);
-    } catch (e: any) {
-      setLoadError(e.message || '加载失败');
+    } catch (e: unknown) {
+      setLoadError(getErrorMessage(e, '加载失败'));
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAction = async (id: number, action: string, fn: (id: number) => Promise<any>, successMsg: string) => {
+  const handleAction = async (id: number, _action: string, fn: (id: number) => Promise<ActionResult>, successMsg: string) => {
     setActionLoading(id);
     try {
       const result = await fn(id);
       setModalNotify({ success: true, message: result.message || successMsg });
       loadDatasources();
-    } catch (e: any) {
-      setModalNotify({ success: false, message: e.message || '操作失败' });
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: getErrorMessage(e) });
     } finally {
       setActionLoading(null);
     }
@@ -90,8 +104,8 @@ export default function SemanticDatasourceListPage() {
     try {
       const diff = await previewDatasourceDiff(ds.connection_id, ds.id);
       setShowDiff({ open: true, diff, ds });
-    } catch (e: any) {
-      setModalNotify({ success: false, message: e.message });
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: getErrorMessage(e) });
     }
   };
 
@@ -103,8 +117,8 @@ export default function SemanticDatasourceListPage() {
         message: simulate ? '模拟发布完成，请查看差异' : (result.message || '发布成功'),
       });
       if (!simulate) loadDatasources();
-    } catch (e: any) {
-      setModalNotify({ success: false, message: e.message });
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: getErrorMessage(e) });
     }
   };
 
@@ -127,8 +141,8 @@ export default function SemanticDatasourceListPage() {
       setModalNotify({ success: true, message: result.message });
       setEditingId(null);
       loadDatasources();
-    } catch (e: any) {
-      setModalNotify({ success: false, message: e.message });
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: getErrorMessage(e) });
     } finally {
       setActionLoading(null);
     }

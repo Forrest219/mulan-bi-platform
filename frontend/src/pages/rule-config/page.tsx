@@ -57,7 +57,7 @@ export default function RuleConfigPage() {
       if (!resp.ok) throw new Error('获取规则列表失败');
       const data = await resp.json();
       setRules(data.rules);
-    } catch (error) {
+    } catch (_error) {
       showToast('获取规则列表失败');
     }
     setLoading(false);
@@ -81,7 +81,7 @@ export default function RuleConfigPage() {
         prev.map((r) => (r.id === id ? { ...r, status: data.status } : r))
       );
       showToast(data.message);
-    } catch (error) {
+    } catch (_error) {
       showToast('切换规则状态失败');
     }
   };
@@ -117,7 +117,7 @@ export default function RuleConfigPage() {
         db_type: 'MySQL',
       });
       fetchRules();
-    } catch (error) {
+    } catch (_error) {
       showToast('创建规则失败');
     }
   };
