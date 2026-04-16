@@ -1,5 +1,4 @@
-"""
-权限配置 API - 仅管理员可访问
+"""权限配置 API - 仅管理员可访问
 """
 from fastapi import APIRouter, Depends
 

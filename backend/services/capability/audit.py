@@ -52,8 +52,8 @@ def write_audit(rec: InvocationRecord) -> None:
 
     失败只记日志不抛，避免审计路径阻塞主链路。
     """
+    db = SessionLocal()
     try:
-        db = SessionLocal()
         db.execute(
             text("""
                 INSERT INTO bi_capability_invocations
@@ -83,6 +83,7 @@ def write_audit(rec: InvocationRecord) -> None:
             },
         )
         db.commit()
-        db.close()
     except Exception as e:
         logger.error("审计写入失败 trace_id=%s: %s", rec.trace_id, e)
+    finally:
+        db.close()

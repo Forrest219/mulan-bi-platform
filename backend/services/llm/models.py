@@ -18,6 +18,10 @@ class LLMConfig(Base):
     is_active = Column(Boolean, default=False, server_default=sa_text('false')) # Boolean 默认值
     created_at = Column(DateTime, server_default=sa_func.now()) # DateTime 默认值
     updated_at = Column(DateTime, server_default=sa_func.now(), onupdate=sa_func.now()) # DateTime 默认值和更新
+    # B3 新增：purpose 路由、display_name、priority
+    purpose = Column(String(50), default='default', server_default=sa_text("'default'"), nullable=False)
+    display_name = Column(String(100), nullable=True)
+    priority = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()), nullable=False)
 
     def to_dict(self):
         """返回配置，隐藏 api_key"""
@@ -30,6 +34,9 @@ class LLMConfig(Base):
             "max_tokens": self.max_tokens,
             "is_active": self.is_active,
             "has_api_key": bool(self.api_key_encrypted),
+            "purpose": self.purpose,
+            "display_name": self.display_name,
+            "priority": self.priority,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -52,14 +59,54 @@ class LLMConfigDatabase:
         s.expire_all()
         return s
 
-    def get_config(self) -> Optional[LLMConfig]:
+    def get_config(self, purpose: str = "default") -> Optional[LLMConfig]:
+        """
+        获取 LLM 配置。
+
+        路由规则（B3）：
+        1. 先查 purpose=<purpose> AND is_active=True，按 priority DESC 取第一条
+        2. 找不到则 fallback 查 purpose='default' AND is_active=True
+        3. 仍找不到返回 None
+
+        向后兼容：原调用方不传 purpose 时默认走 'default' 路由。
+        """
         session = self.get_session()
         try:
-            return session.query(LLMConfig).first()
+            # Step 1: 查目标 purpose
+            config = (
+                session.query(LLMConfig)
+                .filter(LLMConfig.purpose == purpose, LLMConfig.is_active == True)
+                .order_by(LLMConfig.priority.desc())
+                .first()
+            )
+            if config is not None:
+                return config
+
+            # Step 2: fallback 到 'default' purpose（仅当 purpose 本身不是 'default'）
+            if purpose != "default":
+                config = (
+                    session.query(LLMConfig)
+                    .filter(LLMConfig.purpose == "default", LLMConfig.is_active == True)
+                    .order_by(LLMConfig.priority.desc())
+                    .first()
+                )
+            return config
         finally:
             session.close()
 
-    def save_config(self, provider, base_url, api_key_encrypted, model, temperature, max_tokens, is_active):
+    def save_config(
+        self,
+        provider,
+        base_url,
+        api_key_encrypted,
+        model,
+        temperature,
+        max_tokens,
+        is_active,
+        purpose: str = "default",
+        display_name: str | None = None,
+        priority: int = 0,
+    ):
         session = self.get_session()
         try:
             config = session.query(LLMConfig).first()
@@ -71,6 +118,10 @@ class LLMConfigDatabase:
                 config.temperature = temperature
                 config.max_tokens = max_tokens
                 config.is_active = is_active
+                config.purpose = purpose
+                if display_name is not None:
+                    config.display_name = display_name
+                config.priority = priority
                 # updated_at 会由 onupdate 自动更新
             else:
                 config = LLMConfig(
@@ -81,6 +132,9 @@ class LLMConfigDatabase:
                     temperature=temperature,
                     max_tokens=max_tokens,
                     is_active=is_active,
+                    purpose=purpose,
+                    display_name=display_name,
+                    priority=priority,
                 )
                 session.add(config)
             session.commit()

@@ -115,8 +115,8 @@ class LLMService:
             cls._instance._config_db = LLMConfigDatabase()
         return cls._instance
 
-    def _load_config(self):
-        return self._config_db.get_config()
+    def _load_config(self, purpose: str = "default"):
+        return self._config_db.get_config(purpose=purpose)
 
     def _get_openai_client(self, api_key: str, base_url: str, model: str, timeout: int):
         from openai import AsyncOpenAI
@@ -136,11 +136,11 @@ class LLMService:
         _client_cache.set("anthropic", base_url, model, api_key, client)
         return client
 
-    async def complete(self, prompt: str, system: str = None, timeout: int = 15) -> dict:
+    async def complete(self, prompt: str, system: str = None, timeout: int = 15, purpose: str = "default") -> dict:
         """异步 LLM 调用
         Returns: { "content": str } or { "error": str }
         """
-        config = self._load_config()
+        config = self._load_config(purpose=purpose)
         if not config or not config.is_active or not config.api_key_encrypted:
             return {"error": "LLM 未配置，请联系管理员"}
 
@@ -160,13 +160,13 @@ class LLMService:
             return {"error": str(e)}
 
     async def complete_with_temp(
-        self, prompt: str, system: str = None, timeout: int = 15, temperature: float = 0.1
+        self, prompt: str, system: str = None, timeout: int = 15, temperature: float = 0.1, purpose: str = "default"
     ) -> dict:
         """异步 LLM 调用（指定 temperature，不继承全局配置）。
         用于 NL-to-Query One-Pass LLM 等对输出稳定性有强制要求的场景。
         Returns: { "content": str } or { "error": str }
         """
-        config = self._load_config()
+        config = self._load_config(purpose=purpose)
         if not config or not config.is_active or not config.api_key_encrypted:
             return {"error": "LLM 未配置，请联系管理员"}
 
@@ -190,7 +190,7 @@ class LLMService:
             return {"error": str(e)}
 
     async def complete_for_semantic(
-        self, prompt: str, system: str = None, timeout: int = 30
+        self, prompt: str, system: str = None, timeout: int = 30, purpose: str = "default"
     ) -> dict:
         """Semantic 语义生成专用调用（Spec v1.2 §4.2 强制超参数）。
 
@@ -200,7 +200,7 @@ class LLMService:
 
         Returns: { "content": str } or { "error": str }
         """
-        config = self._load_config()
+        config = self._load_config(purpose=purpose)
         if not config or not config.is_active or not config.api_key_encrypted:
             return {"error": "LLM 未配置，请联系管理员"}
 

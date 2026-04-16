@@ -20,6 +20,7 @@ export interface SearchAnswer {
   type: SearchAnswerType;
   data?: NumberData | TableData | { text?: string; candidates?: Array<{ id: number; name: string }> };
   datasource?: { id: number; name: string };
+  datasource_luid?: string;
   query?: unknown;
   confidence?: number;
   reason?: string;
@@ -31,6 +32,8 @@ export interface AskQuestionRequest {
   question: string;
   datasource_luid?: string;
   connection_id?: number;
+  conversation_id?: string;
+  use_conversation_context?: boolean;
 }
 
 export class SearchError extends Error {

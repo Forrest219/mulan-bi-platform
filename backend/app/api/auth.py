@@ -1,5 +1,4 @@
-"""
-认证 API — 支持 JWT Access Token + Refresh Token 双 Token 模式
+"""认证 API — 支持 JWT Access Token + Refresh Token 双 Token 模式
 
 - Access Token（JWT）：存 session cookie，7天有效，前端用于 API 认证
 - Refresh Token：存 refresh_token cookie，30天 Sliding Window，用于 Access Token 续期
@@ -16,16 +15,19 @@ from collections import defaultdict
 from typing import Optional
 
 import jwt
-from fastapi import APIRouter, HTTPException, Response, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from services.auth import auth_service
 from app.core.constants import (
-    JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRE_SECONDS,
-    REFRESH_TOKEN_COOKIE_NAME, REFRESH_TOKEN_EXPIRE_SECONDS,
+    JWT_ALGORITHM,
+    JWT_EXPIRE_SECONDS,
+    JWT_SECRET,
     MIN_PASSWORD_LENGTH,
+    REFRESH_TOKEN_COOKIE_NAME,
+    REFRESH_TOKEN_EXPIRE_SECONDS,
 )
 from app.core.dependencies import get_current_user as _get_current_user
+from services.auth import auth_service
 
 router = APIRouter()
 
@@ -70,12 +72,14 @@ def _decode_session_token(token: str) -> Optional[dict]:
 
 class LoginRequest(BaseModel):
     """登录请求"""
+
     username: str  # 支持用户名或邮箱
     password: str
 
 
 class RegisterRequest(BaseModel):
     """注册请求"""
+
     email: str
     password: str
     display_name: Optional[str] = None
@@ -83,17 +87,20 @@ class RegisterRequest(BaseModel):
 
 class MFAVerifyRequest(BaseModel):
     """MFA 验证请求（setup / disable 时使用）"""
+
     code: str  # 6 位 TOTP Code 或备用码
 
 
 class MFADisableRequest(BaseModel):
     """禁用 MFA 请求"""
+
     password: str
     code: str  # MFA 验证码
 
 
 class LoginResponse(BaseModel):
     """登录响应"""
+
     success: bool
     message: str
     user: Optional[dict] = None
@@ -120,7 +127,7 @@ async def login(request: LoginRequest, response: Response, http_request: Request
     if user.get("mfa_enabled"):
         # MFA 启用：颁发临时 session cookie，但返回 MFA challenge
         token = _create_session_token(user["id"], user["username"], user["role"])
-        _is_secure = os.environ.get("SECURE_COOKIES", "false").lower() == "true"
+        _is_secure = os.environ.get("SECURE_COOKIES", "true").lower() == "true"
         response.set_cookie(
             key="session",
             value=token,
@@ -137,7 +144,7 @@ async def login(request: LoginRequest, response: Response, http_request: Request
 
     # MFA 未启用：完整登录流程
     token = _create_session_token(user["id"], user["username"], user["role"])
-    _is_secure = os.environ.get("SECURE_COOKIES", "false").lower() == "true"
+    _is_secure = os.environ.get("SECURE_COOKIES", "true").lower() == "true"
     response.set_cookie(
         key="session",
         value=token,
@@ -190,7 +197,7 @@ async def register(request: RegisterRequest, req: Request, response: Response):
 
     # 自动登录（使用 JWT）
     token = _create_session_token(user["id"], user["username"], user["role"])
-    _is_secure = os.environ.get("SECURE_COOKIES", "false").lower() == "true"
+    _is_secure = os.environ.get("SECURE_COOKIES", "true").lower() == "true"
     response.set_cookie(
         key="session",
         value=token,
@@ -257,8 +264,7 @@ async def logout(request: Request, response: Response):
 
 @router.post("/mfa/setup")
 async def mfa_setup(request: Request, response: Response):
-    """
-    生成 MFA 验证码（Setup Flow）。
+    """生成 MFA 验证码（Setup Flow）。
 
     1. 用户在个人设置页面请求开启 MFA
     2. 后端生成 TOTP Secret 和 QR Code URI
@@ -289,8 +295,7 @@ async def mfa_setup(request: Request, response: Response):
 
 @router.post("/mfa/verify-setup")
 async def mfa_verify_setup(request: MFAVerifyRequest, response: Response):
-    """
-    验证 MFA Setup Code 并启用 MFA。
+    """验证 MFA Setup Code 并启用 MFA。
 
     需要先调用 /mfa/setup 获取 secret 和 backup codes。
     """
@@ -311,8 +316,7 @@ async def mfa_verify_setup(request: MFAVerifyRequest, response: Response):
 
 @router.post("/mfa/disable")
 async def mfa_disable(request: MFADisableRequest, response: Response):
-    """
-    禁用 MFA（需要密码 + MFA 验证码双重验证）。
+    """禁用 MFA（需要密码 + MFA 验证码双重验证）。
     """
     user_info = _get_current_user(request)
     if not user_info:
@@ -342,8 +346,7 @@ async def mfa_status(request: Request):
 
 @router.post("/mfa/verify")
 async def mfa_verify(request: MFAVerifyRequest, response: Response):
-    """
-    完成 MFA 登录验证（登录流程的第二步）。
+    """完成 MFA 登录验证（登录流程的第二步）。
 
     在登录返回 mfa_required=True 后，前端调用此接口验证 TOTP Code。
     验证成功后颁发 Refresh Token 完成登录。
@@ -361,7 +364,7 @@ async def mfa_verify(request: MFAVerifyRequest, response: Response):
         user_id=user_info["id"],
         device_fingerprint=_device,
     )
-    _is_secure = os.environ.get("SECURE_COOKIES", "false").lower() == "true"
+    _is_secure = os.environ.get("SECURE_COOKIES", "true").lower() == "true"
     response.set_cookie(
         key=_REFRESH_TOKEN_COOKIE_NAME,
         value=refresh_token,
@@ -382,8 +385,7 @@ async def mfa_verify(request: MFAVerifyRequest, response: Response):
 
 @router.post("/refresh")
 async def refresh_token(request: Request, response: Response):
-    """
-    使用 Refresh Token 换取新的 Access Token（Sliding Window）。
+    """使用 Refresh Token 换取新的 Access Token（Sliding Window）。
 
     流程：
     1. 从 refresh_token cookie 读取 Refresh Token
@@ -401,7 +403,7 @@ async def refresh_token(request: Request, response: Response):
 
     # 颁发新的 Access Token
     new_access_token = _create_session_token(user["id"], user["username"], user["role"])
-    _is_secure = os.environ.get("SECURE_COOKIES", "false").lower() == "true"
+    _is_secure = os.environ.get("SECURE_COOKIES", "true").lower() == "true"
     response.set_cookie(
         key="session",
         value=new_access_token,
@@ -432,8 +434,7 @@ async def refresh_token(request: Request, response: Response):
 
 @router.post("/refresh/revoke-all")
 async def revoke_all_refresh_tokens(request: Request, response: Response):
-    """
-    撤销当前用户所有 Refresh Token（"退出所有设备"功能）。
+    """撤销当前用户所有 Refresh Token（"退出所有设备"功能）。
 
     保留当前 Access Token 有效，撤销所有 refresh token。
     下次登录需要重新认证。

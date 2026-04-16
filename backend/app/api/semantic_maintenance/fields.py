@@ -1,22 +1,19 @@
+"""语义维护 - 字段语义 API
 """
-语义维护 - 字段语义 API
-"""
-from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, Query, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 # 导入中央数据库依赖和统一的权限验证函数
 from app.core.database import get_db
+from app.core.dependencies import get_current_user
 from app.utils.auth import verify_connection_access
-from app.core.dependencies import get_current_user, require_roles
+from services.semantic_maintenance.models import SemanticSource, SensitivityLevel
 
 # 导入语义维护服务和模型
 from services.semantic_maintenance.service import SemanticMaintenanceService
-from services.semantic_maintenance.models import SemanticStatus, SensitivityLevel, SemanticSource
-from services.semantic_maintenance.database import SemanticMaintenanceDatabase # 导入 SemanticMaintenanceDatabase
 
 router = APIRouter()
 
@@ -50,6 +47,8 @@ def _sm_service():
 # --- Pydantic Schemas ---
 
 class CreateFieldSemanticsRequest(BaseModel):
+    """创建字段语义请求模型"""
+
     connection_id: int
     tableau_field_id: str
     field_registry_id: Optional[int] = None  # tableau_datasource_fields.id
@@ -67,6 +66,8 @@ class CreateFieldSemanticsRequest(BaseModel):
 
 
 class UpdateFieldSemanticsRequest(BaseModel):
+    """更新字段语义请求模型"""
+
     semantic_name: Optional[str] = None
     semantic_name_zh: Optional[str] = None
     semantic_definition: Optional[str] = None

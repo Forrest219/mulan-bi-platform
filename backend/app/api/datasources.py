@@ -1,20 +1,18 @@
+"""数据源管理 API
 """
-数据源管理 API
-"""
-import json
 import logging
 import sys
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from services.datasources.models import DataSourceDatabase
-from app.core.dependencies import get_current_user, require_roles
 from app.core.crypto import get_datasource_crypto
 from app.core.database import get_db  # 导入中央数据库依赖
+from app.core.dependencies import get_current_user, require_roles
+from services.datasources.models import DataSourceDatabase
 
 router = APIRouter()
 
@@ -24,6 +22,8 @@ _decrypt = _crypto.decrypt
 
 
 class CreateDataSourceRequest(BaseModel):
+    """创建数据源请求模型"""
+
     name: str
     db_type: str
     host: str
@@ -35,6 +35,8 @@ class CreateDataSourceRequest(BaseModel):
 
 
 class UpdateDataSourceRequest(BaseModel):
+    """更新数据源请求模型"""
+
     name: Optional[str] = None
     db_type: Optional[str] = None
     host: Optional[str] = None

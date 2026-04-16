@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import DOMPurify from 'dompurify';
 import { getAsset, getAssetChildren, getAssetParent, explainAsset, getAssetHealth, TableauAsset } from '../../../api/tableau';
 import type { HealthCheck } from '../../../api/tableau';
 import { getAssetSummary, getLLMConfig } from '../../../api/llm';
@@ -564,7 +565,7 @@ export default function TableauAssetDetailPage() {
                     <div>
                       <div
                         className="prose prose-sm prose-slate max-w-none bg-slate-50 rounded-lg p-5 text-sm text-slate-700 leading-relaxed"
-                        dangerouslySetInnerHTML={{ __html: renderMarkdown(aiContent) }}
+                        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(renderMarkdown(aiContent)) }}
                       />
                       {aiCached && (
                         <div className="mt-2 text-xs text-slate-400">

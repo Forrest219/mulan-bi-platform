@@ -1,13 +1,13 @@
 """事件 API（管理员专用）"""
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_current_user
 from app.core.database import get_db
+from app.core.dependencies import get_current_user
+from services.events import EVT_ERROR_MESSAGES, EvtErrorCode
 from services.events.models import EventDatabase
-from services.events import EvtErrorCode, EVT_ERROR_MESSAGES
 
 router = APIRouter()
 
@@ -24,8 +24,7 @@ async def list_events(
     end_time: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    """
-    获取事件列表（仅管理员，PRD §6.5）
+    """获取事件列表（仅管理员，PRD §6.5）
     GET /api/events
     """
     user = get_current_user(request, db)

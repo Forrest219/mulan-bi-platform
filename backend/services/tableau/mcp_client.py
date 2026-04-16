@@ -134,6 +134,7 @@ class _MCPSessionState:
         self.lock = threading.Lock()
         self.session_id: Optional[str] = None
         self.last_activity: float = 0.0
+        self.last_used: float = time.monotonic()  # LRU 驱逐用（P1）
         self.protocol_version: str = "2025-06-18"
         self._initialized = False
 
@@ -144,7 +145,62 @@ class _MCPSessionState:
             self._initialized = False
 
 
-_mcp_session_state = _MCPSessionState()
+# ─────────────────────────────────────────────────────────────────────────────
+# 多站点 MCP Session 状态（P0 改造：per-site 隔离）
+# ─────────────────────────────────────────────────────────────────────────────
+
+_mcp_session_states: Dict[str, _MCPSessionState] = {}
+_mcp_session_states_lock = threading.Lock()
+
+# 向后兼容别名：原有模块级单例，指向默认站点状态（懒创建）
+# 内部函数通过 _get_or_create_session_state 获取正确实例
+_mcp_session_state = _MCPSessionState()  # 保留用于向后兼容（_invalidate_session 等）
+
+
+def _get_site_key(conn) -> str:
+    """返回站点唯一键：{server_url}|{site}"""
+    server_url = getattr(conn, "server_url", "") or ""
+    site = getattr(conn, "site", "") or ""
+    return f"{server_url}|{site}"
+
+
+def _get_or_create_session_state(site_key: str, _max_sites: int = 50) -> _MCPSessionState:
+    """
+    获取或创建指定 site_key 的 _MCPSessionState，并实现 LRU 驱逐（P1）。
+
+    参数：
+        site_key: 由 _get_site_key(conn) 返回的字符串
+        _max_sites: 最大站点数，达到上限时驱逐最久未访问的站点（默认 50）
+
+    线程安全：全部操作在 _mcp_session_states_lock 内进行。
+    """
+    with _mcp_session_states_lock:
+        now = time.monotonic()
+
+        # LRU 驱逐：当字典 size >= _max_sites 且 site_key 不在字典中时，驱逐最久未访问的站点
+        if _max_sites > 0 and site_key not in _mcp_session_states and len(_mcp_session_states) >= _max_sites:
+            # 找到 last_used 最小的（最久未访问）
+            lru_key = min(_mcp_session_states, key=lambda k: _mcp_session_states[k].last_used)
+            lru_state = _mcp_session_states.pop(lru_key)
+            logger.info(
+                "_get_or_create_session_state: LRU 驱逐 site_key=%s (last_used=%.1fs ago)",
+                lru_key,
+                now - lru_state.last_used,
+            )
+            # 释放 MCP session（非阻塞，驱逐过程中不持有 lru_state.lock）
+            try:
+                _invalidate_session(session_state=lru_state)
+            except Exception as e:
+                logger.warning("LRU 驱逐时释放 session 失败（忽略）: %s", e)
+
+        if site_key not in _mcp_session_states:
+            _mcp_session_states[site_key] = _MCPSessionState()
+            logger.debug("_get_or_create_session_state: 创建新 session_state, site_key=%s", site_key)
+
+        state = _mcp_session_states[site_key]
+        state.last_used = now  # 每次访问更新 LRU 时间戳
+        return state
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MCP Session 管理函数
@@ -162,15 +218,22 @@ def _next_id() -> int:
         return _jsonrpc_id_counter
 
 
-def _build_headers(with_session: bool = True) -> Dict[str, str]:
-    """构建 MCP HTTP 请求头。"""
+def _build_headers(with_session: bool = True, session_state: Optional[_MCPSessionState] = None) -> Dict[str, str]:
+    """
+    构建 MCP HTTP 请求头。
+
+    参数：
+        with_session: 是否附加 mcp-session-id
+        session_state: 指定 session 状态实例（默认使用全局 _mcp_session_state）
+    """
+    state = session_state if session_state is not None else _mcp_session_state
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
-        "MCP-Protocol-Version": _mcp_session_state.protocol_version,
+        "MCP-Protocol-Version": state.protocol_version,
     }
-    if with_session and _mcp_session_state.session_id:
-        headers["mcp-session-id"] = _mcp_session_state.session_id
+    if with_session and state.session_id:
+        headers["mcp-session-id"] = state.session_id
     return headers
 
 
@@ -208,6 +271,8 @@ def _post_mcp(
     method: str,
     timeout: int = 30,
     expect_sse: bool = True,
+    session_state: Optional[_MCPSessionState] = None,
+    base_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     发送 MCP JSON-RPC 请求，返回解析后的响应体。
@@ -216,14 +281,16 @@ def _post_mcp(
         method: 用于日志的 MCP method 名（如 "initialize"）
         timeout: 请求超时秒数
         expect_sse: 是否解析 SSE 响应（False 用于 initialize 握手）
+        session_state: 指定 session 状态实例（默认使用全局 _mcp_session_state）
+        base_url: MCP server URL（优先用参数值，fallback 到全局配置）
 
     重试策略：
         - 网络错误 / 5xx：重试 1 次，间隔 1s
         - 4xx：不重试
         - session 过期（HTTP 400 + "No valid session ID"）：由调用方处理（_ensure_session）
     """
-    url = get_tableau_mcp_server_url()
-    headers = _build_headers(with_session=True)
+    url = base_url if base_url else get_tableau_mcp_server_url()
+    headers = _build_headers(with_session=True, session_state=session_state)
     last_error: Optional[Exception] = None
 
     for attempt in range(2):
@@ -290,7 +357,12 @@ class _SessionExpiredError(Exception):
     pass
 
 
-def _ensure_session(timeout: int = 30) -> str:
+def _ensure_session(
+    timeout: int = 30,
+    site_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+    session_state: Optional[_MCPSessionState] = None,
+) -> str:
     """
     确保 MCP session 已建立。
 
@@ -299,33 +371,38 @@ def _ensure_session(timeout: int = 30) -> str:
         2. 若未初始化或过期，发起 initialize + notifications/initialized
         3. 收到 session 过期 HTTP 400，清空 session_id 后重建
 
+    参数：
+        timeout: 超时秒数
+        site_key: 站点唯一键（多站点改造，P0 新增）
+        base_url: MCP Server URL（优先用参数值，fallback 到全局配置）
+        session_state: 指定 session 状态实例（默认使用全局 _mcp_session_state）
+
     返回：
         有效的 session_id
 
-    注意：
-        这是模块级共享函数，所有 connection_id 共用同一个 MCP session。
-        线程安全（自旋锁保护）。
+    线程安全（自旋锁保护）。
     """
+    state = session_state if session_state is not None else _mcp_session_state
     protocol_ver = get_tableau_mcp_protocol_version()
     now = time.monotonic()
     idle_timeout = 300  # 5 分钟，与 _IDLE_TIMEOUT 保持一致
+    effective_url = base_url if base_url else get_tableau_mcp_server_url()
 
-    with _mcp_session_state.lock:
+    with state.lock:
         # 检查活跃 session
         if (
-            _mcp_session_state.session_id
-            and _mcp_session_state._initialized
-            and (now - _mcp_session_state.last_activity) < idle_timeout
+            state.session_id
+            and state._initialized
+            and (now - state.last_activity) < idle_timeout
         ):
-            return _mcp_session_state.session_id
+            return state.session_id
 
         # 重置状态，触发完整初始化（inline 而非调用 reset() 避免重入锁死锁）
-        _mcp_session_state.session_id = None
-        _mcp_session_state.last_activity = 0.0
-        _mcp_session_state._initialized = False
-        _mcp_session_state.protocol_version = protocol_ver
+        state.session_id = None
+        state.last_activity = 0.0
+        state._initialized = False
+        state.protocol_version = protocol_ver
 
-    base_url = get_tableau_mcp_server_url()
     headers_base = {
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
@@ -348,7 +425,7 @@ def _ensure_session(timeout: int = 30) -> str:
     }
 
     resp = _get_http_session().post(
-        base_url,
+        effective_url,
         json=init_payload,
         headers=headers_base,
         timeout=timeout,
@@ -404,7 +481,7 @@ def _ensure_session(timeout: int = 30) -> str:
     # notifications/initialized 期望 202 Accepted，server 不返回 body
     try:
         notif_resp = _get_http_session().post(
-            base_url,
+            effective_url,
             json=notif_payload,
             headers=notif_headers,
             timeout=timeout,
@@ -414,28 +491,39 @@ def _ensure_session(timeout: int = 30) -> str:
         logger.warning("notifications/initialized 失败（不影响主流程）: %s", e)
 
     # 写入状态
-    with _mcp_session_state.lock:
-        _mcp_session_state.session_id = session_id
-        _mcp_session_state.last_activity = time.monotonic()
-        _mcp_session_state._initialized = True
+    with state.lock:
+        state.session_id = session_id
+        state.last_activity = time.monotonic()
+        state._initialized = True
 
-    logger.info("MCP session 建立成功，session_id=%s", session_id[:16] + "...")
+    site_info = f" site_key={site_key}" if site_key else ""
+    logger.info("MCP session 建立成功，session_id=%s%s", session_id[:16] + "...", site_info)
     return session_id
 
 
-def _invalidate_session() -> None:
-    """主动释放 MCP session（发 DELETE，然后清状态）。"""
-    session_id = _mcp_session_state.session_id
+def _invalidate_session(
+    session_state: Optional[_MCPSessionState] = None,
+    base_url: Optional[str] = None,
+) -> None:
+    """
+    主动释放 MCP session（发 DELETE，然后清状态）。
+
+    参数：
+        session_state: 指定 session 状态实例（默认使用全局 _mcp_session_state）
+        base_url: MCP Server URL（优先用参数值，fallback 到全局配置）
+    """
+    state = session_state if session_state is not None else _mcp_session_state
+    session_id = state.session_id
     if not session_id:
-        _mcp_session_state.reset()
+        state.reset()
         return
 
-    base_url = get_tableau_mcp_server_url()
-    headers = _build_headers(with_session=True)
+    effective_url = base_url if base_url else get_tableau_mcp_server_url()
+    headers = _build_headers(with_session=True, session_state=state)
 
     try:
         resp = _get_http_session().delete(
-            base_url,
+            effective_url,
             headers=headers,
             timeout=10,
         )
@@ -443,7 +531,7 @@ def _invalidate_session() -> None:
     except Exception as e:
         logger.warning("MCP DELETE session 失败（非致命）: %s", e)
     finally:
-        _mcp_session_state.reset()
+        state.reset()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -666,6 +754,12 @@ class TableauMCPClient:
                     details={"connection_id": connection_id},
                 )
 
+            # 多站点 session 路由（P0 改造）
+            site_key = _get_site_key(conn)
+            session_state = _get_or_create_session_state(site_key)
+            # base_url：优先 conn.mcp_server_url，fallback 到全局配置
+            effective_base_url = getattr(conn, "mcp_server_url", None) or None
+
             # 组装 MCP tools/call 请求（limit 在 arguments 顶层，verified by tools/list）
             payload = self._build_jsonrpc_request(
                 datasource_luid=datasource_luid,
@@ -674,7 +768,13 @@ class TableauMCPClient:
             )
 
             # 发送并处理响应（含 session 过期自动重建）
-            response = self._send_jsonrpc(payload, timeout=timeout)
+            response = self._send_jsonrpc(
+                payload,
+                timeout=timeout,
+                site_key=site_key,
+                session_state=session_state,
+                base_url=effective_base_url,
+            )
 
             return self._parse_jsonrpc_response(response)
         finally:
@@ -724,37 +824,52 @@ class TableauMCPClient:
             },
         }
 
-    def _send_jsonrpc(self, payload: dict, timeout: int) -> dict:
+    def _send_jsonrpc(
+        self,
+        payload: dict,
+        timeout: int,
+        site_key: Optional[str] = None,
+        session_state: Optional[_MCPSessionState] = None,
+        base_url: Optional[str] = None,
+    ) -> dict:
         """
         发送 MCP JSON-RPC 请求（内部处理 session 生命周期）。
+
+        参数：
+            payload: JSON-RPC 请求体
+            timeout: 超时秒数
+            site_key: 站点唯一键（多站点改造，P0 新增）
+            session_state: 指定 session 状态实例（默认使用全局 _mcp_session_state）
+            base_url: MCP Server URL（优先用参数值，fallback 到全局配置）
 
         重试策略：
             - 网络错误 / 5xx：重试 1 次，间隔 1s
             - 4xx：不重试
             - session 过期：自动重建 session + 重试 1 次（不计入外层重试）
         """
+        state = session_state if session_state is not None else _mcp_session_state
         method = payload.get("method", "unknown")
 
         for attempt in range(2):
             try:
                 # 确保 session 已建立（懒加载）
-                _ensure_session(timeout=timeout)
+                _ensure_session(timeout=timeout, site_key=site_key, base_url=base_url, session_state=state)
 
                 # 更新最后活跃时间（每次成功建立 session 后）
-                with _mcp_session_state.lock:
-                    _mcp_session_state.last_activity = time.monotonic()
+                with state.lock:
+                    state.last_activity = time.monotonic()
 
-                return _post_mcp(payload, method=method, timeout=timeout, expect_sse=True)
+                return _post_mcp(payload, method=method, timeout=timeout, expect_sse=True, session_state=state, base_url=base_url)
 
             except _SessionExpiredError:
                 # Session 过期：清空并重建，不计入外层重试
                 logger.warning("MCP session 过期，尝试重建: %s", method)
-                _mcp_session_state.reset()
-                _ensure_session(timeout=timeout)
-                with _mcp_session_state.lock:
-                    _mcp_session_state.last_activity = time.monotonic()
+                state.reset()
+                _ensure_session(timeout=timeout, site_key=site_key, base_url=base_url, session_state=state)
+                with state.lock:
+                    state.last_activity = time.monotonic()
                 # 重试 1 次（这次用新 session）
-                return _post_mcp(payload, method=method, timeout=timeout, expect_sse=True)
+                return _post_mcp(payload, method=method, timeout=timeout, expect_sse=True, session_state=state, base_url=base_url)
 
             except TableauMCPError:
                 raise  # 已构造好，直接透传

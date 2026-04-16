@@ -1,16 +1,15 @@
-"""
-规则配置 API — 持久化到 PostgreSQL
+"""规则配置 API — 持久化到 PostgreSQL
 """
 import logging
 from typing import Optional
 
-from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 from app.core.dependencies import get_current_user, require_roles
-from services.rules.models import RuleConfigDatabase
 from services.ddl_checker.cache import RuleCache
 from services.logs.logger import logger as audit_logger
+from services.rules.models import RuleConfigDatabase
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -64,6 +63,8 @@ except Exception as e:
 
 
 class ValidationRule(BaseModel):
+    """DDL 验证规则模型"""
+
     id: str
     name: str
     level: str
@@ -77,6 +78,7 @@ class ValidationRule(BaseModel):
 
 class DryRunRequest(BaseModel):
     """Dry Run 请求"""
+
     rule: dict
     ddl_text: str
     db_type: str = "mysql"
@@ -119,8 +121,7 @@ async def get_rules(
 
 @router.put("/{rule_id}/toggle")
 async def toggle_rule(rule_id: str, request: Request):
-    """
-    切换规则启用/禁用状态。
+    """切换规则启用/禁用状态。
 
     关键变更（disable）使用同一 DB 事务同步写入审计日志。
     """
@@ -233,8 +234,7 @@ async def create_custom_rule(rule: ValidationRule, request: Request):
 
 @router.delete("/{rule_id}")
 async def delete_custom_rule(rule_id: str, request: Request):
-    """
-    删除自定义规则。
+    """删除自定义规则。
 
     删除操作使用同步 DB 事务写入审计日志，确保可靠性。
     """
@@ -279,15 +279,13 @@ async def delete_custom_rule(rule_id: str, request: Request):
 
 @router.post("/test")
 async def test_rule(request: Request, body: DryRunRequest):
-    """
-    Dry Run：测试新规则对指定 DDL 的拦截效果（不保存规则）。
+    """Dry Run：测试新规则对指定 DDL 的拦截效果（不保存规则）。
 
     用于管理员在修改规则配置后，预验证规则是否按预期拦截/放行。
     """
     require_roles(request, ["admin", "data_admin"])
 
     from services.ddl_checker.parser import DDLParser
-    from services.ddl_checker.validator import DDLValidator, ViolationLevel
 
     rule = body.rule
     ddl_text = body.ddl_text

@@ -17,10 +17,14 @@ import LoginPage from '../pages/login/page';
 import RegisterPage from '../pages/register/page';
 import ProtectedRoute from '../components/auth/ProtectedRoute';
 import AppShellLayout from '../components/layout/AppShellLayout';
+import HomeLayout from '../components/layout/HomeLayout';
+import { ConversationProvider } from '../store/conversationStore';
 
 // ──────────────────────────────────────────────────────────────
 // 代码分割：每个域独立 chunk（Spec 18 §4.3）
 // ──────────────────────────────────────────────────────────────
+const ChatPage            = lazy(() => import('../pages/chat/page'));
+const LLMConfigsPage      = lazy(() => import('../pages/admin/llm-configs/page'));
 const DDLValidatorPage    = lazy(() => import('../pages/ddl-validator/page'));
 const RuleConfigPage      = lazy(() => import('../pages/rule-config/page'));
 const DataHealthPage      = lazy(() => import('../pages/data-governance/health/page'));
@@ -48,9 +52,19 @@ const ActivityAdminPage     = lazy(() => import('../pages/admin/activity/page'))
 const routes: RouteObject[] = [
 
   // =====================
-  // 公开路由（无布局）
+  // 公开路由（HomeLayout + ConversationProvider）
   // =====================
-  { path: '/',               element: <Home /> },
+  {
+    element: (
+      <ConversationProvider>
+        <HomeLayout />
+      </ConversationProvider>
+    ),
+    children: [
+      { path: '/', element: <Home /> },
+      { path: '/chat/:id', element: <ChatPage /> },
+    ],
+  },
   { path: '/login',          element: <LoginPage /> },
   { path: '/register',       element: <RegisterPage /> },
 
@@ -280,6 +294,14 @@ const routes: RouteObject[] = [
               </ProtectedRoute>
             ),
           },
+          {
+            path: 'llm-configs',
+            element: (
+              <ProtectedRoute adminOnly>
+                <LLMConfigsPage />
+              </ProtectedRoute>
+            ),
+          },
         ],
       },
 
@@ -303,7 +325,8 @@ const routes: RouteObject[] = [
   { path: '/admin/users',                      element: <Navigate to="/system/users" replace /> },
   { path: '/admin/groups',                     element: <Navigate to="/system/groups" replace /> },
   { path: '/admin/permissions',                element: <Navigate to="/system/permissions" replace /> },
-  { path: '/admin/llm',                        element: <Navigate to="/system/llm" replace /> },
+  { path: '/admin/llm',                        element: <Navigate to="/system/llm-configs" replace /> },
+  { path: '/system/llm',                       element: <Navigate to="/system/llm-configs" replace /> },
   { path: '/admin/tasks',                      element: <Navigate to="/system/tasks" replace /> },
   { path: '/admin/activity',                    element: <Navigate to="/system/activity" replace /> },
   { path: '/admin/datasources',                element: <Navigate to="/assets/datasources" replace /> },

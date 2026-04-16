@@ -1,18 +1,19 @@
+"""需求管理 API
 """
-需求管理 API
-"""
-from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException, Request
 from typing import Optional
 
-from services.requirements import requirement_service
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
+
 from app.core.dependencies import get_current_user, require_roles
+from services.requirements import requirement_service
 
 router = APIRouter()
 
 
 class CreateRequirementRequest(BaseModel):
     """创建需求请求"""
+
     title: str
     what_to_do: str
     requirement_type: str = "ddl_change"
@@ -26,6 +27,7 @@ class CreateRequirementRequest(BaseModel):
 
 class Requirement(BaseModel):
     """需求"""
+
     id: int
     title: str
     requirement_type: str

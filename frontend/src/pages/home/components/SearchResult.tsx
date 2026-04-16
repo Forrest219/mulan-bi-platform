@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { SearchAnswer, NumberData, TableData } from '../../../api/search';
 
 interface SearchResultProps {
@@ -67,6 +68,75 @@ function NumberCard({ data, confidence, datasource }: NumberCardProps) {
   );
 }
 
+// ─── SimpleBarChart ───────────────────────────────────────────────────────────
+
+interface BarChartRow {
+  label: string;
+  value: number;
+}
+
+interface SimpleBarChartProps {
+  rows: BarChartRow[];
+  dimCol: string;
+  metricCol: string;
+}
+
+function SimpleBarChart({ rows, dimCol, metricCol }: SimpleBarChartProps) {
+  const maxValue = Math.max(...rows.map((r) => r.value), 1);
+  return (
+    <div className="px-4 py-4">
+      <div className="flex items-center gap-2 mb-3 text-xs text-slate-400">
+        <span>{dimCol}</span>
+        <span className="mx-1">vs</span>
+        <span>{metricCol}</span>
+      </div>
+      <div className="space-y-2">
+        {rows.map((row, i) => {
+          const pct = Math.max((row.value / maxValue) * 100, 0);
+          const label = row.label.length > 12 ? row.label.slice(0, 12) + '…' : row.label;
+          return (
+            <div key={i} className="flex items-center gap-3">
+              <div className="w-24 shrink-0 text-xs text-slate-600 text-right truncate" title={row.label}>
+                {label}
+              </div>
+              <div className="flex-1 relative h-7 bg-slate-100 rounded overflow-hidden">
+                <div
+                  className="absolute inset-y-0 left-0 bg-gradient-to-r from-blue-500 to-blue-400 rounded transition-all duration-300"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <div className="w-24 shrink-0 text-xs text-slate-500 text-left tabular-nums">
+                {typeof row.value === 'number'
+                  ? row.value.toLocaleString('zh-CN', { maximumFractionDigits: 2 })
+                  : String(row.value)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** 判断 TableData 是否适合显示简单柱状图 */
+function getBarChartData(data: TableData): BarChartRow[] | null {
+  if (data.columns.length !== 2) return null;
+  if (data.rows.length === 0 || data.rows.length > 20) return null;
+
+  const [dimCol, metricCol] = data.columns;
+  const chartRows: BarChartRow[] = [];
+
+  for (const row of data.rows) {
+    const label = String(row[dimCol] ?? '');
+    const rawVal = row[metricCol];
+    const value = typeof rawVal === 'number' ? rawVal : parseFloat(String(rawVal ?? ''));
+    if (isNaN(value)) return null; // 度量列含非数字，放弃
+    chartRows.push({ label, value });
+  }
+
+  return chartRows;
+}
+
 // ─── TableResult ───────────────────────────────────────────────────────────────
 
 interface TableResultProps {
@@ -74,36 +144,72 @@ interface TableResultProps {
 }
 
 function TableResult({ data }: TableResultProps) {
+  const [tableExpanded, setTableExpanded] = useState(false);
+
   if (!data) return null;
+
+  const chartRows = getBarChartData(data);
+  const showChart = chartRows !== null;
+
   const rows = data.rows.slice(0, 10);
   const truncated = data.rows.length > 10;
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-slate-50 border-b border-slate-200">
+
+  const tableNode = (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-slate-50 border-b border-slate-200">
+            {data.columns.map((col) => (
+              <th key={col} className="px-4 py-2 text-left font-medium text-slate-600">{col}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
               {data.columns.map((col) => (
-                <th key={col} className="px-4 py-2 text-left font-medium text-slate-600">{col}</th>
+                <td key={col} className="px-4 py-2 text-slate-700">{String(row[col] ?? '')}</td>
               ))}
             </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
-                {data.columns.map((col) => (
-                  <td key={col} className="px-4 py-2 text-slate-700">{String(row[col] ?? '')}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </tbody>
+      </table>
       {truncated && (
         <div className="px-4 py-2 text-xs text-slate-400 bg-slate-50">
           共 {data.rows.length} 行，已截断显示前 10 行
         </div>
       )}
+    </div>
+  );
+
+  if (showChart) {
+    return (
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        {/* 柱状图 */}
+        <SimpleBarChart
+          rows={chartRows!}
+          dimCol={data.columns[0]}
+          metricCol={data.columns[1]}
+        />
+        {/* 可折叠的原始表格 */}
+        <div className="border-t border-slate-100">
+          <button
+            onClick={() => setTableExpanded((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-2 text-xs text-slate-400
+                       hover:text-slate-600 hover:bg-slate-50 transition-colors"
+          >
+            <span>查看原始数据</span>
+            <i className={`ri-arrow-${tableExpanded ? 'up' : 'down'}-s-line`} />
+          </button>
+          {tableExpanded && tableNode}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      {tableNode}
     </div>
   );
 }

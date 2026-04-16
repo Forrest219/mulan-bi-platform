@@ -1,24 +1,23 @@
-"""
-语义维护 - 字段同步 API
+"""语义维护 - 字段同步 API
 """
 import asyncio
-from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, Query, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-# 导入中央数据库依赖和统一的权限验证函数
-from app.core.database import get_db
-from app.utils.auth import verify_connection_access
-from app.core.dependencies import get_current_user
 from app.core.crypto import get_tableau_crypto
 
-# 导入 Tableau 模型和数据库服务
-from services.tableau.models import TableauConnection, TableauAsset, TableauDatabase
-from services.semantic_maintenance.field_sync import FieldSyncJob
+# 导入中央数据库依赖和统一的权限验证函数
+from app.core.database import get_db
+from app.core.dependencies import get_current_user
+from app.utils.auth import verify_connection_access
 from services.semantic_maintenance.database import SemanticMaintenanceDatabase
+from services.semantic_maintenance.field_sync import FieldSyncJob
+
+# 导入 Tableau 模型和数据库服务
+from services.tableau.models import TableauAsset, TableauDatabase
 
 router = APIRouter()
 _crypto = get_tableau_crypto()

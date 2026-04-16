@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.errors import MulanError
 
-from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm, health_scan, tasks, notifications, events, knowledge_base, search
+from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm, health_scan, tasks, notifications, events, knowledge_base, search, conversations
 from app.api.governance import quality
 from app.api.semantic_maintenance import datasources as sm_datasources, fields as sm_fields, review as sm_review, sync as sm_sync, publish as sm_publish
 
@@ -63,6 +63,7 @@ app.include_router(notifications.router, prefix="/api/notifications", tags=["通
 app.include_router(events.router, prefix="/api/events", tags=["事件"])
 app.include_router(knowledge_base.router, prefix="/api/knowledge-base", tags=["知识库"])
 app.include_router(search.router, prefix="/api/search", tags=["NL搜索"])
+app.include_router(conversations.router, prefix="/api/conversations", tags=["对话历史"])
 app.include_router(sm_datasources.router, prefix="/api/semantic-maintenance", tags=["语义维护"])
 app.include_router(sm_fields.router, prefix="/api/semantic-maintenance", tags=["语义维护"])
 app.include_router(sm_review.router, prefix="/api/semantic-maintenance", tags=["语义维护"])

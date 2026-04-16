@@ -2,8 +2,8 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | v1.0 |
-| 日期 | 2026-04-03 |
+| 版本 | v1.1 |
+| 日期 | 2026-04-16 |
 | 状态 | 草稿 |
 | 作者 | Mulan BI Platform Team |
 | 模块路径 | `backend/services/llm/` |
@@ -73,12 +73,25 @@ LLM 能力层为 Mulan BI Platform 提供大语言模型调用基础设施，支
 | `is_active` | `BOOLEAN` | — | `false` | 是否启用 |
 | `created_at` | `DATETIME` | — | `now()` | 创建时间 |
 | `updated_at` | `DATETIME` | — | `now()` (onupdate) | 更新时间 |
+| `purpose` | `VARCHAR(50)` | NOT NULL | `'default'` | **[P1 新增]** 用途标识，见下方 Purpose 枚举 |
+| `display_name` | `VARCHAR(100)` | NULL | — | **[P1 新增]** 配置的展示名称（管理页面用） |
+| `priority` | `INTEGER` | NOT NULL | `0` | **[P1 新增]** 同一 purpose 内的优先级，越大越优先 |
+
+### 2.1.1 Purpose 枚举（P1 新增）
+
+| purpose 值 | 含义 | 典型场景 |
+|-----------|------|---------|
+| `default` | 通用配置，其他 purpose 的兜底 | 资产摘要、报表解读等一般性 LLM 调用 |
+| `nlq` | 自然语言转查询专用 | NL-to-Query One-Pass LLM（`one_pass_llm()` 使用） |
+| `semantic` | 语义生成专用 | 字段语义 AI 生成（`complete_for_semantic()` 使用） |
+| `embedding` | 向量化专用 | 文本 embedding 生成 |
 
 ### 2.2 设计说明
 
-- 当前为**单配置模式**：`get_config()` 取表中第一条记录，`save_config()` 采用 upsert 逻辑（有则更新，无则插入）
+- **[P1 改造] 多配置模式**：表中可存放多条记录，每条有独立的 `purpose`。原"单配置全局"模式（`get_config()` 取第一条、`save_config()` 做 upsert）已被下方 Purpose 路由机制替代，旧接口仅用于向后兼容。
+- **Purpose 路由规则**：`get_config(purpose)` 先查 `purpose=<purpose> AND is_active=True`，按 `priority DESC` 取第一条；找不到则 fallback 到 `purpose='default' AND is_active=True`；仍找不到返回 `None`。
 - `api_key_encrypted` 存储格式为 `base64(salt[16B] + fernet_ciphertext)`，解密需要环境变量中的主密钥
-- `to_dict()` 方法**不返回** `api_key_encrypted`，仅返回 `has_api_key: bool` 标识
+- `to_dict()` 方法**不返回** `api_key_encrypted`，仅返回 `has_api_key: bool` 标识；同时返回 `purpose`、`display_name`、`priority` 字段
 
 ### 2.3 ORM 模型
 
@@ -94,8 +107,8 @@ class LLMConfig(Base):
 
 | 方法 | 说明 |
 |------|------|
-| `get_config() -> Optional[LLMConfig]` | 获取当前配置（取第一条） |
-| `save_config(provider, base_url, api_key_encrypted, model, temperature, max_tokens, is_active)` | upsert 配置 |
+| `get_config(purpose="default") -> Optional[LLMConfig]` | **[P1 改造]** 按 purpose 路由获取配置（先查目标 purpose，fallback 到 `default`） |
+| `save_config(provider, base_url, api_key_encrypted, model, temperature, max_tokens, is_active)` | upsert 兼容接口（向后兼容，写入 `purpose='default'` 的记录） |
 | `delete_config()` | 删除全部配置 |
 
 ---
@@ -106,11 +119,15 @@ class LLMConfig(Base):
 
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
-| `GET` | `/api/llm/config` | admin | 获取 LLM 配置 |
-| `POST` | `/api/llm/config` | admin | 创建/更新 LLM 配置 |
-| `DELETE` | `/api/llm/config` | admin | 删除 LLM 配置 |
+| `GET` | `/api/llm/config` | admin | 获取 LLM 配置（兼容旧接口，取第一条 default） |
+| `POST` | `/api/llm/config` | admin | 创建/更新 LLM 配置（兼容旧接口，upsert default） |
+| `DELETE` | `/api/llm/config` | admin | 删除全部 LLM 配置 |
 | `POST` | `/api/llm/config/test` | admin | 测试 LLM 连接 |
 | `GET` | `/api/llm/assets/{asset_id}/summary` | user+ | 获取资产 AI 摘要 |
+| `GET` | `/api/llm/configs` | admin | **[P1 新增]** 列出所有 LLM 配置 |
+| `POST` | `/api/llm/configs` | admin | **[P1 新增]** 创建新 LLM 配置（含 purpose/display_name/priority） |
+| `PUT` | `/api/llm/configs/{id}` | admin | **[P1 新增]** 更新指定 LLM 配置 |
+| `DELETE` | `/api/llm/configs/{id}` | admin | **[P1 新增]** 删除指定 LLM 配置（不可删最后一条 default 活跃配置） |
 
 ### 3.2 GET /api/llm/config
 
@@ -206,7 +223,60 @@ class LLMConfig(Base):
 }
 ```
 
-### 3.6 GET /api/llm/assets/{asset_id}/summary
+### 3.6 多配置 CRUD 接口（P1 新增）
+
+#### GET /api/llm/configs
+
+列出所有 LLM 配置（按 `priority DESC, id` 排序），不含 API Key 明文。
+
+**响应 200**：
+```json
+{
+  "configs": [
+    {
+      "id": 1,
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "purpose": "default",
+      "display_name": "通用配置",
+      "priority": 0,
+      "is_active": true,
+      "has_api_key": true
+    }
+  ]
+}
+```
+
+#### POST /api/llm/configs（创建，HTTP 201）
+
+**请求体** `LLMConfigCreateRequest`：
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `provider` | `string` | 否 | `"openai"` | 供应商 |
+| `base_url` | `string` | 否 | `"https://api.openai.com/v1"` | API 端点 |
+| `api_key` | `string` | 是 | — | API Key 明文 |
+| `model` | `string` | 否 | `"gpt-4o-mini"` | 模型名 |
+| `temperature` | `float` | 否 | `0.7` | 温度 |
+| `max_tokens` | `int` | 否 | `1024` | 最大 token |
+| `is_active` | `bool` | 否 | `true` | 是否启用 |
+| `purpose` | `string` | 否 | `"default"` | 用途：`default`/`nlq`/`semantic`/`embedding` |
+| `display_name` | `string` | 否 | `null` | 展示名称 |
+| `priority` | `int` | 否 | `0` | 优先级（越大越优先） |
+
+**响应 201**：`{"config": {...}}`（包含新建配置的完整字段）
+
+#### PUT /api/llm/configs/{id}（更新）
+
+字段同上，所有字段可选，`api_key` 为空字符串时不更新已有密钥。
+
+**响应 200**：`{"config": {...}}`
+
+#### DELETE /api/llm/configs/{id}（删除，HTTP 204）
+
+**保护规则**：若目标配置是 `purpose=default` 且 `is_active=True`，且已无其他同 purpose 活跃配置，则拒绝删除（400）。
+
+### 3.7 GET /api/llm/assets/{asset_id}/summary
 
 获取指定 Tableau 资产的 AI 摘要。支持缓存（1 小时），可强制刷新。
 
@@ -280,12 +350,25 @@ class LLMService:
 
 SDK 采用延迟导入（`from openai import AsyncOpenAI`），仅在首次调用对应供应商时加载。
 
-### 4.3 complete() 核心调用流程
+### 4.3 complete() 系列核心调用流程
+
+`LLMService` 提供三个主要调用接口，均支持 `purpose` 参数路由到对应配置：
+
+| 方法 | purpose 默认值 | 特殊约束 | 用途 |
+|------|--------------|---------|------|
+| `complete(prompt, system, timeout, purpose)` | `"default"` | 继承配置的 temperature | 通用 LLM 调用 |
+| `complete_with_temp(prompt, system, timeout, temperature, purpose)` | `"default"` | temperature 硬编码，不继承配置 | NL-to-Query One-Pass |
+| `complete_for_semantic(prompt, system, timeout, purpose)` | `"default"` | temperature=0.1，OpenAI 额外开启 `response_format=json_object` | 语义生成、One-Pass LLM |
+
+`one_pass_llm()` 调用 `complete_for_semantic(..., purpose="nlq")`，路由到 `purpose=nlq` 的 LLM 配置。
+
+**`complete()` 流程**：
 
 ```
-complete(prompt, system, timeout=15)
+complete(prompt, system, timeout=15, purpose="default")
   │
-  ├── 1. 加载配置 (_load_config)
+  ├── 1. 加载配置 (_load_config(purpose))
+  │     └── purpose 路由：先查目标 purpose，fallback 到 default
   │     └── 校验 config 存在 / is_active / api_key_encrypted 非空
   │
   ├── 2. 解密 API Key (_decrypt)
@@ -487,12 +570,13 @@ generate_asset_summary(asset)
 
 ### 8.2 下游消费者
 
-| 消费者 | 调用方式 | 说明 |
-|--------|---------|------|
-| Tableau 资产管理 | `llm_service.generate_asset_summary(asset)` | 资产列表页 AI 摘要 |
-| 报表解读（规划中） | `llm_service.complete(ASSET_EXPLAIN_TEMPLATE, ...)` | 5 维深度解读 |
-| 自然语言查询（规划中） | `llm_service.complete(NL_TO_QUERY_TEMPLATE, ...)` | NL-to-VizQL |
-| LLM 配置管理前端 | 通过 `/api/llm/config*` API | 管理员配置页面 |
+| 消费者 | 调用方式 | purpose 参数 | 说明 |
+|--------|---------|------------|------|
+| Tableau 资产管理 | `llm_service.generate_asset_summary(asset)` | `"default"` | 资产列表页 AI 摘要 |
+| 报表解读 | `llm_service.generate_asset_explanation(asset)` | `"default"` | 5 维深度解读 |
+| 自然语言查询（One-Pass） | `llm_service.complete_for_semantic(..., purpose="nlq")` | `"nlq"` | NL-to-VizQL，使用 nlq 专用配置 |
+| 语义 AI 生成 | `llm_service.complete_for_semantic(...)` | `"default"` | 字段语义批量生成 |
+| LLM 配置管理前端 | 通过 `/api/llm/configs` 系列 API | — | 管理员多配置管理页面 |
 
 ### 8.3 操作日志
 
@@ -592,11 +676,20 @@ generate_asset_summary(asset)
 
 | 编号 | 问题 | 优先级 | 状态 |
 |------|------|--------|------|
-| OI-01 | 当前为单配置模式，未来是否需要支持多供应商同时启用并按场景路由？ | P2 | 待讨论 |
+| OI-01 | ~~当前为单配置模式，未来是否需要支持多供应商同时启用并按场景路由？~~ | P2 | **已解决（P1 改造：多配置 purpose 路由）** |
 | OI-02 | 客户端缓存（`_clients` 字典）无过期机制，配置变更后旧客户端不会失效，需考虑缓存刷新策略 | P1 | 待解决 |
 | OI-03 | `ASSET_EXPLAIN_TEMPLATE` 和 `NL_TO_QUERY_TEMPLATE` 已定义但尚无对应 API 端点，需规划接入时机 | P2 | 待规划 |
 | OI-04 | Anthropic system prompt 通过 `<system>` 标签嵌入 user message，非官方推荐方式，后续应改用 SDK 原生 system 参数 | P2 | 待优化 |
 | OI-05 | `complete()` 返回错误时使用 `{"error": str}` 而非抛 HTTP 异常，上层需逐个判断，考虑统一为异常机制 | P2 | 待讨论 |
 | OI-06 | 资产摘要缓存有效期硬编码为 3600 秒，是否需要可配置化？ | P3 | 待讨论 |
-| OI-07 | NL-to-VizQL 场景的 Prompt 输出为 JSON，需增加 JSON 解析校验和 Schema 验证 | P1 | 待实现 |
+| OI-07 | ~~NL-to-VizQL 场景的 Prompt 输出为 JSON，需增加 JSON 解析校验和 Schema 验证~~ | P1 | **已解决（`nlq_service.py` 实现了 Schema 校验 + 重试机制）** |
 | OI-08 | 操作日志记录失败时仅 warning 级别日志，不阻塞主流程，是否需要更强的保障？ | P3 | 待讨论 |
+
+---
+
+## 变更记录
+
+| 日期 | 版本 | 变更内容 |
+|------|------|---------|
+| 2026-04-16 | v1.1 | P1 改造：支持多配置 purpose 路由。`ai_llm_configs` 表新增 `purpose`、`display_name`、`priority` 字段；`get_config(purpose)` 实现 purpose → default 两级路由；新增 `GET/POST /api/llm/configs`、`PUT/DELETE /api/llm/configs/{id}` 四个 admin-only CRUD 端点；`complete_for_semantic()` NLQ 调用传 `purpose="nlq"`；客户端缓存改为带 TTL 的 `_TimedClientCache`（5 分钟过期）。 |
+| 2026-04-03 | v1.0 | 初始版本，单配置全局模式 |

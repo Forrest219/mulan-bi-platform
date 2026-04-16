@@ -14,15 +14,14 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_current_user, require_roles
 from app.core.database import get_db
-from services.datasources.models import DataSource, DataSourceDatabase
+from app.core.dependencies import get_current_user, require_roles
+from services.datasources.models import DataSourceDatabase
 from services.governance.database import QualityDatabase
-from services.governance.models import QualityRule
 from services.tasks.quality_tasks import execute_quality_rules_task
 
 logger = logging.getLogger(__name__)
@@ -32,6 +31,8 @@ router = APIRouter()
 # ==================== 请求/响应模型 ====================
 
 class CreateRuleRequest(BaseModel):
+    """创建质量规则请求模型"""
+
     name: str = Field(..., max_length=256)
     description: Optional[str] = None
     datasource_id: int
@@ -48,6 +49,8 @@ class CreateRuleRequest(BaseModel):
 
 
 class UpdateRuleRequest(BaseModel):
+    """更新质量规则请求模型"""
+
     name: Optional[str] = Field(None, max_length=256)
     description: Optional[str] = None
     rule_type: Optional[str] = Field(None, max_length=32)
@@ -62,6 +65,8 @@ class UpdateRuleRequest(BaseModel):
 
 
 class ExecuteRequest(BaseModel):
+    """手动触发质量检测请求模型"""
+
     datasource_id: Optional[int] = None
     table_name: Optional[str] = None
     rule_ids: Optional[list[int]] = None
@@ -401,8 +406,8 @@ async def get_dashboard(request: Request, db: Session = Depends(get_db)):
     top_failures = qdb.get_top_failures(db, limit=10)
 
     # 各数据源最新评分
-    from services.governance.database import QualityDatabase
     from sqlalchemy import func
+
     from app.core.database import SessionLocal
     from services.governance.models import QualityScore
 

@@ -1,11 +1,10 @@
+"""任务状态查询 API
 """
-任务状态查询 API
-"""
-from fastapi import APIRouter, Request
 from celery.result import AsyncResult
+from fastapi import APIRouter, Request
 
-from services.tasks import celery_app
 from app.core.dependencies import get_current_user
+from services.tasks import celery_app
 
 router = APIRouter()
 

@@ -1,11 +1,11 @@
+"""日志 API
 """
-日志 API
-"""
-from fastapi import APIRouter, Request
 from typing import Optional
 
-from services.logs import logger
+from fastapi import APIRouter, Request
+
 from app.core.dependencies import get_current_user
+from services.logs import logger
 
 router = APIRouter()
 

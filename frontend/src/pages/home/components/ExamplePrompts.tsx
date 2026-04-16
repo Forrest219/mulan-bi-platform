@@ -1,3 +1,4 @@
+// @deprecated 已被 SuggestionGrid.tsx 替代，请勿在新代码中使用
 interface ExamplePromptsProps {
   onPick: (question: string) => void;
 }

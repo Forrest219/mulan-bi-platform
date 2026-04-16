@@ -2,6 +2,7 @@
 
 | 版本 | 日期 | 状态 | 作者 |
 |------|------|------|------|
+| v1.1 | 2026-04-16 | Draft | Mulan BI Team |
 | v1.0 | 2026-04-04 | Draft | Mulan BI Team |
 
 ---
@@ -214,39 +215,69 @@ class TableauMCPClient:
         ...
 ```
 
-### 2.2 连接池管理
+### 2.2 Session 管理（P1 改造：多站点 per-site session 字典）
 
-MCP 客户端实例按 `connection_id` 缓存，避免重复认证开销。
+> **[P1 变更]** 原文描述的是单进程单 `_MCPSessionState` 单例（全局共享），实际实现已改为 per-site session 字典，支持多 Tableau 站点并发。
+
+#### _MCPSessionState
 
 ```python
-class MCPClientPool:
-    """MCP 客户端连接池"""
-
-    _pool: Dict[int, TableauMCPClient] = {}
-    _lock: asyncio.Lock = asyncio.Lock()
-    _max_idle_seconds: int = 300  # 空闲 5 分钟后回收
-
-    @classmethod
-    async def get_client(cls, connection_id: int) -> TableauMCPClient:
-        """获取或创建 MCP 客户端实例"""
-        ...
-
-    @classmethod
-    async def invalidate(cls, connection_id: int) -> None:
-        """移除指定连接的客户端（连接配置变更时调用）"""
-        ...
-
-    @classmethod
-    async def cleanup_idle(cls) -> None:
-        """清理空闲超时的客户端（由定时任务触发）"""
-        ...
+class _MCPSessionState:
+    """MCP session 生命周期状态（每个 Tableau Site 一个实例）"""
+    lock: threading.Lock
+    session_id: Optional[str]
+    last_activity: float
+    last_used: float    # LRU 驱逐时间戳
+    protocol_version: str
+    _initialized: bool
 ```
 
-**池管理规则**：
-- 每个 `connection_id` 至多一个活跃客户端实例
-- 空闲 300 秒后自动回收
-- 连接配置更新时（`PUT /connections/{id}`）主动 invalidate
-- 连接池最大容量：50 个客户端
+#### 多站点 Session 字典
+
+```python
+# 全局字典：key 为 site_key，value 为 _MCPSessionState 实例
+_mcp_session_states: Dict[str, _MCPSessionState] = {}
+_mcp_session_states_lock: threading.Lock
+```
+
+**site_key 格式**：`f"{server_url}|{site}"`，由 `_get_site_key(conn)` 生成。
+
+#### 新增函数说明
+
+| 函数 | 说明 |
+|------|------|
+| `_get_site_key(conn) -> str` | 从连接对象提取 `server_url` 和 `site`，返回 `"{server_url}\|{site}"` 格式的唯一键 |
+| `_get_or_create_session_state(site_key, _max_sites=50) -> _MCPSessionState` | 获取或创建指定站点的 session 状态，并实现 LRU 驱逐 |
+
+#### LRU 驱逐规则
+
+- 上限：`_max_sites=50`，超限时驱逐 `last_used` 最小的站点 session
+- 驱逐时调用 `_invalidate_session(session_state=lru_state)` 向 MCP Server 发 DELETE 释放 session
+- 驱逐在 `_mcp_session_states_lock` 内完成，线程安全
+
+#### 内部函数签名变更（P1）
+
+以下内部函数均已接受 `site_key`/`session_state` 参数，以支持 per-site 路由：
+
+| 函数 | 变化 |
+|------|------|
+| `_ensure_session(timeout, site_key, base_url, session_state)` | 新增 `site_key`、`base_url`、`session_state` 参数 |
+| `_post_mcp(payload, method, timeout, expect_sse, session_state, base_url)` | 新增 `session_state`、`base_url` 参数 |
+| `_build_headers(with_session, session_state)` | 新增 `session_state` 参数，默认使用全局兼容别名 |
+| `_invalidate_session(session_state, base_url)` | 新增 `session_state`、`base_url` 参数 |
+
+#### 对外公开接口签名不变
+
+```python
+def get_tableau_mcp_client(connection_id: int) -> TableauMCPClient: ...
+# TableauMCPClient.query_datasource() 签名不变，site 路由在内部自动处理
+```
+
+**连接池规则（按 connection_id 隔离）**：
+- 每个 `connection_id` 至多一个活跃 `TableauMCPClient` 实例（`_instances: Dict[int, TableauMCPClient]`）
+- 空闲 300 秒后自动回收（`_IDLE_TIMEOUT = 300`）
+- 实例上限：`_MAX_INSTANCES = 200`，超限时 FIFO 清理一半旧实例
+- 连接配置更新时调用 `TableauMCPClient.invalidate(connection_id)` 主动清除
 
 ### 2.3 认证方式
 
@@ -1338,5 +1369,14 @@ sequenceDiagram
 | 10 | 数据预览的字段自动选取策略是否需要可配置 | 功能 | P3 | 待定 |
 
 ---
+
+---
+
+## 变更记录
+
+| 日期 | 版本 | 变更内容 |
+|------|------|---------|
+| 2026-04-16 | v1.1 | P1 改造：单 session 全局单例 → per-site session 字典，LRU 驱逐上限 50。新增 `_get_site_key(conn)`、`_get_or_create_session_state(site_key, _max_sites=50)` 函数；`_ensure_session`、`_post_mcp`、`_build_headers`、`_invalidate_session` 均新增 `session_state`/`base_url`/`site_key` 参数；对外 `get_tableau_mcp_client`、`query_datasource` 签名不变。传输层改为标准 MCP Streamable-HTTP over JSON-RPC 2.0，删除自定义 REST 传输。 |
+| 2026-04-04 | v1.0 | 初始版本，单 session 全局单例模式 |
 
 *文档结束*

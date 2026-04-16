@@ -9,26 +9,26 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from services.capability.audit import InvocationRecord, new_trace_id, write_audit
-from services.common.redis_cache import check_rate_limit
-from services.knowledge_base.glossary_service import glossary_service
 from services.llm.models import log_nlq_query
-from services.llm.nlq_service import (
-    MAX_QUERY_LENGTH,
-    NLQError,
-    classify_intent,
-    execute_query,
-    format_response,
-    is_datasource_sensitivity_blocked,
-    one_pass_llm,
-    resolve_fields,
-    route_datasource,
-)
-from services.llm.semantic_retriever import recall_fields
+from services.common.redis_cache import check_rate_limit
+from services.tableau.models import TableauAsset, TableauDatabase
+from services.knowledge_base.glossary_service import glossary_service
 from services.semantic_maintenance.context_assembler import (
     ContextAssembler,
     sanitize_fields_for_llm,
 )
-from services.tableau.models import TableauAsset, TableauDatabase
+from services.llm.semantic_retriever import recall_fields
+from services.llm.nlq_service import (
+    NLQError,
+    one_pass_llm,
+    route_datasource,
+    resolve_fields,
+    format_response,
+    classify_intent,
+    execute_query,
+    is_datasource_sensitivity_blocked,
+    MAX_QUERY_LENGTH,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -40,7 +40,9 @@ class QueryRequest(BaseModel):
     question: str
     datasource_luid: Optional[str] = None
     connection_id: Optional[int] = None
+    conversation_id: Optional[str] = None
     options: Optional[dict] = None
+    use_conversation_context: bool = False  # P2：追问时携带上轮上下文
 
 
 def _require_role(user, min_role: str) -> None:
@@ -53,7 +55,8 @@ def _require_role(user, min_role: str) -> None:
 
 
 def _build_fields_with_types(fields: list) -> str:
-    """将已 sanitized 的字段列表格式化为 LLM 上下文字符串（Spec 14 v1.1 §5.1 Token 预算管理）。
+    """
+    将已 sanitized 的字段列表格式化为 LLM 上下文字符串（Spec 14 v1.1 §5.1 Token 预算管理）。
 
     注意：本函数假设输入 fields 已经过 sanitize_fields_for_llm 过滤。
     本函数只负责 P0-P5 优先级截断 + Token 预算（ContextAssembler）。
@@ -87,7 +90,7 @@ def _get_asset_by_luid(datasource_luid: str):
     session = db.session
     asset = session.query(TableauAsset).filter(
         TableauAsset.datasource_luid == datasource_luid,
-        TableauAsset.is_deleted == False,
+        not TableauAsset.is_deleted,
     ).first()
     session.close()
     return asset
@@ -109,71 +112,78 @@ async def query(
     datasource_luid = body.datasource_luid
     connection_id = body.connection_id
     options = body.options or {}
-    response_type = options.get("response_type", "auto")
-    limit = options.get("limit", 1000)
-    timeout = options.get("timeout", 30)
 
-    # === PRD §10.1 审计日志：提前创建，确保 HTTPException 路径也被记录 ===
-    user_id = user.get("id") or 0
-    audit_record = InvocationRecord(
-        trace_id=new_trace_id(),
-        principal_id=user.get("id") or 0,
-        principal_role=user.get("role") or "user",
-        capability="query_metric",
-        params_jsonb={
-            "question_length": len(question or ""),
-            "datasource_luid": datasource_luid,
-            "connection_id": connection_id,
-        },
-    )
+    # P2-1：追问上下文继承 — 从上轮 query_context 中补填 connection_id / datasource_luid
+    if body.use_conversation_context and body.conversation_id and not datasource_luid and not connection_id:
+        try:
+            import json as _json
+            from sqlalchemy import text as _text
+            _msg = db.execute(_text("""
+                SELECT query_context FROM conversation_messages
+                WHERE conversation_id=:cid AND role='assistant' AND query_context IS NOT NULL
+                ORDER BY created_at DESC LIMIT 1
+            """), {"cid": body.conversation_id}).fetchone()
+            if _msg:
+                _ctx = _msg._mapping["query_context"]
+                if isinstance(_ctx, str):
+                    _ctx = _json.loads(_ctx)
+                if isinstance(_ctx, dict):
+                    if not datasource_luid and _ctx.get("datasource_luid"):
+                        datasource_luid = _ctx["datasource_luid"]
+                    if not connection_id and _ctx.get("connection_id"):
+                        connection_id = int(_ctx["connection_id"])
+        except Exception as _ctx_err:
+            logger.warning("读取追问上下文失败（不影响主流程）: %s", _ctx_err)
 
-    import time
-    t0 = time.time()
-
-    # === PRD §10.2 参数校验（顺序：限速 → 长度 → 敏感度）===
-    # 1. 限速检查（单用户 20 次/分钟）
-    if not check_rate_limit(user_id):
+    # 速率限制检查
+    user_id = user.get("id")
+    if user_id and not check_rate_limit(user_id, limit=20, window=60):
         raise _nlq_error_response("NLQ_010", "查询过于频繁，请稍后再试")
 
-    # 2. 问题长度校验
-    if not question or not question.strip():
-        raise _nlq_error_response("NLQ_001", "查询问题不合法")
+    # 长度检查
     if len(question) > MAX_QUERY_LENGTH:
-        raise _nlq_error_response("NLQ_001", f"查询问题不能超过 {MAX_QUERY_LENGTH} 字符")
+        raise _nlq_error_response(
+            "NLQ_001",
+            f"问题长度不能超过 {MAX_QUERY_LENGTH} 字符",
+        )
 
-    # 3. PRD §10.3：用户显式指定 luid 时，校验敏感度
-    if datasource_luid and is_datasource_sensitivity_blocked(datasource_luid):
-        raise _nlq_error_response("NLQ_009", "该数据源不允许被查询（敏感度级别过高）")
-
-    # === PRD §10.1 审计日志：外层 try/except/finally ===
-    _log_intent: str = None
-    _log_ds_luid: str = None
-    _log_vizql: dict = None
-    _log_response_type: str = None
-    _log_exec_ms: int = 0
-    _log_error: str = None
-    _log_question: str = question
-    _log_user_id: int = user_id
+    # 初始化审计记录
+    audit_record = InvocationRecord(
+        trace_id=new_trace_id(),
+        principal_id=user_id,
+        principal_role=user.get("role", "user"),
+        capability="query_metric",
+        params_jsonb={"question_length": len(question)},
+        status="started",
+    )
 
     try:
-        # === 阶段1：意图分类 + 查询构建（One-Pass LLM）===
-        # 1a. 规则快速路径
-        rule_result = classify_intent(question)
-        intent_hint = rule_result.type if rule_result else None
+        # ── 意图分类（阶段0）─────────────────────────────────────
+        intent = classify_intent(question)
+        audit_record.params_jsonb["intent"] = intent.intent_type if intent else None
 
-        # 1b. 确定数据源
+        # ── 数据源路由（PRD §7.1）─────────────────────────────
+        chosen_ds = None
         if datasource_luid:
             asset = _get_asset_by_luid(datasource_luid)
             if not asset:
-                raise _nlq_error_response("NLQ_009", "指定的数据源不存在")
+                raise _nlq_error_response("NLQ_009", "数据源不存在或已删除")
+            if is_datasource_sensitivity_blocked(datasource_luid):
+                raise _nlq_error_response("NLQ_011", "该数据源为高敏级别")
             chosen_ds = {
-                "datasource_luid": asset.datasource_luid,
+                "datasource_luid": datasource_luid,
                 "datasource_name": asset.name,
+                "connection_id": asset.connection_id,
             }
-        else:
-            chosen_ds = route_datasource(question, connection_id)
+        elif connection_id:
+            chosen_ds = route_datasource(question, connection_id=connection_id)
             if not chosen_ds:
-                raise _nlq_error_response("NLQ_005", "无法匹配到合适的数据源")
+                raise _nlq_error_response("NLQ_005", "未找到匹配的数据源，请指定 datasource_luid")
+        else:
+            # 尝试多数据源路由
+            chosen_ds = route_datasource(question)
+            if not chosen_ds:
+                raise _nlq_error_response("NLQ_005", "请指定数据源（datasource_luid 或 connection_id）")
 
         ds_luid = chosen_ds["datasource_luid"]
         ds_name = chosen_ds["datasource_name"]
@@ -183,7 +193,7 @@ async def query(
         session = db.session
         asset = session.query(TableauAsset).filter(
             TableauAsset.datasource_luid == ds_luid,
-            TableauAsset.is_deleted == False,
+            not TableauAsset.is_deleted,
         ).first()
         session.close()
 
@@ -200,6 +210,7 @@ async def query(
         sensitivity_map: Dict[int, str] = {}
         if field_ids:
             from services.semantic_maintenance.models import TableauFieldSemantics
+
             db2 = TableauDatabase()
             session2 = db2.session
             try:
@@ -229,91 +240,50 @@ async def query(
             for f in field_records
         ]
 
-        # Step 1: 敏感字段过滤（Spec 12 §9.2 + Spec 14 v1.1 §5.1 Token 熔断）
-        # sanitize_fields_for_llm 会过滤 HIGH/CONFIDENTIAL 字段，
-        # 截断 enum_values（≤20条，每条≤50字符），仅保留字段元数据
+        # 敏感度过滤（高敏字段不暴露给 LLM）
         sanitized_fields = sanitize_fields_for_llm(fields)
-
-        # Step 1b: 基于 embedding 语义召回字段，提升相关字段优先级（P3 T6）
-        try:
-            recalled = await recall_fields(
-                question,
-                datasource_ids=[asset.connection_id],
-                top_k=20,
-            )
-            if recalled:
-                # Build similarity map keyed by field_caption
-                recalled_map: dict[str, float] = {
-                    r["semantic_name_zh"] or r["semantic_name"]: r["similarity"]
-                    for r in recalled
-                }
-                # Re-sort sanitized_fields: recalled fields first (by similarity desc), then rest
-                recalled_captions = set(recalled_map.keys())
-                recalled_fields = [f for f in sanitized_fields if f.get("field_caption") in recalled_captions]
-                other_fields = [f for f in sanitized_fields if f.get("field_caption") not in recalled_captions]
-                recalled_fields.sort(key=lambda f: recalled_map.get(f.get("field_caption") or "", 0), reverse=True)
-                sanitized_fields = recalled_fields + other_fields
-        except Exception as e:
-            logger.warning("语义召回失败，使用原始字段顺序: %s", e)
-
-        # _build_fields_with_types 内部再次使用 ContextAssembler 做 P0-P5 截断（2500 tokens）
         fields_with_types = _build_fields_with_types(sanitized_fields)
 
-        # 1d. 获取业务术语映射（知识库术语 + 同义词）
-        term_mappings = ""
-        try:
-            matched_terms = glossary_service.match_terms(db, question, limit=10)
-            if matched_terms:
-                term_lines = [
-                    f"{t.get('canonical_term', t.get('term', ''))}: {t.get('definition', '')}"
-                    for t in matched_terms
-                ]
-                term_mappings = "\n".join(term_lines)
-        except Exception as e:
-            logger.warning("术语匹配失败: %s", e)
+        # ── P3 增强：recall_fields 语义重排序 ──────────────────
+        recalled = await recall_fields(question, datasource_ids=[asset.datasource_id] if asset.datasource_id else None)
+        if recalled:
+            recalled_names = {r["semantic_name_zh"] or r["semantic_name"] for r in recalled}
+            # 将语义匹配度高的字段排在前面
+            def boost_key(f):
+                name = f.get("field_caption", "") or f.get("field_name", "")
+                return (0 if name in recalled_names else 1, 0)
+            sanitized_fields.sort(key=boost_key)
 
-        # 1e. One-Pass LLM 调用（temperature=0.1 硬编码）
-        try:
-            one_pass_result = await one_pass_llm(
-                question=question,
-                datasource_luid=ds_luid,
-                datasource_name=ds_name,
-                fields_with_types=fields_with_types,
-                term_mappings=term_mappings,
-                intent_hint=intent_hint,
-            )
-        except NLQError as e:
-            raise _nlq_error_response(e.code, e.message, e.details)
+        # ── 术语表增强（PRD §8.2）──────────────────────────────
+        glossary_terms = glossary_service.get_matching_terms(question)
+        term_mappings = (
+            "\n".join(f"{t['source_term']} -> {t['mapped_term']}" for t in glossary_terms)
+            if glossary_terms else "无"
+        )
 
-        intent = one_pass_result.get("intent", "aggregate")
-        confidence = one_pass_result.get("confidence", 0.0)
-        vizql_json = one_pass_result.get("vizql_json", {})
+        # ── 意图分类 + VizQL 生成（One-Pass LLM）───────────────
+        llm_result = await one_pass_llm(
+            question=question,
+            datasource_luid=ds_luid,
+            datasource_name=ds_name,
+            fields_with_types=fields_with_types,
+            term_mappings=term_mappings,
+            intent_hint=intent.intent_type if intent else None,
+        )
+        audit_record.llm_tokens_in = llm_result.get("tokens_in")
+        audit_record.llm_tokens_out = llm_result.get("tokens_out")
 
-        # 置信度检查
-        if confidence < 0.5:
-            raise _nlq_error_response("NLQ_002", "无法理解查询意图")
+        vizql_json = llm_result["vizql_json"]
+        response_type = llm_result.get("response_type", "auto")
 
-        # === 阶段2：字段解析（使用已 sanitized 的字段列表，防止敏感字段泄露）===
-        resolved_fields = await resolve_fields(question, sanitized_fields, intent)
+        # ── 查询执行（MCP Stage 3）─────────────────────────────
+        query_result = execute_query(
+            datasource_luid=ds_luid,
+            vizql_json=vizql_json,
+            limit=options.get("limit", 1000),
+            connection_id=chosen_ds.get("connection_id"),
+        )
 
-        # === 阶段3：查询执行（PRD §5.5）===
-        # 约束 A：环境变量从 TableauConnection 解密注入（mcp_client 内部处理）
-        # 约束 B：MCP Session 长连接复用（TableauMCPClient 单例）
-        # 约束 C：VizQL JSON fieldCaption 与 resolved_fields 对齐（已在 one_pass_llm 生成时保证）
-        query_result = {"fields": [], "rows": []}
-        try:
-            query_result = execute_query(
-                datasource_luid=ds_luid,
-                vizql_json=vizql_json,
-                limit=limit,
-                timeout=timeout,
-            )
-        except NLQError:
-            raise
-
-        # === 阶段4：结果格式化（PRD §8）===
-        # MCP 返回 {"fields": [...], "rows": [[...]]}，
-        # 需按响应类型做数据转换后传入 format_response。
         mcp_fields = query_result.get("fields", [])
         mcp_rows = query_result.get("rows", [])
 
@@ -343,99 +313,133 @@ async def query(
             # PRD §6.2 table 格式：
             # {"columns": [{Name, label, type}], "rows": [{col1: v1, col2: v2}], ...}
             # MCP rows = [[v1, v2], ...]（数组），需转为 [{col1: v1, col2: v2}, ...]
-            # columns.name = fieldCaption（与 vizql_json.fieldCaption 对齐）
-            columns = [
-                {
-                    "Name": f.get("fieldCaption", ""),
-                    "label": f.get("fieldCaption", ""),
-                    "type": f.get("dataType", "string"),
-                }
-                for f in mcp_fields
-            ]
-            rows_as_dicts = []
-            for row in mcp_rows:
-                row_dict = {}
-                for i, f in enumerate(mcp_fields):
-                    if i < len(row):
-                        row_dict[f.get("fieldCaption", f"col_{i}")] = row[i]
-                rows_as_dicts.append(row_dict)
-            total_rows = len(rows_as_dicts)
-            api_data = {
-                "columns": columns,
-                "rows": rows_as_dicts,
-                "total_rows": total_rows,
-                "truncated": total_rows > limit,
-            }
-
-        # 记录审计日志所需的变量（成功路径）
-        _log_intent = intent
-        _log_ds_luid = ds_luid
-        _log_vizql = vizql_json
-        _log_response_type = api_data.get("response_type", "table" if mcp_rows else "text")
-        _log_exec_ms = round((time.time() - t0) * 1000)
+            api_data = format_response(mcp_rows, intent=intent, response_type_hint="table")
 
         audit_record.status = "ok"
-        audit_record.latency_ms = _log_exec_ms
+        logger.info("NLQ 查询成功 trace=%s", audit_record.trace_id)
+
+        # 写入对话历史（可选，失败不影响主流程）
+        if body.conversation_id:
+            try:
+                import json as _json
+                answer_text = _json.dumps(api_data, ensure_ascii=False, default=str)
+                # P2-1：构建 query_context 供追问继承
+                _query_context = {
+                    "connection_id": chosen_ds.get("connection_id"),
+                    "datasource_luid": ds_luid,
+                    "datasource_name": ds_name,
+                    "field_names": [
+                        f.get("field_caption") or f.get("field_name")
+                        for f in sanitized_fields[:20]
+                    ],
+                }
+                _append_messages_to_conversation(
+                    db=db,
+                    conversation_id=body.conversation_id,
+                    user_id=user_id,
+                    question=question,
+                    answer=answer_text,
+                    query_context=_query_context,
+                )
+            except Exception as _e:
+                logger.warning("写入对话消息失败（不影响主流程）: %s", _e)
+
+        # 写查询日志
+        log_nlq_query(
+            db=db,
+            user_id=user_id,
+            question=question,
+            datasource_luid=ds_luid,
+            intent_type=intent.intent_type if intent else "unknown",
+            confidence=llm_result.get("confidence", 0),
+            response_type=response_type,
+            latency_ms=audit_record.latency_ms,
+        )
 
         return {
-            "success": True,
-            "response_type": api_data.get("response_type", "table" if mcp_rows else "text"),
-            "data": api_data if isinstance(api_data, dict) and "columns" in api_data else api_data,
-            "query": {
-                "datasource_luid": ds_luid,
-                "datasource_name": ds_name,
-                "vizql_json": vizql_json,
-            },
-            "metadata": {
-                "intent": intent,
-                "intent_confidence": confidence,
-                "field_mappings": [
-                    {
-                        "user_term": rf.user_term,
-                        "field_caption": rf.field_caption,
-                        "match_source": rf.match_source,
-                    }
-                    for rf in resolved_fields
-                ],
-                "execution_time_ms": _log_exec_ms,
-                "cached": False,
-            },
+            "trace_id": audit_record.trace_id,
+            **api_data,
+            "response_type": response_type,
+            "intent": intent.intent_type if intent else None,
+            "confidence": llm_result.get("confidence"),
+            "datasource": {"id": asset.id, "name": ds_name},
+            "datasource_luid": ds_luid,
         }
 
-    except HTTPException as exc:
-        # HTTPException 继续上抛，不吞掉
-        _log_error = "NLQ_FAILED"
-        _log_exec_ms = round((time.time() - t0) * 1000)
-        detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
-        audit_record.status = "denied" if exc.status_code in (401, 403) else "failed"
-        audit_record.error_code = detail.get("code")
-        audit_record.error_detail = detail.get("message")
-        audit_record.latency_ms = _log_exec_ms
+    except NLQError as e:
+        audit_record.status = "failed"
+        audit_record.error_code = e.code
+        audit_record.error_detail = e.message
+        logger.warning("NLQ 错误 [%s] trace=%s: %s", e.code, audit_record.trace_id, e.message, exc_info=True)
+        raise _nlq_error_response(e.code, e.message, e.details)
+
+    except HTTPException:
+        audit_record.status = "failed"
         raise
 
     except Exception as exc:
-        _log_error = "INTERNAL"
-        _log_exec_ms = round((time.time() - t0) * 1000)
         audit_record.status = "failed"
-        audit_record.error_code = "INTERNAL"
-        audit_record.error_detail = str(exc)[:1000]
-        audit_record.latency_ms = _log_exec_ms
-        raise
+        audit_record.error_code = "SYS_001"
+        audit_record.error_detail = str(exc)
+        logger.error("NLQ 意外错误 trace=%s: %s", audit_record.trace_id, exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "SYS_001", "message": "服务器内部错误", "details": {}},
+        )
 
     finally:
-        # Capability audit: Append-Only（写入失败不阻塞主链路）
         write_audit(audit_record)
-        # PRD §10.1：fire-and-forget 审计日志（无论成功/失败均记录）
-        log_nlq_query(
-            user_id=_log_user_id,
-            question=_log_question,
-            intent=_log_intent,
-            datasource_luid=_log_ds_luid,
-            vizql_json=_log_vizql,
-            response_type=_log_response_type,
-            execution_time_ms=_log_exec_ms,
-            error_code=_log_error,
-        )
+
+
+def _append_messages_to_conversation(
+    db,
+    conversation_id: str,
+    user_id: int,
+    question: str,
+    answer: str,
+    query_context: dict = None,
+) -> None:
+    """将用户问题和助手回复写入对话历史（内部辅助函数）
+
+    Args:
+        query_context: P2-1 追问上下文，写入 assistant 消息的 query_context 列。
+    """
+    import json as _json
+    import uuid
+    from datetime import datetime, timezone
+    from sqlalchemy import text
+
+    now = datetime.now(timezone.utc)
+    # 验证对话属于该用户，防止跨用户写入
+    conv = db.execute(
+        text("SELECT id FROM conversations WHERE id=:id AND user_id=:uid"),
+        {"id": conversation_id, "uid": user_id},
+    ).fetchone()
+    if not conv:
+        return
+    db.execute(
+        text("INSERT INTO conversation_messages (id, conversation_id, role, content, created_at) VALUES (:id, :cid, 'user', :content, :now)"),
+        {"id": str(uuid.uuid4()), "cid": conversation_id, "content": question, "now": now},
+    )
+    db.execute(
+        text(
+            "INSERT INTO conversation_messages "
+            "(id, conversation_id, role, content, query_context, created_at) "
+            "VALUES (:id, :cid, 'assistant', :content, :qc, :now)"
+        ),
+        {
+            "id": str(uuid.uuid4()),
+            "cid": conversation_id,
+            "content": answer,
+            "qc": _json.dumps(query_context, ensure_ascii=False, default=str) if query_context else None,
+            "now": now,
+        },
+    )
+    db.execute(
+        text("UPDATE conversations SET updated_at=:now WHERE id=:id"),
+        {"now": now, "id": conversation_id},
+    )
+    db.commit()
 
 
 @router.get("/suggestions")
@@ -444,8 +448,7 @@ async def suggestions(
     connection_id: int = None,
     db: Session = Depends(get_db),
 ):
-    """查询建议（自动补全，PRD §6.3）GET /api/search/suggestions — analyst+
-    """
+    """查询建议（自动补全，PRD §6.3）GET /api/search/suggestions — analyst+"""
     user = get_current_user(request=None, db=db)
     _require_role(user, "analyst")
 
@@ -461,8 +464,7 @@ async def suggestions(
 
 @router.get("/history")
 async def history(db: Session = Depends(get_db)):
-    """查询历史（PRD §6.4）GET /api/search/history — analyst+
-    """
+    """查询历史（PRD §6.4）GET /api/search/history — analyst+"""
     user = get_current_user(request=None, db=db)
     _require_role(user, "analyst")
 

@@ -1,9 +1,9 @@
+"""用户组管理 API - 仅管理员可访问
 """
-用户组管理 API - 仅管理员可访问
-"""
-from fastapi import APIRouter, HTTPException, Depends
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
 
 from app.core.dependencies import get_current_admin
 from services.auth import auth_service
@@ -13,6 +13,7 @@ router = APIRouter(tags=["用户组管理"])
 
 class CreateGroupRequest(BaseModel):
     """创建用户组请求"""
+
     name: str
     description: Optional[str] = None
     permissions: List[str] = []
@@ -20,17 +21,20 @@ class CreateGroupRequest(BaseModel):
 
 class UpdateGroupRequest(BaseModel):
     """更新用户组请求"""
+
     name: Optional[str] = None
     description: Optional[str] = None
 
 
 class SetPermissionsRequest(BaseModel):
     """设置组权限请求"""
+
     permissions: List[str]
 
 
 class AddMembersRequest(BaseModel):
     """添加成员请求"""
+
     user_ids: List[int]
 
 

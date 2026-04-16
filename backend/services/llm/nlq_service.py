@@ -309,6 +309,7 @@ async def _retry_field_consistency(
     available_fields: list,
     prompt: str,
     system_prompt: str,
+    ds_luid: str = "",
 ) -> tuple:
     """
     带可用字段列表的 fieldCaption 一致性重试。
@@ -342,7 +343,7 @@ async def _retry_field_consistency(
     # 再次校验一致性
     is_ok, still_missing, _ = validate_field_captions_consistency(
         parsed_retry,
-        parsed_retry.get("datasource_luid", ""),
+        ds_luid,
     )
     if not is_ok:
         return None, (
@@ -470,6 +471,7 @@ async def one_pass_llm(
         prompt=prompt,
         system=system_prompt,
         timeout=30,
+        purpose="nlq",
     )
 
     if "error" in result:
@@ -516,6 +518,7 @@ async def one_pass_llm(
             available_fields=available_fields,
             prompt=prompt,
             system_prompt=system_prompt,
+            ds_luid=datasource_luid,
         )
         if consistency_err:
             raise NLQError("NLQ_004", message=f"fieldCaption 一致性重试失败：{consistency_err}")
@@ -666,9 +669,24 @@ def route_datasource(question: str, connection_id: int = None) -> Optional[Dict[
 
     ⚡ 性能防抖约束（强制）：步骤 3 调用 get_datasource_fields_cached，
     必须命中 Redis 缓存（field_caption 列表，1小时有效期）。
+
+    C4：当 connection_id=None 时，自动选第一个 is_active=True 的 TableauConnection。
     """
+    from services.tableau.models import TableauConnection as _TableauConnection
+
     db = TableauDatabase()
     session = db.session
+
+    # C4：connection_id=None 时自动路由到第一个活跃连接
+    if connection_id is None:
+        active_conn = session.query(_TableauConnection).filter(
+            _TableauConnection.is_active == True,
+        ).order_by(_TableauConnection.id.asc()).first()
+        if active_conn:
+            connection_id = active_conn.id
+            logger.debug("route_datasource: connection_id=None，自动路由到 connection_id=%d", connection_id)
+        else:
+            logger.warning("route_datasource: connection_id=None 且无活跃连接，跳过 connection_id 过滤")
 
     # 1. 获取候选数据源
     query = session.query(TableauAsset).filter(

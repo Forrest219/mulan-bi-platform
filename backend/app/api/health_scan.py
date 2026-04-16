@@ -1,16 +1,15 @@
 """数仓健康检查 API"""
 import logging
-from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_current_user, require_roles
 from app.core.crypto import get_datasource_crypto
 from app.core.database import get_db
+from app.core.dependencies import get_current_user, require_roles
 from services.datasources.models import DataSourceDatabase
 from services.health_scan.models import HealthScanDatabase
 
@@ -19,6 +18,8 @@ router = APIRouter()
 
 
 class ScanRequest(BaseModel):
+    """发起健康扫描请求模型"""
+
     datasource_id: int
 
 

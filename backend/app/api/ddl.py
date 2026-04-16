@@ -1,19 +1,14 @@
-"""
-DDL 检查 API
+"""DDL 检查 API
 """
 import uuid
-from pathlib import Path
-from typing import Optional, List
 
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse
 
+from app.core.dependencies import get_current_user
 from services.ddl_checker.parser import DDLParser, RegexTimeoutError
 from services.ddl_checker.validator import DDLValidator
-from services.ddl_checker.cache import RuleCache
 from services.rules.models import RuleConfigDatabase
-from app.core.dependencies import get_current_user
 
 router = APIRouter()
 
@@ -23,6 +18,7 @@ MAX_DDL_TEXT_LENGTH = 65536
 
 class DDLCheckRequest(BaseModel):
     """DDL 检查请求"""
+
     ddl_text: str = Field(
         ...,
         max_length=MAX_DDL_TEXT_LENGTH,
@@ -34,6 +30,7 @@ class DDLCheckRequest(BaseModel):
 
 class CheckIssue(BaseModel):
     """检查问题"""
+
     rule_id: str
     risk_level: str
     object_type: str
@@ -44,6 +41,7 @@ class CheckIssue(BaseModel):
 
 class DDLCheckResponse(BaseModel):
     """DDL 检查响应（统一响应结构）"""
+
     code: str
     message: str
     trace_id: str
@@ -75,8 +73,7 @@ def _build_response(code: str, message: str, data: dict, trace_id: str) -> DDLCh
 
 @router.post("/check", dependencies=[Depends(get_current_user)])
 async def check_ddl(request: DDLCheckRequest):
-    """
-    检查 DDL 语句
+    """检查 DDL 语句
 
     - **ddl_text**: CREATE TABLE SQL 语句，最大 64KB
     - **db_type**: 数据库类型 (mysql/sqlserver)

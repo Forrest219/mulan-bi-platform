@@ -1,22 +1,23 @@
 """知识库 API（PRD §7 + §8 + §9）"""
-from typing import Optional, Dict
-from pydantic import BaseModel
+from typing import Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_current_user
 from app.core.database import get_db
-from services.knowledge_base.glossary_service import glossary_service
+from app.core.dependencies import get_current_user
 from services.knowledge_base.document_service import document_service
 from services.knowledge_base.embedding_service import embedding_service
-from services.knowledge_base.rag_service import rag_service
 from services.knowledge_base.errors import KBErrorCode, kb_error_response
-from services.knowledge_base.models import KbGlossary, KbDocument, KbSchema
+from services.knowledge_base.glossary_service import glossary_service
+from services.knowledge_base.models import KbDocument, KbGlossary, KbSchema
+from services.knowledge_base.rag_service import rag_service
 
 
 class RagEnrichRequest(BaseModel):
     """RAG enrich 请求体（PRD §7.11）"""
+
     question: str
     scenario: str = "default"
 
@@ -43,8 +44,7 @@ def _error_response(code: KBErrorCode, status_code: int, **kwargs):
 
 
 def _format_search_result(db: Session, raw: Dict) -> Dict:
-    """
-    将原始向量检索结果格式化为 PRD §7.10 规定格式：
+    """将原始向量检索结果格式化为 PRD §7.10 规定格式：
     {source_type, source_id, title, content, similarity}
     - title: 从对应源表查询（glossary→canonical_term, document→title, schema→datasource_id, field_semantic→semantic_name_zh）
     - content: chunk_text
@@ -215,8 +215,7 @@ async def delete_glossary(
     hard: bool = Query(False, description="硬删除（仅 admin）"),
     db: Session = Depends(get_db),
 ):
-    """
-    删除术语（PRD §7.5）DELETE /api/knowledge-base/glossary/{id}
+    """删除术语（PRD §7.5）DELETE /api/knowledge-base/glossary/{id}
     - hard=false（默认）：软删除（data_admin+），status → deprecated
     - hard=true：硬删除（admin 专属），同时清理 kb_embeddings
     """
@@ -259,8 +258,7 @@ async def create_document(
     tags: str = "",
     db: Session = Depends(get_db),
 ):
-    """
-    创建文档（PRD §7.7）POST /api/knowledge-base/documents — data_admin+
+    """创建文档（PRD §7.7）POST /api/knowledge-base/documents — data_admin+
     副作用：Celery Worker 异步生成 Embedding（不等候完成，立即返回 201）。
     """
     user = get_current_user(request=None, db=db)
@@ -349,8 +347,7 @@ async def embed_document(
     doc_id: int,
     db: Session = Depends(get_db),
 ):
-    """
-    手动触发文档向量化（PRD §7.8）POST /api/knowledge-base/documents/{id}/embed — data_admin+
+    """手动触发文档向量化（PRD §7.8）POST /api/knowledge-base/documents/{id}/embed — data_admin+
     仅当自动嵌入失败时使用，正常创建文档后由 Celery 自动处理。
     """
     user = get_current_user(request=None, db=db)
@@ -369,8 +366,7 @@ async def delete_document(
     hard: bool = Query(False, description="硬删除（仅 admin）"),
     db: Session = Depends(get_db),
 ):
-    """
-    删除文档（PRD §7.9 + §9.1）DELETE /api/knowledge-base/documents/{id}
+    """删除文档（PRD §7.9 + §9.1）DELETE /api/knowledge-base/documents/{id}
     - hard=false（默认）：软删除（admin 专属，PRD §9.1）
     - hard=true：硬删除（admin 专属），同时清理 kb_embeddings
     """
@@ -393,8 +389,7 @@ async def search_knowledge(
     threshold: float = Query(0.50, ge=0.0, le=1.0),
     db: Session = Depends(get_db),
 ):
-    """
-    知识库语义搜索（PRD §7.10）POST /api/knowledge-base/search — analyst+
+    """知识库语义搜索（PRD §7.10）POST /api/knowledge-base/search — analyst+
     请求体参数：query, top_k, source_types[], threshold
     """
     user = get_current_user(request=None, db=db)
@@ -421,7 +416,7 @@ async def search_knowledge(
         # 多 type 过滤在 service 层实现（按 source_type 分组）
         if source_type_list and len(source_type_list) > 1:
             vector_results = [r for r in vector_results if r["source_type"] in source_type_list]
-    except RuntimeError as e:
+    except RuntimeError:
         raise _error_response(KBErrorCode.VECTOR_SEARCH_UNAVAILABLE, 502)
     except Exception:
         raise _error_response(KBErrorCode.VECTOR_SEARCH_UNAVAILABLE, 502)
@@ -438,8 +433,7 @@ async def rag_enrich(
     body: RagEnrichRequest,
     db: Session = Depends(get_db),
 ):
-    """
-    RAG 上下文增强（PRD §7.11）POST /api/knowledge-base/rag/enrich — analyst+
+    """RAG 上下文增强（PRD §7.11）POST /api/knowledge-base/rag/enrich — analyst+
     请求体：{ "question": str, "scenario": str }
     """
     user = get_current_user(request=None, db=db)

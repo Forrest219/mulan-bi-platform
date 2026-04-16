@@ -44,7 +44,11 @@ class DatabaseConnector:
             self.inspector = inspect(self.engine)
             return True
         except Exception as e:
-            logger.error("数据库连接失败: %s", e, exc_info=True)
+            # Redact password from connection string in error message before logging
+            import re
+            error_str = str(e)
+            error_str = re.sub(r'(://[^:]+:)[^@]+(@)', r'\1***\2', error_str)
+            logger.error("数据库连接失败: %s", error_str, exc_info=False)
             return False
 
     def disconnect(self):

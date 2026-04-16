@@ -264,17 +264,36 @@ def _close_connection(conn, db_type: str):
 
 def _estimate_row_count(conn, table_name: str, db_type: str) -> int:
     """预估表行数（用于熔断检查）"""
+    import re
+    # Defensive: only allow alphanumeric + underscore + dot (schema.table)
+    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_\.]*$", table_name):
+        logger.warning("Blocked unsafe table_name in row estimation: %s", table_name)
+        return 0
     try:
         if db_type == "postgresql":
-            sql = f"SELECT reltuples::bigint FROM pg_class WHERE relname = '{table_name}'"
+            result = conn.execute(
+                sqlalchemy.text(
+                    "SELECT reltuples::bigint FROM pg_class WHERE relname = :table_name"
+                ),
+                {"table_name": table_name},
+            )
         elif db_type in ("mysql", "starrocks", "doris"):
-            sql = f"SELECT TABLE_ROWS FROM information_schema.TABLES WHERE TABLE_NAME = '{table_name}'"
+            result = conn.execute(
+                sqlalchemy.text(
+                    "SELECT TABLE_ROWS FROM information_schema.TABLES WHERE TABLE_NAME = :table_name"
+                ),
+                {"table_name": table_name},
+            )
         elif db_type in ("mssql", "sqlserver"):
-            sql = f"SELECT SUM(row_count) FROM sys.dm_db_partition_stats WHERE object_id = OBJECT_ID('{table_name}')"
+            result = conn.execute(
+                sqlalchemy.text(
+                    "SELECT SUM(row_count) FROM sys.dm_db_partition_stats WHERE object_id = OBJECT_ID(:table_name)"
+                ),
+                {"table_name": table_name},
+            )
         else:
             return 0
 
-        result = conn.execute(sqlalchemy.text(sql))
         row = result.fetchone()
         if row and row[0]:
             return int(row[0])

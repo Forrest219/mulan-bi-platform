@@ -1,19 +1,18 @@
-"""
-Tableau 管理 API
+"""Tableau 管理 API
 """
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, Query, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from services.tableau.models import TableauDatabase, TableauConnection
-from services.tableau.sync_service import TableauSyncService
-from app.core.dependencies import get_current_user, require_roles
 from app.core.crypto import get_tableau_crypto
-from app.core.database import get_db # 导入中央数据库依赖
-from app.utils.auth import verify_connection_access # 导入统一的权限验证函数
+from app.core.database import get_db  # 导入中央数据库依赖
+from app.core.dependencies import get_current_user, require_roles
+from app.utils.auth import verify_connection_access  # 导入统一的权限验证函数
+from services.tableau.models import TableauDatabase
+from services.tableau.sync_service import TableauSyncService
 
 router = APIRouter()
 
@@ -317,8 +316,7 @@ async def search_assets(
     page_size: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
-    """
-    搜索资产。
+    """搜索资产。
 
     多租户隔离约束（Spec 07 §3.3.2 P0 IDOR 修复）：
     - admin 用户：可不指定 connection_id（搜索所有可访问连接）。
@@ -450,7 +448,7 @@ async def get_sync_status(conn_id: int, request: Request, db: Session = Depends(
 
     next_sync_at = None
     if conn.auto_sync_enabled:
-        from datetime import timedelta # 局部导入
+        from datetime import timedelta  # 局部导入
         if conn.last_sync_at:
             next_dt = conn.last_sync_at + timedelta(hours=conn.sync_interval_hours or 24)
             next_sync_at = next_dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -534,7 +532,7 @@ async def explain_asset(asset_id: int, req: ExplainRequest, request: Request, db
 
     # 缓存：1 小时内不重新生成（除非强制刷新）
     if not req.refresh and asset.ai_explain and asset.ai_explain_at:
-        from datetime import datetime, timedelta # 局部导入
+        from datetime import datetime, timedelta  # 局部导入
         if datetime.now() - asset.ai_explain_at < timedelta(hours=1):
             return {
                 "explain": asset.ai_explain,
@@ -573,8 +571,8 @@ async def explain_asset(asset_id: int, req: ExplainRequest, request: Request, db
 
     # 调用 LLM 生成深度解读
     try:
-        from services.llm.service import LLMService
         from services.llm.prompts import ASSET_EXPLAIN_TEMPLATE
+        from services.llm.service import LLMService
         llm = LLMService()
 
         prompt = ASSET_EXPLAIN_TEMPLATE.format(
@@ -620,8 +618,8 @@ async def get_asset_health(asset_id: int, request: Request, db: Session = Depend
         raise HTTPException(status_code=404, detail="资产不存在")
     verify_connection_access(asset.connection_id, user, db)
 
+
     from services.tableau.health import compute_asset_health
-    import json as _json
 
     datasources = _db.get_asset_datasources(asset_id)
     fields = _db.get_datasource_fields(asset_id)
@@ -642,8 +640,8 @@ async def get_connection_health_overview(conn_id: int, request: Request, db: Ses
         raise HTTPException(status_code=404, detail="连接不存在")
     verify_connection_access(conn_id, user, db)
 
+
     from services.tableau.health import compute_asset_health, get_health_level
-    import json as _json
 
     assets, total = _db.get_assets(conn_id, include_deleted=False, page=1, page_size=9999)
     results = []

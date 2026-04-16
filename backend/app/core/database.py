@@ -1,5 +1,8 @@
+import logging
 import os
 from typing import Generator
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base, scoped_session
@@ -39,7 +42,7 @@ def init_db():
     """
     在应用启动时创建所有数据库表。
     """
-    print("Initializing database schema...")
+    logger.info("Initializing database schema...")
     try:
         # 导入所有模型，确保 Base.metadata 包含了所有表的定义
         # 实际项目中，Alembic 会管理 schema，这里主要用于首次启动或测试
@@ -56,16 +59,20 @@ def init_db():
         from services.governance.models import QualityRule, QualityResult, QualityScore
 
         Base.metadata.create_all(bind=engine)
-        print("Database schema initialized successfully.")
+        logger.info("Database schema initialized successfully.")
     except (OperationalError, ProgrammingError) as e:
-        print(f"Error initializing database schema: {e}")
-        print("This might happen if the database is not yet available or if Alembic is managing migrations.")
-        print("If this is a fresh start, ensure your DATABASE_URL is correct and the PostgreSQL server is running.")
+        logger.warning("Error initializing database schema: %s", e)
+        logger.warning(
+            "This might happen if the database is not yet available or if Alembic is managing migrations."
+        )
+        logger.warning(
+            "If this is a fresh start, ensure your DATABASE_URL is correct and the PostgreSQL server is running."
+        )
         # Re-raise for critical errors during startup if needed, or just log and continue
         # For production, Alembic handles migrations, so create_all might not be strictly necessary here
         # but it's good for dev/testing setup.
     except Exception as e:
-        print(f"An unexpected error occurred during database initialization: {e}")
+        logger.error("An unexpected error occurred during database initialization: %s", e)
         raise
 
 def get_db() -> Generator:

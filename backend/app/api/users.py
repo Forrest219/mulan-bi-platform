@@ -1,12 +1,12 @@
+"""用户管理 API - 仅管理员可访问
 """
-用户管理 API - 仅管理员可访问
-"""
-from fastapi import APIRouter, HTTPException, Request, Depends
-from pydantic import BaseModel
-from typing import Optional, List
+from typing import List, Optional
 
-from app.core.dependencies import get_current_user, get_current_admin
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
+
 from app.core.constants import VALID_ROLES
+from app.core.dependencies import get_current_admin, get_current_user
 from services.auth import auth_service
 
 router = APIRouter()
@@ -14,6 +14,7 @@ router = APIRouter()
 
 class CreateUserRequest(BaseModel):
     """创建用户请求"""
+
     username: str
     display_name: str
     password: str
@@ -23,11 +24,13 @@ class CreateUserRequest(BaseModel):
 
 class UpdateUserRoleRequest(BaseModel):
     """更新用户角色请求"""
+
     role: str  # admin, data_admin, analyst, user
 
 
 class UpdatePermissionsRequest(BaseModel):
     """更新用户权限请求"""
+
     permissions: List[str]  # 权限标识列表
 
 

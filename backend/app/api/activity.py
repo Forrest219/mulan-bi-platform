@@ -1,12 +1,12 @@
+"""访问日志 API
 """
-访问日志 API
-"""
-from fastapi import APIRouter, Request
 from typing import Optional
 
+from fastapi import APIRouter, Request
+
 from app.core.dependencies import get_current_user
-from services.logs.models import LogDatabase
 from services.auth import auth_service
+from services.logs.models import LogDatabase
 
 router = APIRouter(tags=["访问日志"])
 

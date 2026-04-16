@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --color-primary: #0A4D68;
+  --color-text-dark: #2C3E50;
+  --color-text-light: #5C6B7B;
+  --color-404-text: #34495E;
+  --color-background-light: #F8F8F8;
+}
+
 @layer base {
   html {
     scrollbar-width: thin;

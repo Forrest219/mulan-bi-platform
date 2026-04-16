@@ -1,19 +1,21 @@
 """通知 API"""
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_current_user
 from app.core.database import get_db
+from app.core.dependencies import get_current_user
+from services.events import EVT_ERROR_MESSAGES, EvtErrorCode
 from services.events.models import EventDatabase
-from services.events import EvtErrorCode, EVT_ERROR_MESSAGES
 
 router = APIRouter()
 
 
 class BatchReadRequest(BaseModel):
+    """批量标记已读请求模型"""
+
     ids: Optional[list[int]] = None
     all: Optional[bool] = None
 
@@ -36,8 +38,7 @@ async def list_notifications(
     level: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    """
-    获取当前用户的通知列表（PRD §6.1）
+    """获取当前用户的通知列表（PRD §6.1）
     GET /api/notifications
     """
     user = get_current_user(request, db)
@@ -59,8 +60,7 @@ async def mark_notification_read(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """
-    标记通知已读（PRD §6.2）
+    """标记通知已读（PRD §6.2）
     PUT /api/notifications/{id}/read
     """
     user = get_current_user(request, db)
@@ -87,8 +87,7 @@ async def batch_mark_read(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """
-    批量标记通知已读（PRD §6.3）
+    """批量标记通知已读（PRD §6.3）
     PUT /api/notifications/batch-read
     """
     user = get_current_user(request, db)
@@ -112,8 +111,7 @@ async def get_unread_count(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """
-    获取未读通知数量（PRD §6.4）
+    """获取未读通知数量（PRD §6.4）
     GET /api/notifications/unread-count
     """
     user = get_current_user(request, db)
