@@ -1440,4 +1440,490 @@ el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
 | 日期 | 版本 | 作者 | 变更内容 |
 |------|------|------|---------|
 | 2026-04-18 | v1.0 | architect | 初稿：汇编 open-webui 侦察报告、Gap 清单、设计规范，输出完整 Spec 25 |
+| 2026-04-19 | v1.1 | PM | 追加 Phase 2：首页对话框体验优化（Batch 1-4 + Feedback API） |
+
+---
+
+## Phase 2: 首页对话框体验优化
+
+> 前置条件：Phase 1 所有 Gap 已验收（SSE 流式、AskBar、DragDrop 等）。
+> 铁律：不得破坏"你有几个数据源"的已验收连通性（META 查询路径）。
+> 本章节所有改动均有改前/改后对照，Coder 按批次独立实现并提交。
+
+---
+
+### Batch 1 — 结构性修复
+
+#### 1.1 消除双回复卡片
+
+**问题**：流式结束后，`isStreaming` 变为 `false`，`streamingMessages` 仍有内容，导致 `SearchResult` 与流式消息区同时渲染，用户看到两份回答。
+
+**文件**：`frontend/src/pages/home/page.tsx`
+
+改前（第 250-266 行区域）：
+```tsx
+{/* SearchResult（非流式路径） */}
+{homeState === 'HOME_RESULT' && result && !isStreaming && (
+  <SearchResult ... />
+)}
+{homeState === 'HOME_ERROR' && error && !isStreaming && (
+  <SearchResult ... />
+)}
+```
+
+改后：
+```tsx
+{/* SearchResult（非流式路径）— 仅在 streaming 消息区为空时渲染，防止双卡片 */}
+{homeState === 'HOME_RESULT' && result && !isStreaming && streamingMessages.length === 0 && (
+  <SearchResult ... />
+)}
+{homeState === 'HOME_ERROR' && error && !isStreaming && streamingMessages.length === 0 && (
+  <SearchResult ... />
+)}
+```
+
+**完成标准**：提交数据问题，等待流式完成后，页面中只有 streaming 消息区，不出现 SearchResult 白色卡片。
+
+---
+
+#### 1.2 用户消息改右对齐气泡
+
+**问题**：当前用户消息与 AI 消息样式相近（`bg-slate-100 ml-8`），视觉区分不足。
+
+**文件**：`frontend/src/pages/home/page.tsx`，流式消息展示区（第 207-246 行区域）
+
+改前（用户消息气泡部分）：
+```tsx
+className={`rounded-xl px-4 py-3 text-sm leading-relaxed ${
+  msg.role === 'user'
+    ? 'bg-slate-100 text-slate-700 ml-8'
+    : 'bg-white border border-slate-200 text-slate-800'
+}`}
+```
+
+改后：
+```tsx
+className={`rounded-xl px-4 py-3 text-sm leading-relaxed ${
+  msg.role === 'user'
+    ? 'bg-blue-600 text-white self-end max-w-[85%]'
+    : 'bg-white border border-slate-200 text-slate-800'
+}`}
+```
+
+同时，外层容器 `<div className="space-y-3">` 不变，但每条消息的外层 wrapper 需支持 flex 布局方向，将消息区整个 `<div>` 改为：
+```tsx
+<div className="space-y-3 flex flex-col">
+```
+
+**完成标准**：用户消息显示在右侧，背景 `bg-blue-600`，白色文字，最大宽度 85%，无左侧偏移。
+
+---
+
+#### 1.3 消息展示区宽度调整
+
+**问题**：当前消息展示区与输入框共用 `max-w-3xl`，消息内容展示空间过窄。
+
+**文件**：`frontend/src/pages/home/page.tsx`
+
+改前（主内容区 `<div>` 第 189 行）：
+```tsx
+<div
+  className={[
+    'w-full max-w-3xl mx-auto px-6',
+    ...
+  ].join(' ')}
+>
+```
+
+改后：
+```tsx
+<div
+  className={[
+    'w-full max-w-4xl mx-auto px-6',
+    ...
+  ].join(' ')}
+>
+```
+
+**注意**：AskBar 固定底部容器内的 `max-w-3xl` 不变：
+```tsx
+{/* 这段保持不动 */}
+<div className="max-w-3xl mx-auto px-6">
+  <AskBar ... />
+</div>
+```
+
+**完成标准**：在 1440px 宽屏下，消息展示区宽度为 `max-w-4xl`（896px），AskBar 保持 `max-w-3xl`（768px）。
+
+---
+
+### Batch 2 — AI 消息操作区
+
+#### 2.1 新建 MessageActions 组件
+
+**新建文件**：`frontend/src/pages/home/components/MessageActions.tsx`
+
+```tsx
+/**
+ * MessageActions — AI 消息底部操作栏
+ * 悬停时可见，支持复制、点赞、踩
+ */
+interface MessageActionsProps {
+  content: string;
+  conversationId: string | null;
+  messageIndex: number;
+  question: string;        // 该 AI 消息对应的用户问题
+  onFeedback?: (rating: 'up' | 'down') => void;
+}
+```
+
+组件实现要点：
+- 外层容器：`className="flex items-center gap-1 mt-2 invisible group-hover:visible transition-opacity duration-150"`
+- 复制按钮：点击调用 `navigator.clipboard.writeText(content)`，图标 `ri-file-copy-line`，点击后图标切换为 `ri-check-line`（2秒后复原）
+- 点赞按钮：图标 `ri-thumb-up-line`，点击后变 `ri-thumb-up-fill`，调用 `POST /api/feedback`
+- 踩按钮：图标 `ri-thumb-down-line`，点击后变 `ri-thumb-down-fill`，调用 `POST /api/feedback`
+- 按钮公共样式：`p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors`
+- 已点击后按钮不可再次点击（disabled），防止重复提交
+
+`POST /api/feedback` 请求体：
+```json
+{
+  "conversation_id": "string | null",
+  "message_index": 0,
+  "question": "用户问题文本",
+  "answer_summary": "msg.content 前 100 字",
+  "rating": "up" | "down"
+}
+```
+
+---
+
+#### 2.2 在消息展示区集成 MessageActions
+
+**文件**：`frontend/src/pages/home/page.tsx`
+
+改前（AI 消息内容渲染后没有操作栏）：
+```tsx
+{msg.content && (
+  <div className={msg.role === 'assistant' ? 'prose prose-sm max-w-none prose-slate' : ''}>
+    {msg.role === 'assistant' ? (
+      <>
+        <ReactMarkdown ...>{msg.content}</ReactMarkdown>
+        {msg.isStreaming && <span ... />}
+      </>
+    ) : (
+      <span ...>{msg.content}</span>
+    )}
+  </div>
+)}
+```
+
+改后（在 AI 消息完成后追加 MessageActions）：
+```tsx
+{msg.content && (
+  <div className={msg.role === 'assistant' ? 'prose prose-sm max-w-none prose-slate' : ''}>
+    {msg.role === 'assistant' ? (
+      <>
+        <ReactMarkdown ...>{msg.content}</ReactMarkdown>
+        {msg.isStreaming && <span ... />}
+      </>
+    ) : (
+      <span ...>{msg.content}</span>
+    )}
+  </div>
+)}
+{/* AI 消息完成后渲染操作栏 */}
+{msg.role === 'assistant' && !msg.isStreaming && (
+  <MessageActions
+    content={msg.content}
+    conversationId={currentConversationId}
+    messageIndex={streamingMessages.indexOf(msg)}
+    question={
+      // 取本条 AI 消息前一条 user 消息的内容
+      streamingMessages
+        .slice(0, streamingMessages.indexOf(msg))
+        .reverse()
+        .find((m) => m.role === 'user')?.content ?? ''
+    }
+  />
+)}
+```
+
+同时，每条消息的外层 `<div key={msg.id}>` 需加 `group` 类，以触发 `group-hover:visible`：
+```tsx
+<div key={msg.id} className={`group rounded-xl ...`}>
+```
+
+**完成标准**：
+1. 鼠标悬停在完成的 AI 消息上，底部出现操作栏（复制、👍、👎）
+2. 鼠标移离，操作栏消失
+3. 点击复制，剪贴板包含消息文本
+4. 点击点赞/踩，Network 出现 `POST /api/feedback`，返回 `{"ok": true}`
+
+---
+
+### Batch 3 — 输入框打磨
+
+#### 3.1 AskBar 外观微调
+
+**文件**：`frontend/src/pages/home/components/AskBar.tsx`
+
+改前（外层容器，第 125 行）：
+```tsx
+<div className="relative rounded-2xl border border-slate-200 bg-white/80 backdrop-blur-sm shadow-sm px-3 py-3 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/20 transition-shadow">
+```
+
+改后：
+```tsx
+<div className="relative rounded-3xl border border-slate-200 bg-white/80 backdrop-blur-sm shadow-md px-3 py-3 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:shadow-lg transition-shadow">
+```
+
+变更摘要：
+- `rounded-2xl` → `rounded-3xl`
+- `shadow-sm` → `shadow-md`
+- 新增 focus 时 `focus-within:shadow-lg`
+
+---
+
+#### 3.2 占位符文字更新
+
+**文件**：`frontend/src/pages/home/components/AskBar.tsx`
+
+改前（第 159 行 placeholder 属性）：
+```tsx
+placeholder={noConnection ? '请先添加连接，再开始提问' : '输入你的数据问题…（Enter 发送，Shift+Enter 换行）'}
+```
+
+改后：
+```tsx
+placeholder={noConnection ? '请先添加连接，再开始提问' : '向木兰提问…'}
+```
+
+---
+
+#### 3.3 快捷键提示颜色
+
+**文件**：`frontend/src/pages/home/components/AskBar.tsx`
+
+改前（第 168 行）：
+```tsx
+<span className="absolute right-14 bottom-4 text-[10px] text-slate-300 select-none pointer-events-none">
+```
+
+改后：
+```tsx
+<span className="absolute right-14 bottom-4 text-[10px] text-slate-300 select-none pointer-events-none">
+```
+
+注意：原文已是 `text-slate-300`，无需改动。若现有代码为 `text-slate-400`，则改为 `text-slate-300`。
+
+---
+
+#### 3.4 流式中发送按钮变停止图标
+
+**文件**：`frontend/src/hooks/useStreamingChat.ts`
+
+在 `UseStreamingChatReturn` 接口新增 `abort` 方法（包装 `stopStreaming`，保持向后兼容）：
+
+改前：
+```ts
+export interface UseStreamingChatReturn {
+  messages: StreamingMessage[];
+  isStreaming: boolean;
+  sendMessage: (question: string, connectionId?: number) => Promise<void>;
+  stopStreaming: () => void;
+  clearMessages: () => void;
+}
+```
+
+改后：
+```ts
+export interface UseStreamingChatReturn {
+  messages: StreamingMessage[];
+  isStreaming: boolean;
+  sendMessage: (question: string, connectionId?: number) => Promise<void>;
+  stopStreaming: () => void;
+  abort: () => void;   // 新增：与 stopStreaming 行为相同，供 AskBar 调用
+  clearMessages: () => void;
+}
+```
+
+在 `return` 语句中新增 `abort: stopStreaming`：
+```ts
+return { messages, isStreaming, sendMessage, stopStreaming, abort: stopStreaming, clearMessages };
+```
+
+**文件**：`frontend/src/pages/home/page.tsx`
+
+解构时新增 `abort`：
+```ts
+const { messages: streamingMessages, isStreaming, sendMessage, abort } = useStreamingChat();
+```
+
+将 `abort` 透传给 AskBar（新增 prop）：
+```tsx
+<AskBar
+  ...
+  onAbort={abort}
+/>
+```
+
+**文件**：`frontend/src/pages/home/components/AskBar.tsx`
+
+在 `AskBarProps` 新增可选字段：
+```ts
+interface AskBarProps {
+  ...
+  onAbort?: () => void;   // 新增：流式中点击停止时调用
+}
+```
+
+在发送按钮处，根据外部 `isStreaming`（通过 `loading` prop 无法感知，需通过父组件 `onLoading` 状态同步或新增 `isStreaming` prop）渲染停止图标。
+
+**注意**：AskBar 当前使用内部 `loading` state 感知请求状态。由于 SSE 流式过程中 `onLoading(false)` 已在 `submit()` 的 finally 中调用（流式实际由 `useStreamingChat` 接管），需在 AskBar 新增 `isStreaming` prop 以感知外部流式状态：
+
+在 `AskBarProps` 新增：
+```ts
+isStreaming?: boolean;   // 新增：外部 SSE 流式进行中标志
+```
+
+`page.tsx` 传递：
+```tsx
+<AskBar
+  ...
+  isStreaming={isStreaming}
+  onAbort={abort}
+/>
+```
+
+发送按钮改前：
+```tsx
+<button
+  onClick={submit}
+  disabled={loading || !input.trim()}
+  ...
+>
+  {loading ? (
+    <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+  ) : (
+    <i className="ri-send-plane-fill text-base" />
+  )}
+</button>
+```
+
+发送按钮改后：
+```tsx
+<button
+  onClick={isStreaming ? onAbort : submit}
+  disabled={!isStreaming && (loading || !input.trim())}
+  className="absolute right-4 top-1/2 -translate-y-1/2 p-2.5 bg-blue-700
+             hover:bg-blue-800 disabled:bg-slate-100 disabled:text-slate-300 text-white rounded-lg transition-colors"
+  aria-label={isStreaming ? '停止' : '发送'}
+>
+  {isStreaming ? (
+    <i className="ri-stop-circle-line text-base" />
+  ) : loading ? (
+    <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+  ) : (
+    <i className="ri-send-plane-fill text-base" />
+  )}
+</button>
+```
+
+**完成标准**：
+1. 流式进行中，发送按钮显示 `ri-stop-circle-line` 图标
+2. 点击停止后 SSE 连接中断，气泡显示已生成内容，`isStreaming` 变 false
+3. 停止后按钮恢复为发送图标，可重新输入提问
+
+---
+
+### Batch 4 — Loading 状态统一
+
+#### 4.1 删除外部 spinner
+
+**文件**：`frontend/src/pages/home/page.tsx`
+
+删除以下完整 JSX 块（第 269-277 行）：
+```tsx
+{/* Loading 指示器（流式内容尚未开始时） */}
+{homeState === 'HOME_SUBMITTING' && streamingMessages.length === 0 && (
+  <div className="flex justify-center py-6">
+    <div className="flex items-center gap-3 text-slate-400 text-sm">
+      <div className="w-5 h-5 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+      正在分析您的问题...
+    </div>
+  </div>
+)}
+```
+
+**理由**：气泡内三点动画（已有）已能表达 loading 状态，双 loading 指示器冗余且视觉混乱。
+
+**完成标准**：提交问题后，页面中心不出现旋转圆圈 spinner；三点动画仅出现在 AI 气泡内部。
+
+---
+
+#### 4.2 确认保留气泡内三点动画
+
+**文件**：`frontend/src/pages/home/page.tsx`
+
+以下代码块为已有实现，Coder 确认存在即可，**不需要修改**：
+```tsx
+{msg.role === 'assistant' && msg.isStreaming && !msg.content && (
+  <span className="inline-flex items-center gap-1.5 text-slate-400">
+    <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce [animation-delay:0ms]" />
+    <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce [animation-delay:150ms]" />
+    <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce [animation-delay:300ms]" />
+  </span>
+)}
+```
+
+**完成标准**：流式第一条 AI 消息出现但内容为空时，气泡内显示三点弹跳动画。
+
+---
+
+#### 4.3 每条 AI 消息加品牌标识
+
+**文件**：`frontend/src/pages/home/page.tsx`，流式消息展示区
+
+在每条 `msg.role === 'assistant'` 消息的气泡内容顶部，追加发言者标识行：
+
+改前（AI 消息气泡，无发言者标识）：
+```tsx
+<div key={msg.id} className={`rounded-xl px-4 py-3 ...`}>
+  {msg.role === 'assistant' && msg.isStreaming && !msg.content && ( /* 三点动画 */ )}
+  {msg.content && ( /* 消息内容 */ )}
+</div>
+```
+
+改后（AI 消息气泡顶部加品牌标识行）：
+```tsx
+<div key={msg.id} className={`group rounded-xl px-4 py-3 ...`}>
+  {msg.role === 'assistant' && (
+    <div className="flex items-center gap-1.5 mb-2">
+      <img
+        src={LOGO_URL}
+        alt="木兰"
+        className="w-5 h-5 object-contain rounded-full"
+      />
+      <span className="text-xs text-slate-400">木兰</span>
+    </div>
+  )}
+  {msg.role === 'assistant' && msg.isStreaming && !msg.content && ( /* 三点动画 */ )}
+  {msg.content && ( /* 消息内容 */ )}
+</div>
+```
+
+`LOGO_URL` 已在 `page.tsx` 顶部从 `../../config` 导入，无需额外引入。
+
+**完成标准**：每条 AI 消息左上方显示品牌 logo 小圆（`w-5 h-5`）和"木兰"文字（`text-xs text-slate-400`）；用户消息不显示此标识。
+
+---
+
+### Batch 1-4 通用约束
+
+1. **不改动 SSE 接入点**：`useStreamingChat.sendMessage()` 的 fetch URL `/api/chat/stream` 和 SSE 解析逻辑不变。
+2. **不改动 AskBar 提交逻辑**：`submit()` 函数中 `askQuestion()` 调用和 `onLoading()` 回调不变。
+3. **不改动 ScopeContext**：连接选择下拉和 `connectionId` 传递逻辑不变。
+4. **Tailwind 类名**：所有新增类名须在 Tailwind v3 范围内，不引入新的 CSS 文件。
+5. **TypeScript 严格模式**：新增组件和 prop 须补全类型定义，不使用 `any`。
 | 2026-04-18 | v1.1 | architect | 风险补充：移动端 Sidebar Overlay 模式设计决策说明（5.2）；新增陷阱 6（React 19 AskBar 高频更新 + memo/RAF 批处理方案）；新增陷阱 7（AutoGrowingTextarea 极端输入 overflow-y-auto 修复要求 + AC-02-08/09）|

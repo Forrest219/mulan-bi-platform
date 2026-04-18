@@ -33,12 +33,16 @@ interface AskBarProps {
    * 为 undefined 或 null 时：保持原有内部下拉行为。
    */
   connectionId?: string | null;
+  /** 流式进行中时为 true，用于显示停止按钮 */
+  isStreaming?: boolean;
+  /** 停止流式的回调 */
+  onAbort?: () => void;
 }
 
 // memo 包裹：Gap-05 §11 陷阱6 — streaming content state 在父层，AskBar 不应因 token 到达而重渲染
 // forwardRef + memo 组合：先用 forwardRef 定义，再用 memo 导出
 const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
-  function AskBar({ onResult, onError, onLoading, onQuestionChange, conversationId, connectionId: externalConnectionId }, ref) {
+  function AskBar({ onResult, onError, onLoading, onQuestionChange, conversationId, connectionId: externalConnectionId, isStreaming, onAbort }, ref) {
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
     const [connections, setConnections] = useState<TableauConnection[]>([]);
@@ -122,7 +126,7 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
 
     return (
       <>
-      <div className="relative rounded-2xl border border-slate-200 bg-white/80 backdrop-blur-sm shadow-sm px-3 py-3 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/20 transition-shadow">
+      <div className="relative rounded-3xl border border-slate-200/70 bg-white/80 backdrop-blur-sm shadow-md px-3 py-3 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:shadow-lg transition-shadow">
         {/* 连接选择器（多连接时，左下角 inline） */}
         {showConnectionSelect && (
           <div className="absolute left-5 bottom-4 z-10">
@@ -156,7 +160,7 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
               submit();
             }
           }}
-          placeholder={noConnection ? '请先添加连接，再开始提问' : '输入你的数据问题…（Enter 发送，Shift+Enter 换行）'}
+          placeholder={noConnection ? '请先添加连接，再开始提问' : '向木兰提问…'}
           rows={2}
           disabled={loading}
           className={`w-full pr-20 py-3 bg-white text-slate-800 placeholder-slate-400
@@ -165,23 +169,34 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
         />
 
         {/* 快捷键提示 */}
-        <span className="absolute right-14 bottom-4 text-[10px] text-slate-300 select-none pointer-events-none">
+        <span className="absolute right-14 bottom-4 text-[10px] text-slate-300 select-none pointer-events-none" style={{ color: '#cbd5e1' }}>
           ⌘K
         </span>
 
-        <button
-          onClick={submit}
-          disabled={loading || !input.trim()}
-          className="absolute right-4 top-1/2 -translate-y-1/2 p-2.5 bg-blue-700
-                     hover:bg-blue-800 disabled:bg-slate-100 disabled:text-slate-300 text-white rounded-lg transition-colors"
-          aria-label="发送"
-        >
-          {loading ? (
-            <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-          ) : (
-            <i className="ri-send-plane-fill text-base" />
-          )}
-        </button>
+        {isStreaming ? (
+          <button
+            onClick={onAbort}
+            className="absolute right-4 top-1/2 -translate-y-1/2 p-2.5 bg-blue-700
+                       hover:bg-blue-800 text-white rounded-lg transition-colors"
+            aria-label="停止"
+          >
+            <i className="ri-stop-circle-line text-base" />
+          </button>
+        ) : (
+          <button
+            onClick={submit}
+            disabled={loading || !input.trim()}
+            className="absolute right-4 top-1/2 -translate-y-1/2 p-2.5 bg-blue-700
+                       hover:bg-blue-800 disabled:bg-slate-100 disabled:text-slate-300 text-white rounded-lg transition-colors"
+            aria-label="发送"
+          >
+            {loading ? (
+              <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <i className="ri-send-plane-fill text-base" />
+            )}
+          </button>
+        )}
       </div>
       {noConnectionHint && (
         <p className="mt-1.5 text-xs text-amber-600">

@@ -21,6 +21,8 @@ export interface UseStreamingChatReturn {
   isStreaming: boolean;
   sendMessage: (question: string, connectionId?: number) => Promise<void>;
   stopStreaming: () => void;
+  /** abort — 包装 stopStreaming，供 AskBar 停止按钮使用 */
+  abort: () => void;
   clearMessages: () => void;
 }
 
@@ -179,10 +181,15 @@ export function useStreamingChat(): UseStreamingChatReturn {
     abortRef.current?.abort();
   }, []);
 
+  /** abort — 包装 stopStreaming，供 AskBar 停止按钮使用（SESSION.md 约束：不修改 stopStreaming 实现） */
+  const abort = useCallback(() => {
+    stopStreaming();
+  }, [stopStreaming]);
+
   /** clearMessages — 清空消息列表（新对话） */
   const clearMessages = useCallback(() => {
     setMessages([]);
   }, []);
 
-  return { messages, isStreaming, sendMessage, stopStreaming, clearMessages };
+  return { messages, isStreaming, sendMessage, stopStreaming, abort, clearMessages };
 }

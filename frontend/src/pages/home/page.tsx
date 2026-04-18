@@ -24,6 +24,7 @@ import { AssetInspectorDrawer } from './components/AssetInspectorDrawer';
 import { useHomeUrlState } from './hooks/useHomeUrlState';
 // Gap-05: SSE streaming hook — state 与 AskBar 完全隔离（§11 陷阱6）
 import { useStreamingChat } from '../../hooks/useStreamingChat';
+import { MessageActions } from './components/MessageActions';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -43,7 +44,7 @@ function HomePageInner() {
   const { assetId, tab, connectionId, closeAsset, openAsset } = useHomeUrlState();
 
   // Gap-05: streaming state 完全独立，不与 AskBar 的 input/loading state 共享
-  const { messages: streamingMessages, isStreaming, sendMessage } = useStreamingChat();
+  const { messages: streamingMessages, isStreaming, sendMessage, abort } = useStreamingChat();
 
   useEffect(() => {
     if (homeState !== 'HOME_OFFLINE') {
@@ -186,7 +187,7 @@ function HomePageInner() {
       >
         <div
           className={[
-            'w-full max-w-3xl mx-auto px-6',
+            'w-full max-w-4xl mx-auto px-6',
             homeState === 'HOME_IDLE' ? 'space-y-8' : 'pt-6 space-y-6',
           ].join(' ')}
         >
@@ -203,57 +204,84 @@ function HomePageInner() {
 
           {/* Gap-05: SSE 流式消息展示区 */}
           {streamingMessages.length > 0 && (
-            <div className="space-y-3">
-              {streamingMessages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`rounded-xl px-4 py-3 text-sm leading-relaxed ${
-                    msg.role === 'user'
-                      ? 'bg-slate-100 text-slate-700 ml-8'
-                      : 'bg-white border border-slate-200 text-slate-800'
-                  }`}
-                >
-                  {msg.role === 'assistant' && msg.isStreaming && !msg.content && (
-                    <span className="inline-flex items-center gap-1.5 text-slate-400">
-                      <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce [animation-delay:0ms]" />
-                      <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce [animation-delay:150ms]" />
-                      <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce [animation-delay:300ms]" />
-                    </span>
-                  )}
-                  {msg.content && (
-                    <div className={msg.role === 'assistant' ? 'prose prose-sm max-w-none prose-slate' : ''}>
-                      {msg.role === 'assistant' ? (
-                        <>
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {msg.content}
-                          </ReactMarkdown>
-                          {msg.isStreaming && (
-                            <span className="inline-block w-0.5 h-4 ml-0.5 bg-slate-600 animate-pulse align-text-bottom" />
-                          )}
-                        </>
-                      ) : (
-                        <span className="whitespace-pre-wrap">
-                          {msg.content}
-                          {msg.isStreaming && (
-                            <span className="inline-block w-0.5 h-4 ml-0.5 bg-slate-600 animate-pulse align-text-bottom" />
-                          )}
+            <div className="space-y-4 flex flex-col">
+              {(() => {
+                let lastUserQuestion = '';
+                return streamingMessages.map((msg, msgIndex) => {
+                  if (msg.role === 'user') {
+                    lastUserQuestion = msg.content;
+                  }
+                  const questionForAction = lastUserQuestion;
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`group rounded-xl px-4 py-3 text-sm leading-relaxed ${
+                        msg.role === 'user'
+                          ? 'bg-blue-600 text-white self-end max-w-[85%] ml-auto'
+                          : 'bg-white border border-slate-200 text-slate-800 mr-auto max-w-[85%]'
+                      }`}
+                    >
+                      {/* Batch 4.2: AI 消息品牌标识 */}
+                      {msg.role === 'assistant' && (
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <div className="w-5 h-5 rounded-full bg-blue-700 flex items-center justify-center">
+                            <i className="ri-robot-line text-white text-[10px]" />
+                          </div>
+                          <span className="text-xs text-slate-400">木兰</span>
+                        </div>
+                      )}
+                      {msg.role === 'assistant' && msg.isStreaming && !msg.content && (
+                        <span className="inline-flex items-center gap-1.5 text-slate-400">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce [animation-delay:0ms]" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce [animation-delay:150ms]" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce [animation-delay:300ms]" />
                         </span>
                       )}
+                      {msg.content && (
+                        <div className={msg.role === 'assistant' ? 'prose prose-sm max-w-none prose-slate' : ''}>
+                          {msg.role === 'assistant' ? (
+                            <>
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {msg.content}
+                              </ReactMarkdown>
+                              {msg.isStreaming && (
+                                <span className="inline-block w-0.5 h-4 ml-0.5 bg-slate-600 animate-pulse align-text-bottom" />
+                              )}
+                            </>
+                          ) : (
+                            <span className="whitespace-pre-wrap">
+                              {msg.content}
+                              {msg.isStreaming && (
+                                <span className="inline-block w-0.5 h-4 ml-0.5 bg-slate-600 animate-pulse align-text-bottom" />
+                              )}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {/* Batch 2.2: AI 消息操作区（仅在消息完成后显示） */}
+                      {msg.role === 'assistant' && !msg.isStreaming && (
+                        <MessageActions
+                          content={msg.content}
+                          conversationId={currentConversationId}
+                          messageIndex={msgIndex}
+                          question={questionForAction}
+                        />
+                      )}
                     </div>
-                  )}
-                </div>
-              ))}
+                  );
+                });
+              })()}
             </div>
           )}
 
-          {/* SearchResult（非流式路径） */}
-          {homeState === 'HOME_RESULT' && result && !isStreaming && (
+          {/* SearchResult（非流式路径，流式激活后完全隐藏） */}
+          {homeState === 'HOME_RESULT' && result && !isStreaming && streamingMessages.length === 0 && (
             <SearchResult
               result={result}
               onRetry={() => { if (lastQuestion) handleExamplePick(lastQuestion); }}
             />
           )}
-          {homeState === 'HOME_ERROR' && error && !isStreaming && (
+          {homeState === 'HOME_ERROR' && error && !isStreaming && streamingMessages.length === 0 && (
             <SearchResult
               result={{
                 type: 'error',
@@ -263,16 +291,6 @@ function HomePageInner() {
               }}
               onRetry={() => { if (lastQuestion) handleExamplePick(lastQuestion); }}
             />
-          )}
-
-          {/* Loading 指示器（流式内容尚未开始时） */}
-          {homeState === 'HOME_SUBMITTING' && streamingMessages.length === 0 && (
-            <div className="flex justify-center py-6">
-              <div className="flex items-center gap-3 text-slate-400 text-sm">
-                <div className="w-5 h-5 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
-                正在分析您的问题...
-              </div>
-            </div>
           )}
 
           {/* SuggestionGrid：仅 idle 态 */}
@@ -300,6 +318,8 @@ function HomePageInner() {
               onQuestionChange={(q) => { setLastQuestion(q); lastQuestionRef.current = q; }}
               conversationId={currentConversationId ?? undefined}
               connectionId={connectionId}
+              isStreaming={isStreaming}
+              onAbort={abort}
             />
             <p className="mt-2 text-center text-[11px] text-slate-400">
               回答由 AI 生成，请核对关键数据后使用
