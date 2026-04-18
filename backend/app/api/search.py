@@ -2,7 +2,7 @@
 import logging
 from typing import Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -29,6 +29,7 @@ from services.llm.nlq_service import (
     is_datasource_sensitivity_blocked,
     MAX_QUERY_LENGTH,
 )
+from services.tableau.mcp_client import get_tableau_mcp_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -84,6 +85,134 @@ def _nlq_error_response(code: str, message: str, details: dict = None):
     )
 
 
+async def _mcp_list_datasources(
+    mcp_base_url: str,
+    tableau_server: str,
+    site_name: str,
+    pat_name: str,
+    pat_value: str,
+    timeout: float = 30.0,
+) -> list:
+    """
+    直接通过 MCP JSON-RPC 调用 list-datasources 工具（不依赖 TableauConnection 表）。
+
+    用于：当 TableauConnection 为空但 MCP server config 有 credentials 时。
+    """
+    import httpx
+    import json as _json
+
+    protocol_ver = "2025-06-18"
+    session_id = "nlq-fallback-session"
+
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "MCP-Protocol-Version": protocol_ver,
+        "MCP-Session-ID": session_id,
+    }
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        # initialize
+        await client.post(
+            mcp_base_url,
+            json={
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": protocol_ver,
+                    "clientInfo": {"name": "nlq-fallback", "version": "1.0"},
+                    "serverInfo": {"name": "tableau-mcp", "version": "1.0"},
+                }
+            },
+            headers=headers,
+        )
+
+        # notifications/initialized
+        await client.post(
+            mcp_base_url,
+            json={"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            headers=headers,
+        )
+
+        # tools/call: list-datasources
+        list_resp = await client.post(
+            mcp_base_url,
+            json={
+                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": {"name": "list-datasources", "arguments": {"limit": 10}}
+            },
+            headers=headers,
+        )
+        list_data = list_resp.json()
+        result = list_data.get("result", {})
+        content = result.get("content", [])
+        text = "".join(c.get("text", "") for c in content if c.get("type") == "text")
+        if text:
+            list_result = _json.loads(text)
+            return list_result.get("datasources", [])
+        return []
+
+
+async def _mcp_get_datasource_metadata(
+    mcp_base_url: str,
+    datasource_luid: str,
+    timeout: float = 30.0,
+) -> dict:
+    """
+    直接通过 MCP JSON-RPC 调用 get-datasource-metadata 工具（不依赖 TableauConnection 表）。
+    """
+    import httpx
+    import json as _json
+
+    protocol_ver = "2025-06-18"
+    session_id = "nlq-fallback-session"
+
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "MCP-Protocol-Version": protocol_ver,
+        "MCP-Session-ID": session_id,
+    }
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        # initialize
+        await client.post(
+            mcp_base_url,
+            json={
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": protocol_ver,
+                    "clientInfo": {"name": "nlq-fallback", "version": "1.0"},
+                    "serverInfo": {"name": "tableau-mcp", "version": "1.0"},
+                }
+            },
+            headers=headers,
+        )
+
+        # notifications/initialized
+        await client.post(
+            mcp_base_url,
+            json={"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            headers=headers,
+        )
+
+        # tools/call: get-datasource-metadata
+        meta_resp = await client.post(
+            mcp_base_url,
+            json={
+                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": {"name": "get-datasource-metadata", "arguments": {"datasourceLuid": datasource_luid}}
+            },
+            headers=headers,
+        )
+        meta_data = meta_resp.json()
+        result = meta_data.get("result", {})
+        content = result.get("content", [])
+        text = "".join(c.get("text", "") for c in content if c.get("type") == "text")
+        if text:
+            return _json.loads(text)
+        return {}
+
+
 def _get_asset_by_luid(datasource_luid: str):
     """通过 datasource_luid 查找 TableauAsset"""
     db = TableauDatabase()
@@ -100,12 +229,13 @@ def _get_asset_by_luid(datasource_luid: str):
 @router.post("/query")
 async def query(
     body: QueryRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """自然语言查询（PRD §6.2）POST /api/search/query — analyst+
     将用户自然语言问题转换为数据查询并返回结果。
     """
-    user = get_current_user(request=None, db=db)
+    user = get_current_user(request=request, db=db)
     _require_role(user, "analyst")
 
     question = body.question
@@ -137,7 +267,7 @@ async def query(
 
     # 速率限制检查
     user_id = user.get("id")
-    if user_id and not check_rate_limit(user_id, limit=20, window=60):
+    if user_id and not check_rate_limit(user_id):
         raise _nlq_error_response("NLQ_010", "查询过于频繁，请稍后再试")
 
     # 长度检查
@@ -183,10 +313,78 @@ async def query(
             # 尝试多数据源路由
             chosen_ds = route_datasource(question)
             if not chosen_ds:
+                # Fallback：尝试通过 MCP 动态发现数据源
+                logger.info("路由未命中，尝试 MCP 动态发现数据源 trace=%s", audit_record.trace_id)
+                try:
+                    from services.tableau.models import TableauConnection as _TableauConnection
+                    from services.mcp.models import McpServer
+
+                    db_temp = TableauDatabase()
+                    session_temp = db_temp.session
+                    active_conn = session_temp.query(_TableauConnection).filter(
+                        _TableauConnection.is_active == True,
+                    ).order_by(_TableauConnection.id.asc()).first()
+
+                    if not active_conn:
+                        # TableauConnection 为空，从活跃 MCP server config 获取 credentials
+                        mcp_server_record = session_temp.query(McpServer).filter(
+                            McpServer.is_active == True,
+                            McpServer.type == "tableau",
+                        ).order_by(McpServer.id.asc()).first()
+
+                        if mcp_server_record and mcp_server_record.credentials:
+                            creds = mcp_server_record.credentials
+                            mcp_base_url = mcp_server_record.server_url
+                            tableau_server = creds.get("tableau_server", "")
+                            site_name = creds.get("site_name", "")
+                            pat_name = creds.get("pat_name", "")
+                            pat_value = creds.get("pat_value", "")
+
+                            if tableau_server and site_name and pat_name and pat_value:
+                                # 用 MCP config credentials 直接调用 MCP JSON-RPC
+                                ds_list = await _mcp_list_datasources(
+                                    mcp_base_url, tableau_server, site_name, pat_name, pat_value
+                                )
+                                if ds_list and len(ds_list) > 0:
+                                    first_ds = ds_list[0]
+                                    chosen_ds = {
+                                        "datasource_luid": first_ds.get("luid") or first_ds.get("id", ""),
+                                        "datasource_name": first_ds.get("name", "MCP 数据源"),
+                                        "connection_id": None,
+                                        "mcp_discovery": True,
+                                        "mcp_base_url": mcp_base_url,
+                                        "mcp_site": site_name,
+                                        "mcp_token_name": pat_name,
+                                        "mcp_token_value": pat_value,
+                                    }
+                                    logger.info("MCP 动态发现数据源成功: luid=%s, name=%s trace=%s",
+                                                chosen_ds["datasource_luid"], chosen_ds["datasource_name"], audit_record.trace_id)
+
+                    elif active_conn:
+                        mcp_client = get_tableau_mcp_client(active_conn.id)
+                        mcp_result = mcp_client.list_datasources(limit=10, timeout=15)
+                        ds_list = mcp_result.get("datasources", [])
+                        if ds_list and len(ds_list) > 0:
+                            first_ds = ds_list[0]
+                            chosen_ds = {
+                                "datasource_luid": first_ds.get("luid") or first_ds.get("datasource_luid") or first_ds.get("id"),
+                                "datasource_name": first_ds.get("name") or first_ds.get("datasourceName") or "MCP 数据源",
+                                "connection_id": active_conn.id,
+                                "mcp_discovery": True,
+                            }
+                            logger.info("MCP 动态发现数据源成功: luid=%s, name=%s trace=%s",
+                                        chosen_ds["datasource_luid"], chosen_ds["datasource_name"], audit_record.trace_id)
+
+                    session_temp.close()
+                except Exception as mcp_err:
+                    logger.warning("MCP 动态发现失败: %s trace=%s", mcp_err, audit_record.trace_id)
+
+            if not chosen_ds:
                 raise _nlq_error_response("NLQ_005", "请指定数据源（datasource_luid 或 connection_id）")
 
         ds_luid = chosen_ds["datasource_luid"]
         ds_name = chosen_ds["datasource_name"]
+        is_mcp_discovery = chosen_ds.get("mcp_discovery", False)
 
         # 1c. 获取数据源字段
         db = TableauDatabase()
@@ -197,55 +395,100 @@ async def query(
         ).first()
         session.close()
 
-        if not asset:
-            raise _nlq_error_response("NLQ_009", "数据源不存在或已删除")
-
-        field_records = db.get_datasource_fields(asset.id)
-
-        # 提取 field_registry_id（= TableauDatasourceField.id）用于批量查敏感度
-        field_ids = [f.id for f in field_records]
-
-        # 批量查询字段敏感度（JOIN TableauFieldSemantics）
-        # 注意：使用新的 session 查询，因为前面的 session 已关闭
-        sensitivity_map: Dict[int, str] = {}
-        if field_ids:
-            from services.semantic_maintenance.models import TableauFieldSemantics
-
-            db2 = TableauDatabase()
-            session2 = db2.session
+        # MCP 动态发现的数据源（不在本地 DB）→ 通过 MCP 获取字段元数据
+        if not asset and is_mcp_discovery:
+            logger.info("MCP 动态数据源，获取字段元数据 trace=%s", audit_record.trace_id)
             try:
-                semantics_records = session2.query(
-                    TableauFieldSemantics.field_registry_id,
-                    TableauFieldSemantics.sensitivity_level,
-                ).filter(
-                    TableauFieldSemantics.field_registry_id.in_(field_ids),
-                    TableauFieldSemantics.connection_id == asset.connection_id,
-                ).all()
-                sensitivity_map = {
-                    row.field_registry_id: (row.sensitivity_level or "low").lower()
-                    for row in semantics_records
+                # connection_id 为 None 表示使用 MCP config credentials（绕过 TableauConnection）
+                if chosen_ds.get("connection_id") is not None:
+                    mcp_client = get_tableau_mcp_client(connection_id=chosen_ds["connection_id"])
+                    metadata = mcp_client.get_datasource_metadata(ds_luid, timeout=30)
+                else:
+                    # 使用 MCP config credentials 直接调用 MCP JSON-RPC
+                    metadata = await _mcp_get_datasource_metadata(
+                        chosen_ds["mcp_base_url"], ds_luid, timeout=30
+                    )
+                # 解析 MCP 返回的字段（GraphQL Metadata API 格式）
+                raw_fields = metadata.get("data", {}).get("publishedDatasources", [{}])
+                if raw_fields and len(raw_fields) > 0:
+                    mcp_fields = raw_fields[0].get("fields", [])
+                    fields = []
+                    for f in mcp_fields:
+                        fname = f.get("name", "") or f.get("Name", "")
+                        ftype = f.get("dataType", "") or f.get("dataType", "")
+                        frole = f.get("role", "dimension")
+                        if fname:
+                            fields.append({
+                                "field_caption": fname,
+                                "field_name": fname,
+                                "role": frole,
+                                "data_type": ftype,
+                                "formula": None,
+                                "sensitivity_level": "low",
+                            })
+                    sanitized_fields = sanitize_fields_for_llm(fields)
+                    fields_with_types = _build_fields_with_types(sanitized_fields)
+                    asset_datasource_id = None
+                    logger.info("MCP 字段元数据获取成功: %d 个字段 trace=%s", len(fields), audit_record.trace_id)
+                else:
+                    sanitized_fields = []
+                    fields_with_types = "无可用字段"
+                    asset_datasource_id = None
+                    logger.warning("MCP 字段元数据为空 trace=%s", audit_record.trace_id)
+            except Exception as meta_err:
+                logger.error("MCP 获取字段元数据失败: %s trace=%s", meta_err, audit_record.trace_id)
+                raise _nlq_error_response("NLQ_009", "无法获取数据源字段信息，请联系管理员")
+
+        elif not asset:
+            raise _nlq_error_response("NLQ_009", "数据源不存在或已删除")
+        else:
+            field_records = db.get_datasource_fields(asset.id)
+
+            # 提取 field_registry_id（= TableauDatasourceField.id）用于批量查敏感度
+            field_ids = [f.id for f in field_records]
+
+            # 批量查询字段敏感度（JOIN TableauFieldSemantics）
+            # 注意：使用新的 session 查询，因为前面的 session 已关闭
+            sensitivity_map: Dict[int, str] = {}
+            if field_ids:
+                from services.semantic_maintenance.models import TableauFieldSemantics
+
+                db2 = TableauDatabase()
+                session2 = db2.session
+                try:
+                    semantics_records = session2.query(
+                        TableauFieldSemantics.field_registry_id,
+                        TableauFieldSemantics.sensitivity_level,
+                    ).filter(
+                        TableauFieldSemantics.field_registry_id.in_(field_ids),
+                        TableauFieldSemantics.connection_id == asset.connection_id,
+                    ).all()
+                    sensitivity_map = {
+                        row.field_registry_id: (row.sensitivity_level or "low").lower()
+                        for row in semantics_records
+                    }
+                finally:
+                    session2.close()
+
+            fields = [
+                {
+                    "field_caption": f.field_caption,
+                    "field_name": f.field_name,
+                    "role": f.role,
+                    "data_type": f.data_type,
+                    "formula": f.formula,
+                    "sensitivity_level": sensitivity_map.get(f.id, "low"),
                 }
-            finally:
-                session2.close()
+                for f in field_records
+            ]
 
-        fields = [
-            {
-                "field_caption": f.field_caption,
-                "field_name": f.field_name,
-                "role": f.role,
-                "data_type": f.data_type,
-                "formula": f.formula,
-                "sensitivity_level": sensitivity_map.get(f.id, "low"),
-            }
-            for f in field_records
-        ]
-
-        # 敏感度过滤（高敏字段不暴露给 LLM）
-        sanitized_fields = sanitize_fields_for_llm(fields)
-        fields_with_types = _build_fields_with_types(sanitized_fields)
+            # 敏感度过滤（高敏字段不暴露给 LLM）
+            sanitized_fields = sanitize_fields_for_llm(fields)
+            fields_with_types = _build_fields_with_types(sanitized_fields)
+            asset_datasource_id = asset.datasource_id
 
         # ── P3 增强：recall_fields 语义重排序 ──────────────────
-        recalled = await recall_fields(question, datasource_ids=[asset.datasource_id] if asset.datasource_id else None)
+        recalled = await recall_fields(question, datasource_ids=[asset_datasource_id] if asset_datasource_id else None)
         if recalled:
             recalled_names = {r["semantic_name_zh"] or r["semantic_name"] for r in recalled}
             # 将语义匹配度高的字段排在前面

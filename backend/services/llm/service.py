@@ -151,7 +151,7 @@ class LLMService:
             return {"error": "LLM 认证配置错误"}
 
         try:
-            if config.provider == "anthropic":
+            if config.provider in ("anthropic", "minimax") or "anthropic" in (config.base_url or ""):
                 return await self._anthropic_complete(api_key, config, prompt, system, timeout)
             else:
                 return await self._openai_complete(api_key, config, prompt, system, timeout)
@@ -177,7 +177,7 @@ class LLMService:
             return {"error": "LLM 认证配置错误"}
 
         try:
-            if config.provider == "anthropic":
+            if config.provider in ("anthropic", "minimax") or "anthropic" in (config.base_url or ""):
                 return await self._anthropic_complete_with_temp(
                     api_key, config, prompt, system, timeout, temperature
                 )
@@ -211,7 +211,7 @@ class LLMService:
             return {"error": "LLM 认证配置错误"}
 
         try:
-            if config.provider == "anthropic":
+            if config.provider in ("anthropic", "minimax") or "anthropic" in (config.base_url or ""):
                 return await self._anthropic_complete_with_temp(
                     api_key, config, prompt, system, timeout, temperature=0.1
                 )
@@ -442,6 +442,52 @@ class LLMService:
         if "error" in result:
             return {"success": False, "message": result["error"]}
         return {"success": True, "message": result["content"]}
+
+    async def test_connection_adhoc(
+        self,
+        base_url: str,
+        api_key: str,
+        model: str,
+        test_prompt: str = "Hello, respond with 'OK'",
+        provider: str = "openai",
+    ) -> dict:
+        """临时测试 LLM 连接（不依赖 DB，使用传入的参数）
+
+        用于新建配置时保存前的连接测试。
+        当 provider 为 anthropic/minimax 或 base_url 含 'anthropic' 时，走 Anthropic SDK。
+        """
+        use_anthropic = (
+            provider in ("anthropic", "minimax")
+            or "anthropic" in base_url.lower()
+        )
+
+        try:
+            if use_anthropic:
+                import anthropic as _anthropic
+                client = _anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url, timeout=15)
+                response = await client.messages.create(
+                    model=model,
+                    max_tokens=64,
+                    messages=[{"role": "user", "content": test_prompt}],
+                )
+                from anthropic.types import TextBlock as _TextBlock
+                text_blocks = [b for b in response.content if isinstance(b, _TextBlock)]
+                content = text_blocks[0].text.strip() if text_blocks else ""
+                return {"success": True, "message": content}
+            else:
+                from openai import AsyncOpenAI
+                client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=15)
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": test_prompt}],
+                    temperature=0.7,
+                    max_tokens=64,
+                )
+                content = response.choices[0].message.content.strip()
+                return {"success": True, "message": content}
+        except Exception as e:
+            logger.warning("ad-hoc LLM 测试失败: %s", e)
+            return {"success": False, "message": str(e)}
 
     async def generate_embedding_minimax(
         self,

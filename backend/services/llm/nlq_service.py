@@ -16,12 +16,94 @@ from services.llm.prompts import ONE_PASS_NL_TO_QUERY_TEMPLATE, ONE_PASS_RETRY_T
 from services.tableau.models import TableauDatabase, TableauAsset
 
 
+def _mcp_query_datasource_direct(
+    mcp_server_url: str,
+    site: str,
+    token_name: str,
+    token_value: str,
+    datasource_luid: str,
+    query: Dict[str, Any],
+    limit: int = 1000,
+    timeout: int = 30,
+) -> Dict[str, Any]:
+    """
+    直接通过 MCP JSON-RPC 调用 query-datasource 工具（不依赖 TableauConnection 表）。
+
+    用于：当 connection_id=None 且有活跃 MCP server config credentials 时。
+    """
+    import httpx
+
+    protocol_ver = "2025-06-18"
+    session_id = f"nlq-direct-{datasource_luid[:8]}"
+
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "MCP-Protocol-Version": protocol_ver,
+        "MCP-Session-ID": session_id,
+    }
+
+    try:
+        with httpx.Client(timeout=float(timeout)) as client:
+            # initialize
+            client.post(
+                mcp_server_url,
+                json={
+                    "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": {
+                        "protocolVersion": protocol_ver,
+                        "clientInfo": {"name": "nlq-direct", "version": "1.0"},
+                        "serverInfo": {"name": "tableau-mcp", "version": "1.0"},
+                    }
+                },
+                headers=headers,
+            )
+            # notifications/initialized
+            client.post(
+                mcp_server_url,
+                json={"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+                headers=headers,
+            )
+            # tools/call: query-datasource
+            resp = client.post(
+                mcp_server_url,
+                json={
+                    "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                    "params": {
+                        "name": "query-datasource",
+                        "arguments": {
+                            "datasourceLuid": datasource_luid,
+                            "query": query,
+                            "limit": limit,
+                        }
+                    }
+                },
+                headers=headers,
+            )
+            data = resp.json()
+            result = data.get("result", {})
+            content = result.get("content", [])
+            text = "".join(c.get("text", "") for c in content if c.get("type") == "text")
+            if text:
+                return json.loads(text)
+            return {}
+    except httpx.HTTPError as e:
+        logger.error("MCP direct query HTTP error: %s", e)
+        raise NLQError("NLQ_006", message=f"MCP 查询失败: {e}")
+    except json.JSONDecodeError as e:
+        logger.error("MCP direct query JSON decode error: %s", e)
+        raise NLQError("NLQ_006", message=f"MCP 返回格式错误: {e}")
+    except Exception as e:
+        logger.error("MCP direct query failed: %s", e)
+        raise NLQError("NLQ_006", message=f"MCP 查询失败: {e}")
+
+
 def execute_query(
     datasource_luid: str,
     vizql_json: Dict[str, Any],
     limit: int = 1000,
     timeout: int = 30,
-    connection_id: int = None,
+    connection_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Stage 3：查询执行。
@@ -49,7 +131,43 @@ def execute_query(
     from services.tableau.mcp_client import get_tableau_mcp_client, TableauMCPError
 
     if connection_id is None:
-        raise NLQError("NLQ_005", message="execute_query 必须传入 connection_id 参数")
+        # Fallback：当 connection_id=None 时，从活跃 MCP server config 获取 credentials
+        # 用于无预同步 TableauConnection 但有 MCP server 配置的场景（如首页问答 MCP fallback）
+        from app.core.database import SessionLocal
+        from services.mcp.models import McpServer
+        from app.core.crypto import get_tableau_crypto
+
+        db = SessionLocal()
+        try:
+            mcp_record = db.query(McpServer).filter(
+                McpServer.is_active == True,
+                McpServer.type == "tableau",
+            ).order_by(McpServer.id.asc()).first()
+
+            if not mcp_record or not mcp_record.credentials:
+                raise NLQError("NLQ_005", message="无可用的 Tableau 连接配置")
+
+            creds = mcp_record.credentials
+            pat_value = creds.get("pat_value", "")
+            if not pat_value:
+                raise NLQError("NLQ_005", message="Tableau PAT 未配置")
+
+            # 解密 PAT（PAT 在 MCP config 中是明文存储，MCP server 进程持有）
+            # 注意：这里 pat_value 是明文，直接传给 MCP
+            result = _mcp_query_datasource_direct(
+                mcp_server_url=mcp_record.server_url,
+                site=creds.get("site_name", ""),
+                token_name=creds.get("pat_name", ""),
+                token_value=pat_value,
+                datasource_luid=datasource_luid,
+                query=vizql_json,
+                limit=limit,
+                timeout=timeout,
+            )
+            return result
+        finally:
+            db.close()
+
     client = get_tableau_mcp_client(connection_id=connection_id)
     try:
         result = client.query_datasource(
