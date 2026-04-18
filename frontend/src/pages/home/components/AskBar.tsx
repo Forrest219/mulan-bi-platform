@@ -25,20 +25,30 @@ interface AskBarProps {
   initialQuestion?: string;
   /** 关联的 conversation_id（追问时使用） */
   conversationId?: string | null;
+  /**
+   * 外部连接 ID（来自 ScopeContext / ScopePicker）。
+   * 有值时：隐藏内部连接下拉，提交时使用此值。
+   * 为 undefined 或 null 时：保持原有内部下拉行为。
+   */
+  connectionId?: string | null;
 }
 
 export const AskBar = forwardRef<HTMLTextAreaElement, AskBarProps>(
-  function AskBar({ onResult, onError, onLoading, onQuestionChange, conversationId }, ref) {
+  function AskBar({ onResult, onError, onLoading, onQuestionChange, conversationId, connectionId: externalConnectionId }, ref) {
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
     const [connections, setConnections] = useState<TableauConnection[]>([]);
     const [selectedConnectionId, setSelectedConnectionId] = useState<number | null>(null);
 
+    // 当外部 connectionId 有值时，不使用内部下拉
+    const useExternalConnection = externalConnectionId != null;
+
     const internalRef = useRef<HTMLTextAreaElement>(null);
     const textareaRef = (ref as React.RefObject<HTMLTextAreaElement>) ?? internalRef;
 
-    // 加载连接列表
+    // 加载连接列表（仅在无外部 connectionId 时加载内部下拉所需数据）
     useEffect(() => {
+      if (useExternalConnection) return;
       listConnections()
         .then((res) => {
           const active = res.connections.filter((c) => c.is_active);
@@ -48,7 +58,7 @@ export const AskBar = forwardRef<HTMLTextAreaElement, AskBarProps>(
         .catch(() => {
           // 忽略：连接列表加载失败不影响问答
         });
-    }, []);
+    }, [useExternalConnection]);
 
     // Escape 键清空输入（当 textarea 获取焦点时）
     useEffect(() => {
@@ -72,7 +82,11 @@ export const AskBar = forwardRef<HTMLTextAreaElement, AskBarProps>(
       try {
         const { askQuestion } = await import('../../../api/search');
         const req: AskQuestionRequest & { conversation_id?: string } = { question };
-        if (selectedConnectionId !== null) req.connection_id = selectedConnectionId;
+        // 优先使用外部 connectionId（来自 ScopePicker），否则使用内部下拉值
+        const effectiveConnectionId = useExternalConnection
+          ? (externalConnectionId ? Number(externalConnectionId) : null)
+          : selectedConnectionId;
+        if (effectiveConnectionId !== null) req.connection_id = effectiveConnectionId;
         if (conversationId) req.conversation_id = conversationId;
         const result = await askQuestion(req);
         onResult(result);
@@ -89,7 +103,8 @@ export const AskBar = forwardRef<HTMLTextAreaElement, AskBarProps>(
       }
     };
 
-    const showConnectionSelect = connections.length > 1;
+    // 内部连接下拉：仅在无外部 connectionId 且连接数 > 1 时显示
+    const showConnectionSelect = !useExternalConnection && connections.length > 1;
 
     return (
       <div className="relative rounded-2xl border border-slate-200 bg-white shadow-sm px-3 py-3">

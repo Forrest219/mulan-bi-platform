@@ -9,18 +9,24 @@
  * 对话历史存 localStorage（C2），由 HomeLayout 提供的 ConversationProvider 管理。
  */
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { LOGO_URL } from '../../config';
 import { AskBar } from './components/AskBar';
 import { SearchResult } from './components/SearchResult';
 import { WelcomeHero } from './components/WelcomeHero';
 import { SuggestionGrid } from './components/SuggestionGrid';
+import { OpsSnapshotPanel } from './components/OpsSnapshotPanel';
 import { useConversations } from '../../store/conversationStore';
 import type { SearchAnswer } from '../../api/search';
+import { ScopeProvider } from './context/ScopeContext';
+import { ScopePicker } from './components/ScopePicker';
+import { AssetInspectorDrawer } from './components/AssetInspectorDrawer';
+import { useHomeUrlState } from './hooks/useHomeUrlState';
 
 type HomeUiState = 'HOME_IDLE' | 'HOME_SUBMITTING' | 'HOME_RESULT' | 'HOME_ERROR' | 'HOME_OFFLINE';
 
-export default function HomePage() {
+function HomePageInner() {
   const [homeState, setHomeState] = useState<HomeUiState>('HOME_IDLE');
   const stateBeforeOfflineRef = useRef<HomeUiState>('HOME_IDLE');
   const [result, setResult] = useState<SearchAnswer | null>(null);
@@ -28,8 +34,9 @@ export default function HomePage() {
   const [lastQuestion, setLastQuestion] = useState('');
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
 
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { addConversation, appendMessage } = useConversations();
+  const { assetId, tab, connectionId, closeAsset, openAsset } = useHomeUrlState();
 
   useEffect(() => {
     if (homeState !== 'HOME_OFFLINE') {
@@ -67,16 +74,16 @@ export default function HomePage() {
           <h1 className="text-2xl font-bold text-slate-800 mb-2">Mulan Platform</h1>
           <p className="text-sm text-slate-400 mb-8">数据建模与治理平台</p>
           <p className="text-slate-500 mb-6">请先登录以访问平台功能</p>
-          <a
-            href="/login"
+          <Link
+            to="/login"
             className="inline-block w-full py-2.5 bg-slate-900 text-white rounded-lg text-sm font-semibold hover:bg-slate-700 transition-colors"
           >
             登录
-          </a>
+          </Link>
           <div className="mt-4">
-            <a href="/register" className="text-sm text-blue-600 hover:text-blue-700">
+            <Link to="/register" className="text-sm text-blue-600 hover:text-blue-700">
               没有账号？去注册
-            </a>
+            </Link>
           </div>
         </div>
       </div>
@@ -143,6 +150,11 @@ export default function HomePage() {
   // ── 渲染 ──────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen">
+      {/* ScopePicker 工具栏（文档流顶部，全宽） */}
+      <div className="w-full px-6 pt-4 pb-2">
+        <ScopePicker />
+      </div>
+
       <div className="max-w-3xl mx-auto px-6 pb-36">
 
         {/* WelcomeHero（始终展示） */}
@@ -192,7 +204,10 @@ export default function HomePage() {
         )}
 
         {/* AskBar（始终可用，C1） */}
-        <div className="fixed bottom-0 left-0 right-0 border-t border-slate-200 bg-white/95 backdrop-blur z-20">
+        <div
+          className="fixed bottom-0 right-0 border-t border-slate-200 bg-white/95 backdrop-blur z-20"
+          style={{ left: 'var(--conv-bar-w)', transition: 'left 200ms' }}
+        >
           <div className="max-w-3xl mx-auto px-6 py-4">
             <AskBar
               onResult={handleAskBarResult}
@@ -202,16 +217,39 @@ export default function HomePage() {
               }}
               onQuestionChange={(q) => setLastQuestion(q)}
               conversationId={currentConversationId ?? undefined}
+              connectionId={connectionId}
             />
           </div>
         </div>
 
-        {/* SuggestionGrid（idle 态展示） */}
+        {/* SuggestionGrid + OpsSnapshotPanel（idle 态展示） */}
         {homeState === 'HOME_IDLE' && (
-          <SuggestionGrid onPick={handleExamplePick} />
+          <>
+            <SuggestionGrid onPick={handleExamplePick} />
+            <div className="mt-4">
+              <OpsSnapshotPanel onOpenAsset={openAsset} />
+            </div>
+          </>
         )}
 
       </div>
+
+      {/* 资产检查器抽屉（URL ?asset=<id> 存在时渲染，fixed 定位，不破坏文档流） */}
+      {hasPermission('tableau') && (
+        <AssetInspectorDrawer
+          assetId={assetId}
+          tab={tab}
+          onClose={closeAsset}
+        />
+      )}
     </div>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <ScopeProvider>
+      <HomePageInner />
+    </ScopeProvider>
   );
 }

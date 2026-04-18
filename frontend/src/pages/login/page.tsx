@@ -161,13 +161,13 @@ export default function LoginPage() {
 
             {/* Forgot Password Link */}
             <div className="flex justify-end mt-2 mb-4">
-              <a
-                href="/forgot-password"
+              <Link
+                to="/forgot-password"
                 className="text-sm font-medium text-blue-600 hover:text-blue-700
                            focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-white rounded-md"
               >
                 忘记密码？
-              </a>
+              </Link>
             </div>
 
             {/* Login Button */}

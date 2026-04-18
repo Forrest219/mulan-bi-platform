@@ -37,6 +37,41 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/check-handover.sh",
+            "timeout": 10,
+            "statusMessage": "Checking handover artifacts..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/check-handover.sh",
+            "timeout": 10,
+            "statusMessage": "Checking handover artifacts..."
+          }
+        ]
+      },
+      {
+        "matcher": "MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/check-handover.sh",
+            "timeout": 10,
+            "statusMessage": "Checking handover artifacts..."
+          }
+        ]
+      }
     ]
   }
 }

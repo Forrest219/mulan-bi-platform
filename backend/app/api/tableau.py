@@ -684,3 +684,43 @@ async def get_connection_health_overview(conn_id: int, request: Request, db: Ses
         "assets": sorted(results, key=lambda x: x["score"]),
     }
 
+
+# ── Tableau MCP Server 状态检查 ─────────────────────────────────────────────
+
+import time as _time
+
+try:
+    import httpx as _httpx
+except ImportError:
+    _httpx = None  # type: ignore
+
+from services.common.settings import get_tableau_mcp_server_url, get_tableau_mcp_timeout
+
+
+@router.get("/mcp-status")
+async def get_mcp_status():
+    """探测 Tableau MCP Server 连通性（UI 状态指示器用）"""
+    url = get_tableau_mcp_server_url()
+    timeout = min(get_tableau_mcp_timeout(), 5)
+    start = _time.monotonic()
+    if _httpx is None:
+        return {"status": "unknown", "url": url, "latency_ms": 0, "error": "httpx not installed"}
+    try:
+        async with _httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(url)
+        latency_ms = int((_time.monotonic() - start) * 1000)
+        return {
+            "status": "online",
+            "url": url,
+            "latency_ms": latency_ms,
+            "http_status": resp.status_code,
+        }
+    except (_httpx.ConnectError, _httpx.TimeoutException) as e:
+        latency_ms = int((_time.monotonic() - start) * 1000)
+        return {
+            "status": "offline",
+            "url": url,
+            "latency_ms": latency_ms,
+            "error": type(e).__name__,
+        }
+

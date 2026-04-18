@@ -1329,10 +1329,68 @@ sequenceDiagram
 
 ---
 
+## 14. META 查询扩展（v1.3）
+
+### 14.1 概述
+
+v1.3 在 VizQL 流水线之前新增一条规则快速路径，支持 3 种首页「元查询」场景。这类查询不需要 LLM 介入，直接查本地 `tableau_assets` / `tableau_field_semantics` 表，毫秒级返回。
+
+**执行路径**：`query()` 入口 → `classify_meta_intent()` → `handle_meta_query()` → 直接返回，**不进入 VizQL 流水线**。
+
+### 14.2 业务口径（Q1-Q3 已确认）
+
+| 编号 | 问题 | 业务口径 |
+|------|------|---------|
+| Q1 | 查询范围 | 仅限用户在 ScopePicker 选中的 `connection_id`，不自动 fallback 到其他连接。若 `connection_id` 为空，返回"请先选择 Tableau 连接"提示 |
+| Q2 | 「看板」定义 | `dashboard` + `workbook` 两种 `asset_type` 都计入总数 |
+| Q3 | 数据源列出 | 按 Site（connection）分组展示 |
+
+### 14.3 支持的 3 种 META 意图
+
+#### meta_datasource_list — 数据源列表
+
+- **触发词**：`你有哪些数据源`、`有哪些数据源`、`数据源列表`、`list datasource`、`哪些数据源`、`数据源有哪些`
+- **Handler**：`_handle_meta_datasource_list(connection_id, db)`
+- **DB 查询**：`tableau_assets WHERE connection_id=? AND asset_type='datasource' AND is_deleted=False`
+- **分组展示**：用 `TableauConnection.name + site` 作为分组标签
+- **响应格式**：`response_type=text`，Markdown 格式列表
+
+#### meta_asset_count — 看板数量
+
+- **触发词**：`你有几个看板`、`有几个看板`、`看板数量`、`有多少看板`、`多少个看板`、`看板总数`、`几个dashboard`、`几个workbook`
+- **Handler**：`_handle_meta_asset_count(connection_id, db)`
+- **DB 查询**：分别统计 `asset_type='dashboard'` 和 `asset_type='workbook'` 后相加
+- **响应格式**：`response_type=number`，附 `value`（总数）、`content`（详细说明文本）
+
+#### meta_semantic_quality — 语义配置质量
+
+- **触发词**：`语义配置有哪些不完善`、`语义配置不完善`、`语义缺失`、`哪些语义没配置`、`语义配置问题`、`语义不完善`、`语义配置哪些问题`
+- **Handler**：`_handle_meta_semantic_quality(connection_id, db)`
+- **DB 查询**：`tableau_field_semantics WHERE connection_id=? AND (semantic_definition IS NULL OR semantic_definition='' OR status IN ('draft', 'ai_generated'))`
+- **展示逻辑**：最多展示 10 条，超出追加"... 等共 N 处"；字段名优先用 `semantic_name_zh`，其次 `semantic_name`，最后 `tableau_field_id`
+- **响应格式**：`response_type=text`，Markdown 格式列表
+
+### 14.4 实现文件
+
+| 文件 | 变更内容 |
+|------|---------|
+| `backend/services/llm/nlq_service.py` | 新增 `META_INTENT_KEYWORDS` 字典和 `classify_meta_intent()` 函数 |
+| `backend/app/api/search.py` | 新增 `handle_meta_query()`、`_handle_meta_datasource_list()`、`_handle_meta_asset_count()`、`_handle_meta_semantic_quality()` 四个函数；在 `query()` 入口 `try` 块最开始插入 META 意图优先检测逻辑 |
+
+### 14.5 约束
+
+- 不修改任何现有 VizQL 流水线代码（One-Pass LLM、字段校验、MCP query-datasource）
+- 所有 DB query 使用 `query()` 函数注入的同一 `db: Session`，不新建连接
+- `connection_id is None` 时，返回引导提示，不报错、不 fallback
+- 响应体追加 `"meta": True` 字段，便于前端区分 META 回答与 VizQL 查询结果
+
+---
+
 ## 变更记录
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-04-18 | v1.3 | META 查询扩展：新增 3 种元查询意图（meta_datasource_list / meta_asset_count / meta_semantic_quality），规则快速路径优先于 VizQL 流水线执行，支持 Q1-Q3 业务口径。 |
 | 2026-04-16 | v1.2 | P0/P1/P2 改造：(1) `QueryRequest` 新增 `conversation_id`、`use_conversation_context` 字段；(2) `route_datasource()` C4 共识：`connection_id=None` 时自动选第一个活跃连接；(3) 查询成功后携带 `conversation_id` 时写入 `conversation_messages`（user+assistant 两条，assistant 附 `query_context JSONB`）；(4) `use_conversation_context=True` 时从上轮 `query_context` 继承 `datasource_luid`/`connection_id`；(5) `one_pass_llm()` 传 `purpose="nlq"` 使用 nlq 专用 LLM 配置。 |
 | 2026-04-06 | v1.1 | One-Pass LLM 方案，意图分类与查询构建合并为单次 LLM 调用 |
 | 2026-04-04 | v1.0 | 初始版本 |

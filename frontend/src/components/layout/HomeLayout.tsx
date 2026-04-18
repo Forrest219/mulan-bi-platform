@@ -8,7 +8,7 @@
  * 折叠状态持久化到 localStorage key: 'mulan-home-sidebar-collapsed'
  * 折叠动画：transition-all duration-200
  */
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { ConversationBar } from '../../pages/home/components/ConversationBar';
 import { useConversations } from '../../store/conversationStore';
@@ -67,7 +67,10 @@ export default function HomeLayout() {
   const handleToggleCollapse = useCallback(() => setCollapsed((c) => !c), []);
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-blue-50">
+    <div
+      className="flex min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-blue-50"
+      style={{ '--conv-bar-w': collapsed ? '0px' : '260px' } as React.CSSProperties}
+    >
         {/* 左侧对话历史栏 */}
         <div
           className="shrink-0 transition-all duration-200 overflow-hidden"

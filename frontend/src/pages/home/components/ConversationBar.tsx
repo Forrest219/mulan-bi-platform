@@ -16,7 +16,7 @@
  * - 导航：点击对话跳转 /chat/:id（useNavigate）
  */
 import { useState, useMemo, useRef, useCallback } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useConversations, type Conversation } from '../../../store/conversationStore';
 import { ConfirmModal } from '../../../components/ConfirmModal';
 import { useAuth } from '../../../context/AuthContext';
@@ -118,18 +118,11 @@ export function ConversationBar({ collapsed: _collapsed, onToggleCollapse }: Con
       className="bg-slate-50 border-r border-slate-200 flex flex-col h-full"
       style={{ minHeight: '100vh' }}
     >
-      {/* 顶部：折叠 + 新建 */}
+      {/* 顶部：新建 */}
       <div className="flex items-center gap-2 px-3 pt-4 pb-2">
         <button
-          onClick={onToggleCollapse}
-          className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-slate-200 transition-colors text-slate-500"
-          aria-label="折叠对话历史"
-        >
-          <i className="ri-layout-left-line text-base" />
-        </button>
-        <button
           onClick={handleNew}
-          className="flex-1 flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600
+          className="w-full flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600
                      border border-slate-200 rounded-lg hover:bg-white hover:shadow-sm transition-all"
         >
           <i className="ri-add-line text-base" />
@@ -199,29 +192,31 @@ export function ConversationBar({ collapsed: _collapsed, onToggleCollapse }: Con
       {/* 底部：用户信息 + 设置 + 退出 */}
       <div className="border-t border-slate-200 px-3 py-3 space-y-1">
         {/* 用户信息行 */}
-        <div className="flex items-center gap-2 px-2 py-1.5">
-          <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-            <span className="text-[11px] text-blue-600 font-semibold">
+        <div className="flex items-center gap-2.5 px-2 py-2">
+          <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+            <span className="text-xs text-blue-600 font-bold">
               {user?.display_name?.[0] ?? user?.username?.[0] ?? '?'}
             </span>
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-[13px] text-slate-700 font-medium truncate">
+            <div className="text-sm text-slate-800 font-semibold truncate">
               {user?.display_name ?? user?.username ?? '未知用户'}
             </div>
-            <div className="text-[11px] text-slate-400">{user?.role ?? 'user'}</div>
+            <div className="text-xs text-slate-400">{user?.role ?? 'user'}</div>
           </div>
         </div>
 
-        {/* 设置入口 */}
-        <a
-          href="/system/users"
-          className="flex items-center gap-2 px-2 py-1.5 text-sm text-slate-500
-                     rounded-lg hover:bg-slate-100 hover:text-slate-700 transition-colors"
-        >
-          <i className="ri-settings-3-line text-base" />
-          设置
-        </a>
+        {/* 设置入口（仅 admin 可见） */}
+        {user?.role === 'admin' && (
+          <Link
+            to="/system/users"
+            className="flex items-center gap-2 px-2 py-1.5 text-sm text-slate-500
+                       rounded-lg hover:bg-slate-100 hover:text-slate-700 transition-colors"
+          >
+            <i className="ri-settings-3-line text-base" />
+            设置
+          </Link>
+        )}
 
         {/* 退出登录 */}
         <button

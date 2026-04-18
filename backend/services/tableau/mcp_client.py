@@ -780,6 +780,140 @@ class TableauMCPClient:
         finally:
             _connection_id_var.reset(token)
 
+    def list_datasources(self, limit: int = 50, timeout: int = 30) -> Dict[str, Any]:
+        """
+        通过 Tableau MCP 列出可用的数据源（用于动态数据源发现）。
+
+        当本地 TableauAsset 表为空时，NLQ 路由层调用此方法通过 MCP 动态发现数据源。
+
+        返回：
+            {"datasources": [{"luid": "...", "name": "..."}, ...]}
+        """
+        from services.tableau.models import TableauConnection as _TableauConnection
+
+        db = TableauDatabase()
+        session = db.session
+        try:
+            conn_record = session.query(_TableauConnection).filter(
+                _TableauConnection.is_active == True,
+            ).order_by(_TableauConnection.id.asc()).first()
+
+            if not conn_record:
+                raise TableauMCPError(
+                    code="NLQ_009",
+                    message="无活跃的 Tableau 连接",
+                    details={},
+                )
+        finally:
+            session.close()
+
+        token = _connection_id_var.set(conn_record.id)
+        try:
+            site_key = _get_site_key(conn_record)
+            session_state = _get_or_create_session_state(site_key)
+            effective_base_url = getattr(conn_record, "mcp_server_url", None) or None
+
+            # 尝试调用 list_datasources 工具
+            payload = {
+                "jsonrpc": "2.0",
+                "id": _next_id(),
+                "method": "tools/call",
+                "params": {
+                    "name": "list_datasources",
+                    "arguments": {"limit": limit},
+                },
+            }
+
+            response = self._send_jsonrpc(
+                payload,
+                timeout=timeout,
+                site_key=site_key,
+                session_state=session_state,
+                base_url=effective_base_url,
+            )
+
+            parsed = self._parse_jsonrpc_response(response)
+            # 标准化返回格式
+            content = parsed.get("content", [])
+            text = _extract_text(content)
+            if text:
+                try:
+                    data = json.loads(text)
+                    if isinstance(data, dict) and "datasources" in data:
+                        return data
+                except json.JSONDecodeError:
+                    pass
+            # 如果解析失败，返回原始内容
+            return {"datasources": [], "raw": parsed}
+        finally:
+            _connection_id_var.reset(token)
+
+    def get_datasource_metadata(self, datasource_luid: str, timeout: int = 30) -> Dict[str, Any]:
+        """
+        通过 Tableau MCP 获取数据源的字段元数据（用于 NLQ 动态数据源发现）。
+
+        当本地 TableauAsset 表无数据时，NLQ 路由层先调用 list_datasources 发现数据源，
+        再调用此方法获取字段信息，构建 LLM prompt。
+
+        返回：
+            {"fields": [{"name": "...", "dataType": "...", "role": "..."}, ...]}
+        """
+        from services.tableau.models import TableauConnection as _TableauConnection
+
+        db = TableauDatabase()
+        session = db.session
+        try:
+            conn_record = session.query(_TableauConnection).filter(
+                _TableauConnection.is_active == True,
+            ).order_by(_TableauConnection.id.asc()).first()
+
+            if not conn_record:
+                raise TableauMCPError(
+                    code="NLQ_009",
+                    message="无活跃的 Tableau 连接",
+                    details={},
+                )
+        finally:
+            session.close()
+
+        token = _connection_id_var.set(conn_record.id)
+        try:
+            site_key = _get_site_key(conn_record)
+            session_state = _get_or_create_session_state(site_key)
+            effective_base_url = getattr(conn_record, "mcp_server_url", None) or None
+
+            # 调用 get-datasource-metadata 工具
+            payload = {
+                "jsonrpc": "2.0",
+                "id": _next_id(),
+                "method": "tools/call",
+                "params": {
+                    "name": "get-datasource-metadata",
+                    "arguments": {"datasourceLuid": datasource_luid},
+                },
+            }
+
+            response = self._send_jsonrpc(
+                payload,
+                timeout=timeout,
+                site_key=site_key,
+                session_state=session_state,
+                base_url=effective_base_url,
+            )
+
+            parsed = self._parse_jsonrpc_response(response)
+            content = parsed.get("content", [])
+            text = _extract_text(content)
+            if text:
+                try:
+                    data = json.loads(text)
+                    return data
+                except json.JSONDecodeError:
+                    pass
+            return {"fields": [], "raw": parsed}
+        finally:
+            _connection_id_var.reset(token)
+
     # ─────────────────────────────────────────────────────────────────────────
     # 内部方法
     # ─────────────────────────────────────────────────────────────────────────

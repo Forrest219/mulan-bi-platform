@@ -35,6 +35,7 @@ from services.semantic_maintenance.models import (  # noqa: F401
 )
 from services.events.models import BiEvent, BiNotification  # noqa: F401
 from services.knowledge_base.models import KbGlossary, KbSchema, KbDocument, KbEmbedding  # noqa: F401
+from services.mcp.models import McpServer  # noqa: F401
 
 config = context.config
 

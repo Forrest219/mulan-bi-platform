@@ -25,6 +25,7 @@ from services.llm.nlq_service import (
     resolve_fields,
     format_response,
     classify_intent,
+    classify_meta_intent,
     execute_query,
     is_datasource_sensitivity_blocked,
     MAX_QUERY_LENGTH,
@@ -225,6 +226,154 @@ def _get_asset_by_luid(datasource_luid: str):
     return asset
 
 
+# === META 查询 Handler ===
+
+async def handle_meta_query(meta_intent: str, connection_id: int, db: Session) -> dict:
+    """
+    处理 3 种 META 查询意图，直接查本地 DB 返回结构化文本。
+    不走 VizQL One-Pass LLM 流水线。
+
+    Args:
+        meta_intent: classify_meta_intent() 返回的意图 key
+        connection_id: 用户在 ScopePicker 选中的连接 ID（Q1 业务口径：不 fallback）
+        db: SQLAlchemy session（由 Depends(get_db) 注入，与主流程共用）
+
+    Returns:
+        符合 PRD §6.2 响应格式的 dict（response_type + content/value 等字段）
+    """
+    from services.tableau.models import TableauConnection
+    from sqlalchemy import or_
+
+    if meta_intent == "meta_datasource_list":
+        return await _handle_meta_datasource_list(connection_id, db)
+    elif meta_intent == "meta_asset_count":
+        return await _handle_meta_asset_count(connection_id, db)
+    elif meta_intent == "meta_semantic_quality":
+        return await _handle_meta_semantic_quality(connection_id, db)
+    else:
+        return {
+            "response_type": "text",
+            "content": f"未知的 META 查询类型：{meta_intent}",
+        }
+
+
+async def _handle_meta_datasource_list(connection_id: int, db: Session) -> dict:
+    """
+    META handler 1：列出当前连接下的数据源（Q1 业务口径：按 Site 分组展示）。
+
+    - 查询范围 = connection_id 指定的连接，不 fallback
+    - 按 Site（connection name）分组展示
+    """
+    from services.tableau.models import TableauConnection
+
+    assets = db.query(TableauAsset).filter(
+        TableauAsset.connection_id == connection_id,
+        TableauAsset.asset_type == "datasource",
+        TableauAsset.is_deleted == False,
+    ).all()
+
+    # 查 connection 名称，用作分组标签
+    connection = db.query(TableauConnection).filter(
+        TableauConnection.id == connection_id
+    ).first()
+    site_label = f"{connection.name}（{connection.site}）" if connection else f"连接 {connection_id}"
+
+    if not assets:
+        content = f"**{site_label}** 下暂无数据源，请先完成资产同步。"
+    else:
+        lines = [f"**{site_label}** 共有 {len(assets)} 个数据源："]
+        for a in sorted(assets, key=lambda x: x.name):
+            lines.append(f"- {a.name}")
+        content = "\n".join(lines)
+
+    return {
+        "response_type": "text",
+        "content": content,
+        "intent": "meta_datasource_list",
+        "meta": True,
+    }
+
+
+async def _handle_meta_asset_count(connection_id: int, db: Session) -> dict:
+    """
+    META handler 2：统计当前连接下的看板数量（Q2 业务口径：dashboard + workbook 都计入）。
+    """
+    dashboard_count = db.query(TableauAsset).filter(
+        TableauAsset.connection_id == connection_id,
+        TableauAsset.asset_type == "dashboard",
+        TableauAsset.is_deleted == False,
+    ).count()
+
+    workbook_count = db.query(TableauAsset).filter(
+        TableauAsset.connection_id == connection_id,
+        TableauAsset.asset_type == "workbook",
+        TableauAsset.is_deleted == False,
+    ).count()
+
+    total = dashboard_count + workbook_count
+
+    content = (
+        f"当前连接共有 **{total}** 个看板"
+        f"（其中 Dashboard {dashboard_count} 个，Workbook {workbook_count} 个）。"
+    )
+
+    return {
+        "response_type": "number",
+        "value": total,
+        "label": "看板总数",
+        "unit": "个",
+        "formatted": str(total),
+        "content": content,
+        "intent": "meta_asset_count",
+        "meta": True,
+    }
+
+
+async def _handle_meta_semantic_quality(connection_id: int, db: Session) -> dict:
+    """
+    META handler 3：分析当前连接的语义配置完整性（Q3 业务口径）。
+
+    检查 tableau_field_semantics 表中该 connection 下的不完善项：
+    - semantic_definition 为空
+    - status 为 draft 或 ai_generated（未经人工审核）
+    """
+    from services.semantic_maintenance.models import TableauFieldSemantics
+    from sqlalchemy import or_
+
+    incomplete = db.query(TableauFieldSemantics).filter(
+        TableauFieldSemantics.connection_id == connection_id,
+        or_(
+            TableauFieldSemantics.semantic_definition.is_(None),
+            TableauFieldSemantics.semantic_definition == "",
+            TableauFieldSemantics.status.in_(["draft", "ai_generated"]),
+        ),
+    ).all()
+
+    if not incomplete:
+        content = "当前数据源的语义配置较为完善，未发现明显缺失项。"
+    else:
+        lines = [f"发现 **{len(incomplete)}** 处语义配置不完善："]
+        for f in incomplete[:10]:
+            reason = []
+            if not f.semantic_definition:
+                reason.append("缺少语义定义")
+            if f.status in ("draft", "ai_generated"):
+                reason.append(f"状态为 {f.status}（未审核）")
+            # 优先展示中文语义名，其次 tableau_field_id
+            display_name = f.semantic_name_zh or f.semantic_name or f.tableau_field_id
+            lines.append(f"- `{display_name}`：{', '.join(reason)}")
+        if len(incomplete) > 10:
+            lines.append(f"... 等共 {len(incomplete)} 处")
+        content = "\n".join(lines)
+
+    return {
+        "response_type": "text",
+        "content": content,
+        "intent": "meta_semantic_quality",
+        "meta": True,
+    }
+
+
 # === API 端点 ===
 @router.post("/query")
 async def query(
@@ -288,6 +437,27 @@ async def query(
     )
 
     try:
+        # ── META 查询优先检测（Q1-Q3 业务口径，不走 VizQL 流水线）────────
+        # classify_meta_intent 基于规则关键词，无 LLM 调用，优先于 VizQL 意图分类
+        meta_intent = classify_meta_intent(question)
+        if meta_intent:
+            if connection_id is None:
+                audit_record.status = "ok"
+                return {
+                    "trace_id": audit_record.trace_id,
+                    "response_type": "text",
+                    "content": "请先在左上角选择 Tableau 连接，再提问。",
+                    "intent": meta_intent,
+                    "meta": True,
+                }
+            audit_record.params_jsonb["intent"] = meta_intent
+            result = await handle_meta_query(meta_intent, connection_id, db)
+            audit_record.status = "ok"
+            return {
+                "trace_id": audit_record.trace_id,
+                **result,
+            }
+
         # ── 意图分类（阶段0）─────────────────────────────────────
         intent = classify_intent(question)
         audit_record.params_jsonb["intent"] = intent.intent_type if intent else None

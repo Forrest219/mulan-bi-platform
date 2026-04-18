@@ -448,19 +448,25 @@ class LLMService:
         base_url: str,
         api_key: str,
         model: str,
-        test_prompt: str = "Hello, respond with 'OK'",
+        test_prompt: str = "Say OK in one word",
         provider: str = "openai",
     ) -> dict:
         """临时测试 LLM 连接（不依赖 DB，使用传入的参数）
 
         用于新建配置时保存前的连接测试。
         当 provider 为 anthropic/minimax 或 base_url 含 'anthropic' 时，走 Anthropic SDK。
+
+        返回字段：
+            success, message, response_text, response_model, latency_ms,
+            tokens_used, prompt_used
+        失败时额外返回 error_code（如 "HTTP_401"）。
         """
         use_anthropic = (
             provider in ("anthropic", "minimax")
             or "anthropic" in base_url.lower()
         )
 
+        start_time = time.time()
         try:
             if use_anthropic:
                 import anthropic as _anthropic
@@ -470,10 +476,22 @@ class LLMService:
                     max_tokens=64,
                     messages=[{"role": "user", "content": test_prompt}],
                 )
+                latency_ms = int((time.time() - start_time) * 1000)
                 from anthropic.types import TextBlock as _TextBlock
                 text_blocks = [b for b in response.content if isinstance(b, _TextBlock)]
-                content = text_blocks[0].text.strip() if text_blocks else ""
-                return {"success": True, "message": content}
+                response_text = text_blocks[0].text.strip() if text_blocks else ""
+                # Anthropic usage: input_tokens / output_tokens
+                tokens_used = getattr(response.usage, "output_tokens", None)
+                response_model = getattr(response, "model", model)
+                return {
+                    "success": True,
+                    "message": "连接正常",
+                    "response_text": response_text,
+                    "response_model": response_model,
+                    "latency_ms": latency_ms,
+                    "tokens_used": tokens_used,
+                    "prompt_used": test_prompt,
+                }
             else:
                 from openai import AsyncOpenAI
                 client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=15)
@@ -483,11 +501,41 @@ class LLMService:
                     temperature=0.7,
                     max_tokens=64,
                 )
-                content = response.choices[0].message.content.strip()
-                return {"success": True, "message": content}
+                latency_ms = int((time.time() - start_time) * 1000)
+                response_text = response.choices[0].message.content.strip()
+                # OpenAI usage: completion_tokens
+                tokens_used = None
+                if response.usage:
+                    tokens_used = getattr(response.usage, "completion_tokens", None)
+                response_model = getattr(response, "model", model)
+                return {
+                    "success": True,
+                    "message": "连接正常",
+                    "response_text": response_text,
+                    "response_model": response_model,
+                    "latency_ms": latency_ms,
+                    "tokens_used": tokens_used,
+                    "prompt_used": test_prompt,
+                }
         except Exception as e:
+            latency_ms = int((time.time() - start_time) * 1000)
             logger.warning("ad-hoc LLM 测试失败: %s", e)
-            return {"success": False, "message": str(e)}
+            # 提取 HTTP 错误码（openai/anthropic SDK 均会在异常消息中包含状态码）
+            error_str = str(e)
+            error_code: Optional[str] = None
+            import re as _re
+            m = _re.search(r"\b(4\d{2}|5\d{2})\b", error_str)
+            if m:
+                error_code = f"HTTP_{m.group(1)}"
+            result = {
+                "success": False,
+                "message": error_str,
+                "latency_ms": latency_ms,
+                "prompt_used": test_prompt,
+            }
+            if error_code:
+                result["error_code"] = error_code
+            return result
 
     async def generate_embedding_minimax(
         self,
@@ -501,9 +549,11 @@ class LLMService:
         Returns: { "embeddings": List[List[float]], "model": str } or { "error": str }
         注: 本方法独立于全局 provider 配置，固定走 MiniMax OpenAI 兼容 /v1/embeddings
         """
-        config = self._load_config()
+        config = self._load_config(purpose="embedding")
         if not config or not config.is_active or not config.api_key_encrypted:
             return {"error": "LLM 未配置，请联系管理员"}
+        if config.purpose != "embedding":
+            return {"error": "未找到 purpose=embedding 的 LLM 配置，请联系管理员添加专用 Embedding 配置"}
         try:
             api_key = _decrypt(config.api_key_encrypted)
         except Exception as e:

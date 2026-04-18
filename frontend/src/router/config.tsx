@@ -25,6 +25,7 @@ import { ConversationProvider } from '../store/conversationStore';
 // ──────────────────────────────────────────────────────────────
 const ChatPage            = lazy(() => import('../pages/chat/page'));
 const LLMConfigsPage      = lazy(() => import('../pages/admin/llm-configs/page'));
+const McpConfigsPage      = lazy(() => import('../pages/admin/mcp-configs/page'));
 const DDLValidatorPage    = lazy(() => import('../pages/ddl-validator/page'));
 const RuleConfigPage      = lazy(() => import('../pages/rule-config/page'));
 const DataHealthPage      = lazy(() => import('../pages/data-governance/health/page'));
@@ -279,11 +280,7 @@ const routes: RouteObject[] = [
           },
           {
             path: 'llm',
-            element: (
-              <ProtectedRoute adminOnly>
-                <LLMAdminPage />
-              </ProtectedRoute>
-            ),
+            element: <Navigate to="/system/llm-configs" replace />,
           },
           {
             path: 'tasks',
@@ -306,6 +303,14 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute adminOnly>
                 <LLMConfigsPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'mcp-configs',
+            element: (
+              <ProtectedRoute adminOnly>
+                <McpConfigsPage />
               </ProtectedRoute>
             ),
           },
@@ -345,6 +350,9 @@ const routes: RouteObject[] = [
   // 遗留兼容（原有杂项 redirect）
   // =====================
   { path: '/database-monitor', element: <Navigate to="/governance/health" replace /> },
+
+  // /ops → 运维工作台首页（别名）
+  { path: '/ops', element: <Navigate to="/" replace /> },
 
   // =====================
   // 404

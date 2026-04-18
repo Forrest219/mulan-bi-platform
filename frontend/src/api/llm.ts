@@ -9,6 +9,8 @@ export interface LLMConfig {
   max_tokens: number;
   is_active: boolean;
   has_api_key: boolean;
+  api_key_preview?: string | null;
+  api_key_updated_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -76,6 +78,20 @@ export async function deleteLLMConfig(): Promise<{ message: string }> {
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail || '删除失败');
+  }
+  return res.json();
+}
+
+export async function apiToggleActive(id: number, isActive: boolean): Promise<LLMConfig> {
+  const res = await fetch(`${API_BASE}/api/llm/configs/${id}/active`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ is_active: isActive }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
   }
   return res.json();
 }

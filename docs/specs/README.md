@@ -51,6 +51,7 @@
 | 17 | [知识库](17-knowledge-base-spec.md) | 术语表 + Schema + RAG | :white_check_mark: |
 | 18 | [菜单重构](18-menu-restructure-spec.md) | 5 域导航布局 | :white_check_mark: |
 | 19 | [发布日志](19-semantic-publish-logs-spec.md) | 回写审计日志 UI | :white_check_mark: |
+| 20 | [运维工作台](spec-20-ops-workbench.md) | Split-Pane 问数+资产+健康统一入口 | :construction: |
 
 ---
 

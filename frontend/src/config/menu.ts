@@ -65,6 +65,25 @@ export interface MenuDomain {
 // ============================================================
 export const menuConfig: MenuDomain[] = [
   // ──────────────────────────────────────────────────
+  // 域 0：运维工作台 /（登录即可访问）
+  // ──────────────────────────────────────────────────
+  {
+    key: 'ops',
+    label: '运维工作台',
+    icon: 'ri-dashboard-3-line',
+    description: '资产浏览与问数一体化工作台',
+    defaultOpen: false,
+    items: [
+      {
+        key: 'ops-home',
+        label: '工作台',
+        icon: 'ri-dashboard-3-line',
+        path: '/',
+      },
+    ],
+  },
+
+  // ──────────────────────────────────────────────────
   // 域 1：数据开发 /dev
   // ──────────────────────────────────────────────────
   {
@@ -246,7 +265,13 @@ export const menuConfig: MenuDomain[] = [
         key: 'llm',
         label: 'LLM 配置',
         icon: 'ri-robot-line',
-        path: '/system/llm',
+        path: '/system/llm-configs',
+      },
+      {
+        key: 'mcp-configs',
+        label: 'MCP 配置',
+        icon: 'ri-plug-line',
+        path: '/system/mcp-configs',
       },
       {
         key: 'tasks',

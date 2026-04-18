@@ -58,6 +58,8 @@ app.include_router(tableau.router, prefix="/api/tableau", tags=["Tableau 管理"
 app.include_router(health_scan.router, prefix="/api/governance/health", tags=["数仓健康检查"])
 app.include_router(quality.router, prefix="/api/governance/quality", tags=["数据质量监控"])
 app.include_router(llm.router, prefix="/api/llm", tags=["LLM 管理"])
+from app.api import mcp_configs
+app.include_router(mcp_configs.router, prefix="/api/mcp-configs", tags=["MCP 配置管理"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["任务管理"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["通知"])
 app.include_router(events.router, prefix="/api/events", tags=["事件"])

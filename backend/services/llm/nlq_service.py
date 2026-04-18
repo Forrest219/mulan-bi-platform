@@ -307,6 +307,37 @@ INTENT_KEYWORDS = {
     "aggregate": ["总", "合计", "总共", "一共", "平均", "数量", "total", "sum", "average", "count", "how many"],
 }
 
+# === META 查询意图关键词（Q1-Q3 业务口径，不走 VizQL 流水线）===
+META_INTENT_KEYWORDS = {
+    "meta_datasource_list": [
+        "你有哪些数据源", "有哪些数据源", "数据源列表", "list datasource",
+        "哪些数据源", "数据源有哪些",
+    ],
+    "meta_asset_count": [
+        "你有几个看板", "有几个看板", "看板数量", "有多少看板",
+        "几个dashboard", "几个workbook", "多少个看板", "看板总数",
+    ],
+    "meta_semantic_quality": [
+        "语义配置有哪些不完善", "语义配置不完善", "语义缺失",
+        "哪些语义没配置", "语义配置问题", "语义不完善", "语义配置哪些问题",
+    ],
+}
+
+
+def classify_meta_intent(question: str) -> Optional[str]:
+    """
+    规则检测 META 查询意图，返回 intent key 或 None。
+
+    META 查询不走 VizQL One-Pass LLM 流水线，直接查本地 DB 返回结构化文本。
+    优先级高于 VizQL 意图分类（在 search.py 中优先执行）。
+    """
+    q = question.lower()
+    for intent, keywords in META_INTENT_KEYWORDS.items():
+        for kw in keywords:
+            if kw.lower() in q:
+                return intent
+    return None
+
 MIN_ROUTING_SCORE = 0.3
 
 

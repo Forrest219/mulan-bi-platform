@@ -22,9 +22,41 @@ class LLMConfig(Base):
     purpose = Column(String(50), default='default', server_default=sa_text("'default'"), nullable=False)
     display_name = Column(String(100), nullable=True)
     priority = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()), nullable=False)
+    # 改造 1：api_key 最近更新时间（用于前端展示 Key 指纹更新时间）
+    api_key_updated_at = Column(DateTime, nullable=True)
+
+    def _build_api_key_preview(self, decrypted_key: Optional[str]) -> Optional[str]:
+        """构建 api_key 掩码预览，保留前缀和后 4 位明文，中间全部替换为 •。
+
+        示例：'sk-abc123xyz3f2a' → 'sk-•••••••••3f2a'
+        """
+        if not decrypted_key:
+            return None
+        if len(decrypted_key) <= 8:
+            return "•" * len(decrypted_key)
+        prefix = decrypted_key[:3] if decrypted_key.startswith("sk-") else decrypted_key[:2]
+        suffix = decrypted_key[-4:]
+        mask_len = len(decrypted_key) - len(prefix) - 4
+        return f"{prefix}{'•' * mask_len}{suffix}"
 
     def to_dict(self):
-        """返回配置，隐藏 api_key"""
+        """返回配置，隐藏 api_key，附带掩码预览和更新时间"""
+        # 解密仅用于生成 preview，不在返回体中暴露明文
+        decrypted: Optional[str] = None
+        if self.api_key_encrypted:
+            try:
+                from services.llm.service import _decrypt
+                decrypted = _decrypt(self.api_key_encrypted)
+            except Exception:
+                # 密钥轮换等场景解密失败时，降级为固定掩码
+                pass
+
+        api_key_preview: Optional[str]
+        if self.api_key_encrypted:
+            api_key_preview = self._build_api_key_preview(decrypted) if decrypted else "••••••••"
+        else:
+            api_key_preview = None
+
         return {
             "id": self.id,
             "provider": self.provider,
@@ -34,6 +66,8 @@ class LLMConfig(Base):
             "max_tokens": self.max_tokens,
             "is_active": self.is_active,
             "has_api_key": bool(self.api_key_encrypted),
+            "api_key_preview": api_key_preview,
+            "api_key_updated_at": self.api_key_updated_at.isoformat() if self.api_key_updated_at else None,
             "purpose": self.purpose,
             "display_name": self.display_name,
             "priority": self.priority,

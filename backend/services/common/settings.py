@@ -79,8 +79,29 @@ def get_celery_result_backend() -> str:
 # Tableau MCP Server 配置（惰性加载）
 # =============================================================================
 
-@lru_cache(maxsize=1)
 def get_tableau_mcp_server_url() -> str:
+    """
+    获取 Tableau MCP Server URL。
+    优先级：DB(type=tableau, is_active=True) > 环境变量 > 默认值
+    DB 查询失败时静默 fallback（迁移未完成等情况）。
+    """
+    try:
+        from app.core.database import SessionLocal
+        from services.mcp.models import McpServer
+        db = SessionLocal()
+        try:
+            record = (
+                db.query(McpServer)
+                .filter(McpServer.type == "tableau", McpServer.is_active == True)
+                .order_by(McpServer.created_at.asc())
+                .first()
+            )
+            if record:
+                return record.server_url
+        finally:
+            db.close()
+    except Exception:
+        pass
     return os.environ.get("TABLEAU_MCP_SERVER_URL", "http://localhost:3927/tableau-mcp")
 
 
@@ -96,7 +117,6 @@ def get_tableau_mcp_protocol_version() -> str:
 
 def clear_tableau_mcp_cache() -> None:
     """运维用：清除 Tableau MCP 配置缓存"""
-    get_tableau_mcp_server_url.cache_clear()
     get_tableau_mcp_timeout.cache_clear()
     get_tableau_mcp_protocol_version.cache_clear()
 

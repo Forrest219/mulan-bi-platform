@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { API_BASE } from '../config';
 
 export const ALL_PERMISSIONS = [
@@ -64,7 +64,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   // Access Token 过期时间戳（毫秒），用于 proactive refresh
-  const [tokenExpiresAt, setTokenExpiresAt] = useState<number | null>(null);
+  // 用 ref 而非 state：不需要触发重渲染，避免 checkAuth 的 useCallback dep 循环
+  const tokenExpiresAtRef = useRef<number | null>(null);
 
   const refreshToken = useCallback(async (): Promise<boolean> => {
     try {
@@ -107,8 +108,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // 从 session cookie 中尝试读取 expiry（cookie 是 HTTP-only，
         // 但 login 响应中我们已知 expiresAt，将其存内存）
         // 如果没有存过，使用默认值不触发 refresh
-        if (tokenExpiresAt) {
-          scheduleProactiveRefresh(tokenExpiresAt);
+        if (tokenExpiresAtRef.current) {
+          scheduleProactiveRefresh(tokenExpiresAtRef.current);
         }
       } else if (response.status === 401) {
         // 尝试用 refresh token 续期
@@ -127,7 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [refreshToken, scheduleProactiveRefresh, tokenExpiresAt]);
+  }, [refreshToken, scheduleProactiveRefresh]);
 
   useEffect(() => {
     checkAuth();
@@ -154,7 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // 计算 Access Token 过期时间（当前时间 + JWT_EXPIRE_SECONDS）
         // JWT_EXPIRE_SECONDS = 7 天 = 604800 秒
         const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
-        setTokenExpiresAt(expiresAt);
+        tokenExpiresAtRef.current = expiresAt;
         scheduleProactiveRefresh(expiresAt);
         return { success: true, message: '登录成功' };
       } else {
@@ -173,7 +174,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
     } finally {
       setUser(null);
-      setTokenExpiresAt(null);
+      tokenExpiresAtRef.current = null;
     }
   };
 
@@ -186,7 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
     } finally {
       setUser(null);
-      setTokenExpiresAt(null);
+      tokenExpiresAtRef.current = null;
     }
   };
 
