@@ -228,7 +228,7 @@ def _get_asset_by_luid(datasource_luid: str):
 
 # === META 查询 Handler ===
 
-async def handle_meta_query(meta_intent: str, connection_id: int, db: Session) -> dict:
+async def handle_meta_query(meta_intent: str, connection_id: int, db: Session, user: dict) -> dict:
     """
     处理 3 种 META 查询意图，直接查本地 DB 返回结构化文本。
     不走 VizQL One-Pass LLM 流水线。
@@ -237,12 +237,17 @@ async def handle_meta_query(meta_intent: str, connection_id: int, db: Session) -
         meta_intent: classify_meta_intent() 返回的意图 key
         connection_id: 用户在 ScopePicker 选中的连接 ID（Q1 业务口径：不 fallback）
         db: SQLAlchemy session（由 Depends(get_db) 注入，与主流程共用）
+        user: 当前用户（用于 IDOR 防护：verify_connection_access）
 
     Returns:
         符合 PRD §6.2 响应格式的 dict（response_type + content/value 等字段）
     """
     from services.tableau.models import TableauConnection
     from sqlalchemy import or_
+    from app.utils.auth import verify_connection_access
+
+    # IDOR 防护：验证用户有权访问该连接
+    verify_connection_access(connection_id, user, db)
 
     if meta_intent == "meta_datasource_list":
         return await _handle_meta_datasource_list(connection_id, db)
@@ -451,7 +456,7 @@ async def query(
                     "meta": True,
                 }
             audit_record.params_jsonb["intent"] = meta_intent
-            result = await handle_meta_query(meta_intent, connection_id, db)
+            result = await handle_meta_query(meta_intent, connection_id, db, user)
             audit_record.status = "ok"
             return {
                 "trace_id": audit_record.trace_id,
