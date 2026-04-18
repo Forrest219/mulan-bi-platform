@@ -312,6 +312,7 @@ META_INTENT_KEYWORDS = {
     "meta_datasource_list": [
         "你有哪些数据源", "有哪些数据源", "数据源列表", "list datasource",
         "哪些数据源", "数据源有哪些",
+        "几个数据源", "多少个数据源", "有几个数据源", "多少数据源",
     ],
     "meta_asset_count": [
         "你有几个看板", "有几个看板", "看板数量", "有多少看板",

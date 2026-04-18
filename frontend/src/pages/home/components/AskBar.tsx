@@ -9,9 +9,11 @@
  * - 右侧快捷键提示 ⌘K
  * - Escape 键清空输入
  */
-import { useState, useEffect, useRef, forwardRef } from 'react';
+import { useState, useEffect, useRef, forwardRef, memo } from 'react';
+import { Link } from 'react-router-dom';
 import type { SearchAnswer, AskQuestionRequest } from '../../../api/search';
 import { listConnections, type TableauConnection } from '../../../api/tableau';
+import { useScope } from '../context/ScopeContext';
 
 const MAX_LENGTH = 500;
 
@@ -33,12 +35,19 @@ interface AskBarProps {
   connectionId?: string | null;
 }
 
-export const AskBar = forwardRef<HTMLTextAreaElement, AskBarProps>(
+// memo 包裹：Gap-05 §11 陷阱6 — streaming content state 在父层，AskBar 不应因 token 到达而重渲染
+// forwardRef + memo 组合：先用 forwardRef 定义，再用 memo 导出
+const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
   function AskBar({ onResult, onError, onLoading, onQuestionChange, conversationId, connectionId: externalConnectionId }, ref) {
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
     const [connections, setConnections] = useState<TableauConnection[]>([]);
     const [selectedConnectionId, setSelectedConnectionId] = useState<number | null>(null);
+    const [noConnectionHint, setNoConnectionHint] = useState(false);
+
+    // 从 ScopeContext 获取连接状态，用于 noConnection 判断
+    const { connections: scopeConnections, connectionsLoading } = useScope();
+    const noConnection = !connectionsLoading && scopeConnections.length === 0;
 
     // 当外部 connectionId 有值时，不使用内部下拉
     const useExternalConnection = externalConnectionId != null;
@@ -74,6 +83,11 @@ export const AskBar = forwardRef<HTMLTextAreaElement, AskBarProps>(
 
     const submit = async () => {
       if (!input.trim() || loading) return;
+      if (noConnection) {
+        // 无连接时不发请求，显示 inline 提示
+        setNoConnectionHint(true);
+        return;
+      }
       const question = input.trim().slice(0, MAX_LENGTH);
       onQuestionChange?.(question);
       setInput('');
@@ -107,7 +121,8 @@ export const AskBar = forwardRef<HTMLTextAreaElement, AskBarProps>(
     const showConnectionSelect = !useExternalConnection && connections.length > 1;
 
     return (
-      <div className="relative rounded-2xl border border-slate-200 bg-white shadow-sm px-3 py-3">
+      <>
+      <div className="relative rounded-2xl border border-slate-200 bg-white/80 backdrop-blur-sm shadow-sm px-3 py-3 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/20 transition-shadow">
         {/* 连接选择器（多连接时，左下角 inline） */}
         {showConnectionSelect && (
           <div className="absolute left-5 bottom-4 z-10">
@@ -133,6 +148,7 @@ export const AskBar = forwardRef<HTMLTextAreaElement, AskBarProps>(
             const val = e.target.value.slice(0, MAX_LENGTH);
             setInput(val);
             onQuestionChange?.(val);
+            setNoConnectionHint(false);
           }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -140,7 +156,7 @@ export const AskBar = forwardRef<HTMLTextAreaElement, AskBarProps>(
               submit();
             }
           }}
-          placeholder="输入你的数据问题…（Enter 发送，Shift+Enter 换行）"
+          placeholder={noConnection ? '请先添加连接，再开始提问' : '输入你的数据问题…（Enter 发送，Shift+Enter 换行）'}
           rows={2}
           disabled={loading}
           className={`w-full pr-20 py-3 bg-white text-slate-800 placeholder-slate-400
@@ -156,8 +172,8 @@ export const AskBar = forwardRef<HTMLTextAreaElement, AskBarProps>(
         <button
           onClick={submit}
           disabled={loading || !input.trim()}
-          className="absolute right-4 top-1/2 -translate-y-1/2 p-2.5 bg-slate-900
-                     hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg transition-colors"
+          className="absolute right-4 top-1/2 -translate-y-1/2 p-2.5 bg-blue-700
+                     hover:bg-blue-800 disabled:bg-slate-100 disabled:text-slate-300 text-white rounded-lg transition-colors"
           aria-label="发送"
         >
           {loading ? (
@@ -167,6 +183,16 @@ export const AskBar = forwardRef<HTMLTextAreaElement, AskBarProps>(
           )}
         </button>
       </div>
+      {noConnectionHint && (
+        <p className="mt-1.5 text-xs text-amber-600">
+          尚未配置数据连接，请先<Link to="/admin/llm-configs" className="underline hover:text-amber-700">前往添加</Link>。
+        </p>
+      )}
+      </>
     );
   }
 );
+
+// Gap-05 §11 陷阱6：memo 隔离，使 streaming token 更新不触发 AskBar 重渲染
+export const AskBar = memo(AskBarBase);
+AskBar.displayName = 'AskBar';

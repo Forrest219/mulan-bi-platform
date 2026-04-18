@@ -129,7 +129,52 @@ async def list_connections(request: Request, db: Session = Depends(get_db), incl
     else:
         connections = _db.get_all_connections(owner_id=user["id"], include_inactive=include_inactive)
 
-    return {"connections": [c.to_dict() for c in connections], "total": len(connections)}
+    connection_dicts = [c.to_dict() for c in connections]
+
+    # 补充 mcp_servers 表中 type='tableau' 且 is_active=True 的记录，
+    # 让前端 ScopePicker 在 tableau_connections 表为空时也能看到连接
+    try:
+        from services.mcp.models import McpServer
+        mcp_servers = db.query(McpServer).filter(
+            McpServer.type == "tableau",
+            McpServer.is_active == True,
+        ).all()
+
+        # 按 name 建立已有连接的索引，tableau_connections 优先
+        existing_names = {d["name"] for d in connection_dicts}
+
+        for mcp in mcp_servers:
+            if mcp.name in existing_names:
+                continue  # tableau_connections 中已有同名记录，跳过
+            connection_dicts.append({
+                "id": 10000 + mcp.id,
+                "name": mcp.name,
+                "server_url": mcp.server_url or "",
+                "site": mcp.server_url or "",
+                "api_version": "3.21",
+                "connection_type": "mcp",
+                "token_name": "",
+                "owner_id": None,
+                "is_active": True,
+                "auto_sync_enabled": False,
+                "sync_interval_hours": 24,
+                "last_test_at": None,
+                "last_test_success": None,
+                "last_test_message": None,
+                "last_sync_at": None,
+                "last_sync_duration_sec": None,
+                "sync_status": "idle",
+                "mcp_direct_enabled": True,
+                "mcp_server_url": mcp.server_url or "",
+                "next_sync_at": None,
+                "created_at": mcp.created_at.strftime("%Y-%m-%d %H:%M:%S") if mcp.created_at else None,
+                "updated_at": mcp.updated_at.strftime("%Y-%m-%d %H:%M:%S") if mcp.updated_at else None,
+            })
+            existing_names.add(mcp.name)
+    except Exception:
+        logger.exception("从 mcp_servers 聚合 Tableau 连接时出错，返回仅 tableau_connections 的结果")
+
+    return {"connections": connection_dicts, "total": len(connection_dicts)}
 
 
 @router.post("/connections")

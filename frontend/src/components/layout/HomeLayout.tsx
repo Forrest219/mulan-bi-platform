@@ -68,7 +68,7 @@ export default function HomeLayout() {
 
   return (
     <div
-      className="flex min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-blue-50"
+      className="flex min-h-screen bg-white"
       style={{ '--conv-bar-w': collapsed ? '0px' : '260px' } as React.CSSProperties}
     >
         {/* 左侧对话历史栏 */}

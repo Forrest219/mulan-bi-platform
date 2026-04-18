@@ -1,116 +1,86 @@
-# TESTER_PASS — MCP 元查询场景验收报告
+# TESTER_PASS — 首页改造 3 个 Batch 验收
 
-验收日期：2026-04-18
-验收模型：claude-sonnet-4-6
-验收范围：meta_datasource_list / meta_asset_count / meta_semantic_quality
-
----
-
-## 总结
-
-**4 项验证全部通过（PASS）**
+日期：2026-04-18
+验收人：tester (claude-sonnet-4-6)
+结论：**全部通过（18/18 + 类型检查 + Python 语法）**
 
 ---
 
-## 验证 1：语法与导入正确性
+## Batch 1 — ConversationBar.tsx
 
-命令：
-```
-cd backend && python3 -m py_compile app/api/search.py services/llm/nlq_service.py
-```
-
-结果：**py_compile exit: 0**，两个文件均无语法错误。
-
----
-
-## 验证 2：classify_meta_intent 关键词匹配（静态分析 + 逻辑验证）
-
-说明：由于 `app/core/database.py` 在模块加载时强制校验 `DATABASE_URL` 环境变量（`raise RuntimeError`），
-无法在无数据库环境下执行 `python3 -c "import classify_meta_intent"`。
-改用静态代码分析，对照 `META_INTENT_KEYWORDS` 字典逐条验证函数逻辑。
-
-`classify_meta_intent` 实现（`nlq_service.py` 第 327-339 行）：
-- 遍历 `META_INTENT_KEYWORDS`，每个关键词做 `kw.lower() in question.lower()` 匹配
-- 命中即返回对应 intent key，否则返回 `None`
-
-逐条测试结果：
-
-| 输入 | 触发关键词 | 期望 | 实际 |
-|------|-----------|------|------|
-| 你有哪些数据源？ | "你有哪些数据源" | meta_datasource_list | PASS |
-| 有哪些数据源 | "有哪些数据源" | meta_datasource_list | PASS |
-| 你有几个看板？ | "你有几个看板" | meta_asset_count | PASS |
-| 有多少看板 | "有多少看板" | meta_asset_count | PASS |
-| 语义配置有哪些不完善 | "语义配置有哪些不完善" | meta_semantic_quality | PASS |
-| 上个月销售额是多少 | 无命中 | None | PASS |
-| 各区域对比 | 无命中 | None | PASS |
-
-**7/7 通过**
+| 编号 | 检查项 | 结果 | 证据（行号） |
+|------|--------|------|------------|
+| A1 | 顶部不含 `ri-sidebar-fold-line` | PASS | 全文无该 class |
+| A2 | 顶部含 `ri-edit-box-line` | PASS | L141 |
+| A3 | 顶部含 `LOGO_URL` 的 `<img>` | PASS | L23（import），L125-130（JSX） |
+| A4 | 顶部含"木兰平台"文字 | PASS | L131 |
+| A5 | `onToggleCollapse` 改为 `_onToggleCollapse` | PASS | L56 解构参数 |
+| A6 | interface 保留 `onToggleCollapse: () => void` | PASS | L29 |
 
 ---
 
-## 验证 3：META 意图不干扰现有流水线
+## Batch 2 — WelcomeHero.tsx
 
-grep 输出（`search.py`）：
-```
-28:    classify_meta_intent,
-231:async def handle_meta_query(meta_intent: str, connection_id: int, db: Session) -> dict:
-237:        meta_intent: classify_meta_intent() 返回的意图 key
-441:        # classify_meta_intent 基于规则关键词，无 LLM 调用，优先于 VizQL 意图分类
-442:        meta_intent = classify_meta_intent(question)
-444:            if connection_id is None:
-454:            result = await handle_meta_query(meta_intent, connection_id, db)
-```
+| 编号 | 检查项 | 结果 | 证据（行号） |
+|------|--------|------|------------|
+| B1 | 引入 `useAuth` 读取当前用户 | PASS | L7 import，L19 调用 |
+| B2 | 含 `greetingByHour()` 时段问候函数 | PASS | L9-16 |
+| B3 | logo className 含 `w-6 h-6` | PASS | L29 |
+| B4 | 主标题 `text-2xl font-semibold` | PASS | L31 |
+| B5 | 副标题含 `text-slate-500` | PASS | L34 |
 
-确认结论：
-- `classify_meta_intent(question)`（第 442 行）在 `classify_intent(question)`（VizQL 流水线入口，第 462 行）之前执行，顺序正确
-- `connection_id is None` 时（第 444 行），直接返回提示文本 `"请先在左上角选择 Tableau 连接，再提问。"`，不报错、不进入数据库查询
+## Batch 2 — SuggestionGrid.tsx
 
-**PASS**
-
----
-
-## 验证 4：数据库字段映射正确性（静态分析）
-
-说明：同验证 2，DATABASE_URL 强制校验阻止运行时 import，改用源码静态对比。
-
-### `_handle_meta_datasource_list`（search.py 第 260-294 行）
-
-| handler 使用字段 | 模型来源 | 模型实际定义 |
-|-----------------|---------|------------|
-| `TableauAsset.connection_id` | `tableau/models.py` L87 | Column(Integer, ForeignKey(...)) |
-| `TableauAsset.asset_type` | `tableau/models.py` L88 | Column(String(32)) |
-| `TableauAsset.is_deleted` | `tableau/models.py` L97 | Column(Boolean) |
-| `TableauAsset.name` | `tableau/models.py` L90 | Column(String(256)) |
-| `TableauConnection.id` | `tableau/models.py` L12 | Column(Integer, primary_key=True) |
-| `TableauConnection.name` | `tableau/models.py` L13 | Column(String(128)) |
-| `TableauConnection.site` | `tableau/models.py` L15 | Column(String(128)) |
-
-### `_handle_meta_asset_count`（search.py 第 297-329 行）
-
-使用字段与上表相同，全部一致。
-
-### `_handle_meta_semantic_quality`（search.py 第 332-374 行）
-
-| handler 使用字段 | 模型来源 | 模型实际定义 |
-|-----------------|---------|------------|
-| `TableauFieldSemantics.connection_id` | `semantic_maintenance/models.py` L157 | Column(Integer) |
-| `TableauFieldSemantics.semantic_definition` | `semantic_maintenance/models.py` L161 | Column(Text) |
-| `TableauFieldSemantics.status` | `semantic_maintenance/models.py` L171 | Column(String(32)) |
-| `TableauFieldSemantics.semantic_name_zh` | `semantic_maintenance/models.py` L160 | Column(String(256)) |
-| `TableauFieldSemantics.semantic_name` | `semantic_maintenance/models.py` L159 | Column(String(256)) |
-| `TableauFieldSemantics.tableau_field_id` | `semantic_maintenance/models.py` L158 | Column(String(256)) |
-
-**全部字段名与模型定义一致，无不匹配项。PASS**
+| 编号 | 检查项 | 结果 | 证据（行号） |
+|------|--------|------|------------|
+| B6 | SUGGESTIONS 数组恰好 4 条 | PASS | L12-17，4 个元素 |
+| B7 | 每条有 `title` 和 `hint` 字段 | PASS | interface L8-10，4 条数据均含两字段 |
+| B8 | grid 使用 `grid-cols-2` | PASS | L25 |
+| B9 | hover 样式为 `hover:bg-slate-50` | PASS | L33，无蓝色 hover |
 
 ---
 
-## 注意事项
+## Batch 3 — HomeLayout.tsx
 
-1. `database.py` 第 15-16 行在模块加载时强制 `raise RuntimeError`（无 DATABASE_URL 即抛错），
-   导致所有依赖数据库模型的单元测试无法在本地无数据库环境下执行。
-   建议 coder 后续将该检查改为延迟校验（在首次建立连接时校验），
-   以支持测试环境 mock 和 CI 离线验证。
+路径：`frontend/src/components/layout/HomeLayout.tsx`
 
-2. 验证 2 和验证 4 因上述原因改为静态分析，结论可信但非运行时验证，
-   建议在集成测试环境中补充运行时回归用例。
+| 编号 | 检查项 | 结果 | 证据（行号） |
+|------|--------|------|------------|
+| C1 | 根容器含 `bg-white` | PASS | L71 `flex min-h-screen bg-white` |
+
+## Batch 3 — page.tsx
+
+路径：`frontend/src/pages/home/page.tsx`
+
+| 编号 | 检查项 | 结果 | 证据（行号） |
+|------|--------|------|------------|
+| C2 | 根容器含 `relative flex flex-col min-h-screen bg-white` | PASS | L160 完全匹配 |
+| C3 | ScopePicker 条件为 `homeState !== 'HOME_IDLE' && homeState !== 'HOME_OFFLINE'` | PASS | L163 完全匹配 |
+| C4 | `OpsSnapshotPanel` 不在 JSX 中渲染（import 可保留） | PASS | L19 有 import，JSX 中无渲染 |
+| C5 | `WelcomeHero` 渲染条件为 `homeState === 'HOME_IDLE'` | PASS | L187 |
+| C6 | idle 态 `<main>` 含 `items-center justify-center` | PASS | L175 条件 class |
+| C7 | AskBar 外层含 `pointer-events-none`，内层含 `pointer-events-auto` | PASS | L267 外层，L273 内层 |
+| C8 | AskBar 容器含免责声明"回答由 AI 生成" | PASS | L284 |
+| C9 | 未登录态 `if (!user)` return 保持不变 | PASS | L74-96，含 logo / 标题 / 登录 / 注册链接 |
+
+---
+
+## 类型检查（D）
+
+命令：`cd frontend && npm run type-check`（`tsc --noEmit --project tsconfig.app.json`）
+
+结果：无任何输出，零错误，exit 0。**PASS**
+
+---
+
+## Python 语法（E）
+
+命令：`python3 -m py_compile backend/app/api/chat.py backend/app/main.py`
+
+结果：输出 OK，两文件均无语法错误。**PASS**
+
+---
+
+## 遗留风险
+
+无。所有改动符合预期，无边界问题或类型隐患被识别。

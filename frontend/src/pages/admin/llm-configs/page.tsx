@@ -196,7 +196,7 @@ function ApiKeyCell({
   cfg: LLMConfigItem;
   onSetupKey: () => void;
 }) {
-  const hasKey = cfg.has_api_key && cfg.api_key_preview;
+  const hasKey = cfg.has_api_key === true;
 
   if (!hasKey) {
     return (
@@ -218,7 +218,11 @@ function ApiKeyCell({
 
   return (
     <div className="space-y-0.5">
-      <code className="text-xs font-mono text-slate-700 tracking-wider">{cfg.api_key_preview}</code>
+      {cfg.has_api_key && (
+        <code className="block truncate max-w-full text-xs font-mono text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
+          {cfg.api_key_preview || '••••••••'}
+        </code>
+      )}
       <div className="flex items-center gap-1.5 flex-wrap">
         {cfg.api_key_updated_at && (
           <span className="text-[11px] text-slate-400">
@@ -241,7 +245,7 @@ function TestEvidenceRow({ evidence }: { evidence: TestEvidence }) {
   if (evidence.status === 'testing') {
     return (
       <tr>
-        <td colSpan={8} className="px-4 py-3 bg-slate-50 border-b border-slate-100">
+        <td colSpan={9} className="px-4 py-3 bg-slate-50 border-b border-slate-100">
           <div className="flex items-center gap-2 text-sm text-slate-500">
             <span className="w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
             检测中…
@@ -271,7 +275,7 @@ function TestEvidenceRow({ evidence }: { evidence: TestEvidence }) {
 
   return (
     <tr>
-      <td colSpan={8} className={`border-b border-slate-100 ${bgColor}`}>
+      <td colSpan={9} className={`border-b border-slate-100 ${bgColor}`}>
         <div className={`ml-4 mr-4 my-2.5 pl-3 border-l-4 ${borderColor}`}>
           {isOk ? (
             <div className="space-y-1">
@@ -626,7 +630,7 @@ export default function LLMConfigsPage() {
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
       <div className="bg-white border-b border-slate-200 px-8 py-5">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2 mb-0.5">
               {showForm ? (
@@ -656,10 +660,10 @@ export default function LLMConfigsPage() {
               <button
                 onClick={() => testAllActive(configs)}
                 className="flex items-center gap-1 px-3 py-2 text-sm text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-                title="重新检测所有配置连接状态"
+                title="检测所有配置的连接可用性"
               >
                 <i className="ri-refresh-line" />
-                检测状态
+                重新检测连接
               </button>
               <button
                 onClick={handleOpenNew}
@@ -675,7 +679,7 @@ export default function LLMConfigsPage() {
       </div>
 
       {/* Content */}
-      <div className="max-w-5xl mx-auto px-8 py-7">
+      <div className="max-w-7xl mx-auto px-8 py-7">
         {/* ── 列表视图 ──────────────────────────────────────────────── */}
         {!showForm && <>
 
@@ -720,10 +724,11 @@ export default function LLMConfigsPage() {
                   <th className="px-4 py-3 text-left font-medium text-slate-600">用途</th>
                   <th className="px-4 py-3 text-left font-medium text-slate-600">名称</th>
                   <th className="px-4 py-3 text-left font-medium text-slate-600">Provider · Model</th>
-                  <th className="px-4 py-3 text-left font-medium text-slate-600" style={{ width: 160 }}>API Key</th>
-                  <th className="px-4 py-3 text-center font-medium text-slate-600">优先级</th>
-                  <th className="px-4 py-3 text-left font-medium text-slate-600">运行状态</th>
-                  <th className="px-4 py-3 text-right font-medium text-slate-600">操作</th>
+                  <th className="px-4 py-3 text-left font-medium text-slate-600 w-40">API Key</th>
+                  <th className="px-4 py-3 text-center font-medium text-slate-600 w-20">优先级</th>
+                  <th className="px-4 py-3 text-left font-medium text-slate-600 min-w-[120px]">连接状态</th>
+                  <th className="px-4 py-3 text-center font-medium text-slate-600">启用</th>
+                  <th className="px-4 py-3 text-left font-medium text-slate-600">操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -735,57 +740,57 @@ export default function LLMConfigsPage() {
 
                   return (
                     <>
-                      <tr key={cfg.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                        <td className="px-4 py-3">
+                      <tr key={cfg.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors align-middle">
+                        <td className="px-4 py-3 align-middle">
                           <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs rounded-md font-mono">
                             {cfg.purpose}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-slate-700 font-medium">{cfg.display_name || '-'}</td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 align-middle text-slate-700 font-medium">{cfg.display_name || '-'}</td>
+                        <td className="px-4 py-3 align-middle">
                           <div className="text-slate-500 text-xs">{providerLabel(cfg.provider)}</div>
                           <div className="text-slate-500 font-mono text-xs">{cfg.model}</div>
                         </td>
-                        <td className="px-4 py-3" style={{ width: 160 }}>
+                        <td className="px-4 py-3 align-middle w-40 max-w-[200px]">
                           <ApiKeyCell
                             cfg={cfg}
                             onSetupKey={() => handleOpenEdit(cfg, true)}
                           />
                         </td>
-                        <td className="px-4 py-3 text-center text-slate-500">{cfg.priority}</td>
-                        <td className="px-4 py-3">
-                          {/* 状态 pill + toggle switch 并排 */}
-                          <div className="flex items-center gap-2">
-                            <RunStatusBadge state={runState} />
-                            {/* toggle switch */}
-                            <label className="relative inline-flex items-center cursor-pointer">
-                              <input
-                                type="checkbox"
-                                role="switch"
-                                className="sr-only peer"
-                                checked={cfg.is_active}
-                                disabled={isToggling}
-                                onChange={() => handleToggleActive(cfg)}
-                              />
-                              <div className={`
-                                w-8 h-4 rounded-full transition-colors
-                                peer-disabled:opacity-50
-                                ${cfg.is_active ? 'bg-emerald-500' : 'bg-slate-300'}
-                                peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-400 peer-focus-visible:ring-offset-1
-                              `}>
-                                <div className={`
-                                  absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full shadow-sm transition-transform
-                                  ${cfg.is_active ? 'translate-x-4' : 'translate-x-0'}
-                                `} />
-                              </div>
-                            </label>
-                          </div>
+                        <td className="px-4 py-3 align-middle text-center text-slate-500 w-20">{cfg.priority}</td>
+                        <td className="px-4 py-3 align-middle min-w-[120px]">
+                          <RunStatusBadge state={runState} />
                         </td>
-                        <td className="px-4 py-3 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
+                        <td className="px-4 py-3 align-middle text-center">
+                          {/* toggle switch */}
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              role="switch"
+                              className="sr-only peer"
+                              checked={cfg.is_active}
+                              disabled={isToggling}
+                              onChange={() => handleToggleActive(cfg)}
+                            />
+                            <div className={`
+                              w-8 h-4 rounded-full transition-colors
+                              peer-disabled:opacity-50
+                              ${cfg.is_active ? 'bg-emerald-500' : 'bg-slate-300'}
+                              peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-400 peer-focus-visible:ring-offset-1
+                            `}>
+                              <div className={`
+                                absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full shadow-sm transition-transform
+                                ${cfg.is_active ? 'translate-x-4' : 'translate-x-0'}
+                              `} />
+                            </div>
+                          </label>
+                        </td>
+                        <td className="px-4 py-3 align-middle">
+                          <div className="flex items-center justify-start gap-1.5">
                             <button
                               onClick={() => handleRowTest(cfg)}
-                              disabled={evidence?.status === 'testing'}
+                              disabled={evidence?.status === 'testing' || !cfg.has_api_key}
+                              title={!cfg.has_api_key ? '请先配置 API Key' : undefined}
                               className="px-2.5 py-1 text-xs text-slate-500 hover:text-slate-700
                                          hover:bg-slate-100 rounded-md transition-colors flex items-center gap-1
                                          disabled:opacity-40 disabled:cursor-not-allowed"

@@ -20,6 +20,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useConversations, type Conversation } from '../../../store/conversationStore';
 import { ConfirmModal } from '../../../components/ConfirmModal';
 import { useAuth } from '../../../context/AuthContext';
+import { LOGO_URL } from '../../../config';
 
 const PAGE_SIZE = 100;
 
@@ -52,7 +53,7 @@ const GROUP_ORDER: TimeGroup[] = ['今天', '昨天', '过去 7 天', '更早'];
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ConversationBar({ collapsed: _collapsed, onToggleCollapse }: ConversationBarProps) {
+export function ConversationBar({ collapsed: _collapsed, onToggleCollapse: _onToggleCollapse }: ConversationBarProps) {
   const { conversations, addConversation, deleteConversation, updateConversationTitle } =
     useConversations();
   const { user, logout } = useAuth();
@@ -115,19 +116,29 @@ export function ConversationBar({ collapsed: _collapsed, onToggleCollapse }: Con
 
   return (
     <div
-      className="bg-slate-50 border-r border-slate-200 flex flex-col h-full"
+      className="bg-white border-r border-slate-200 flex flex-col h-full"
       style={{ minHeight: '100vh' }}
     >
-      {/* 顶部：新建 */}
-      <div className="flex items-center gap-2 px-3 pt-4 pb-2">
+      {/* 顶部：品牌区 + 新建图标按钮 */}
+      <div className="flex items-center justify-between h-14 px-3 border-b border-slate-100 flex-shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <img
+            src={LOGO_URL}
+            alt=""
+            aria-hidden="true"
+            className="w-5 h-5 object-contain flex-shrink-0"
+          />
+          <span className="text-sm font-semibold text-slate-800 truncate">木兰平台</span>
+        </div>
         <button
           onClick={handleNew}
-          className="w-full flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600
-                     border border-slate-200 rounded-lg hover:bg-white hover:shadow-sm transition-all"
+          title="新对话  ⌘N"
+          aria-label="新对话"
+          className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg
+                     text-slate-400 hover:bg-slate-100 hover:text-slate-700
+                     transition-colors duration-150"
         >
-          <i className="ri-add-line text-base" />
-          新对话
-          <span className="ml-auto text-[10px] text-slate-300 select-none">⌘N</span>
+          <i className="ri-edit-box-line text-base" />
         </button>
       </div>
 
@@ -143,7 +154,7 @@ export function ConversationBar({ collapsed: _collapsed, onToggleCollapse }: Con
               setPage(1);
             }}
             placeholder="搜索对话..."
-            className="w-full pl-7 pr-3 py-1.5 text-sm bg-white border border-slate-200
+            className="w-full pl-7 pr-3 py-1.5 text-sm bg-slate-50 border border-slate-200
                        rounded-lg focus:outline-none focus:border-blue-300 placeholder-slate-400"
           />
         </div>

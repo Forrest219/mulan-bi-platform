@@ -1,4 +1,9 @@
 import { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import type { Components } from 'react-markdown';
 import type { SearchAnswer, NumberData, TableData } from '../../../api/search';
 
 interface SearchResultProps {
@@ -221,6 +226,55 @@ function TableResult({ data }: TableResultProps) {
 
 // ─── TextAnswer ──────────────────────────────────────────────────────────────
 
+const textAnswerComponents: Components = {
+  code({ className, children, ...props }) {
+    const match = /language-(\w+)/.exec(className || '');
+    const codeContent = String(children).replace(/\n$/, '');
+    if (match) {
+      return (
+        <SyntaxHighlighter
+          style={oneLight}
+          language={match[1]}
+          PreTag="div"
+          className="!rounded-lg !text-sm my-3"
+        >
+          {codeContent}
+        </SyntaxHighlighter>
+      );
+    }
+    return (
+      <code
+        className="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded text-xs font-mono"
+        {...props}
+      >
+        {children}
+      </code>
+    );
+  },
+  a({ href, children }) {
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700 underline">
+        {children}
+      </a>
+    );
+  },
+  table({ children }) {
+    return (
+      <div className="overflow-x-auto my-3">
+        <table className="min-w-full border-collapse border border-slate-200 text-sm">
+          {children}
+        </table>
+      </div>
+    );
+  },
+  th({ children }) {
+    return <th className="border border-slate-200 bg-slate-50 px-3 py-2 text-left font-medium text-slate-700">{children}</th>;
+  },
+  td({ children }) {
+    return <td className="border border-slate-200 px-3 py-2 text-slate-600">{children}</td>;
+  },
+};
+
 interface TextAnswerProps {
   answer: string;
 }
@@ -228,7 +282,11 @@ interface TextAnswerProps {
 function TextAnswer({ answer }: TextAnswerProps) {
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-6">
-      <pre className="text-sm text-slate-700 whitespace-pre-wrap">{answer}</pre>
+      <div className="prose prose-sm max-w-none prose-slate text-slate-700">
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={textAnswerComponents}>
+          {answer}
+        </ReactMarkdown>
+      </div>
     </div>
   );
 }

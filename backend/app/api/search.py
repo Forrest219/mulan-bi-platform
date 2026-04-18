@@ -228,6 +228,59 @@ def _get_asset_by_luid(datasource_luid: str):
 
 # === META 查询 Handler ===
 
+async def handle_meta_query_all(meta_intent: str, db: Session, user: dict) -> dict:
+    """
+    META 查询聚合版：connection_id=None 时，跨所有活跃连接汇总结果。
+    同时聚合 tableau_connections 表和 mcp_servers 表（type='tableau'）。
+    """
+    from services.tableau.models import TableauConnection
+    from services.mcp.models import McpServer
+
+    # 查 tableau_connections 表
+    active_connections = db.query(TableauConnection).filter(
+        TableauConnection.is_active == True,
+    ).order_by(TableauConnection.id.asc()).all()
+
+    # 同时聚合 mcp_servers 表中 type='tableau' 的活跃记录
+    if not active_connections:
+        try:
+            mcp_tableau = db.query(McpServer).filter(
+                McpServer.type == "tableau",
+                McpServer.is_active == True,
+            ).order_by(McpServer.id.asc()).all()
+            if mcp_tableau:
+                # 将 McpServer 包装成轻量对象供下游 handler 使用
+                class _MqpConn:
+                    def __init__(self, m):
+                        self.id = 10000 + m.id
+                        self.name = m.name
+                        self.site = m.server_url
+                        self.is_active = True
+                active_connections = [_MqpConn(m) for m in mcp_tableau]
+        except Exception:
+            pass
+
+    if not active_connections:
+        return {
+            "response_type": "text",
+            "content": "当前系统暂无可用的数据连接，请联系管理员添加。",
+            "intent": meta_intent,
+            "meta": True,
+        }
+
+    if meta_intent == "meta_datasource_list":
+        return await _handle_meta_datasource_list_all(active_connections, db)
+    elif meta_intent == "meta_asset_count":
+        return await _handle_meta_asset_count_all(active_connections, db)
+    elif meta_intent == "meta_semantic_quality":
+        return await _handle_meta_semantic_quality_all(active_connections, db)
+    else:
+        return {
+            "response_type": "text",
+            "content": f"未知的 META 查询类型：{meta_intent}",
+        }
+
+
 async def handle_meta_query(meta_intent: str, connection_id: int, db: Session, user: dict) -> dict:
     """
     处理 3 种 META 查询意图，直接查本地 DB 返回结构化文本。
@@ -299,6 +352,67 @@ async def _handle_meta_datasource_list(connection_id: int, db: Session) -> dict:
     }
 
 
+async def _handle_meta_datasource_list_all(connections: list, db: Session) -> dict:
+    """跨所有活跃连接，汇总数据源列表，按连接分组展示。
+    本地 tableau_assets 为空时自动 fallback 到实时调用 MCP list-datasources。
+    """
+    from services.mcp.models import McpServer
+
+    total = 0
+    sections = []
+
+    for conn in connections:
+        assets = db.query(TableauAsset).filter(
+            TableauAsset.connection_id == conn.id,
+            TableauAsset.asset_type == "datasource",
+            TableauAsset.is_deleted == False,
+        ).order_by(TableauAsset.name.asc()).all()
+
+        _site = getattr(conn, 'site', None)
+        _site_clean = _site if (_site and not _site.startswith('http://localhost')) else None
+        site_label = f"{conn.name}（{_site_clean}）" if _site_clean else conn.name
+
+        if not assets:
+            # Fallback：实时调用 MCP 获取数据源列表
+            try:
+                # 找对应的 MCP server（按 name 匹配，或取第一个活跃 tableau MCP）
+                mcp = db.query(McpServer).filter(
+                    McpServer.type == "tableau",
+                    McpServer.is_active == True,
+                ).first()
+                if mcp:
+                    ds_list = await _mcp_list_datasources(mcp.server_url, "", "", "", "")
+                    if ds_list:
+                        total += len(ds_list)
+                        lines = [f"**{site_label}** 共 {len(ds_list)} 个："]
+                        for ds in ds_list:
+                            name = ds.get("name") or ds.get("contentUrl") or str(ds)
+                            lines.append(f"- {name}")
+                        sections.append("\n".join(lines))
+            except Exception as e:
+                logger.warning("MCP fallback list-datasources 失败: %s", e)
+            continue
+
+        total += len(assets)
+        lines = [f"**{site_label}** 共 {len(assets)} 个："]
+        for a in assets:
+            lines.append(f"- {a.name}")
+        sections.append("\n".join(lines))
+
+    if not sections:
+        content = "所有连接下暂无数据源，请先完成资产同步。"
+    else:
+        header = f"共有 **{total}** 个数据源，分布在 {len(connections)} 个连接：\n"
+        content = header + "\n\n".join(sections)
+
+    return {
+        "response_type": "text",
+        "content": content,
+        "intent": "meta_datasource_list",
+        "meta": True,
+    }
+
+
 async def _handle_meta_asset_count(connection_id: int, db: Session) -> dict:
     """
     META handler 2：统计当前连接下的看板数量（Q2 业务口径：dashboard + workbook 都计入）。
@@ -328,6 +442,40 @@ async def _handle_meta_asset_count(connection_id: int, db: Session) -> dict:
         "label": "看板总数",
         "unit": "个",
         "formatted": str(total),
+        "content": content,
+        "intent": "meta_asset_count",
+        "meta": True,
+    }
+
+
+async def _handle_meta_asset_count_all(connections: list, db: Session) -> dict:
+    """跨所有活跃连接，汇总看板数量。"""
+    total_dashboard = 0
+    total_workbook = 0
+    sections = []
+
+    for conn in connections:
+        d = db.query(TableauAsset).filter(
+            TableauAsset.connection_id == conn.id,
+            TableauAsset.asset_type == "dashboard",
+            TableauAsset.is_deleted == False,
+        ).count()
+        w = db.query(TableauAsset).filter(
+            TableauAsset.connection_id == conn.id,
+            TableauAsset.asset_type == "workbook",
+            TableauAsset.is_deleted == False,
+        ).count()
+        total_dashboard += d
+        total_workbook += w
+        site_label = f"{conn.name}（{conn.site}）" if conn.site else conn.name
+        sections.append(f"- **{site_label}**：Dashboard {d} 个，Workbook {w} 个")
+
+    total = total_dashboard + total_workbook
+    detail = "\n".join(sections) if sections else "暂无看板数据。"
+    content = f"所有连接共有 **{total}** 个看板（Dashboard {total_dashboard} 个，Workbook {total_workbook} 个）：\n\n{detail}"
+
+    return {
+        "response_type": "text",
         "content": content,
         "intent": "meta_asset_count",
         "meta": True,
@@ -379,6 +527,24 @@ async def _handle_meta_semantic_quality(connection_id: int, db: Session) -> dict
     }
 
 
+async def _handle_meta_semantic_quality_all(connections: list, db: Session) -> dict:
+    """跨所有活跃连接，汇总语义配置质量。"""
+    # 复用单连接逻辑，逐连接查询后汇总
+    sections = []
+    for conn in connections:
+        result = await _handle_meta_semantic_quality(conn.id, db)
+        site_label = f"{conn.name}（{conn.site}）" if conn.site else conn.name
+        sections.append(f"### {site_label}\n{result.get('content', '')}")
+
+    content = "\n\n".join(sections) if sections else "暂无语义配置数据。"
+    return {
+        "response_type": "text",
+        "content": content,
+        "intent": "meta_semantic_quality",
+        "meta": True,
+    }
+
+
 # === API 端点 ===
 @router.post("/query")
 async def query(
@@ -394,7 +560,8 @@ async def query(
 
     question = body.question
     datasource_luid = body.datasource_luid
-    connection_id = body.connection_id
+    # connection_id >= 10000 是 MCP 虚拟连接 ID，后端不存在对应 tableau_connections 记录，视为全局路由
+    connection_id = body.connection_id if (body.connection_id is None or body.connection_id < 10000) else None
     options = body.options or {}
 
     # P2-1：追问上下文继承 — 从上轮 query_context 中补填 connection_id / datasource_luid
@@ -403,10 +570,12 @@ async def query(
             import json as _json
             from sqlalchemy import text as _text
             _msg = db.execute(_text("""
-                SELECT query_context FROM conversation_messages
-                WHERE conversation_id=:cid AND role='assistant' AND query_context IS NOT NULL
-                ORDER BY created_at DESC LIMIT 1
-            """), {"cid": body.conversation_id}).fetchone()
+                SELECT m.query_context FROM conversation_messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                WHERE m.conversation_id=:cid AND c.user_id=:uid
+                  AND m.role='assistant' AND m.query_context IS NOT NULL
+                ORDER BY m.created_at DESC LIMIT 1
+            """), {"cid": body.conversation_id, "uid": user.get("id")}).fetchone()
             if _msg:
                 _ctx = _msg._mapping["query_context"]
                 if isinstance(_ctx, str):
@@ -446,17 +615,12 @@ async def query(
         # classify_meta_intent 基于规则关键词，无 LLM 调用，优先于 VizQL 意图分类
         meta_intent = classify_meta_intent(question)
         if meta_intent:
-            if connection_id is None:
-                audit_record.status = "ok"
-                return {
-                    "trace_id": audit_record.trace_id,
-                    "response_type": "text",
-                    "content": "请先在左上角选择 Tableau 连接，再提问。",
-                    "intent": meta_intent,
-                    "meta": True,
-                }
             audit_record.params_jsonb["intent"] = meta_intent
-            result = await handle_meta_query(meta_intent, connection_id, db, user)
+            if connection_id is None:
+                # 全部连接聚合查询
+                result = await handle_meta_query_all(meta_intent, db, user)
+            else:
+                result = await handle_meta_query(meta_intent, connection_id, db, user)
             audit_record.status = "ok"
             return {
                 "trace_id": audit_record.trace_id,
@@ -473,6 +637,8 @@ async def query(
             asset = _get_asset_by_luid(datasource_luid)
             if not asset:
                 raise _nlq_error_response("NLQ_009", "数据源不存在或已删除")
+            from app.utils.auth import verify_connection_access
+            verify_connection_access(asset.connection_id, user, db)
             if is_datasource_sensitivity_blocked(datasource_luid):
                 raise _nlq_error_response("NLQ_011", "该数据源为高敏级别")
             chosen_ds = {
@@ -481,6 +647,8 @@ async def query(
                 "connection_id": asset.connection_id,
             }
         elif connection_id:
+            from app.utils.auth import verify_connection_access
+            verify_connection_access(connection_id, user, db)
             chosen_ds = route_datasource(question, connection_id=connection_id)
             if not chosen_ds:
                 raise _nlq_error_response("NLQ_005", "未找到匹配的数据源，请指定 datasource_luid")

@@ -424,7 +424,7 @@ export default function McpConfigsPage() {
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
       <div className="bg-white border-b border-slate-200 px-8 py-5">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2 mb-0.5">
               {showForm ? (
@@ -463,7 +463,7 @@ export default function McpConfigsPage() {
       </div>
 
       {/* Content */}
-      <div className="max-w-5xl mx-auto px-8 py-7">
+      <div className="max-w-7xl mx-auto px-8 py-7">
         {/* ── 列表视图 ──────────────────────────────────────────────── */}
         {!showForm && (
           <>
@@ -509,19 +509,19 @@ export default function McpConfigsPage() {
                       <th className="px-4 py-3 text-left font-medium text-slate-600">名称</th>
                       <th className="px-4 py-3 text-left font-medium text-slate-600">Server URL</th>
                       <th className="px-4 py-3 text-center font-medium text-slate-600">状态</th>
-                      <th className="px-4 py-3 text-right font-medium text-slate-600">操作</th>
+                      <th className="px-4 py-3 text-left font-medium text-slate-600">操作</th>
                     </tr>
                   </thead>
                   <tbody>
                     {servers.map((server) => {
                       const testResult = testResults[server.id];
                       return (
-                        <tr key={server.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                          <td className="px-4 py-3">
+                        <tr key={server.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors align-middle">
+                          <td className="px-4 py-3 align-middle">
                             <TypeBadge type={server.type} />
                           </td>
-                          <td className="px-4 py-3 text-slate-700 font-medium">{server.name}</td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 align-middle text-slate-700 font-medium">{server.name}</td>
+                          <td className="px-4 py-3 align-middle">
                             <span
                               className="font-mono text-xs text-slate-500"
                               title={server.server_url}
@@ -529,7 +529,7 @@ export default function McpConfigsPage() {
                               {truncateUrl(server.server_url)}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-center">
+                          <td className="px-4 py-3 align-middle text-center">
                             {/* is_active toggle */}
                             <button
                               onClick={() => handleToggleActive(server)}
@@ -537,20 +537,20 @@ export default function McpConfigsPage() {
                               title={server.is_active ? '点击禁用' : '点击启用'}
                             >
                               <div
-                                className={`w-9 h-5 rounded-full transition-colors ${
+                                className={`w-8 h-4 rounded-full transition-colors ${
                                   server.is_active ? 'bg-emerald-500' : 'bg-slate-200'
                                 }`}
                               >
                                 <div
-                                  className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${
+                                  className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full shadow-sm transition-transform ${
                                     server.is_active ? 'translate-x-4' : ''
                                   }`}
                                 />
                               </div>
                             </button>
                           </td>
-                          <td className="px-4 py-3 text-right">
-                            <div className="flex items-center justify-end gap-1">
+                          <td className="px-4 py-3 align-middle">
+                            <div className="flex items-center justify-start gap-1">
                               {/* 编辑 */}
                               <button
                                 onClick={() => handleOpenEdit(server)}
@@ -588,7 +588,7 @@ export default function McpConfigsPage() {
                             </div>
                             {/* 测试结果详情（行内） */}
                             {testResult && (
-                              <div className={`mt-1 text-xs px-2 py-0.5 rounded text-right ${
+                              <div className={`mt-1 text-xs px-2 py-0.5 rounded text-left ${
                                 testResult.status === 'online'
                                   ? 'text-emerald-600'
                                   : 'text-red-500'
@@ -810,12 +810,12 @@ export default function McpConfigsPage() {
                   <label className="flex items-center justify-between py-1 cursor-pointer">
                     <span className="text-sm text-slate-700">启用此配置</span>
                     <div
-                      className={`relative w-10 h-6 rounded-full transition-colors ${
+                      className={`relative w-8 h-4 rounded-full transition-colors ${
                         form.is_active ? 'bg-emerald-500' : 'bg-slate-200'
                       }`}
                       onClick={() => setForm(f => ({ ...f, is_active: !f.is_active }))}
                     >
-                      <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform ${
+                      <div className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full shadow-sm transition-transform ${
                         form.is_active ? 'translate-x-4' : ''
                       }`} />
                     </div>

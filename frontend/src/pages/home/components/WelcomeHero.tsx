@@ -1,21 +1,39 @@
 /**
- * WelcomeHero — 首页欢迎区（idle 态展示）
+ * WelcomeHero — 首页欢迎区（idle 态主视觉）
  *
- * 居中：Logo + "Mulan Platform" + 副标题
- * 样式：slate/blue 浅色风格
+ * 风格：贴近 open-webui，问候语为唯一主角；logo 作为 24px 徽标点缀。
  */
 import { LOGO_URL } from '../../../config';
+import { useAuth } from '../../../context/AuthContext';
+
+function greetingByHour(): string {
+  const h = new Date().getHours();
+  if (h < 6) return '夜深了';
+  if (h < 12) return '早上好';
+  if (h < 14) return '中午好';
+  if (h < 18) return '下午好';
+  return '晚上好';
+}
 
 export function WelcomeHero() {
+  const { user } = useAuth();
+  const name = user?.display_name ?? user?.username ?? '';
+  const greeting = name ? `${greetingByHour()}，${name}` : greetingByHour();
+
   return (
-    <div className="flex flex-col items-center text-center pt-16 pb-8">
+    <div className="flex flex-col items-center text-center">
       <img
         src={LOGO_URL}
-        alt="Mulan Platform Logo"
-        className="w-16 h-16 object-contain mb-5"
+        alt=""
+        aria-hidden="true"
+        className="w-6 h-6 object-contain mb-3 opacity-80"
       />
-      <h1 className="text-3xl font-bold text-slate-700 mb-2">Mulan Platform</h1>
-      <p className="text-slate-400 text-sm">数据建模与治理平台 — 用自然语言探索你的数据</p>
+      <h1 className="text-2xl font-semibold text-slate-800 tracking-tight">
+        {greeting}
+      </h1>
+      <p className="mt-2 text-sm text-slate-500">
+        用自然语言向木兰提问，开始探索你的数据
+      </p>
     </div>
   );
 }

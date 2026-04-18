@@ -59,7 +59,7 @@ export async function askQuestion(req: AskQuestionRequest): Promise<SearchAnswer
     throw new SearchError(code, msg);
   }
   const json = await resp.json();
-  // Normalize backend response: map response_type → type
-  const { response_type, ...rest } = json;
-  return { type: response_type, ...rest };
+  // Normalize backend response: map response_type → type, content → answer
+  const { response_type, content, answer, ...rest } = json;
+  return { type: response_type, answer: answer ?? content, ...rest };
 }

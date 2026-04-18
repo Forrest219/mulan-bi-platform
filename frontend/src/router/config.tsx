@@ -15,6 +15,7 @@ import NotFound from '../pages/NotFound';
 import Home from '../pages/home/page';
 import LoginPage from '../pages/login/page';
 import RegisterPage from '../pages/register/page';
+import ForbiddenPage from '../pages/ForbiddenPage';
 import ProtectedRoute from '../components/auth/ProtectedRoute';
 import AppShellLayout from '../components/layout/AppShellLayout';
 import HomeLayout from '../components/layout/HomeLayout';
@@ -45,6 +46,7 @@ const PermissionsAdminPage = lazy(() => import('../pages/admin/permissions/page'
 const LLMAdminPage         = lazy(() => import('../pages/admin/llm/page'));
 const AdminTasksPage        = lazy(() => import('../pages/admin/tasks/page'));
 const ActivityAdminPage     = lazy(() => import('../pages/admin/activity/page'));
+const ForgotPasswordPage    = lazy(() => import('../pages/forgot-password/page'));
 
 // ──────────────────────────────────────────────────────────────
 // 路由定义
@@ -67,6 +69,7 @@ const routes: RouteObject[] = [
   },
   { path: '/login',          element: <LoginPage /> },
   { path: '/register',       element: <RegisterPage /> },
+  { path: '/forgot-password', element: <ForgotPasswordPage /> },
 
   // =====================
   // 统一侧边栏布局（5 域，Spec 18 §4.2）
@@ -254,6 +257,7 @@ const routes: RouteObject[] = [
       {
         path: '/system',
         children: [
+          { index: true, element: <Navigate to="/system/users" replace /> },
           {
             path: 'users',
             element: (
@@ -355,8 +359,9 @@ const routes: RouteObject[] = [
   { path: '/ops', element: <Navigate to="/" replace /> },
 
   // =====================
-  // 404
+  // 403 / 404
   // =====================
+  { path: '/403', element: <ForbiddenPage /> },
   { path: '*', element: <NotFound /> },
 ];
 
