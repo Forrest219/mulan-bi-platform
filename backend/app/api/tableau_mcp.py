@@ -109,13 +109,7 @@ async def _list_datasources(credentials: dict) -> list:
 
 async def _get_datasource_metadata(credentials: dict, luid: str) -> dict:
     """登录 Tableau 并拉取指定数据源详情。"""
-    crypto = get_tableau_crypto()
-    pat_value_raw = credentials.get("pat_value", "")
-    try:
-        pat_value = crypto.decrypt(pat_value_raw)
-    except Exception:
-        logger.warning("PAT value decryption failed, using as plaintext")
-        pat_value = pat_value_raw
+    pat_value = credentials.get("pat_value", "")
 
     tableau_server = credentials["tableau_server"]
     pat_name = credentials["pat_name"]

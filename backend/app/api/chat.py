@@ -118,18 +118,25 @@ async def _stream_llm_response(
     try:
         answer = await _resolve_answer(question, connection_id, authorization, cookie)
 
-        words = answer.split()
+        # 按行切分，保留换行符，每行再按词切 chunk
+        lines = answer.split("\n")
         chunk_size = 3
 
-        for i in range(0, len(words), chunk_size):
-            chunk_words = words[i : i + chunk_size]
-            # 非最后一组末尾加空格，保留自然分隔
-            chunk = " ".join(chunk_words)
-            if i + chunk_size < len(words):
-                chunk += " "
-            payload = json.dumps({"token": chunk}, ensure_ascii=False)
-            yield f"data: {payload}\n\n"
-            await asyncio.sleep(0.05)
+        for line_idx, line in enumerate(lines):
+            words = line.split(" ") if line.strip() else [""]
+            for i in range(0, len(words), chunk_size):
+                chunk_words = words[i : i + chunk_size]
+                chunk = " ".join(chunk_words)
+                # 非行末追加空格；每行结束追加换行
+                is_last_chunk = (i + chunk_size >= len(words))
+                is_last_line = (line_idx == len(lines) - 1)
+                if not is_last_chunk:
+                    chunk += " "
+                elif not is_last_line:
+                    chunk += "\n"
+                payload = json.dumps({"token": chunk}, ensure_ascii=False)
+                yield f"data: {payload}\n\n"
+                await asyncio.sleep(0.05)
 
         yield f"data: {json.dumps({'done': True})}\n\n"
 

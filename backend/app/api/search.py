@@ -228,7 +228,7 @@ def _get_asset_by_luid(datasource_luid: str):
 
 # === META 查询 Handler ===
 
-async def handle_meta_query_all(meta_intent: str, db: Session, user: dict) -> dict:
+async def handle_meta_query_all(meta_intent: str, db: Session, user: dict, question: str = "") -> dict:
     """
     META 查询聚合版：connection_id=None 时，跨所有活跃连接汇总结果。
     同时聚合 tableau_connections 表和 mcp_servers 表（type='tableau'）。
@@ -270,6 +270,8 @@ async def handle_meta_query_all(meta_intent: str, db: Session, user: dict) -> di
 
     if meta_intent == "meta_datasource_list":
         return await _handle_meta_datasource_list_all(active_connections, db)
+    elif meta_intent == "meta_field_list":
+        return await _handle_meta_field_list_all(active_connections, db, question=question)
     elif meta_intent == "meta_asset_count":
         return await _handle_meta_asset_count_all(active_connections, db)
     elif meta_intent == "meta_semantic_quality":
@@ -281,9 +283,9 @@ async def handle_meta_query_all(meta_intent: str, db: Session, user: dict) -> di
         }
 
 
-async def handle_meta_query(meta_intent: str, connection_id: int, db: Session, user: dict) -> dict:
+async def handle_meta_query(meta_intent: str, connection_id: int, db: Session, user: dict, question: str = "") -> dict:
     """
-    处理 3 种 META 查询意图，直接查本地 DB 返回结构化文本。
+    处理 META 查询意图，直接查本地 DB 返回结构化文本。
     不走 VizQL One-Pass LLM 流水线。
 
     Args:
@@ -291,6 +293,7 @@ async def handle_meta_query(meta_intent: str, connection_id: int, db: Session, u
         connection_id: 用户在 ScopePicker 选中的连接 ID（Q1 业务口径：不 fallback）
         db: SQLAlchemy session（由 Depends(get_db) 注入，与主流程共用）
         user: 当前用户（用于 IDOR 防护：verify_connection_access）
+        question: 原始用户问题（用于字段列表意图提取数据源名称）
 
     Returns:
         符合 PRD §6.2 响应格式的 dict（response_type + content/value 等字段）
@@ -304,6 +307,12 @@ async def handle_meta_query(meta_intent: str, connection_id: int, db: Session, u
 
     if meta_intent == "meta_datasource_list":
         return await _handle_meta_datasource_list(connection_id, db)
+    elif meta_intent == "meta_field_list":
+        # 单连接下的字段查询，先查本地资产，为空时 fallback MCP
+        from services.tableau.models import TableauConnection as _TC
+        conn = db.query(_TC).filter(_TC.id == connection_id).first()
+        conns = [conn] if conn else []
+        return await _handle_meta_field_list_all(conns, db, question=question)
     elif meta_intent == "meta_asset_count":
         return await _handle_meta_asset_count(connection_id, db)
     elif meta_intent == "meta_semantic_quality":
@@ -339,9 +348,10 @@ async def _handle_meta_datasource_list(connection_id: int, db: Session) -> dict:
     if not assets:
         content = f"**{site_label}** 下暂无数据源，请先完成资产同步。"
     else:
-        lines = [f"**{site_label}** 共有 {len(assets)} 个数据源："]
+        lines = [f"我在 **{site_label}** 中找到 **{len(assets)}** 个数据源："]
         for a in sorted(assets, key=lambda x: x.name):
             lines.append(f"- {a.name}")
+        lines.append("\n> 如需了解某个数据源的字段信息，可以直接提问，例如：「管理费用数据源 有什么字段」")
         content = "\n".join(lines)
 
     return {
@@ -381,10 +391,11 @@ async def _handle_meta_datasource_list_all(connections: list, db: Session) -> di
                     McpServer.is_active == True,
                 ).first()
                 if mcp:
-                    ds_list = await _mcp_list_datasources(mcp.server_url, "", "", "", "")
+                    # 使用内置 MCP 端点（tableau_mcp.py），不使用 mcp.server_url（Tableau 官网 URL）
+                    ds_list = await _mcp_list_datasources("http://localhost:8000/tableau-mcp", "", "", "", "")
                     if ds_list:
                         total += len(ds_list)
-                        lines = [f"**{site_label}** 共 {len(ds_list)} 个："]
+                        lines = [f"\n### {site_label}（共 {len(ds_list)} 个）"]
                         for ds in ds_list:
                             name = ds.get("name") or ds.get("contentUrl") or str(ds)
                             lines.append(f"- {name}")
@@ -394,21 +405,170 @@ async def _handle_meta_datasource_list_all(connections: list, db: Session) -> di
             continue
 
         total += len(assets)
-        lines = [f"**{site_label}** 共 {len(assets)} 个："]
+        lines = [f"\n### {site_label}（共 {len(assets)} 个）"]
         for a in assets:
             lines.append(f"- {a.name}")
         sections.append("\n".join(lines))
 
+    n_conns = len(connections)
     if not sections:
         content = "所有连接下暂无数据源，请先完成资产同步。"
     else:
-        header = f"共有 **{total}** 个数据源，分布在 {len(connections)} 个连接：\n"
-        content = header + "\n\n".join(sections)
+        header = f"我在 **{n_conns}** 个连接中共找到 **{total}** 个数据源："
+        footer = "\n\n> 如需了解某个数据源的字段信息，可以直接提问，例如：「管理费用数据源 有什么字段」"
+        content = header + "\n".join(sections) + footer
 
     return {
         "response_type": "text",
         "content": content,
         "intent": "meta_datasource_list",
+        "meta": True,
+    }
+
+
+async def _handle_meta_field_list_all(connections: list, db: Session, question: str = "") -> dict:
+    """
+    META handler：查询指定数据源的字段列表。
+
+    从用户问题中提取数据源名称（模糊匹配 MCP/本地 datasource 名称），
+    先查本地 tableau_assets 字段，为空时 fallback 到 MCP get-datasource-metadata。
+
+    Args:
+        connections: 活跃连接列表
+        db: SQLAlchemy session
+        question: 原始用户问题，用于从中提取数据源名称
+    """
+    from services.mcp.models import McpServer
+
+    # 1. 通过 MCP 拉全量数据源列表（用于名称匹配）
+    mcp_base_url = "http://localhost:8000/tableau-mcp"
+    all_ds = []
+    try:
+        all_ds = await _mcp_list_datasources(mcp_base_url, "", "", "", "")
+    except Exception as e:
+        logger.warning("_handle_meta_field_list: MCP list-datasources 失败: %s", e)
+
+    # 2. 从问题中匹配数据源名称（最长优先匹配）
+    matched_ds = None
+    if question and all_ds:
+        q_lower = question.lower()
+        candidates = sorted(all_ds, key=lambda x: len(x.get("name", "")), reverse=True)
+        for ds in candidates:
+            name = ds.get("name", "")
+            if name and name.lower() in q_lower:
+                matched_ds = ds
+                break
+
+    if not matched_ds:
+        # 问题中未能识别数据源名称
+        if all_ds:
+            ds_sample = "、".join(ds.get("name", "") for ds in all_ds[:5])
+            hint = f"（例如：{ds_sample}）" if ds_sample else ""
+            content = f"请告诉我您想查询哪个数据源的字段，例如：「XX数据源 有什么字段」{hint}"
+        else:
+            content = "暂时无法获取数据源列表，请稍后重试或联系管理员。"
+        return {
+            "response_type": "text",
+            "content": content,
+            "intent": "meta_field_list",
+            "meta": True,
+        }
+
+    ds_name = matched_ds.get("name", "")
+    ds_luid = matched_ds.get("luid", "")
+
+    # 3. 先查本地 tableau_assets 中该数据源的字段
+    local_fields = []
+    if ds_luid:
+        try:
+            from services.tableau.models import TableauDatabase as _TDB
+            _db = _TDB()
+            _session = _db.session
+            local_asset = _session.query(TableauAsset).filter(
+                TableauAsset.datasource_luid == ds_luid,
+                TableauAsset.is_deleted == False,
+            ).first()
+            if local_asset:
+                local_fields = _db.get_datasource_fields(local_asset.id)
+            _session.close()
+        except Exception as e:
+            logger.warning("_handle_meta_field_list: 本地字段查询失败: %s", e)
+
+    if local_fields:
+        lines = [f"**{ds_name}** 共有 **{len(local_fields)}** 个字段："]
+        for f in sorted(local_fields, key=lambda x: (x.role or "", x.field_caption or "")):
+            role_label = "度量" if (f.role or "").lower() == "measure" else "维度"
+            dtype = f.data_type or ""
+            lines.append(f"- {f.field_caption}（{role_label}{', ' + dtype if dtype else ''}）")
+        content = "\n".join(lines)
+        return {
+            "response_type": "text",
+            "content": content,
+            "intent": "meta_field_list",
+            "meta": True,
+        }
+
+    # 4. 本地无数据，fallback 到 MCP get-datasource-metadata
+    if not ds_luid:
+        content = f"未能找到数据源「{ds_name}」的 LUID，无法查询字段信息。"
+        return {
+            "response_type": "text",
+            "content": content,
+            "intent": "meta_field_list",
+            "meta": True,
+        }
+
+    try:
+        metadata = await _mcp_get_datasource_metadata(mcp_base_url, ds_luid)
+    except Exception as e:
+        logger.error("_handle_meta_field_list: MCP get-datasource-metadata 失败: %s", e)
+        content = f"获取「{ds_name}」字段信息时出错，请稍后重试。"
+        return {
+            "response_type": "text",
+            "content": content,
+            "intent": "meta_field_list",
+            "meta": True,
+        }
+
+    # MCP 返回格式：{"datasource": {..., "fields": [...]}}（REST API 格式）
+    # 或 GraphQL 格式：{"data": {"publishedDatasources": [{...,"fields":[...]}]}}
+    mcp_fields = []
+    ds_info = metadata.get("datasource", {})
+    if ds_info:
+        # REST API 格式（tableau_mcp.py 实现）
+        raw_fields = ds_info.get("fields", {})
+        if isinstance(raw_fields, dict):
+            raw_fields = raw_fields.get("field", [])
+        if isinstance(raw_fields, list):
+            mcp_fields = raw_fields
+    else:
+        # GraphQL 格式 fallback
+        gql_ds = metadata.get("data", {}).get("publishedDatasources", [{}])
+        if gql_ds:
+            mcp_fields = gql_ds[0].get("fields", [])
+
+    if not mcp_fields:
+        content = (
+            f"「{ds_name}」数据源暂无可用字段信息。\n"
+            f"该数据源已存在（LUID: `{ds_luid}`），"
+            f"建议完成资产同步后再查询字段详情。"
+        )
+    else:
+        lines = [f"**{ds_name}** 共有 **{len(mcp_fields)}** 个字段："]
+        for f in mcp_fields:
+            fname = f.get("name") or f.get("fieldCaption") or str(f)
+            ftype = f.get("dataType") or f.get("type") or ""
+            frole = f.get("role") or ""
+            role_label = "度量" if frole.lower() == "measure" else ("维度" if frole else "")
+            meta_parts = [p for p in [role_label, ftype] if p]
+            suffix = f"（{'、'.join(meta_parts)}）" if meta_parts else ""
+            lines.append(f"- {fname}{suffix}")
+        content = "\n".join(lines)
+
+    return {
+        "response_type": "text",
+        "content": content,
+        "intent": "meta_field_list",
         "meta": True,
     }
 
@@ -618,9 +778,9 @@ async def query(
             audit_record.params_jsonb["intent"] = meta_intent
             if connection_id is None:
                 # 全部连接聚合查询
-                result = await handle_meta_query_all(meta_intent, db, user)
+                result = await handle_meta_query_all(meta_intent, db, user, question=question)
             else:
-                result = await handle_meta_query(meta_intent, connection_id, db, user)
+                result = await handle_meta_query(meta_intent, connection_id, db, user, question=question)
             audit_record.status = "ok"
             return {
                 "trace_id": audit_record.trace_id,
