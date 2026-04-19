@@ -27,6 +27,7 @@ import { ConversationProvider } from '../store/conversationStore';
 const ChatPage            = lazy(() => import('../pages/chat/page'));
 const LLMConfigsPage      = lazy(() => import('../pages/admin/llm-configs/page'));
 const McpConfigsPage      = lazy(() => import('../pages/admin/mcp-configs/page'));
+const McpDebuggerPage     = lazy(() => import('../pages/system/mcp-debugger/page'));
 const DDLValidatorPage    = lazy(() => import('../pages/ddl-validator/page'));
 const RuleConfigPage      = lazy(() => import('../pages/rule-config/page'));
 const DataHealthPage      = lazy(() => import('../pages/data-governance/health/page'));
@@ -315,6 +316,14 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute adminOnly>
                 <McpConfigsPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'mcp-debugger',
+            element: (
+              <ProtectedRoute adminOnly>
+                <McpDebuggerPage />
               </ProtectedRoute>
             ),
           },

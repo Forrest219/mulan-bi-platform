@@ -2,12 +2,14 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
-      "Bash(npm:*)",
-      "Bash(cd frontend && npm:*)",
-      "Bash(cd backend && uvicorn:*)",
-      "Bash(python3:*)",
-      "Bash(sqlite3:*)",
-      "Read",
+      "Read(.ts)",
+      "Read(.tsx)",
+      "Read(.py)",
+      "Read(.md)",
+      "Read(.json)",
+      "Read(.yml)",
+      "Read(.yaml)",
+      "Read(.sh)",
       "Edit(.tsx)",
       "Edit(.ts)",
       "Edit(.py)",
@@ -15,15 +17,76 @@
       "Write(.ts)",
       "Write(.py)",
       "Write(.md)",
-      "Write(.json)"
+      "Write(.json)",
+      "Write(.yml)",
+      "Write(.yaml)",
+      "Bash(bash scripts/audit-todos.sh)",
+      "Bash(bash scripts/audit-internal-links.sh)",
+      "Bash(bash scripts/audit-alembic-server-defaults.sh)",
+      "Bash(bash scripts/check-handover.sh)",
+      "Bash(bash scripts/pretool-guard.sh)",
+      "Bash(bash scripts/audit-adrs.sh)",
+      "Bash(cd backend && ruff check .)",
+      "Bash(cd backend && python3 -m py_compile)",
+      "Bash(cd backend && pytest -q)",
+      "Bash(cd backend && alembic upgrade head)",
+      "Bash(cd backend && alembic downgrade)",
+      "Bash(cd backend && alembic revision)",
+      "Bash(cd backend && pip install -r requirements.txt)",
+      "Bash(cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000)",
+      "Bash(cd frontend && npm run lint)",
+      "Bash(cd frontend && npm run type-check)",
+      "Bash(cd frontend && npm run build)",
+      "Bash(cd frontend && npm run test)",
+      "Bash(cd frontend && npm ci)",
+      "Bash(cd frontend && npm run dev)",
+      "Bash(cd frontend && npx playwright test)",
+      "Bash(cd frontend && npx playwright install chromium)",
+      "Bash(alembic upgrade head)",
+      "Bash(alembic downgrade)",
+      "Bash(alembic revision)",
+      "Bash(git status)",
+      "Bash(git diff)",
+      "Bash(git log)",
+      "Bash(git show)",
+      "Bash(git branch)",
+      "Bash(git remote -v)",
+      "Bash(python3 --version)",
+      "Bash(node --version)",
+      "Bash(npm --version)",
+      "Bash(python3 -c)"
     ],
     "deny": [
-      "Bash(rm -rf:*)",
-      "Bash(rm:*)"
+      "Bash(rm -rf /)",
+      "Bash(rm -rf /home)",
+      "Bash(rm -rf /usr)",
+      "Bash(rm -rf /tmp)",
+      "Bash(rm -rf /var)",
+      "Bash(find . -delete)",
+      "Bash(find / -delete)",
+      "Bash(truncate -s 0)",
+      "Bash(dd if=)",
+      "Bash(dd of=)",
+      "Bash(mkfs)",
+      "Bash(mkfs.)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(npm publish)",
+      "Bash(npm adduser)",
+      "Bash(pip uninstall)",
+      "Bash(python3 -m pip uninstall)",
+      "Bash(chmod 777)",
+      "Bash(chmod -R 777)",
+      "Bash(shutdown)",
+      "Bash(reboot)",
+      "Bash(halt)",
+      "Bash(poweroff)",
+      "Bash(kill -9)",
+      "Bash(killall)"
     ]
   },
   "env": {
-    "REACT_APP_API_BASE": "http://localhost:8000"
+    "VITE_API_BASE": "http://localhost:8000"
   },
   "hooks": {
     "Stop": [
@@ -31,9 +94,58 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd frontend && npm run lint 2>&1 | tail -50",
-            "timeout": 60,
+            "command": "bash -c 'set -o pipefail; cd frontend && npm run lint 2>&1; [ $? -eq 0 ]'",
+            "timeout": 120,
             "statusMessage": "Running frontend lint..."
+          },
+          {
+            "type": "command",
+            "command": "bash -c 'set -o pipefail; cd frontend && npm run type-check 2>&1; [ $? -eq 0 ]'",
+            "timeout": 120,
+            "statusMessage": "Running frontend type check..."
+          },
+          {
+            "type": "command",
+            "command": "bash -c 'set -o pipefail; bash scripts/audit-todos.sh 2>&1; [ $? -eq 0 ]'",
+            "timeout": 30,
+            "statusMessage": "Auditing TODO comments..."
+          },
+          {
+            "type": "command",
+            "command": "bash -c 'set -o pipefail; bash scripts/audit-internal-links.sh 2>&1; [ $? -eq 0 ]'",
+            "timeout": 30,
+            "statusMessage": "Auditing SPA router safety..."
+          },
+          {
+            "type": "command",
+            "command": "bash -c 'set -o pipefail; bash scripts/audit-alembic-server-defaults.sh 2>&1; [ $? -eq 0 ]'",
+            "timeout": 30,
+            "statusMessage": "Auditing alembic server defaults..."
+          },
+          {
+            "type": "command",
+            "command": "bash -c 'set -o pipefail; cd backend && ruff check . 2>&1; [ $? -eq 0 ]'",
+            "timeout": 60,
+            "statusMessage": "Running backend ruff check..."
+          },
+          {
+            "type": "command",
+            "command": "bash -c 'set -o pipefail; cd backend && pytest -q --tb=short 2>&1; [ $? -eq 0 ]'",
+            "timeout": 120,
+            "statusMessage": "Running backend tests..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/pretool-guard.sh",
+            "timeout": 5,
+            "statusMessage": "PreToolUse guard..."
           }
         ]
       }
@@ -63,6 +175,17 @@
       },
       {
         "matcher": "MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/check-handover.sh",
+            "timeout": 10,
+            "statusMessage": "Checking handover artifacts..."
+          }
+        ]
+      },
+      {
+        "matcher": "Delete",
         "hooks": [
           {
             "type": "command",

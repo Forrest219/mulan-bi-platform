@@ -76,6 +76,8 @@ app.include_router(sm_sync.router, prefix="/api/semantic-maintenance", tags=["�
 app.include_router(sm_publish.router, prefix="/api/semantic-maintenance", tags=["语义维护"])
 from app.api import feedback
 app.include_router(feedback.router, prefix="/api/feedback", tags=["反馈"])
+from app.api import mcp_debug
+app.include_router(mcp_debug.router)
 
 
 @app.get("/")

@@ -2,6 +2,9 @@
   "mcpServers": {
     "codex": {
       "command": "/Users/forrest/.local/node-v24.14.1-darwin-arm64/bin/codex-mcp-server"
+    },
+    "mulan-tableau": {
+      "url": "http://localhost:8000/tableau-mcp"
     }
   }
 }

@@ -7,37 +7,104 @@ on:
     branches: [main]
 
 jobs:
-  frontend:
+  # ──────────────────────────────────────────────────────────────
+  # PR 描述 + Commit message 检查（最先运行，阻断不合格 PR）
+  # ──────────────────────────────────────────────────────────────
+  pr-check:
     runs-on: ubuntu-latest
+    # 只在 PR 事件触发，push 到 main 不需要（已合并）
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 需要检查所有 commit
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'frontend/node_modules'
 
-      - name: Install dependencies
-        run: cd frontend && npm ci
+      - name: Install commitlint
+        run: npm install -g @commitlint/cli@latest @commitlint/config-conventional@latest
 
-      - name: Type check
-        run: cd frontend && npm run type-check
+      - name: Check PR description
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          echo "=== 检查 PR 描述 ==="
 
-      - name: Lint
-        run: cd frontend && npm run lint
+          # 检查 PR 标题是否符合 conventional commit
+          if ! echo "$PR_TITLE" | grep -qE '^(feat|fix|refactor|perf|docs|style|test|chore)(\(.+\))?: .'; then
+            echo "❌ PR 标题不符合 conventional commit 格式"
+            echo "   正确格式：feat(scope): description"
+            echo "   当前标题：$PR_TITLE"
+            exit 1
+          fi
+          echo "✅ PR 标题格式正确"
 
-      - name: Unit tests
-        run: cd frontend && npm run test -- --coverage
+          # 检查描述是否为空（body 可以很短但不能全为空）
+          # 先删除 HTML 注释，再删除空白字符，判断是否为空
+          BODY_CLEAN=$(echo "$PR_BODY" | sed 's/<!--.*-->//g' | tr -d '\n\r\t ')
+          if [ -z "$BODY_CLEAN" ]; then
+            echo "❌ PR 描述为空，请填写描述"
+            exit 1
+          fi
 
-      - name: Build
-        run: cd frontend && npm run build
+          # 检查必填项：Summary
+          if ! echo "$PR_BODY" | grep -qE '## Summary'; then
+            echo "❌ PR 描述缺少 ## Summary 部分"
+            exit 1
+          fi
+
+          # 检查必填项：Test Plan
+          if ! echo "$PR_BODY" | grep -qE '## Test Plan'; then
+            echo "❌ PR 描述缺少 ## Test Plan 部分"
+            exit 1
+          fi
+
+          # Summary 必须有实质内容（先删 HTML 注释，再判断）
+          SUMMARY_CONTENT=$(echo "$PR_BODY" | sed 's/<!--.*-->//g' | sed -n '/## Summary/,/## /p' | head -n -1 | sed '1d' | grep -v '^[[:space:]]*$')
+          if [ -z "$SUMMARY_CONTENT" ]; then
+            echo "❌ Summary 部分为空，请填写变更描述"
+            exit 1
+          fi
+
+          # Test Plan 必须有实质内容（不能只有标题和占位符）
+          TESTPLAN_CONTENT=$(echo "$PR_BODY" | sed 's/<!--.*-->//g' | sed -n '/## Test Plan/,/## [^T]/p' | head -n -1 | sed '1d' | grep -v '^[[:space:]]*$' | grep -v '^[[:space:]]*[0-9]\+[[:space:]]*$')
+          if [ -z "$TESTPLAN_CONTENT" ]; then
+            echo "❌ Test Plan 部分为空，请填写验证步骤"
+            exit 1
+          fi
+
+          echo "✅ PR 描述格式完整"
+
+      - name: Run commitlint on PR commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          echo "=== 检查 PR commit 格式 ==="
+          echo "范围：$BASE_SHA → $HEAD_SHA"
+
+          # 使用 commitlint CLI 检查 PR 范围内的所有 commit
+          # --from 是 exclusive，--to 是 inclusive
+          if ! npx commitlint --from "$BASE_SHA" --to "$HEAD_SHA"; then
+            echo ""
+            echo "❌ 存在不合格的 commit message"
+            echo "正确的 commit 格式：feat(scope): description"
+            echo "类型：feat | fix | refactor | perf | docs | style | test | chore"
+            exit 1
+          fi
+          echo "✅ 全部 commit 格式正确"
 
   backend:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: mulan
           POSTGRES_PASSWORD: mulan
@@ -107,7 +174,7 @@ jobs:
 
       - name: Verify backend app imports
         env:
-          DATABASE_URL: postgresql://mulan:mulan@localhost:5432/mulan_bi_test
+          DATABASE_URL: postgresql://mulan:***@localhost:5432/mulan_bi_test
           SESSION_SECRET: test-secret
           ADMIN_USERNAME: admin
           ADMIN_PASSWORD: admin123
@@ -118,7 +185,7 @@ jobs:
 
       - name: Run tests with coverage
         env:
-          DATABASE_URL: postgresql://mulan:mulan@localhost:5432/mulan_bi_test
+          DATABASE_URL: postgresql://mulan:***@localhost:5432/mulan_bi_test
           SESSION_SECRET: test-secret
           ADMIN_USERNAME: admin
           ADMIN_PASSWORD: admin123
@@ -136,3 +203,248 @@ jobs:
           files: backend/coverage.xml
           fail_ci_if_error: false
           verbose: true
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: cd frontend && npm ci
+
+      - name: Type check
+        run: cd frontend && npm run type-check
+
+      - name: Lint
+        run: cd frontend && npm run lint
+
+      - name: Unit tests
+        run: cd frontend && npm run test -- --coverage
+
+      - name: Build
+        run: cd frontend && npm run build
+
+  # ──────────────────────────────────────────────────────────────
+  # 冒烟测试门禁（E2E — Playwright）
+  # 依赖 backend + frontend 均通过后运行
+  # ──────────────────────────────────────────────────────────────
+  smoke:
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: mulan
+          POSTGRES_PASSWORD: mulan
+          POSTGRES_DB: mulan_bi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      # ── 数据库初始化 ──────────────────────────────────────────
+      - name: Run database migrations
+        env:
+          DATABASE_URL: postgresql://mulan:***@localhost:5432/mulan_bi_test
+          SESSION_SECRET: smoke-test-secret!!
+          ADMIN_USERNAME: admin
+          ADMIN_PASSWORD: admin123
+          DATASOURCE_ENCRYPTION_KEY: smoke-datasource-key-32-bytes!!
+          TABLEAU_ENCRYPTION_KEY: smoke-tableau-key-32-bytes!!
+          LLM_ENCRYPTION_KEY: smoke-llm-key-32-bytes-ok!!!!
+        run: |
+          cd backend
+          alembic upgrade head
+
+      # ── Seed 测试用户 ─────────────────────────────────────────
+      - name: Seed smoke test users
+        env:
+          DATABASE_URL: postgresql://mulan:***@localhost:5432/mulan_bi_test
+          SESSION_SECRET: smoke-test-secret!!
+          ADMIN_USERNAME: admin
+          ADMIN_PASSWORD: admin123
+          DATASOURCE_ENCRYPTION_KEY: smoke-datasource-key-32-bytes!!
+          TABLEAU_ENCRYPTION_KEY: smoke-tableau-key-32-bytes!!
+          LLM_ENCRYPTION_KEY: smoke-llm-key-32-bytes-ok!!!!
+        run: |
+          cd backend
+          python3 -c "
+          import os, sys
+          sys.path.insert(0, '.')
+          from app.database import SessionLocal, engine
+          from app.models.user import User
+          from app.services.common.password import hash_password
+
+          db = SessionLocal()
+          try:
+              # 创建 admin（如果不存在）
+              admin = db.query(User).filter(User.username == 'admin').first()
+              if not admin:
+                  admin = User(
+                      username='admin',
+                      display_name='Smoke Admin',
+                      password_hash=hash_password('admin123'),
+                      role='admin',
+                      is_active=True,
+                  )
+                  db.add(admin)
+                  print('Created admin user')
+              else:
+                  print('Admin user already exists')
+
+              # 创建 smoke_analyst（仅 database_monitor 权限）
+              analyst = db.query(User).filter(User.username == 'smoke_analyst').first()
+              if not analyst:
+                  analyst = User(
+                      username='smoke_analyst',
+                      display_name='Smoke Analyst',
+                      password_hash=hash_password('analyst123'),
+                      role='analyst',
+                      is_active=True,
+                      permissions=['database_monitor'],
+                  )
+                  db.add(analyst)
+                  print('Created smoke_analyst user')
+              else:
+                  print('smoke_analyst user already exists')
+
+              db.commit()
+              print('Seed complete')
+          finally:
+              db.close()
+          "
+
+      # ── 启动后端服务 ───────────────────────────────────────────
+      - name: Start backend
+        env:
+          DATABASE_URL: postgresql://mulan:***@localhost:5432/mulan_bi_test
+          SESSION_SECRET: smoke-test-secret!!
+          ADMIN_USERNAME: admin
+          ADMIN_PASSWORD: admin123
+          DATASOURCE_ENCRYPTION_KEY: smoke-datasource-key-32-bytes!!
+          TABLEAU_ENCRYPTION_KEY: smoke-tableau-key-32-bytes!!
+          LLM_ENCRYPTION_KEY: smoke-llm-key-32-bytes-ok!!!!
+        run: |
+          cd backend
+          nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/backend.log 2>&1 &
+          echo "Backend PID: $!"
+          # 等待后端就绪
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/api/auth/me > /dev/null 2>&1; then
+              echo "Backend is ready"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "❌ 后端在 60 秒内未就绪"
+              cat /tmp/backend.log
+              exit 1
+            fi
+            echo "Waiting for backend... ($i)"
+            sleep 2
+          done
+
+      # ── 启动前端服务 ───────────────────────────────────────────
+      - name: Start frontend dev server
+        run: |
+          cd frontend
+          nohup npm run dev > /tmp/frontend.log 2>&1 &
+          echo "Frontend PID: $!"
+          # 等待前端 dev server 就绪（Vite 默认端口 3000）
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3000 > /dev/null 2>&1; then
+              echo "Frontend port 3000 is listening"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "ERROR: Frontend did not start in 120s"
+              cat /tmp/frontend.log
+              exit 1
+            fi
+            sleep 2
+          done
+          # 额外等待，确保 Vite HMR 热更新完成
+          sleep 5
+
+      # ── 安装 Playwright 浏览器 ────────────────────────────────
+      - name: Install Playwright browsers
+        run: |
+          cd frontend
+          npx playwright install chromium --with-deps
+
+      # ── 运行冒烟测试 ───────────────────────────────────────────
+      - name: Run smoke tests
+        env:
+          BASE_URL: http://localhost:3000
+          DATABASE_URL: postgresql://mulan:***@localhost:5432/mulan_bi_test
+          SESSION_SECRET: smoke-test-secret!!
+          ADMIN_USERNAME: admin
+          ADMIN_PASSWORD: admin123
+          SMOKE_ANALYST_USERNAME: smoke_analyst
+          SMOKE_ANALYST_PASSWORD: analyst123
+          DATASOURCE_ENCRYPTION_KEY: smoke-datasource-key-32-bytes!!
+          TABLEAU_ENCRYPTION_KEY: smoke-tableau-key-32-bytes!!
+          LLM_ENCRYPTION_KEY: smoke-llm-key-32-bytes-ok!!!!
+        run: |
+          cd frontend
+          npx playwright test \
+            --reporter=line \
+            --timeout=30000 \
+            --retries=1
+
+      # ── 上传测试报告 ───────────────────────────────────────────
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-smoke-report
+          path: frontend/playwright-report/
+          retention-days: 14
+
+      - name: Upload backend log on failure
+        if: failure()
+        run: cat /tmp/backend.log
+
+      - name: Upload frontend log on failure
+        if: failure()
+        run: cat /tmp/frontend.log

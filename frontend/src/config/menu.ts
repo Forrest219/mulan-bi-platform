@@ -274,6 +274,12 @@ export const menuConfig: MenuDomain[] = [
         path: '/system/mcp-configs',
       },
       {
+        key: 'mcp-debugger',
+        label: 'MCP 调试器',
+        icon: 'ri-bug-line',
+        path: '/system/mcp-debugger',
+      },
+      {
         key: 'tasks',
         label: '任务管理',
         icon: 'ri-task-line',

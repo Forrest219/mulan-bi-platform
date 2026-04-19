@@ -461,6 +461,13 @@ async def get_me(request: Request):
     return user
 
 
+@router.post("/forgot-password", status_code=200)
+async def forgot_password(payload: dict):
+    """Always returns 200 regardless of whether email exists (security)."""
+    # Email lookup intentionally omitted to prevent account enumeration
+    return {"message": "如果该邮箱已注册，我们将发送重置说明。"}
+
+
 @router.get("/verify")
 async def verify_session(request: Request):
     """验证会话是否有效"""

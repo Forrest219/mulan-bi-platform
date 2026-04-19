@@ -36,7 +36,7 @@ def _create_tables():
 
 
 def _ensure_admin():
-    """确保测试数据库中有管理员账户"""
+    """确保测试数据库中有管理员账户和 analyst 测试账户"""
     from services.auth.models import User
     from app.core.database import SessionLocal
     import hashlib
@@ -44,25 +44,46 @@ def _ensure_admin():
 
     session = SessionLocal()
     try:
-        existing = session.query(User).filter(User.username == "admin").first()
-        if existing:
-            return
-        salt = secrets.token_hex(16)
-        pw_hash = f"{salt}${hashlib.pbkdf2_hmac('sha256', 'admin123'.encode(), salt.encode(), 100000).hex()}"
-        admin = User(
+        def _create_user(username: str, display_name: str, role: str, permissions: list, password: str):
+            existing = session.query(User).filter(User.username == username).first()
+            if existing:
+                return
+            salt = secrets.token_hex(16)
+            pw_hash = f"{salt}${hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000).hex()}"
+            user = User(
+                username=username,
+                display_name=display_name,
+                password_hash=pw_hash,
+                email=f"{username}@mulan.local",
+                role=role,
+                permissions=permissions,
+                is_active=True,
+            )
+            session.add(user)
+
+        # 管理员（所有权限）
+        _create_user(
             username="admin",
             display_name="管理员",
-            password_hash=pw_hash,
-            email="admin@mulan.local",
             role="admin",
             permissions=[
                 "ddl_check", "ddl_generator", "database_monitor",
                 "rule_config", "scan_logs", "user_management",
                 "tableau", "llm",
             ],
-            is_active=True,
+            password="admin123",
         )
-        session.add(admin)
+        # analyst（部分权限，用于 RBAC 冒烟测试）
+        _create_user(
+            username="smoke_analyst",
+            display_name="Analyst Smoke User",
+            role="analyst",
+            permissions=[
+                "database_monitor",   # 可访问连接中心、数据健康
+                # 没有: ddl_check, tableau, user_management, llm, adminOnly
+            ],
+            password="analyst123",
+        )
         session.commit()
     finally:
         session.close()

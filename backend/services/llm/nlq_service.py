@@ -398,6 +398,53 @@ def classify_meta_intent(question: str) -> Optional[str]:
                 return intent
     return None
 
+
+# === Tableau 动作意图关键词 ===
+TABLEAU_ACTION_INTENT_KEYWORDS = {
+    "tableau_field_match": [
+        "字段叫什么", "找字段", "匹配字段", "这个字段叫", "字段名是",
+        "resolve field", "find field", "match field",
+        "那个维度", "那个指标", "哪个字段",
+    ],
+    "tableau_view_filter": [
+        "改过滤器", "设置筛选", "筛选为", "过滤为", "显示哪个区域",
+        "只看", "只显示", "filter to", "filter by", "set filter",
+        "视图只显示", "看板显示",
+    ],
+    "tableau_write_semantic": [
+        "修改字段名", "改字段描述", "更新字段", "字段重命名",
+        "update field", "rename field", "change caption",
+        "发布语义", "把语义发布", "publish semantic",
+    ],
+    "tableau_parameter": [
+        "改参数", "设置参数", "参数值", "parameter 值",
+        "set parameter", "change parameter",
+    ],
+}
+
+# === Tableau 动作意图 -> 建议工具映射 ===
+TABLEAU_ACTION_TOOL_MAP = {
+    "tableau_field_match": ["resolve-field-name", "get-field-schema"],
+    "tableau_view_filter": ["get-view-filter-url", "create-custom-view"],
+    "tableau_write_semantic": ["update-field-caption", "update-field-description", "publish-field-semantic"],
+    "tableau_parameter": ["get-workbook-parameters", "set-parameter-via-url", "run-vizql-command"],
+}
+
+
+def classify_tableau_action_intent(question: str) -> Optional[str]:
+    """
+    检测是否为 Tableau 动作意图（字段匹配/视图控制/写操作/参数控制）。
+    返回 intent key 或 None（交由现有 VizQL 流水线处理）。
+    规则匹配优先，无匹配时返回 None。
+    """
+    q_lower = question.lower()
+    for intent, keywords in TABLEAU_ACTION_INTENT_KEYWORDS.items():
+        for kw in keywords:
+            if kw.lower() in q_lower:
+                return intent
+    return None
+
+
 MIN_ROUTING_SCORE = 0.3
 
 
@@ -418,6 +465,14 @@ class ResolvedField:
     match_source: str  # "exact" | "synonym" | "semantic" | "fuzzy" | "llm"
     match_confidence: float
     user_term: str
+
+
+@dataclass
+class TableauActionIntentResult:
+    type: str          # tableau_field_match / tableau_view_filter / tableau_write_semantic / tableau_parameter
+    confidence: float
+    source: str        # "rule"
+    suggested_tools: list  # 建议调用的 MCP tool 名称列表
 
 
 # === 意图分类器（规则快速路径）===
