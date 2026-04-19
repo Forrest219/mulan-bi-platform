@@ -481,7 +481,7 @@ def validate_field_captions_consistency(
     db = TableauDatabase()
     session = db.session
     asset = session.query(TableauAsset).filter(
-        TableauAsset.datasource_luid == datasource_luid
+        TableauAsset.tableau_id == datasource_luid
     ).first()
     session.close()
 
@@ -702,7 +702,7 @@ async def one_pass_llm(
     is_valid, validation_err = validate_one_pass_output(parsed)
     if not is_valid:
         # 校验失败，带反馈重试
-        parsed, validation_err = _retry_with_feedback(
+        parsed, validation_err = await _retry_with_feedback(
             prompt=prompt,
             system_prompt=system_prompt,
             error_details=validation_err,
@@ -820,11 +820,11 @@ def get_cached_datasource_fields_by_luid(datasource_luid: str) -> Optional[List[
     """通过 datasource_luid 查找缓存的 field_caption 列表"""
     from services.common.redis_cache import get_cached_datasource_fields
 
-    # 先通过 luid 找到 asset_id
+    # 先通过 luid（tableau_id）找到 asset_id
     db = TableauDatabase()
     session = db.session
     asset = session.query(TableauAsset).filter(
-        TableauAsset.datasource_luid == datasource_luid
+        TableauAsset.tableau_id == datasource_luid
     ).first()
     session.close()
 
@@ -914,7 +914,7 @@ def route_datasource(question: str, connection_id: int = None) -> Optional[Dict[
     # 用户指定 luid 时的敏感度检查在 search.py 单独处理
     candidates = [
         ds for ds in candidates
-        if not is_datasource_sensitivity_blocked(ds.datasource_luid)
+        if not is_datasource_sensitivity_blocked(ds.tableau_id)
     ]
 
     if not candidates:
@@ -939,7 +939,7 @@ def route_datasource(question: str, connection_id: int = None) -> Optional[Dict[
 
     best_ds = scored[0][0]
     return {
-        "datasource_luid": best_ds.datasource_luid,
+        "datasource_luid": best_ds.tableau_id,
         "datasource_name": best_ds.name,
         "connection_id": best_ds.connection_id,
         "score": scored[0][1],

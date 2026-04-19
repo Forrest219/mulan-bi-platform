@@ -377,12 +377,12 @@ async def _mcp_get_downstream_workbooks(mcp_base_url: str, ds_name: str, timeout
 
 
 def _get_asset_by_luid(datasource_luid: str):
-    """通过 datasource_luid 查找 TableauAsset"""
+    """通过 datasource_luid 查找 TableauAsset（tableau_id 字段存储 Tableau LUID）"""
     db = TableauDatabase()
     session = db.session
     asset = session.query(TableauAsset).filter(
-        TableauAsset.datasource_luid == datasource_luid,
-        not TableauAsset.is_deleted,
+        TableauAsset.tableau_id == datasource_luid,
+        TableauAsset.is_deleted == False,
     ).first()
     session.close()
     return asset
@@ -1471,12 +1471,12 @@ async def query(
         ds_name = chosen_ds["datasource_name"]
         is_mcp_discovery = chosen_ds.get("mcp_discovery", False)
 
-        # 1c. 获取数据源字段
+        # 1c. 获取数据源字段（TableauAsset 使用 tableau_id 存储 Tableau LUID）
         db = TableauDatabase()
         session = db.session
         asset = session.query(TableauAsset).filter(
-            TableauAsset.datasource_luid == ds_luid,
-            not TableauAsset.is_deleted,
+            TableauAsset.tableau_id == ds_luid,
+            TableauAsset.is_deleted == False,
         ).first()
         session.close()
 
@@ -1573,7 +1573,11 @@ async def query(
             asset_datasource_id = asset.datasource_id
 
         # ── P3 增强：recall_fields 语义重排序 ──────────────────
-        recalled = await recall_fields(question, datasource_ids=[asset_datasource_id] if asset_datasource_id else None)
+        try:
+            recalled = await recall_fields(question, datasource_ids=[asset_datasource_id] if asset_datasource_id else None)
+        except Exception as recall_err:
+            logger.warning("recall_fields 失败（跳过语义重排序）: %s trace=%s", recall_err, audit_record.trace_id)
+            recalled = []
         if recalled:
             recalled_names = {r["semantic_name_zh"] or r["semantic_name"] for r in recalled}
             # 将语义匹配度高的字段排在前面
@@ -1583,9 +1587,15 @@ async def query(
             sanitized_fields.sort(key=boost_key)
 
         # ── 术语表增强（PRD §8.2）──────────────────────────────
-        glossary_terms = glossary_service.get_matching_terms(question)
+        try:
+            _gl_db = TableauDatabase().session
+            glossary_terms = glossary_service.match_terms(_gl_db, question)
+            _gl_db.close()
+        except Exception as gl_err:
+            logger.warning("术语表查询失败（跳过）: %s trace=%s", gl_err, audit_record.trace_id)
+            glossary_terms = []
         term_mappings = (
-            "\n".join(f"{t['source_term']} -> {t['mapped_term']}" for t in glossary_terms)
+            "\n".join(f"{t.get('source_term', t.get('term',''))} -> {t.get('mapped_term', t.get('definition',''))}" for t in glossary_terms)
             if glossary_terms else "无"
         )
 
