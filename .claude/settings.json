@@ -20,6 +20,8 @@
       "Write(.json)",
       "Write(.yml)",
       "Write(.yaml)",
+      "Edit(.yml)",
+      "Edit(.yaml)",
       "Bash(bash scripts/audit-todos.sh)",
       "Bash(bash scripts/audit-internal-links.sh)",
       "Bash(bash scripts/audit-alembic-server-defaults.sh)",
@@ -133,6 +135,12 @@
             "command": "bash -c 'set -o pipefail; cd backend && pytest -q --tb=short 2>&1; [ $? -eq 0 ]'",
             "timeout": 120,
             "statusMessage": "Running backend tests..."
+          },
+          {
+            "type": "command",
+            "command": "bash -c 'set -o pipefail; bash scripts/audit-adrs.sh 2>&1; [ $? -eq 0 ]'",
+            "timeout": 30,
+            "statusMessage": "Auditing expired ADRs..."
           }
         ]
       }
@@ -145,7 +153,40 @@
             "type": "command",
             "command": "bash scripts/pretool-guard.sh",
             "timeout": 5,
-            "statusMessage": "PreToolUse guard..."
+            "statusMessage": "PreToolUse guard (Bash)..."
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/pretool-guard.sh",
+            "timeout": 5,
+            "statusMessage": "PreToolUse guard (Write)..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/pretool-guard.sh",
+            "timeout": 5,
+            "statusMessage": "PreToolUse guard (Edit)..."
+          }
+        ]
+      },
+      {
+        "matcher": "MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/pretool-guard.sh",
+            "timeout": 5,
+            "statusMessage": "PreToolUse guard (MultiEdit)..."
           }
         ]
       }
