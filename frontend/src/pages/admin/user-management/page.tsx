@@ -70,7 +70,13 @@ export default function UserManagementPage() {
     email: '',
     role: 'user'
   });
-  const [editUserData, setEditUserData] = useState({ display_name: '', email: '' });
+  const [editUserData, setEditUserData] = useState<{
+    display_name: string;
+    email: string;
+    role: UserRole;
+    group_ids: number[];
+  }>({ display_name: '', email: '', role: 'user', group_ids: [] });
+  const [groups, setGroups] = useState<{ id: number; name: string }[]>([]);
   const [formError, setFormError] = useState('');
   const [message, setMessage] = useState('');
   const [confirmModal, setConfirmModal] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void } | null>(null);
@@ -87,7 +93,22 @@ export default function UserManagementPage() {
     }
   };
 
-  useEffect(() => { fetchUsers(); }, []);
+  const fetchGroups = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/users/groups`, { credentials: 'include' });
+      if (response.ok) {
+        const data = await response.json();
+        setGroups(data.groups || []);
+      }
+    } catch {
+      // 获取组列表失败不阻断主流程
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+    fetchGroups();
+  }, []);
 
   // 筛选用户
   const filteredUsers = users.filter(user => {
@@ -212,7 +233,12 @@ export default function UserManagementPage() {
   // 打开编辑弹窗
   const openEditModal = (user: User) => {
     setEditingUser(user);
-    setEditUserData({ display_name: user.display_name, email: user.email || '' });
+    setEditUserData({
+      display_name: user.display_name,
+      email: user.email || '',
+      role: user.role,
+      group_ids: user.group_ids || [],
+    });
     setShowEditModal(true);
   };
 
@@ -223,15 +249,30 @@ export default function UserManagementPage() {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ display_name: editUserData.display_name, email: editUserData.email || null })
+      body: JSON.stringify({
+        display_name: editUserData.display_name,
+        email: editUserData.email || null,
+        role: editUserData.role,
+        group_ids: editUserData.group_ids,
+      }),
     });
     if (response.ok) {
       setShowEditModal(false);
       setEditingUser(null);
       fetchUsers();
     } else {
-      setMessage('更新失败');
+      const err = await response.json();
+      setMessage(err.detail || '更新失败');
     }
+  };
+
+  const toggleEditGroup = (groupId: number) => {
+    setEditUserData((prev) => {
+      const ids = prev.group_ids.includes(groupId)
+        ? prev.group_ids.filter((id) => id !== groupId)
+        : [...prev.group_ids, groupId];
+      return { ...prev, group_ids: ids };
+    });
   };
 
   const openPermissionModal = (user: User) => {
@@ -479,7 +520,7 @@ export default function UserManagementPage() {
       {/* 编辑用户弹窗 */}
       {showEditModal && editingUser && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl max-h-[90vh] overflow-y-auto">
             <h2 className="text-lg font-semibold text-slate-800 mb-1">编辑用户</h2>
             <p className="text-sm text-slate-500 mb-4">@{editingUser.username}</p>
             <div className="space-y-4">
@@ -495,6 +536,34 @@ export default function UserManagementPage() {
                   onChange={(e) => setEditUserData({ ...editUserData, email: e.target.value })}
                   className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500" placeholder="example@company.com" />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1.5">角色</label>
+                <select value={editUserData.role}
+                  onChange={(e) => setEditUserData({ ...editUserData, role: e.target.value as UserRole })}
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500">
+                  {ROLES.map(r => (
+                    <option key={r.key} value={r.key}>{r.label}</option>
+                  ))}
+                </select>
+              </div>
+              {groups.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-1.5">用户组</label>
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto border border-slate-200 rounded-lg p-2">
+                    {groups.map((g) => (
+                      <label key={g.id} className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-slate-50 rounded-md cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editUserData.group_ids.includes(g.id)}
+                          onChange={() => toggleEditGroup(g.id)}
+                          className="w-4 h-4 text-blue-600 rounded border-slate-300"
+                        />
+                        <span className="text-sm text-slate-700">{g.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => { setShowEditModal(false); setEditingUser(null); }}

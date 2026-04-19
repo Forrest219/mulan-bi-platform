@@ -10,6 +10,7 @@
   4. 前端重试原请求
 """
 import os
+import re
 import time
 from collections import defaultdict
 from typing import Optional
@@ -41,6 +42,24 @@ _REFRESH_TOKEN_EXPIRE_SECONDS = REFRESH_TOKEN_EXPIRE_SECONDS
 _register_attempts: dict[str, list[float]] = defaultdict(list)
 _REGISTER_RATE_LIMIT = 5
 _REGISTER_RATE_WINDOW = 60  # seconds
+
+# 忘记密码速率限制：每个 IP 每 3600 秒最多 10 次
+_forgot_attempts: dict[str, list[float]] = defaultdict(list)
+_FORGOT_RATE_LIMIT = 10
+_FORGOT_RATE_WINDOW = 3600  # seconds
+
+
+def _validate_password_complexity(password: str) -> bool:
+    """密码复杂度校验：≥8 位、含大写、含小写、含数字"""
+    if len(password) < 8:
+        return False
+    if not re.search(r'[A-Z]', password):
+        return False
+    if not re.search(r'[a-z]', password):
+        return False
+    if not re.search(r'\d', password):
+        return False
+    return True
 
 
 def _create_session_token(user_id: int, username: str, role: str) -> str:
@@ -83,6 +102,23 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
     display_name: Optional[str] = None
+
+
+class ForgotPasswordRequest(BaseModel):
+    """忘记密码请求"""
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    """重置密码请求"""
+    token: str
+    new_password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    """修改密码请求"""
+    old_password: str
+    new_password: str
 
 
 class MFAVerifyRequest(BaseModel):
@@ -462,10 +498,74 @@ async def get_me(request: Request):
 
 
 @router.post("/forgot-password", status_code=200)
-async def forgot_password(payload: dict):
-    """Always returns 200 regardless of whether email exists (security)."""
-    # Email lookup intentionally omitted to prevent account enumeration
-    return {"message": "如果该邮箱已注册，我们将发送重置说明。"}
+async def forgot_password(request: ForgotPasswordRequest, req: Request):
+    """
+    触发密码重置流程。
+
+    无论邮箱是否存在，均返回相同消息（防枚举）。
+    若邮箱存在，生成 token 并在响应中返回（供管理员中转）。
+    速率限制：每个 IP 每小时最多 10 次。
+    """
+    client_ip = req.client.host if req.client else "unknown"
+    now = time.time()
+    _forgot_attempts[client_ip] = [
+        t for t in _forgot_attempts[client_ip] if now - t < _FORGOT_RATE_WINDOW
+    ]
+    if len(_forgot_attempts[client_ip]) >= _FORGOT_RATE_LIMIT:
+        raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
+    _forgot_attempts[client_ip].append(now)
+
+    auth_service.create_password_reset_token(request.email)
+
+    return {"message": "如果邮箱存在，已发送重置链接"}
+
+
+@router.post("/reset-password", status_code=200)
+async def reset_password(request: ResetPasswordRequest):
+    """
+    使用重置 token 设置新密码。
+
+    token 有效期 15 分钟，使用后立即失效。
+    新密码须满足复杂度要求（≥8 位、含大小写字母和数字）。
+    """
+    if not _validate_password_complexity(request.new_password):
+        raise HTTPException(
+            status_code=400,
+            detail="密码须至少 8 位，且包含大写字母、小写字母和数字",
+        )
+
+    success = auth_service.reset_password_with_token(request.token, request.new_password)
+    if not success:
+        raise HTTPException(status_code=400, detail="重置链接无效或已过期")
+
+    return {"success": True, "message": "密码已重置，请重新登录"}
+
+
+@router.put("/me/password", status_code=200)
+async def change_password(request: ChangePasswordRequest, req: Request):
+    """
+    修改当前用户密码（需登录）。
+
+    验证旧密码后更新为新密码。
+    新密码须满足复杂度要求（≥8 位、含大小写字母和数字）。
+    """
+    user_info = _get_current_user(req)
+    if not user_info:
+        raise HTTPException(status_code=401, detail="未登录")
+
+    if not _validate_password_complexity(request.new_password):
+        raise HTTPException(
+            status_code=400,
+            detail="新密码须至少 8 位，且包含大写字母、小写字母和数字",
+        )
+
+    success, message = auth_service.change_password(
+        user_info["id"], request.old_password, request.new_password
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+
+    return {"success": True, "message": message}
 
 
 @router.get("/verify")

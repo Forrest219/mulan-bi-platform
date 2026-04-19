@@ -1,9 +1,11 @@
 """用户认证数据模型"""
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+import uuid
 
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Table, Text, Index
 from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from app.core.database import Base, JSONB, sa_func, sa_text # 导入中央配置的 Base, JSONB, func, text
 
 # 关联表：用户-组
@@ -101,6 +103,28 @@ class GroupPermission(Base):
 
     # 关系
     group = relationship('UserGroup', back_populates='group_perms')
+
+
+class PasswordResetToken(Base):
+    """密码重置 Token 存储表"""
+    __tablename__ = "auth_password_reset_tokens"
+
+    id = Column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa_text("gen_random_uuid()"),
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey('auth_users.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    token_hash = Column(String(64), nullable=False, unique=True)
+    expires_at = Column(DateTime, nullable=False)
+    is_used = Column(Boolean, server_default=sa_text('false'), nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
 
 
 class RefreshToken(Base):
@@ -314,6 +338,62 @@ class UserDatabase:
             {"key": "scan_logs", "label": "扫描日志", "module": "Scan Logs"},
             {"key": "user_management", "label": "用户管理", "module": "Admin"},
         ]
+
+    # ========== 密码重置 Token 管理 ==========
+
+    def create_password_reset_token(
+        self, user_id: int, token_hash: str, expires_at: datetime
+    ) -> "PasswordResetToken":
+        """创建密码重置 token 记录"""
+        token = PasswordResetToken(
+            user_id=user_id,
+            token_hash=token_hash,
+            expires_at=expires_at,
+        )
+        self.session.add(token)
+        self.session.commit()
+        return token
+
+    def get_valid_password_reset_token(self, token_hash: str) -> Optional["PasswordResetToken"]:
+        """获取有效的密码重置 token（未过期、未使用）"""
+        now = datetime.utcnow()
+        return (
+            self.session.query(PasswordResetToken)
+            .filter(
+                PasswordResetToken.token_hash == token_hash,
+                PasswordResetToken.is_used.is_(False),
+                PasswordResetToken.expires_at > now,
+            )
+            .first()
+        )
+
+    def invalidate_previous_reset_tokens(self, user_id: int) -> int:
+        """将用户所有未使用的重置 token 标记为已使用，返回数量"""
+        now = datetime.utcnow()
+        count = (
+            self.session.query(PasswordResetToken)
+            .filter(
+                PasswordResetToken.user_id == user_id,
+                PasswordResetToken.is_used.is_(False),
+                PasswordResetToken.expires_at > now,
+            )
+            .update({"is_used": True})
+        )
+        self.session.commit()
+        return count
+
+    def mark_token_used(self, token_hash: str) -> bool:
+        """标记 token 为已使用"""
+        token = (
+            self.session.query(PasswordResetToken)
+            .filter(PasswordResetToken.token_hash == token_hash)
+            .first()
+        )
+        if not token:
+            return False
+        token.is_used = True
+        self.session.commit()
+        return True
 
     # ========== Refresh Token 管理 ==========
 

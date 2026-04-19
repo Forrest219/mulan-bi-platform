@@ -342,6 +342,130 @@ class AuthService:
         """获取所有可用权限定义"""
         return self._db.get_all_permissions()
 
+    # ========== 密码重置 ==========
+
+    def create_password_reset_token(self, email: str) -> Optional[str]:
+        """
+        根据邮箱生成密码重置 token。
+
+        邮箱存在时返回原始 token；邮箱不存在时返回 None。
+        同时使该用户所有旧的有效重置 token 失效。
+        """
+        import uuid
+        import hashlib
+
+        user = self._db.get_user_by_email(email)
+        if not user:
+            return None
+
+        raw_token = str(uuid.uuid4())
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        expires_at = datetime.utcnow() + timedelta(minutes=15)
+
+        self._db.invalidate_previous_reset_tokens(user.id)
+        self._db.create_password_reset_token(user.id, token_hash, expires_at)
+        return raw_token
+
+    def reset_password_with_token(self, raw_token: str, new_password: str) -> bool:
+        """
+        验证重置 token，更新密码并标记 token 已使用。
+
+        返回 True 表示成功，False 表示 token 无效或已过期。
+        """
+        import hashlib
+
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        from sqlalchemy import text as sa_text
+
+        result = self._db.session.execute(
+            sa_text(
+                "UPDATE auth_password_reset_tokens "
+                "SET is_used = true "
+                "WHERE token_hash = :hash AND is_used = false AND expires_at > now() "
+                "RETURNING user_id"
+            ),
+            {"hash": token_hash},
+        )
+        row = result.fetchone()
+        if not row:
+            return False
+
+        user = self._db.get_user(row[0])
+        if not user:
+            return False
+
+        user.password_hash = self.hash_password(new_password)
+        self._db.update_user(user)
+        return True
+
+    def change_password(self, user_id: int, old_password: str, new_password: str) -> tuple:
+        """
+        验证旧密码后更新为新密码。
+
+        返回 (success, message) 元组。
+        """
+        user = self._db.get_user(user_id)
+        if not user:
+            return False, "用户不存在"
+        if not self.verify_password(old_password, user.password_hash):
+            return False, "旧密码不正确"
+        user.password_hash = self.hash_password(new_password)
+        self._db.update_user(user)
+        return True, "密码已更新"
+
+    def update_user_profile(
+        self,
+        user_id: int,
+        display_name: str = None,
+        email: str = None,
+        role: str = None,
+        permissions: list = None,
+        group_ids: list = None,
+        is_active: bool = None,
+    ) -> tuple:
+        """
+        更新用户档案字段（display_name / email / role / permissions / group_ids）。
+
+        返回 (success, message) 元组。
+        """
+        user = self._db.get_user(user_id)
+        if not user:
+            return False, "用户不存在"
+
+        if email and email != user.email:
+            existing = self._db.get_user_by_email(email)
+            if existing and existing.id != user_id:
+                return False, "EMAIL_CONFLICT"
+            user.email = email
+
+        if display_name:
+            user.display_name = display_name
+
+        if role and role in [self.ROLE_ADMIN, self.ROLE_DATA_ADMIN, self.ROLE_ANALYST, self.ROLE_USER]:
+            user.role = role
+
+        if is_active is not None:
+            user.is_active = is_active
+
+        if permissions is not None:
+            for p in permissions:
+                if p not in self.ALL_PERMISSIONS:
+                    return False, f"无效权限: {p}"
+            user.permissions = permissions
+
+        self._db.update_user(user)
+
+        if group_ids is not None:
+            current_groups = self._db.get_user_groups(user_id)
+            current_group_ids = {g.id for g in current_groups}
+            new_group_ids = set(group_ids)
+            for gid in new_group_ids - current_group_ids:
+                self._db.add_user_to_group(user_id, gid)
+            for gid in current_group_ids - new_group_ids:
+                self._db.remove_user_from_group(user_id, gid)
+
+        return True, "用户信息已更新"
+
     # ========== 用户标签 ==========
 
     # ========== MFA（TOTP）管理 ==========

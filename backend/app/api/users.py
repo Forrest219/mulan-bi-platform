@@ -34,6 +34,17 @@ class UpdatePermissionsRequest(BaseModel):
     permissions: List[str]  # 权限标识列表
 
 
+class UpdateUserRequest(BaseModel):
+    """编辑用户档案请求（display_name / email / role / permissions / group_ids）"""
+
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+    role: Optional[str] = None
+    permissions: Optional[List[str]] = None
+    group_ids: Optional[List[int]] = None
+    is_active: Optional[bool] = None
+
+
 @router.get("/", dependencies=[Depends(get_current_admin)])
 async def get_users(role: Optional[str] = None):
     """获取用户列表（管理员）"""
@@ -102,6 +113,41 @@ async def update_user_permissions(user_id: int, request: UpdatePermissionsReques
         raise HTTPException(status_code=404, detail="用户不存在")
 
     return {"message": "权限更新成功"}
+
+
+@router.put("/{user_id}", dependencies=[Depends(get_current_admin)])
+async def update_user(user_id: int, request: UpdateUserRequest, http_request: Request):
+    """更新用户档案（管理员）：display_name / email / role / permissions / group_ids"""
+    if request.role and request.role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail="无效的角色")
+
+    # 防止把自己降级
+    current_user = get_current_user(http_request)
+    if current_user["id"] == user_id and request.role and request.role != "admin":
+        raise HTTPException(status_code=400, detail="不能将自己的角色降级")
+
+    success, message = auth_service.update_user_profile(
+        user_id=user_id,
+        display_name=request.display_name,
+        email=request.email,
+        role=request.role,
+        permissions=request.permissions,
+        group_ids=request.group_ids,
+        is_active=request.is_active,
+    )
+    if not success:
+        if message == "EMAIL_CONFLICT":
+            raise HTTPException(status_code=422, detail="Email 已被使用")
+        raise HTTPException(status_code=400, detail=message)
+
+    return {"message": message}
+
+
+@router.get("/groups", dependencies=[Depends(get_current_admin)])
+async def get_groups():
+    """获取所有用户组列表（管理员，供编辑用户时选择）"""
+    groups = auth_service.get_groups()
+    return {"groups": groups}
 
 
 @router.get("/permissions", dependencies=[Depends(get_current_admin)])

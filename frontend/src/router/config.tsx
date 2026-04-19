@@ -48,6 +48,7 @@ const LLMAdminPage         = lazy(() => import('../pages/admin/llm/page'));
 const AdminTasksPage        = lazy(() => import('../pages/admin/tasks/page'));
 const ActivityAdminPage     = lazy(() => import('../pages/admin/activity/page'));
 const ForgotPasswordPage    = lazy(() => import('../pages/forgot-password/page'));
+const ResetPasswordPage     = lazy(() => import('../pages/reset-password/page'));
 
 // ──────────────────────────────────────────────────────────────
 // 路由定义
@@ -71,6 +72,7 @@ const routes: RouteObject[] = [
   { path: '/login',          element: <LoginPage /> },
   { path: '/register',       element: <RegisterPage /> },
   { path: '/forgot-password', element: <ForgotPasswordPage /> },
+  { path: '/reset-password',  element: <ResetPasswordPage /> },
 
   // =====================
   // 统一侧边栏布局（5 域，Spec 18 §4.2）
