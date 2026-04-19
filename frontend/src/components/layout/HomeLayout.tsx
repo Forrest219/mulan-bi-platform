@@ -50,15 +50,7 @@ export default function HomeLayout() {
         const el = document.querySelector<HTMLTextAreaElement>('[data-askbar-input]');
         el?.focus();
       }
-      if (e.key === 'Escape' && !isMod) {
-        // 清空当前 AskBar 输入
-        const el = document.querySelector<HTMLTextAreaElement>('[data-askbar-input]');
-        if (el && document.activeElement === el) {
-          // 由 AskBar 自身处理 Escape
-        } else {
-          setCollapsed(true);
-        }
-      }
+      // Escape 键仅由 AskBar 自身处理，不在此处折叠侧边栏
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
@@ -83,6 +75,23 @@ export default function HomeLayout() {
             />
           </div>
         </div>
+
+        {/* 侧边栏折叠时，在左边缘渲染展开按钮（逃生门） */}
+        {collapsed && (
+          <button
+            onClick={handleToggleCollapse}
+            title="展开侧边栏"
+            aria-label="展开侧边栏"
+            className="fixed left-0 top-1/2 -translate-y-1/2 z-50
+                       w-5 h-10 flex items-center justify-center
+                       bg-white border border-l-0 border-slate-200
+                       rounded-r-lg shadow-sm
+                       text-slate-400 hover:text-slate-700 hover:bg-slate-50
+                       transition-colors duration-150"
+          >
+            <i className="ri-arrow-right-s-line text-base" />
+          </button>
+        )}
 
         {/* 右侧主内容区 */}
         <div className="flex-1 min-w-0">

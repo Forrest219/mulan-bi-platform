@@ -53,7 +53,7 @@ const GROUP_ORDER: TimeGroup[] = ['今天', '昨天', '过去 7 天', '更早'];
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ConversationBar({ collapsed: _collapsed, onToggleCollapse: _onToggleCollapse }: ConversationBarProps) {
+export function ConversationBar({ collapsed: _collapsed, onToggleCollapse }: ConversationBarProps) {
   const { conversations, addConversation, deleteConversation, updateConversationTitle } =
     useConversations();
   const { user, logout } = useAuth();
@@ -119,9 +119,19 @@ export function ConversationBar({ collapsed: _collapsed, onToggleCollapse: _onTo
       className="bg-white border-r border-slate-200 flex flex-col h-full"
       style={{ minHeight: '100vh' }}
     >
-      {/* 顶部：品牌区 + 新建图标按钮 */}
+      {/* 顶部：折叠按钮 + 品牌区 + 新建图标按钮 */}
       <div className="flex items-center justify-between h-14 px-3 border-b border-slate-100 flex-shrink-0">
         <div className="flex items-center gap-2 min-w-0">
+          <button
+            onClick={onToggleCollapse}
+            title="折叠侧边栏"
+            aria-label="折叠侧边栏"
+            className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg
+                       text-slate-400 hover:bg-slate-100 hover:text-slate-700
+                       transition-colors duration-150"
+          >
+            <i className="ri-sidebar-fold-line text-base" />
+          </button>
           <img
             src={LOGO_URL}
             alt=""
