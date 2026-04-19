@@ -102,13 +102,144 @@ async def _list_datasources(credentials: dict) -> list:
             "name": ds.get("name", ""),
             "contentUrl": ds.get("contentUrl", ""),
             "luid": ds.get("id", ""),
+            "createdAt": ds.get("createdAt", ""),
+            "updatedAt": ds.get("updatedAt", ""),
+            "size": ds.get("size", 0),
+            "description": ds.get("description", ""),
         }
         for ds in raw_list
     ]
 
 
+async def _list_workbooks(credentials: dict) -> list:
+    """登录 Tableau 并拉取工作簿列表。"""
+    pat_value = credentials.get("pat_value", "")
+    tableau_server = credentials["tableau_server"]
+    pat_name = credentials["pat_name"]
+    site_name = credentials.get("site_name", "")
+
+    token, site_id = await _tableau_signin(tableau_server, pat_name, pat_value, site_name)
+
+    wb_url = f"{tableau_server.rstrip('/')}/api/3.20/sites/{site_id}/workbooks?pageSize=100"
+    async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+        resp = await client.get(
+            wb_url,
+            headers={"x-tableau-auth": token, "Accept": "application/json"},
+        )
+    if resp.status_code != 200:
+        raise RuntimeError(f"获取工作簿列表失败 (HTTP {resp.status_code})")
+
+    data = resp.json()
+    raw_list = data.get("workbooks", {}).get("workbook", [])
+    if isinstance(raw_list, dict):
+        raw_list = [raw_list]
+    return [
+        {
+            "name": wb.get("name", ""),
+            "luid": wb.get("id", ""),
+            "projectName": (wb.get("project") or {}).get("name", ""),
+            "updatedAt": wb.get("updatedAt", ""),
+        }
+        for wb in raw_list
+    ]
+
+
+async def _get_datasource_upstream_tables(credentials: dict, ds_name: str) -> list:
+    """通过 Metadata API GraphQL 查询数据源的上游物理表。"""
+    pat_value = credentials.get("pat_value", "")
+    tableau_server = credentials["tableau_server"]
+    pat_name = credentials["pat_name"]
+    site_name = credentials.get("site_name", "")
+
+    token, _ = await _tableau_signin(tableau_server, pat_name, pat_value, site_name)
+
+    graphql_url = f"{tableau_server.rstrip('/')}/api/metadata/graphql"
+    gql_query = (
+        '{ publishedDatasourcesConnection(filter: {nameWithin: ["%s"]}) {'
+        '  nodes { name upstreamTables { name schema database { name } } } } }'
+    ) % ds_name.replace('"', '\\"')
+
+    async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+        resp = await client.post(
+            graphql_url,
+            json={"query": gql_query},
+            headers={
+                "x-tableau-auth": token,
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+        )
+    if resp.status_code != 200:
+        raise RuntimeError(f"Metadata API 调用失败 (HTTP {resp.status_code})")
+
+    data = resp.json()
+    nodes = (
+        data.get("data", {})
+        .get("publishedDatasourcesConnection", {})
+        .get("nodes", [])
+    )
+    if not nodes:
+        return []
+    tables = nodes[0].get("upstreamTables", [])
+    return [
+        {
+            "table": t.get("name", ""),
+            "schema": t.get("schema", ""),
+            "database": (t.get("database") or {}).get("name", ""),
+        }
+        for t in tables
+    ]
+
+
+async def _get_datasource_downstream_workbooks(credentials: dict, ds_name: str) -> list:
+    """通过 Metadata API GraphQL 查询数据源的下游工作簿。"""
+    pat_value = credentials.get("pat_value", "")
+    tableau_server = credentials["tableau_server"]
+    pat_name = credentials["pat_name"]
+    site_name = credentials.get("site_name", "")
+
+    token, _ = await _tableau_signin(tableau_server, pat_name, pat_value, site_name)
+
+    graphql_url = f"{tableau_server.rstrip('/')}/api/metadata/graphql"
+    gql_query = (
+        '{ publishedDatasourcesConnection(filter: {nameWithin: ["%s"]}) {'
+        '  nodes { name downstreamWorkbooks { name projectName updatedAt } } } }'
+    ) % ds_name.replace('"', '\\"')
+
+    async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+        resp = await client.post(
+            graphql_url,
+            json={"query": gql_query},
+            headers={
+                "x-tableau-auth": token,
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+        )
+    if resp.status_code != 200:
+        raise RuntimeError(f"Metadata API 调用失败 (HTTP {resp.status_code})")
+
+    data = resp.json()
+    nodes = (
+        data.get("data", {})
+        .get("publishedDatasourcesConnection", {})
+        .get("nodes", [])
+    )
+    if not nodes:
+        return []
+    workbooks = nodes[0].get("downstreamWorkbooks", [])
+    return [
+        {
+            "name": wb.get("name", ""),
+            "project": wb.get("projectName", ""),
+            "updatedAt": wb.get("updatedAt", ""),
+        }
+        for wb in workbooks
+    ]
+
+
 async def _get_datasource_metadata(credentials: dict, luid: str) -> dict:
-    """登录 Tableau 并拉取指定数据源详情。"""
+    """登录 Tableau 并拉取指定数据源详情（含字段列表）。"""
     pat_value = credentials.get("pat_value", "")
 
     tableau_server = credentials["tableau_server"]
@@ -117,16 +248,64 @@ async def _get_datasource_metadata(credentials: dict, luid: str) -> dict:
 
     token, site_id = await _tableau_signin(tableau_server, pat_name, pat_value, site_name)
 
-    ds_url = f"{tableau_server.rstrip('/')}/api/3.20/sites/{site_id}/datasources/{luid}"
+    base_url = tableau_server.rstrip("/")
+
     async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+        # 1. 获取数据源基本信息
+        ds_url = f"{base_url}/api/3.20/sites/{site_id}/datasources/{luid}"
         resp = await client.get(
             ds_url,
             headers={"x-tableau-auth": token, "Accept": "application/json"},
         )
-    if resp.status_code != 200:
-        raise RuntimeError(f"获取数据源详情失败 (HTTP {resp.status_code})")
+        if resp.status_code != 200:
+            raise RuntimeError(f"获取数据源详情失败 (HTTP {resp.status_code})")
+        ds_info = resp.json().get("datasource", {})
 
-    return resp.json().get("datasource", {})
+        # 2. 通过 Metadata API（GraphQL）获取字段列表
+        # Tableau Metadata API 的 Field 类型只暴露 name / isHidden / description
+        graphql_url = f"{base_url}/api/metadata/graphql"
+        gql_query = (
+            '{ publishedDatasourcesConnection(filter: {luid: "%s"}) {'
+            '  nodes { luid name fields { name isHidden description } } } }'
+        ) % luid
+        try:
+            meta_resp = await client.post(
+                graphql_url,
+                json={"query": gql_query},
+                headers={
+                    "x-tableau-auth": token,
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+            )
+            if meta_resp.status_code == 200:
+                meta_data = meta_resp.json()
+                if meta_data and "data" in meta_data and meta_data["data"]:
+                    nodes = (
+                        meta_data["data"]
+                        .get("publishedDatasourcesConnection", {})
+                        .get("nodes", [])
+                    )
+                    if nodes:
+                        raw_fields = nodes[0].get("fields", [])
+                        # 过滤隐藏字段，规范化格式
+                        ds_info["fields"] = [
+                            {
+                                "name": f.get("name", ""),
+                                "description": f.get("description", ""),
+                            }
+                            for f in raw_fields
+                            if not f.get("isHidden", False) and f.get("name", "")
+                        ]
+            else:
+                logger.warning(
+                    "_get_datasource_metadata: Metadata API 返回 %s，跳过字段查询",
+                    meta_resp.status_code,
+                )
+        except Exception as e:
+            logger.warning("_get_datasource_metadata: Metadata API 调用失败: %s", e)
+
+    return ds_info
 
 
 # ── MCP JSON-RPC 端点 ────────────────────────────────────────────────────────
@@ -187,6 +366,36 @@ async def handle_mcp(request: Request):
                             "required": ["datasource_luid"],
                         },
                     },
+                    {
+                        "name": "list-workbooks",
+                        "description": "列出 Tableau 所有已发布的工作簿",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {},
+                        },
+                    },
+                    {
+                        "name": "get-datasource-upstream-tables",
+                        "description": "查询数据源对应的上游物理表",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "datasource_name": {"type": "string", "description": "数据源名称"}
+                            },
+                            "required": ["datasource_name"],
+                        },
+                    },
+                    {
+                        "name": "get-datasource-downstream-workbooks",
+                        "description": "查询引用了该数据源的下游工作簿",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "datasource_name": {"type": "string", "description": "数据源名称"}
+                            },
+                            "required": ["datasource_name"],
+                        },
+                    },
                 ]
             })
         )
@@ -221,6 +430,43 @@ async def handle_mcp(request: Request):
                     )
                 metadata = await _get_datasource_metadata(credentials, luid)
                 text_content = json.dumps({"datasource": metadata}, ensure_ascii=False)
+                return JSONResponse(
+                    _make_result(req_id, {
+                        "content": [{"type": "text", "text": text_content}]
+                    })
+                )
+
+            elif tool_name == "list-workbooks":
+                workbooks = await _list_workbooks(credentials)
+                text_content = json.dumps({"workbooks": workbooks}, ensure_ascii=False)
+                return JSONResponse(
+                    _make_result(req_id, {
+                        "content": [{"type": "text", "text": text_content}]
+                    })
+                )
+
+            elif tool_name == "get-datasource-upstream-tables":
+                ds_name = arguments.get("datasource_name", "")
+                if not ds_name:
+                    return JSONResponse(
+                        _make_error(req_id, -32602, "缺少必要参数: datasource_name"),
+                    )
+                tables = await _get_datasource_upstream_tables(credentials, ds_name)
+                text_content = json.dumps({"tables": tables}, ensure_ascii=False)
+                return JSONResponse(
+                    _make_result(req_id, {
+                        "content": [{"type": "text", "text": text_content}]
+                    })
+                )
+
+            elif tool_name == "get-datasource-downstream-workbooks":
+                ds_name = arguments.get("datasource_name", "")
+                if not ds_name:
+                    return JSONResponse(
+                        _make_error(req_id, -32602, "缺少必要参数: datasource_name"),
+                    )
+                workbooks = await _get_datasource_downstream_workbooks(credentials, ds_name)
+                text_content = json.dumps({"workbooks": workbooks}, ensure_ascii=False)
                 return JSONResponse(
                     _make_result(req_id, {
                         "content": [{"type": "text", "text": text_content}]

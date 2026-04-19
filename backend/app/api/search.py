@@ -144,6 +144,9 @@ async def _mcp_list_datasources(
             headers=headers,
         )
         list_data = list_resp.json()
+        if "error" in list_data:
+            err = list_data["error"]
+            raise RuntimeError(f"MCP list-datasources 错误 [{err.get('code')}]: {err.get('message')}")
         result = list_data.get("result", {})
         content = result.get("content", [])
         text = "".join(c.get("text", "") for c in content if c.get("type") == "text")
@@ -201,17 +204,176 @@ async def _mcp_get_datasource_metadata(
             mcp_base_url,
             json={
                 "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                "params": {"name": "get-datasource-metadata", "arguments": {"datasourceLuid": datasource_luid}}
+                "params": {"name": "get-datasource-metadata", "arguments": {"datasource_luid": datasource_luid}}
             },
             headers=headers,
         )
         meta_data = meta_resp.json()
+        if "error" in meta_data:
+            err = meta_data["error"]
+            raise RuntimeError(f"MCP get-datasource-metadata 错误 [{err.get('code')}]: {err.get('message')}")
         result = meta_data.get("result", {})
         content = result.get("content", [])
         text = "".join(c.get("text", "") for c in content if c.get("type") == "text")
         if text:
             return _json.loads(text)
         return {}
+
+
+async def _mcp_list_workbooks(mcp_base_url: str, timeout: float = 30.0) -> list:
+    """通过 MCP JSON-RPC 调用 list-workbooks 工具。"""
+    import httpx
+    import json as _json
+
+    protocol_ver = "2025-06-18"
+    session_id = "nlq-fallback-session"
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "MCP-Protocol-Version": protocol_ver,
+        "MCP-Session-ID": session_id,
+    }
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        await client.post(
+            mcp_base_url,
+            json={
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": protocol_ver,
+                    "clientInfo": {"name": "nlq-fallback", "version": "1.0"},
+                    "serverInfo": {"name": "tableau-mcp", "version": "1.0"},
+                }
+            },
+            headers=headers,
+        )
+        await client.post(
+            mcp_base_url,
+            json={"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            headers=headers,
+        )
+        resp = await client.post(
+            mcp_base_url,
+            json={
+                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": {"name": "list-workbooks", "arguments": {}}
+            },
+            headers=headers,
+        )
+        data = resp.json()
+        if "error" in data:
+            err = data["error"]
+            raise RuntimeError(f"MCP list-workbooks 错误 [{err.get('code')}]: {err.get('message')}")
+        result = data.get("result", {})
+        content = result.get("content", [])
+        text = "".join(c.get("text", "") for c in content if c.get("type") == "text")
+        if text:
+            return _json.loads(text).get("workbooks", [])
+        return []
+
+
+async def _mcp_get_upstream_tables(mcp_base_url: str, ds_name: str, timeout: float = 30.0) -> list:
+    """通过 MCP JSON-RPC 调用 get-datasource-upstream-tables 工具。"""
+    import httpx
+    import json as _json
+
+    protocol_ver = "2025-06-18"
+    session_id = "nlq-fallback-session"
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "MCP-Protocol-Version": protocol_ver,
+        "MCP-Session-ID": session_id,
+    }
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        await client.post(
+            mcp_base_url,
+            json={
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": protocol_ver,
+                    "clientInfo": {"name": "nlq-fallback", "version": "1.0"},
+                    "serverInfo": {"name": "tableau-mcp", "version": "1.0"},
+                }
+            },
+            headers=headers,
+        )
+        await client.post(
+            mcp_base_url,
+            json={"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            headers=headers,
+        )
+        resp = await client.post(
+            mcp_base_url,
+            json={
+                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": {"name": "get-datasource-upstream-tables", "arguments": {"datasource_name": ds_name}}
+            },
+            headers=headers,
+        )
+        data = resp.json()
+        if "error" in data:
+            err = data["error"]
+            raise RuntimeError(f"MCP get-datasource-upstream-tables 错误 [{err.get('code')}]: {err.get('message')}")
+        result = data.get("result", {})
+        content = result.get("content", [])
+        text = "".join(c.get("text", "") for c in content if c.get("type") == "text")
+        if text:
+            return _json.loads(text).get("tables", [])
+        return []
+
+
+async def _mcp_get_downstream_workbooks(mcp_base_url: str, ds_name: str, timeout: float = 30.0) -> list:
+    """通过 MCP JSON-RPC 调用 get-datasource-downstream-workbooks 工具。"""
+    import httpx
+    import json as _json
+
+    protocol_ver = "2025-06-18"
+    session_id = "nlq-fallback-session"
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "MCP-Protocol-Version": protocol_ver,
+        "MCP-Session-ID": session_id,
+    }
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        await client.post(
+            mcp_base_url,
+            json={
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": protocol_ver,
+                    "clientInfo": {"name": "nlq-fallback", "version": "1.0"},
+                    "serverInfo": {"name": "tableau-mcp", "version": "1.0"},
+                }
+            },
+            headers=headers,
+        )
+        await client.post(
+            mcp_base_url,
+            json={"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            headers=headers,
+        )
+        resp = await client.post(
+            mcp_base_url,
+            json={
+                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": {"name": "get-datasource-downstream-workbooks", "arguments": {"datasource_name": ds_name}}
+            },
+            headers=headers,
+        )
+        data = resp.json()
+        if "error" in data:
+            err = data["error"]
+            raise RuntimeError(f"MCP get-datasource-downstream-workbooks 错误 [{err.get('code')}]: {err.get('message')}")
+        result = data.get("result", {})
+        content = result.get("content", [])
+        text = "".join(c.get("text", "") for c in content if c.get("type") == "text")
+        if text:
+            return _json.loads(text).get("workbooks", [])
+        return []
 
 
 def _get_asset_by_luid(datasource_luid: str):
@@ -276,6 +438,22 @@ async def handle_meta_query_all(meta_intent: str, db: Session, user: dict, quest
         return await _handle_meta_asset_count_all(active_connections, db)
     elif meta_intent == "meta_semantic_quality":
         return await _handle_meta_semantic_quality_all(active_connections, db)
+    elif meta_intent == "meta_workbook_count":
+        return await _handle_meta_workbook_count(active_connections, db)
+    elif meta_intent == "meta_datasource_physical_table":
+        return await _handle_meta_physical_table(active_connections, db, question=question)
+    elif meta_intent == "meta_datasource_downstream":
+        return await _handle_meta_downstream_workbooks(active_connections, db, question=question)
+    elif meta_intent == "meta_datasource_new_in_period":
+        return await _handle_meta_datasource_new_in_period(active_connections, db, question=question)
+    elif meta_intent == "meta_datasource_recently_updated":
+        return await _handle_meta_datasource_recently_updated(active_connections, db, question=question)
+    elif meta_intent == "meta_datasource_top_by_size":
+        return await _handle_meta_datasource_top_by_size(active_connections, db, question=question)
+    elif meta_intent == "meta_datasource_incomplete_metadata":
+        return await _handle_meta_datasource_incomplete_metadata(active_connections, db)
+    elif meta_intent == "meta_datasource_duplicate":
+        return await _handle_meta_datasource_duplicates(active_connections, db)
     else:
         return {
             "response_type": "text",
@@ -363,64 +541,37 @@ async def _handle_meta_datasource_list(connection_id: int, db: Session) -> dict:
 
 
 async def _handle_meta_datasource_list_all(connections: list, db: Session) -> dict:
-    """跨所有活跃连接，汇总数据源列表，按连接分组展示。
-    本地 tableau_assets 为空时自动 fallback 到实时调用 MCP list-datasources。
-    """
-    from services.mcp.models import McpServer
+    """跨所有活跃连接，实时调用 MCP list-datasources 获取数据源列表。"""
+    mcp_base_url = "http://localhost:8000/tableau-mcp"
+    try:
+        ds_list = await _mcp_list_datasources(mcp_base_url, "", "", "", "")
+    except Exception as e:
+        logger.error("_handle_meta_datasource_list_all: MCP 调用失败: %s", e)
+        return {
+            "response_type": "text",
+            "content": "数据获取暂时异常，请稍后重试或联系管理员。",
+            "intent": "meta_datasource_list",
+            "meta": True,
+        }
 
-    total = 0
-    sections = []
+    if not ds_list:
+        return {
+            "response_type": "text",
+            "content": "当前 Tableau 中暂无已发布的数据源。",
+            "intent": "meta_datasource_list",
+            "meta": True,
+        }
 
-    for conn in connections:
-        assets = db.query(TableauAsset).filter(
-            TableauAsset.connection_id == conn.id,
-            TableauAsset.asset_type == "datasource",
-            TableauAsset.is_deleted == False,
-        ).order_by(TableauAsset.name.asc()).all()
-
-        _site = getattr(conn, 'site', None)
-        _site_clean = _site if (_site and not _site.startswith('http://localhost')) else None
-        site_label = f"{conn.name}（{_site_clean}）" if _site_clean else conn.name
-
-        if not assets:
-            # Fallback：实时调用 MCP 获取数据源列表
-            try:
-                # 找对应的 MCP server（按 name 匹配，或取第一个活跃 tableau MCP）
-                mcp = db.query(McpServer).filter(
-                    McpServer.type == "tableau",
-                    McpServer.is_active == True,
-                ).first()
-                if mcp:
-                    # 使用内置 MCP 端点（tableau_mcp.py），不使用 mcp.server_url（Tableau 官网 URL）
-                    ds_list = await _mcp_list_datasources("http://localhost:8000/tableau-mcp", "", "", "", "")
-                    if ds_list:
-                        total += len(ds_list)
-                        lines = [f"\n### {site_label}（共 {len(ds_list)} 个）"]
-                        for ds in ds_list:
-                            name = ds.get("name") or ds.get("contentUrl") or str(ds)
-                            lines.append(f"- {name}")
-                        sections.append("\n".join(lines))
-            except Exception as e:
-                logger.warning("MCP fallback list-datasources 失败: %s", e)
-            continue
-
-        total += len(assets)
-        lines = [f"\n### {site_label}（共 {len(assets)} 个）"]
-        for a in assets:
-            lines.append(f"- {a.name}")
-        sections.append("\n".join(lines))
-
-    n_conns = len(connections)
-    if not sections:
-        content = "所有连接下暂无数据源，请先完成资产同步。"
-    else:
-        header = f"我在 **{n_conns}** 个连接中共找到 **{total}** 个数据源："
-        footer = "\n\n> 如需了解某个数据源的字段信息，可以直接提问，例如：「管理费用数据源 有什么字段」"
-        content = header + "\n".join(sections) + footer
+    total = len(ds_list)
+    lines = [f"我在 Tableau 中找到 **{total}** 个数据源："]
+    for ds in ds_list:
+        name = ds.get("name") or ds.get("contentUrl") or str(ds)
+        lines.append(f"- {name}")
+    lines.append("\n> 如需了解某个数据源的字段信息，可以直接提问，例如：「管理费用数据源 有什么字段」")
 
     return {
         "response_type": "text",
-        "content": content,
+        "content": "\n".join(lines),
         "intent": "meta_datasource_list",
         "meta": True,
     }
@@ -429,24 +580,21 @@ async def _handle_meta_datasource_list_all(connections: list, db: Session) -> di
 async def _handle_meta_field_list_all(connections: list, db: Session, question: str = "") -> dict:
     """
     META handler：查询指定数据源的字段列表。
-
-    从用户问题中提取数据源名称（模糊匹配 MCP/本地 datasource 名称），
-    先查本地 tableau_assets 字段，为空时 fallback 到 MCP get-datasource-metadata。
-
-    Args:
-        connections: 活跃连接列表
-        db: SQLAlchemy session
-        question: 原始用户问题，用于从中提取数据源名称
+    实时调用 MCP，不依赖本地 DB 缓存。
     """
-    from services.mcp.models import McpServer
+    mcp_base_url = "http://localhost:8000/tableau-mcp"
 
     # 1. 通过 MCP 拉全量数据源列表（用于名称匹配）
-    mcp_base_url = "http://localhost:8000/tableau-mcp"
-    all_ds = []
     try:
         all_ds = await _mcp_list_datasources(mcp_base_url, "", "", "", "")
     except Exception as e:
-        logger.warning("_handle_meta_field_list: MCP list-datasources 失败: %s", e)
+        logger.error("_handle_meta_field_list: MCP list-datasources 失败: %s", e)
+        return {
+            "response_type": "text",
+            "content": "数据获取暂时异常，请稍后重试或联系管理员。",
+            "intent": "meta_field_list",
+            "meta": True,
+        }
 
     # 2. 从问题中匹配数据源名称（最长优先匹配）
     matched_ds = None
@@ -460,13 +608,12 @@ async def _handle_meta_field_list_all(connections: list, db: Session, question: 
                 break
 
     if not matched_ds:
-        # 问题中未能识别数据源名称
         if all_ds:
             ds_sample = "、".join(ds.get("name", "") for ds in all_ds[:5])
             hint = f"（例如：{ds_sample}）" if ds_sample else ""
             content = f"请告诉我您想查询哪个数据源的字段，例如：「XX数据源 有什么字段」{hint}"
         else:
-            content = "暂时无法获取数据源列表，请稍后重试或联系管理员。"
+            content = "当前 Tableau 中暂无已发布的数据源。"
         return {
             "response_type": "text",
             "content": content,
@@ -477,55 +624,22 @@ async def _handle_meta_field_list_all(connections: list, db: Session, question: 
     ds_name = matched_ds.get("name", "")
     ds_luid = matched_ds.get("luid", "")
 
-    # 3. 先查本地 tableau_assets 中该数据源的字段
-    local_fields = []
-    if ds_luid:
-        try:
-            from services.tableau.models import TableauDatabase as _TDB
-            _db = _TDB()
-            _session = _db.session
-            local_asset = _session.query(TableauAsset).filter(
-                TableauAsset.datasource_luid == ds_luid,
-                TableauAsset.is_deleted == False,
-            ).first()
-            if local_asset:
-                local_fields = _db.get_datasource_fields(local_asset.id)
-            _session.close()
-        except Exception as e:
-            logger.warning("_handle_meta_field_list: 本地字段查询失败: %s", e)
-
-    if local_fields:
-        lines = [f"**{ds_name}** 共有 **{len(local_fields)}** 个字段："]
-        for f in sorted(local_fields, key=lambda x: (x.role or "", x.field_caption or "")):
-            role_label = "度量" if (f.role or "").lower() == "measure" else "维度"
-            dtype = f.data_type or ""
-            lines.append(f"- {f.field_caption}（{role_label}{', ' + dtype if dtype else ''}）")
-        content = "\n".join(lines)
-        return {
-            "response_type": "text",
-            "content": content,
-            "intent": "meta_field_list",
-            "meta": True,
-        }
-
-    # 4. 本地无数据，fallback 到 MCP get-datasource-metadata
     if not ds_luid:
-        content = f"未能找到数据源「{ds_name}」的 LUID，无法查询字段信息。"
         return {
             "response_type": "text",
-            "content": content,
+            "content": f"未能获取数据源「{ds_name}」的 LUID，请检查 Tableau 数据源配置。",
             "intent": "meta_field_list",
             "meta": True,
         }
 
+    # 3. 直接通过 MCP 获取字段信息
     try:
         metadata = await _mcp_get_datasource_metadata(mcp_base_url, ds_luid)
     except Exception as e:
         logger.error("_handle_meta_field_list: MCP get-datasource-metadata 失败: %s", e)
-        content = f"获取「{ds_name}」字段信息时出错，请稍后重试。"
         return {
             "response_type": "text",
-            "content": content,
+            "content": f"获取「{ds_name}」字段信息暂时异常，请稍后重试或联系管理员。",
             "intent": "meta_field_list",
             "meta": True,
         }
@@ -701,6 +815,465 @@ async def _handle_meta_semantic_quality_all(connections: list, db: Session) -> d
         "response_type": "text",
         "content": content,
         "intent": "meta_semantic_quality",
+        "meta": True,
+    }
+
+
+async def _handle_meta_workbook_count(connections: list, db: Session) -> dict:
+    """Q2：平台上有多少个报表（工作簿）。"""
+    mcp_base_url = "http://localhost:8000/tableau-mcp"
+    try:
+        wb_list = await _mcp_list_workbooks(mcp_base_url)
+    except Exception as e:
+        logger.error("_handle_meta_workbook_count: MCP 调用失败: %s", e)
+        return {
+            "response_type": "text",
+            "content": "暂时无法获取报表数据，请稍后重试或联系管理员。",
+            "intent": "meta_workbook_count",
+            "meta": True,
+        }
+
+    total = len(wb_list)
+    if total == 0:
+        content = "当前 Tableau 中暂无已发布的工作簿（报表）。"
+    else:
+        lines = [f"Tableau 中共有 **{total}** 个工作簿（报表）："]
+        for wb in wb_list:
+            proj = wb.get("projectName", "")
+            proj_label = f"（{proj}）" if proj else ""
+            lines.append(f"- {wb.get('name', '')}{proj_label}")
+        content = "\n".join(lines)
+
+    return {
+        "response_type": "text",
+        "content": content,
+        "intent": "meta_workbook_count",
+        "meta": True,
+    }
+
+
+async def _handle_meta_physical_table(connections: list, db: Session, question: str = "") -> dict:
+    """Q4：数据源对应后台的物理表叫什么名字。"""
+    mcp_base_url = "http://localhost:8000/tableau-mcp"
+
+    # 先拉数据源列表，从问题中匹配数据源名称
+    try:
+        all_ds = await _mcp_list_datasources(mcp_base_url, "", "", "", "")
+    except Exception as e:
+        logger.error("_handle_meta_physical_table: MCP list-datasources 失败: %s", e)
+        return {
+            "response_type": "text",
+            "content": "数据获取暂时异常，请稍后重试或联系管理员。",
+            "intent": "meta_datasource_physical_table",
+            "meta": True,
+        }
+
+    matched_ds = None
+    if question and all_ds:
+        q_lower = question.lower()
+        candidates = sorted(all_ds, key=lambda x: len(x.get("name", "")), reverse=True)
+        for ds in candidates:
+            name = ds.get("name", "")
+            if name and name.lower() in q_lower:
+                matched_ds = ds
+                break
+
+    if not matched_ds:
+        if all_ds:
+            ds_sample = "、".join(ds.get("name", "") for ds in all_ds[:5])
+            hint = f"（例如：{ds_sample}）" if ds_sample else ""
+            content = f"请告诉我您想查询哪个数据源的物理表{hint}"
+        else:
+            content = "当前 Tableau 中暂无已发布的数据源。"
+        return {
+            "response_type": "text",
+            "content": content,
+            "intent": "meta_datasource_physical_table",
+            "meta": True,
+        }
+
+    ds_name = matched_ds.get("name", "")
+    try:
+        tables = await _mcp_get_upstream_tables(mcp_base_url, ds_name)
+    except Exception as e:
+        logger.error("_handle_meta_physical_table: MCP 调用失败: %s", e)
+        return {
+            "response_type": "text",
+            "content": f"获取「{ds_name}」物理表信息失败，请检查 Tableau 连接。",
+            "intent": "meta_datasource_physical_table",
+            "meta": True,
+        }
+
+    if not tables:
+        content = (
+            f"暂未找到「{ds_name}」的物理表信息，该数据源可能不支持数据溯源，"
+            f"或直接使用了文件/提取数据。"
+        )
+    else:
+        lines = [f"「{ds_name}」对应的后台物理表："]
+        for t in tables:
+            db_label = t.get("database", "")
+            schema_label = t.get("schema", "")
+            table_label = t.get("table", "")
+            parts = [p for p in [db_label, schema_label, table_label] if p]
+            lines.append(f"- {'.'.join(parts)}")
+        content = "\n".join(lines)
+
+    return {
+        "response_type": "text",
+        "content": content,
+        "intent": "meta_datasource_physical_table",
+        "meta": True,
+    }
+
+
+async def _handle_meta_downstream_workbooks(connections: list, db: Session, question: str = "") -> dict:
+    """Q5：哪些看板和报表用了某个数据源。"""
+    mcp_base_url = "http://localhost:8000/tableau-mcp"
+
+    try:
+        all_ds = await _mcp_list_datasources(mcp_base_url, "", "", "", "")
+    except Exception as e:
+        logger.error("_handle_meta_downstream_workbooks: MCP list-datasources 失败: %s", e)
+        return {
+            "response_type": "text",
+            "content": "数据获取暂时异常，请稍后重试或联系管理员。",
+            "intent": "meta_datasource_downstream",
+            "meta": True,
+        }
+
+    matched_ds = None
+    if question and all_ds:
+        q_lower = question.lower()
+        candidates = sorted(all_ds, key=lambda x: len(x.get("name", "")), reverse=True)
+        # 先精确匹配完整名称
+        for ds in candidates:
+            name = ds.get("name", "")
+            if name and name.lower() in q_lower:
+                matched_ds = ds
+                break
+        # 再尝试去掉"数据源"后缀的核心词匹配（处理"管理费用这个数据源"等表述）
+        if not matched_ds:
+            for ds in candidates:
+                name = ds.get("name", "")
+                core = name.lower().replace("数据源", "").replace("datasource", "").strip()
+                if core and core in q_lower:
+                    matched_ds = ds
+                    break
+
+    if not matched_ds:
+        if all_ds:
+            ds_sample = "、".join(ds.get("name", "") for ds in all_ds[:5])
+            hint = f"（例如：{ds_sample}）" if ds_sample else ""
+            content = f"请告诉我您想查询哪个数据源的下游报表{hint}"
+        else:
+            content = "当前 Tableau 中暂无已发布的数据源。"
+        return {
+            "response_type": "text",
+            "content": content,
+            "intent": "meta_datasource_downstream",
+            "meta": True,
+        }
+
+    ds_name = matched_ds.get("name", "")
+    try:
+        workbooks = await _mcp_get_downstream_workbooks(mcp_base_url, ds_name)
+    except Exception as e:
+        logger.error("_handle_meta_downstream_workbooks: MCP 调用失败: %s", e)
+        return {
+            "response_type": "text",
+            "content": f"获取「{ds_name}」下游报表失败，请检查 Tableau 连接。",
+            "intent": "meta_datasource_downstream",
+            "meta": True,
+        }
+
+    if not workbooks:
+        content = f"暂未找到使用「{ds_name}」的报表，可能该数据源尚未被任何工作簿引用。"
+    else:
+        lines = [f"引用「{ds_name}」的工作簿（共 {len(workbooks)} 个）："]
+        for wb in workbooks:
+            proj = wb.get("project", "")
+            proj_label = f"（{proj}）" if proj else ""
+            lines.append(f"- {wb.get('name', '')}{proj_label}")
+        content = "\n".join(lines)
+
+    return {
+        "response_type": "text",
+        "content": content,
+        "intent": "meta_datasource_downstream",
+        "meta": True,
+    }
+
+
+def _parse_days_from_question(question: str, default_days: int) -> int:
+    """从问题中解析时间范围天数。"""
+    import re
+    # 提取数字
+    nums = re.findall(r'\d+', question)
+    if nums:
+        return int(nums[0])
+    if any(kw in question for kw in ["一个月", "本月", "这月", "上个月"]):
+        return 30
+    if any(kw in question for kw in ["一周", "本周", "这周", "上周"]):
+        return 7
+    if any(kw in question for kw in ["一天", "今天", "昨天"]):
+        return 1
+    if any(kw in question for kw in ["一季度", "本季", "这季"]):
+        return 90
+    return default_days
+
+
+async def _handle_meta_datasource_new_in_period(connections: list, db: Session, question: str = "") -> dict:
+    """Q6：最近一个月新增了哪些数据源。"""
+    from datetime import datetime, timezone, timedelta
+
+    mcp_base_url = "http://localhost:8000/tableau-mcp"
+    try:
+        ds_list = await _mcp_list_datasources(mcp_base_url, "", "", "", "")
+    except Exception as e:
+        logger.error("_handle_meta_datasource_new_in_period: MCP 调用失败: %s", e)
+        return {
+            "response_type": "text",
+            "content": "获取数据源列表失败，请检查 Tableau 连接。",
+            "intent": "meta_datasource_new_in_period",
+            "meta": True,
+        }
+
+    days = _parse_days_from_question(question, 30)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    # 检查是否有 createdAt 信息
+    has_created_at = any(ds.get("createdAt") for ds in ds_list)
+    if not has_created_at:
+        return {
+            "response_type": "text",
+            "content": "Tableau 未提供创建时间信息，请联系管理员查阅审计记录。",
+            "intent": "meta_datasource_new_in_period",
+            "meta": True,
+        }
+
+    new_ds = []
+    for ds in ds_list:
+        created_at_str = ds.get("createdAt", "")
+        if not created_at_str:
+            continue
+        try:
+            created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+            if created_at >= cutoff:
+                new_ds.append(ds)
+        except Exception:
+            continue
+
+    if not new_ds:
+        content = f"过去 {days} 天内未发现新增数据源。"
+    else:
+        lines = [f"过去 **{days}** 天内新增了 **{len(new_ds)}** 个数据源："]
+        for ds in new_ds:
+            lines.append(f"- {ds.get('name', '')}（创建于 {ds.get('createdAt', '')[:10]}）")
+        content = "\n".join(lines)
+
+    return {
+        "response_type": "text",
+        "content": content,
+        "intent": "meta_datasource_new_in_period",
+        "meta": True,
+    }
+
+
+async def _handle_meta_datasource_recently_updated(connections: list, db: Session, question: str = "") -> dict:
+    """Q7：过去一周哪些数据源被改过了。"""
+    from datetime import datetime, timezone, timedelta
+
+    mcp_base_url = "http://localhost:8000/tableau-mcp"
+    try:
+        ds_list = await _mcp_list_datasources(mcp_base_url, "", "", "", "")
+    except Exception as e:
+        logger.error("_handle_meta_datasource_recently_updated: MCP 调用失败: %s", e)
+        return {
+            "response_type": "text",
+            "content": "获取数据源列表失败，请检查 Tableau 连接。",
+            "intent": "meta_datasource_recently_updated",
+            "meta": True,
+        }
+
+    days = _parse_days_from_question(question, 7)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    updated_ds = []
+    for ds in ds_list:
+        updated_at_str = ds.get("updatedAt", "")
+        if not updated_at_str:
+            continue
+        try:
+            updated_at = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
+            if updated_at >= cutoff:
+                updated_ds.append(ds)
+        except Exception:
+            continue
+
+    if not updated_ds:
+        content = f"过去 {days} 天内没有数据源被更新。"
+    else:
+        lines = [f"过去 **{days}** 天内更新过的数据源（共 **{len(updated_ds)}** 个）："]
+        for ds in updated_ds:
+            lines.append(f"- {ds.get('name', '')}（最后更新：{ds.get('updatedAt', '')[:10]}）")
+        content = "\n".join(lines)
+    content += "\n\n注：Tableau API 暂不支持获取操作人信息，如需确认修改人请查阅 Tableau Server 审计日志。"
+
+    return {
+        "response_type": "text",
+        "content": content,
+        "intent": "meta_datasource_recently_updated",
+        "meta": True,
+    }
+
+
+def _format_size(size_bytes) -> str:
+    """将字节数格式化为可读的 MB/GB 字符串。"""
+    try:
+        size_bytes = int(size_bytes)
+    except (TypeError, ValueError):
+        size_bytes = 0
+    if size_bytes <= 0:
+        return "0 B"
+    if size_bytes >= 1024 ** 3:
+        return f"{size_bytes / 1024 ** 3:.2f} GB"
+    if size_bytes >= 1024 ** 2:
+        return f"{size_bytes / 1024 ** 2:.2f} MB"
+    if size_bytes >= 1024:
+        return f"{size_bytes / 1024:.2f} KB"
+    return f"{size_bytes} B"
+
+
+async def _handle_meta_datasource_top_by_size(connections: list, db: Session, question: str = "") -> dict:
+    """Q8：占用空间最大的前 N 个数据源。"""
+    import re
+
+    mcp_base_url = "http://localhost:8000/tableau-mcp"
+    try:
+        ds_list = await _mcp_list_datasources(mcp_base_url, "", "", "", "")
+    except Exception as e:
+        logger.error("_handle_meta_datasource_top_by_size: MCP 调用失败: %s", e)
+        return {
+            "response_type": "text",
+            "content": "获取数据源列表失败，请检查 Tableau 连接。",
+            "intent": "meta_datasource_top_by_size",
+            "meta": True,
+        }
+
+    # 解析 N
+    nums = re.findall(r'\d+', question)
+    n = int(nums[0]) if nums else 10
+
+    # 确保 size 为整数
+    for ds in ds_list:
+        try:
+            ds["size"] = int(ds.get("size", 0) or 0)
+        except (TypeError, ValueError):
+            ds["size"] = 0
+
+    # 检查是否有 size 信息
+    if all(ds.get("size", 0) == 0 for ds in ds_list):
+        return {
+            "response_type": "text",
+            "content": "Tableau 未返回数据源大小信息，请联系管理员查阅 Tableau Server 存储统计。",
+            "intent": "meta_datasource_top_by_size",
+            "meta": True,
+        }
+
+    sorted_ds = sorted(ds_list, key=lambda x: x.get("size", 0), reverse=True)
+    top_n = sorted_ds[:n]
+
+    lines = [f"占用空间最大的前 **{n}** 个数据源："]
+    for i, ds in enumerate(top_n, 1):
+        size_str = _format_size(ds.get("size", 0))
+        lines.append(f"{i}. {ds.get('name', '')}（{size_str}）")
+    content = "\n".join(lines)
+
+    return {
+        "response_type": "text",
+        "content": content,
+        "intent": "meta_datasource_top_by_size",
+        "meta": True,
+    }
+
+
+async def _handle_meta_datasource_incomplete_metadata(connections: list, db: Session) -> dict:
+    """Q9：哪些数据源的备注和定义没写全。"""
+    mcp_base_url = "http://localhost:8000/tableau-mcp"
+    try:
+        ds_list = await _mcp_list_datasources(mcp_base_url, "", "", "", "")
+    except Exception as e:
+        logger.error("_handle_meta_datasource_incomplete_metadata: MCP 调用失败: %s", e)
+        return {
+            "response_type": "text",
+            "content": "获取数据源列表失败，请检查 Tableau 连接。",
+            "intent": "meta_datasource_incomplete_metadata",
+            "meta": True,
+        }
+
+    incomplete = [
+        ds for ds in ds_list
+        if not ds.get("description") or len(ds.get("description", "")) < 10
+    ]
+
+    if not incomplete:
+        content = "所有数据源的描述信息均已完善。"
+    else:
+        lines = [f"以下 **{len(incomplete)}** 个数据源的描述信息缺失或不完整，建议补充："]
+        for ds in incomplete:
+            desc = ds.get("description", "")
+            status = "（无描述）" if not desc else f"（描述较短：{desc[:20]}...）"
+            lines.append(f"- {ds.get('name', '')}{status}")
+        lines.append("\n> 完善数据源描述有助于提升语义检索质量。")
+        content = "\n".join(lines)
+
+    return {
+        "response_type": "text",
+        "content": content,
+        "intent": "meta_datasource_incomplete_metadata",
+        "meta": True,
+    }
+
+
+async def _handle_meta_datasource_duplicates(connections: list, db: Session) -> dict:
+    """Q10：有没有重名的数据源。"""
+    mcp_base_url = "http://localhost:8000/tableau-mcp"
+    try:
+        ds_list = await _mcp_list_datasources(mcp_base_url, "", "", "", "")
+    except Exception as e:
+        logger.error("_handle_meta_datasource_duplicates: MCP 调用失败: %s", e)
+        return {
+            "response_type": "text",
+            "content": "获取数据源列表失败，请检查 Tableau 连接。",
+            "intent": "meta_datasource_duplicate",
+            "meta": True,
+        }
+
+    from collections import defaultdict
+    name_groups: dict = defaultdict(list)
+    for ds in ds_list:
+        name = ds.get("name", "").strip()
+        if name:
+            name_groups[name].append(ds)
+
+    duplicates = {name: items for name, items in name_groups.items() if len(items) > 1}
+
+    if not duplicates:
+        content = "未发现重名的数据源，当前所有数据源名称唯一。"
+    else:
+        lines = [f"发现 **{len(duplicates)}** 组重名数据源，请及时处理以避免混淆："]
+        for name, items in duplicates.items():
+            lines.append(f"\n**{name}**（共 {len(items)} 个）：")
+            for item in items:
+                luid = item.get("luid", "")
+                lines.append(f"  - LUID: `{luid}`")
+        content = "\n".join(lines)
+
+    return {
+        "response_type": "text",
+        "content": content,
+        "intent": "meta_datasource_duplicate",
         "meta": True,
     }
 
@@ -883,7 +1456,16 @@ async def query(
                     logger.warning("MCP 动态发现失败: %s trace=%s", mcp_err, audit_record.trace_id)
 
             if not chosen_ds:
-                raise _nlq_error_response("NLQ_005", "请指定数据源（datasource_luid 或 connection_id）")
+                audit_record.status = "ok"
+                return {
+                    "trace_id": audit_record.trace_id,
+                    "response_type": "text",
+                    "content": "未能识别您想查询的数据源，您可以先问「你有哪些数据源」获取数据源列表，再指定数据源名称提问。",
+                    "intent": None,
+                    "confidence": None,
+                    "datasource": None,
+                    "datasource_luid": None,
+                }
 
         ds_luid = chosen_ds["datasource_luid"]
         ds_name = chosen_ds["datasource_name"]
