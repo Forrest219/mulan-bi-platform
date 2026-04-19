@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   listFieldSemantics, updateFieldSemantics,
   submitFieldForReview, approveField, rejectField,
@@ -16,6 +17,7 @@ const getErrorMessage = (error: unknown, fallback = '操作失败'): string => {
 };
 
 export default function SemanticFieldListPage() {
+  const navigate = useNavigate();
   const [connections, setConnections] = useState<TableauConnection[]>([]);
   const [selectedConnId, setSelectedConnId] = useState<number | null>(null);
   const [fields, setFields] = useState<SemanticField[]>([]);
@@ -197,6 +199,18 @@ export default function SemanticFieldListPage() {
             ) : (
               <><i className="ri-refresh-line" /> 同步字段</>
             )}
+          </button>
+          <button
+            onClick={() => {
+              navigate(
+                `/system/mcp-debugger?view=debugger&tool=get-datasource-metadata&arg_datasource_id=${selectedConnId}&arg_connection_id=${selectedConnId}`,
+              );
+            }}
+            disabled={!selectedConnId}
+            title={!selectedConnId ? '请先选择连接' : undefined}
+            className="px-4 py-2 text-sm bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <i className="ri-test-tube-line" /> 字段 Schema 验证
           </button>
           {selectedFields.size > 0 && (
             <button

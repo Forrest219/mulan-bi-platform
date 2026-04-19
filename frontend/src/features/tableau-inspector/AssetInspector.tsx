@@ -267,6 +267,35 @@ export function AssetInspector({ assetId, layout = 'page', onClose }: AssetInspe
               </div>
             )}
 
+            {/* MCP 调试 */}
+            <div className="bg-white border border-slate-200 rounded-xl p-5">
+              <h3 className="text-sm font-semibold text-slate-700 mb-3">MCP 调试</h3>
+              {asset.asset_type === 'workbook' && (
+                <button
+                  onClick={() => navigate(`/system/mcp-debugger?view=debugger&tool=get-workbook&arg_workbook_id=${asset.tableau_id}`)}
+                  className="w-full text-left px-3 py-2 text-xs text-blue-600 hover:bg-blue-50 rounded-lg flex items-center gap-2 transition-colors"
+                >
+                  <i className="ri-bug-line" /> 调试 get-workbook
+                </button>
+              )}
+              {asset.asset_type === 'datasource' && (
+                <button
+                  onClick={() => navigate(`/system/mcp-debugger?view=debugger&tool=get-datasource-metadata&arg_datasource_id=${asset.tableau_id}`)}
+                  className="w-full text-left px-3 py-2 text-xs text-blue-600 hover:bg-blue-50 rounded-lg flex items-center gap-2 transition-colors"
+                >
+                  <i className="ri-bug-line" /> 调试 get-datasource-metadata
+                </button>
+              )}
+              {(asset.asset_type === 'view' || asset.asset_type === 'dashboard') && (
+                <button
+                  onClick={() => navigate(`/system/mcp-debugger?view=debugger&tool=list-views&arg_workbook_id=${asset.tableau_id}`)}
+                  className="w-full text-left px-3 py-2 text-xs text-blue-600 hover:bg-blue-50 rounded-lg flex items-center gap-2 transition-colors"
+                >
+                  <i className="ri-bug-line" /> 调试 list-views
+                </button>
+              )}
+            </div>
+
             {/* Quick Stats */}
             {(asset.view_count != null || asset.field_count != null || asset.health_score != null) && (
               <div className="bg-white border border-slate-200 rounded-xl p-5">

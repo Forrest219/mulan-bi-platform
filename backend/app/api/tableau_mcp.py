@@ -43,7 +43,26 @@ def _make_result(req_id, result: dict) -> dict:
 
 
 def _get_tableau_config() -> dict:
-    """从 DB 读取 type='tableau' 且 is_active=True 的 McpServer，返回 credentials。"""
+    """
+    读取 Tableau 连接配置，优先级：
+    1. 环境变量（TABLEAU_SERVER / TABLEAU_SITE / TABLEAU_PAT_NAME / TABLEAU_PAT_TOKEN）
+    2. DB 里 type='tableau' 且 is_active=True 的 McpServer credentials
+    """
+    # 环境变量优先，支持 tester 独立注入
+    env_server = os.environ.get("TABLEAU_SERVER", "").rstrip("/")
+    env_site = os.environ.get("TABLEAU_SITE", "")
+    env_pat_name = os.environ.get("TABLEAU_PAT_NAME", "")
+    env_pat_token = os.environ.get("TABLEAU_PAT_TOKEN", "")
+
+    if env_server and env_pat_name and env_pat_token:
+        return {
+            "tableau_server": env_server,
+            "site_name": env_site,
+            "pat_name": env_pat_name,
+            "pat_value": env_pat_token,
+        }
+
+    # 回退到 DB
     db = SessionLocal()
     try:
         record = (
