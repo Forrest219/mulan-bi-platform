@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Table, Text, Index
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Table, Text, Index, CheckConstraint
 from sqlalchemy.orm import relationship
 from app.core.database import Base, JSONB, sa_func, sa_text # 导入中央配置的 Base, JSONB, func, text
 
@@ -28,28 +28,55 @@ class User(Base):
     permissions = Column(JSONB, nullable=True)  # JSON array: 用户单独权限, 改为 JSONB
     is_active = Column(Boolean, default=True, server_default=sa_text('true')) # Boolean 默认值
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
+    updated_at = Column(DateTime, nullable=True, onupdate=sa_func.now())  # 自动更新修改时间
     last_login = Column(DateTime, nullable=True)
     # MFA 字段
     mfa_enabled = Column(Boolean, default=False, server_default=sa_text('false'))
     mfa_secret_encrypted = Column(String(256), nullable=True)  # Fernet 加密存储
     mfa_backup_codes_encrypted = Column(String(1024), nullable=True)  # 加密 JSON 数组
 
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('admin', 'data_admin', 'analyst', 'user')",
+            name="ck_user_role"
+        ),
+    )
+
     # 关联
     groups = relationship('UserGroup', secondary=user_group_members, back_populates='members')
 
     def to_dict(self, include_sensitive: bool = False) -> Dict[str, Any]:
+        # 计算角色默认权限（与 AuthService.ROLE_DEFAULT_PERMISSIONS 保持一致）
+        _role_defaults = {
+            "admin": ["ddl_check", "ddl_generator", "database_monitor", "rule_config", "scan_logs", "user_management", "tableau", "llm"],
+            "data_admin": ["database_monitor", "ddl_check", "rule_config", "scan_logs", "tableau", "llm"],
+            "analyst": ["scan_logs", "tableau"],
+            "user": [],
+        }
+        role_perms = _role_defaults.get(self.role, [])
+        personal_perms = self.permissions if self.permissions else []
+        # 组继承权限
+        group_perms: List[str] = []
+        if self.groups:
+            for group in self.groups:
+                for gp in group.group_perms:
+                    group_perms.append(gp.permission_key)
+        all_perms = list(set(role_perms + personal_perms + group_perms))
+
         result = {
             "id": self.id,
             "username": self.username,
             "display_name": self.display_name,
             "email": self.email,
             "role": self.role,
-            "permissions": self.permissions if self.permissions else [], # JSONB 字段直接是 Python 对象
+            "permissions": personal_perms,
+            "all_permissions": all_perms,  # 合并后生效权限（角色默认 + 个人 + 组继承）
             "group_ids": [g.id for g in self.groups] if self.groups else [],
             "group_names": [g.name for g in self.groups] if self.groups else [],
             "is_active": self.is_active,
             "mfa_enabled": self.mfa_enabled,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
             "last_login": self.last_login.strftime("%Y-%m-%d %H:%M:%S") if self.last_login else None,
         }
         return result
@@ -63,6 +90,7 @@ class UserGroup(Base):
     name = Column(String(64), unique=True, nullable=False, index=True)
     description = Column(String(256), nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
+    updated_at = Column(DateTime, nullable=True, onupdate=sa_func.now())  # 自动更新修改时间
 
     # 关联
     members = relationship('User', secondary=user_group_members, back_populates='groups')
@@ -76,6 +104,7 @@ class UserGroup(Base):
             "member_count": len(self.members) if self.members else 0,
             "permissions": self.get_permissions(),
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
         }
         if include_members:
             result["members"] = [m.to_dict() for m in self.members] if self.members else []
@@ -93,15 +122,21 @@ class UserGroup(Base):
 
 class GroupPermission(Base):
     """组-权限关联表"""
-    __tablename__ = "auth_group_permissions" # 表名前缀规范化
+    __tablename__ = "auth_group_permissions"  # 表名前缀规范化
 
     group_id = Column(Integer, ForeignKey('auth_user_groups.id'), primary_key=True)
     permission_key = Column(String(64), primary_key=True)
-    created_at = Column(DateTime, server_default=sa_func.now()) # DateTime 默认值
+    created_at = Column(DateTime, server_default=sa_func.now())  # DateTime 默认值
 
     # 关系
     group = relationship('UserGroup', back_populates='group_perms')
 
+    __table_args__ = (
+        CheckConstraint(
+            "permission_key IN ('ddl_check', 'ddl_generator', 'database_monitor', 'rule_config', 'scan_logs', 'user_management', 'tableau', 'llm')",
+            name="ck_group_permission_key"
+        ),
+    )
 
 class RefreshToken(Base):
     """Refresh Token 存储表（JWT Refresh Token 持久化）"""
@@ -289,6 +324,11 @@ class UserDatabase:
             self.session.add(gp)
 
         self.session.commit()
+
+        # 清除组权限缓存，防止脏读
+        if hasattr(group, '_permissions_cache'):
+            del group._permissions_cache
+
         return True
 
     def get_group_permissions(self, group_id: int) -> List[str]:
@@ -305,7 +345,7 @@ class UserDatabase:
         return list(perms)
 
     def get_all_permissions(self) -> List[Dict[str, str]]:
-        """获取所有可用权限定义"""
+        """获取所有可用权限定义（共 8 项，与 AuthService.ALL_PERMISSIONS 保持一致）"""
         return [
             {"key": "ddl_check", "label": "DDL 规范检查", "module": "DDL Validator"},
             {"key": "ddl_generator", "label": "DDL 生成器", "module": "DDL Generator"},
@@ -313,6 +353,8 @@ class UserDatabase:
             {"key": "rule_config", "label": "规则配置", "module": "Rule Config"},
             {"key": "scan_logs", "label": "扫描日志", "module": "Scan Logs"},
             {"key": "user_management", "label": "用户管理", "module": "Admin"},
+            {"key": "tableau", "label": "Tableau 资产", "module": "Tableau"},
+            {"key": "llm", "label": "LLM 管理", "module": "LLM"},
         ]
 
     # ========== Refresh Token 管理 ==========

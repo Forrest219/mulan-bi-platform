@@ -107,6 +107,12 @@ class LoginResponse(BaseModel):
     mfa_required: bool = False  # MFA 已启用，需要输入验证码
 
 
+class ChangePasswordRequest(BaseModel):
+    """修改密码请求"""
+    old_password: str
+    new_password: str
+
+
 def get_session_user(request: Request) -> Optional[dict]:
     """从 session cookie 获取用户信息（JWT 验签）"""
     token = request.cookies.get("session")
@@ -466,6 +472,20 @@ async def forgot_password(payload: dict):
     """Always returns 200 regardless of whether email exists (security)."""
     # Email lookup intentionally omitted to prevent account enumeration
     return {"message": "如果该邮箱已注册，我们将发送重置说明。"}
+
+
+@router.put("/change-password")
+async def change_password(request: ChangePasswordRequest, http_request: Request):
+    """修改密码（需登录态）"""
+    current_user = _get_current_user(http_request)
+    success = auth_service.change_password(
+        current_user["id"],
+        request.old_password,
+        request.new_password,
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail="旧密码不正确或用户不存在")
+    return {"message": "密码修改成功，已退出其他设备"}
 
 
 @router.get("/verify")

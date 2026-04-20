@@ -34,6 +34,13 @@ class UpdatePermissionsRequest(BaseModel):
     permissions: List[str]  # 权限标识列表
 
 
+class UpdateUserRequest(BaseModel):
+    """更新用户基础信息请求"""
+
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+
+
 @router.get("/", dependencies=[Depends(get_current_admin)])
 async def get_users(role: Optional[str] = None):
     """获取用户列表（管理员）"""
@@ -59,6 +66,19 @@ async def create_user(request: CreateUserRequest):
         raise HTTPException(status_code=400, detail="用户名已存在")
 
     return {"user": user, "message": "用户创建成功"}
+
+
+@router.put("/{user_id}", dependencies=[Depends(get_current_admin)])
+async def update_user(user_id: int, request: UpdateUserRequest):
+    """更新用户基础信息（管理员）"""
+    updated = auth_service.update_user_info(
+        user_id,
+        display_name=request.display_name,
+        email=request.email,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return {"user": updated, "message": "用户信息已更新"}
 
 
 @router.put("/{user_id}/role", dependencies=[Depends(get_current_admin)])
@@ -106,19 +126,10 @@ async def update_user_permissions(user_id: int, request: UpdatePermissionsReques
 
 @router.get("/permissions", dependencies=[Depends(get_current_admin)])
 async def get_all_permissions():
-    """获取所有可用权限（管理员）"""
-    PERMISSION_LABELS = {
-        "ddl_check": "DDL 规范检查",
-        "ddl_generator": "DDL 生成器",
-        "database_monitor": "数据库监控",
-        "rule_config": "规则配置",
-        "scan_logs": "扫描日志",
-        "user_management": "用户管理"
-    }
-
+    """获取所有可用权限（管理员，共 8 项）"""
     permissions = [
-        {"key": key, "label": PERMISSION_LABELS.get(key, key)}
-        for key in auth_service.ALL_PERMISSIONS
+        {"key": key, "label": label}
+        for key, label in auth_service.PERMISSION_LABELS.items()
     ]
     return {"permissions": permissions}
 

@@ -24,12 +24,12 @@ export default function ProtectedRoute({ children, adminOnly = false, requiredPe
   }
 
   if (adminOnly && user.role !== 'admin') {
-    return <Navigate to="/" state={{ from: location }} replace />;
+    return <Navigate to="/403" state={{ from: location }} replace />;
   }
 
   // Check specific permission (non-admin users)
   if (requiredPermission && !hasPermission(requiredPermission)) {
-    return <Navigate to="/" state={{ from: location }} replace />;
+    return <Navigate to="/403" state={{ from: location }} replace />;
   }
 
   return <>{children}</>;

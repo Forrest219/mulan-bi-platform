@@ -178,9 +178,12 @@ async def list_connections(request: Request, db: Session = Depends(get_db), incl
 
 
 @router.post("/connections")
-async def create_connection(req: CreateConnectionRequest, request: Request, db: Session = Depends(get_db)):
+async def create_connection(
+    req: CreateConnectionRequest,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
+):
     """创建 Tableau 连接"""
-    user = require_roles(request, ["admin", "data_admin"], db)
     _db = TableauDatabase(session=db)
 
     if req.connection_type not in ("mcp", "tsc"):
@@ -194,7 +197,7 @@ async def create_connection(req: CreateConnectionRequest, request: Request, db: 
         site=req.site,
         token_name=req.token_name,
         token_encrypted=encrypted_token,
-        owner_id=user["id"],
+        owner_id=current_user["id"],
         api_version=req.api_version,
         connection_type=req.connection_type
     )
@@ -203,13 +206,17 @@ async def create_connection(req: CreateConnectionRequest, request: Request, db: 
 
 
 @router.put("/connections/{conn_id}")
-async def update_connection(conn_id: int, req: UpdateConnectionRequest, request: Request, db: Session = Depends(get_db)):
+async def update_connection(
+    conn_id: int,
+    req: UpdateConnectionRequest,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
+):
     """更新 Tableau 连接"""
-    user = require_roles(request, ["admin", "data_admin"], db)
     _db = TableauDatabase(session=db)
 
     # 使用统一的权限验证函数
-    verify_connection_access(conn_id, user, db)
+    verify_connection_access(conn_id, current_user, db)
 
     update_data = req.model_dump(exclude_unset=True)
     if "token_value" in update_data and update_data["token_value"]:
@@ -227,26 +234,32 @@ async def update_connection(conn_id: int, req: UpdateConnectionRequest, request:
 
 
 @router.delete("/connections/{conn_id}")
-async def delete_connection(conn_id: int, request: Request, db: Session = Depends(get_db)):
+async def delete_connection(
+    conn_id: int,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
+):
     """删除 Tableau 连接"""
-    user = require_roles(request, ["admin", "data_admin"], db)
     _db = TableauDatabase(session=db)
 
     # 使用统一的权限验证函数
-    verify_connection_access(conn_id, user, db)
+    verify_connection_access(conn_id, current_user, db)
 
     _db.delete_connection(conn_id)
     return {"message": "连接已删除"}
 
 
 @router.post("/connections/{conn_id}/test")
-async def test_connection(conn_id: int, request: Request, db: Session = Depends(get_db)):
+async def test_connection(
+    conn_id: int,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
+):
     """测试 Tableau 连接"""
-    user = require_roles(request, ["admin", "data_admin"], db)
     _db = TableauDatabase(session=db)
 
     # 使用统一的权限验证函数
-    verify_connection_access(conn_id, user, db)
+    verify_connection_access(conn_id, current_user, db)
 
     conn = _db.get_connection(conn_id)
     if not conn:
@@ -300,12 +313,15 @@ async def test_connection(conn_id: int, request: Request, db: Session = Depends(
 
 
 @router.post("/connections/{conn_id}/sync")
-async def sync_connection(conn_id: int, request: Request, db: Session = Depends(get_db)):
+async def sync_connection(
+    conn_id: int,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
+):
     """触发 Tableau 资产同步（Celery 异步任务）"""
-    user = require_roles(request, ["admin", "data_admin"], db)
     _db = TableauDatabase(session=db)
 
-    verify_connection_access(conn_id, user, db)
+    verify_connection_access(conn_id, current_user, db)
 
     conn = _db.get_connection(conn_id)
     if not conn:
@@ -732,6 +748,7 @@ async def get_connection_health_overview(conn_id: int, request: Request, db: Ses
 
 # ── Tableau MCP Server 状态检查 ─────────────────────────────────────────────
 
+import asyncio as _asyncio
 import time as _time
 
 try:
@@ -747,25 +764,37 @@ async def get_mcp_status():
     """探测 Tableau MCP Server 连通性（UI 状态指示器用）"""
     url = get_tableau_mcp_server_url()
     timeout = min(get_tableau_mcp_timeout(), 5)
-    start = _time.monotonic()
     if _httpx is None:
         return {"status": "unknown", "url": url, "latency_ms": 0, "error": "httpx not installed"}
-    try:
-        async with _httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.get(url)
-        latency_ms = int((_time.monotonic() - start) * 1000)
-        return {
-            "status": "online",
-            "url": url,
-            "latency_ms": latency_ms,
-            "http_status": resp.status_code,
-        }
-    except (_httpx.ConnectError, _httpx.TimeoutException) as e:
-        latency_ms = int((_time.monotonic() - start) * 1000)
-        return {
-            "status": "offline",
-            "url": url,
-            "latency_ms": latency_ms,
-            "error": type(e).__name__,
-        }
+
+    for attempt in range(2):
+        start = _time.monotonic()
+        try:
+            async with _httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(url)
+            return {
+                "status": "online",
+                "url": url,
+                "latency_ms": int((_time.monotonic() - start) * 1000),
+                "http_status": resp.status_code,
+                **({"retried": True} if attempt == 1 else {}),
+            }
+        except _httpx.TimeoutException as e:
+            return {
+                "status": "offline",
+                "url": url,
+                "latency_ms": int((_time.monotonic() - start) * 1000),
+                "error": type(e).__name__,
+            }
+        except _httpx.ConnectError as e:
+            if attempt == 0:
+                await _asyncio.sleep(1)  # 参考 Spec 22 _post_mcp：ConnectError 重试 1 次间隔 1s
+                continue
+            return {
+                "status": "offline",
+                "url": url,
+                "latency_ms": int((_time.monotonic() - start) * 1000),
+                "error": type(e).__name__,
+                "retried": True,
+            }
 

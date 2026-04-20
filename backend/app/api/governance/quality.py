@@ -75,10 +75,12 @@ class ExecuteRequest(BaseModel):
 # ==================== 规则 CRUD ====================
 
 @router.post("/rules")
-async def create_rule(body: CreateRuleRequest, request: Request, db: Session = Depends(get_db)):
+async def create_rule(
+    body: CreateRuleRequest,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
+):
     """创建质量规则 - admin/data_admin"""
-    user = get_current_user(request, db)
-    require_roles(request, ["admin", "data_admin"], db)
 
     qdb = QualityDatabase()
 
@@ -112,7 +114,7 @@ async def create_rule(body: CreateRuleRequest, request: Request, db: Session = D
         raise HTTPException(status_code=409, detail="GOV_006: 同一数据源+表+字段+规则类型已存在相同规则")
 
     # 非 admin 只能为自己的数据源创建规则
-    if user["role"] != "admin" and ds.owner_id != user["id"]:
+    if current_user["role"] != "admin" and ds.owner_id != current_user["id"]:
         raise HTTPException(status_code=403, detail="GOV_001: 无权为此数据源创建规则")
 
     rule = qdb.create_rule(
@@ -131,7 +133,7 @@ async def create_rule(body: CreateRuleRequest, request: Request, db: Session = D
         custom_sql=body.custom_sql,
         enabled=True,
         tags_json=body.tags_json,
-        created_by=user["id"],
+        created_by=current_user["id"],
     )
 
     return {"rule": rule.to_dict(), "message": "质量规则创建成功"}
@@ -172,11 +174,13 @@ async def get_rule(rule_id: int, request: Request, db: Session = Depends(get_db)
 
 
 @router.put("/rules/{rule_id}")
-async def update_rule(rule_id: int, body: UpdateRuleRequest, request: Request, db: Session = Depends(get_db)):
+async def update_rule(
+    rule_id: int,
+    body: UpdateRuleRequest,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
+):
     """更新规则 - admin/data_admin"""
-    user = get_current_user(request, db)
-    require_roles(request, ["admin", "data_admin"], db)
-
     qdb = QualityDatabase()
     rule = qdb.get_rule(db, rule_id)
     if not rule:
@@ -194,7 +198,7 @@ async def update_rule(rule_id: int, body: UpdateRuleRequest, request: Request, d
 
     # 禁止修改的字段
     update_fields = body.model_dump(exclude_unset=True, exclude={"id", "created_by", "datasource_id", "table_name", "field_name", "rule_type"})
-    update_fields["updated_by"] = user["id"]
+    update_fields["updated_by"] = current_user["id"]
 
     qdb.update_rule(db, rule_id, **update_fields)
     updated_rule = qdb.get_rule(db, rule_id)
@@ -202,11 +206,12 @@ async def update_rule(rule_id: int, body: UpdateRuleRequest, request: Request, d
 
 
 @router.delete("/rules/{rule_id}")
-async def delete_rule(rule_id: int, request: Request, db: Session = Depends(get_db)):
+async def delete_rule(
+    rule_id: int,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
+):
     """删除规则 - admin/data_admin"""
-    get_current_user(request)
-    require_roles(request, ["admin", "data_admin"], db)
-
     qdb = QualityDatabase()
     if not qdb.get_rule(db, rule_id):
         raise HTTPException(status_code=404, detail="GOV_001: 质量规则不存在")
@@ -216,11 +221,12 @@ async def delete_rule(rule_id: int, request: Request, db: Session = Depends(get_
 
 
 @router.put("/rules/{rule_id}/toggle")
-async def toggle_rule(rule_id: int, request: Request, db: Session = Depends(get_db)):
+async def toggle_rule(
+    rule_id: int,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
+):
     """启用/禁用规则 - admin/data_admin"""
-    get_current_user(request)
-    require_roles(request, ["admin", "data_admin"], db)
-
     qdb = QualityDatabase()
     new_state = qdb.toggle_rule(db, rule_id)
     if new_state is None:
@@ -232,11 +238,12 @@ async def toggle_rule(rule_id: int, request: Request, db: Session = Depends(get_
 # ==================== 检测执行 ====================
 
 @router.post("/execute")
-async def execute_quality_checks(body: ExecuteRequest, request: Request, db: Session = Depends(get_db)):
+async def execute_quality_checks(
+    body: ExecuteRequest,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
+):
     """手动触发质量检测 - admin/data_admin"""
-    user = get_current_user(request, db)
-    require_roles(request, ["admin", "data_admin"], db)
-
     datasource_id = body.datasource_id
     rule_ids = body.rule_ids
 
@@ -252,7 +259,7 @@ async def execute_quality_checks(body: ExecuteRequest, request: Request, db: Ses
             raise HTTPException(status_code=400, detail="GOV_010: 数据源不存在或未激活")
 
         # 非 admin 只能操作自己的数据源
-        if user["role"] != "admin" and ds.owner_id != user["id"]:
+        if current_user["role"] != "admin" and ds.owner_id != current_user["id"]:
             raise HTTPException(status_code=403, detail="GOV_001: 无权操作此数据源")
 
         # 构建只读连接配置
@@ -281,11 +288,12 @@ async def execute_quality_checks(body: ExecuteRequest, request: Request, db: Ses
 
 
 @router.post("/execute/rule/{rule_id}")
-async def execute_single_rule(rule_id: int, request: Request, db: Session = Depends(get_db)):
+async def execute_single_rule(
+    rule_id: int,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
+):
     """执行单条规则 - admin/data_admin"""
-    user = get_current_user(request, db)
-    require_roles(request, ["admin", "data_admin"], db)
-
     qdb = QualityDatabase()
     rule = qdb.get_rule(db, rule_id)
     if not rule:

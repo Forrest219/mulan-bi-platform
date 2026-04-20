@@ -8,7 +8,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Session
 
-from app.core.database import Base, JSONB, sa_func
+from app.core.database import Base, JSONB, sa_func, sa_text
 
 
 # === kb_glossary ===
@@ -20,13 +20,13 @@ class KbGlossary(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     term = Column(String(128), nullable=False, index=True)
     canonical_term = Column(String(128), nullable=False)
-    synonyms_json = Column(JSONB, nullable=True, server_default="'[]'")
+    synonyms_json = Column(JSONB, nullable=True, server_default=sa_text("'[]'::jsonb"))
     definition = Column(Text, nullable=False)
     formula = Column(Text, nullable=True)
-    category = Column(String(64), nullable=False, server_default="'concept'")
-    related_fields_json = Column(JSONB, nullable=True, server_default="'[]'")
-    source = Column(String(16), nullable=False, server_default="'manual'")
-    status = Column(String(16), nullable=False, server_default="'active'")
+    category = Column(String(64), nullable=False, server_default=sa_text("'concept'"))
+    related_fields_json = Column(JSONB, nullable=True, server_default=sa_text("'[]'::jsonb"))
+    source = Column(String(16), nullable=False, server_default=sa_text("'manual'"))
+    status = Column(String(16), nullable=False, server_default=sa_text("'active'"))
     created_by = Column(Integer, nullable=True)
     updated_by = Column(Integer, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
@@ -127,10 +127,10 @@ class KbDocument(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     title = Column(String(256), nullable=False)
     content = Column(Text, nullable=False)
-    format = Column(String(16), nullable=False, server_default="'markdown'")
-    category = Column(String(64), nullable=False, server_default="'general'")
-    tags_json = Column(JSONB, nullable=True, server_default="'[]'")
-    status = Column(String(16), nullable=False, server_default="'active'")
+    format = Column(String(16), nullable=False, server_default=sa_text("'markdown'"))
+    category = Column(String(64), nullable=False, server_default=sa_text("'general'"))
+    tags_json = Column(JSONB, nullable=True, server_default=sa_text("'[]'::jsonb"))
+    status = Column(String(16), nullable=False, server_default=sa_text("'active'"))
     chunk_count = Column(Integer, nullable=False, server_default="0")
     last_embedded_at = Column(DateTime, nullable=True)
     created_by = Column(Integer, nullable=True)

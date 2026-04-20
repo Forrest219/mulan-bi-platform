@@ -76,11 +76,10 @@ class McpDebugCallResponse(BaseModel):
 @router.post("/call", response_model=McpDebugCallResponse)
 async def call_mcp_tool(
     req: McpDebugCallRequest,
-    request: Request,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
     db: Session = Depends(get_db),
 ):
     """调用指定 MCP 工具，并将结果写入调试日志。"""
-    current_user = require_roles(request, ["admin", "data_admin"], db)
 
     # 延迟导入，避免循环依赖
     from app.api.tableau_mcp import _process_mcp_body
@@ -139,7 +138,7 @@ async def call_mcp_tool(
 
 @router.get("/logs")
 async def list_mcp_debug_logs(
-    request: Request,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
     tool_name: Optional[str] = Query(None, description="按工具名过滤"),
     status: Optional[str] = Query(None, description="按状态过滤：success / error"),
     page: int = Query(1, ge=1),
@@ -147,7 +146,6 @@ async def list_mcp_debug_logs(
     db: Session = Depends(get_db),
 ):
     """查询 MCP 调试日志，支持按工具名和状态过滤。"""
-    require_roles(request, ["admin", "data_admin"], db)
 
     query = db.query(McpDebugLog)
     if tool_name:

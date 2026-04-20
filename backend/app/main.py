@@ -11,9 +11,10 @@ from fastapi.responses import JSONResponse
 
 from app.core.errors import MulanError
 
-from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm, health_scan, tasks, notifications, events, knowledge_base, search, conversations, chat
+from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm, health_scan, tasks, notifications, events, knowledge_base, search, conversations, chat, ask_data
 from app.api.governance import quality
 from app.api.semantic_maintenance import datasources as sm_datasources, fields as sm_fields, review as sm_review, sync as sm_sync, publish as sm_publish
+from app.api import audit, governance_runtime, connection_hub
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,7 @@ app.include_router(knowledge_base.router, prefix="/api/knowledge-base", tags=["�
 app.include_router(search.router, prefix="/api/search", tags=["NL搜索"])
 app.include_router(conversations.router, prefix="/api/conversations", tags=["对话历史"])
 app.include_router(chat.router)  # Gap-05: /api/chat/stream (SSE), prefix 已在 router 内定义
+app.include_router(ask_data.router, prefix="/api/ask-data", tags=["智能问数"])
 app.include_router(sm_datasources.router, prefix="/api/semantic-maintenance", tags=["语义维护"])
 app.include_router(sm_fields.router, prefix="/api/semantic-maintenance", tags=["语义维护"])
 app.include_router(sm_review.router, prefix="/api/semantic-maintenance", tags=["语义维护"])
@@ -78,6 +80,11 @@ from app.api import feedback
 app.include_router(feedback.router, prefix="/api/feedback", tags=["反馈"])
 from app.api import mcp_debug
 app.include_router(mcp_debug.router)
+
+# Spec 24 P0 占位路由
+app.include_router(audit.router, prefix="/api/audit", tags=["审计"])
+app.include_router(governance_runtime.router, prefix="/api/governance", tags=["治理"])
+app.include_router(connection_hub.router, prefix="/api/connection-hub", tags=["连接中心"])
 
 
 @app.get("/")

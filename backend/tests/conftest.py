@@ -14,6 +14,8 @@ os.environ.setdefault("TABLEAU_ENCRYPTION_KEY", "test-tableau-key-32-bytes-ok!!"
 os.environ.setdefault("LLM_ENCRYPTION_KEY", "test-llm-key-32-bytes-ok!!!!")
 os.environ.setdefault("ADMIN_USERNAME", "admin")
 os.environ.setdefault("ADMIN_PASSWORD", "")  # 禁用自动创建管理员
+# TestClient 使用 HTTP，cookie 的 secure=True 会导致 cookie 不被发送，必须设为 false
+os.environ.setdefault("SECURE_COOKIES", "false")
 
 import pytest
 from fastapi.testclient import TestClient
@@ -98,18 +100,67 @@ def setup_database():
 
 @pytest.fixture(scope="session")
 def client():
-    """FastAPI TestClient — 整个测试会话复用"""
+    """FastAPI TestClient — 整个测试会话复用，用于无需认证的测试"""
     from app.main import app
     with TestClient(app) as c:
         yield c
 
 
 @pytest.fixture(scope="function")
-def admin_client(client: TestClient):
-    """已登录管理员的 TestClient — session-scoped client 上先清空 cookies 再登录"""
-    client.cookies.clear()
-    resp = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
+def admin_client():
+    """独立的已登录管理员 TestClient — 避免与 analyst_client 共享 session"""
+    from app.main import app
+    c = TestClient(app)
+    resp = c.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
     assert resp.status_code == 200, f"Admin login failed: {resp.status_code} {resp.text}"
-    yield client
-    # 测试结束后清空 cookies，防止污染后续使用 session-scoped client 的测试
-    client.cookies.clear()
+    yield c
+    c.cookies.clear()
+    c.close()
+
+
+@pytest.fixture(scope="function")
+def analyst_client():
+    """独立的已登录 analyst TestClient — 避免与 admin_client 共享 session"""
+    from app.main import app
+    c = TestClient(app)
+    resp = c.post("/api/auth/login", json={"username": "smoke_analyst", "password": "analyst123"})
+    assert resp.status_code == 200, f"Analyst login failed: {resp.status_code} {resp.text}"
+    yield c
+    c.cookies.clear()
+    c.close()
+
+
+@pytest.fixture(scope="function")
+def db_session():
+    """
+    function-scoped 数据库 session — 每个测试后自动 rollback，实现数据隔离。
+
+    用法示例：
+        def test_something(db_session):
+            db_session.add(SomeModel(...))
+            db_session.flush()  # 生成 id，但不提交
+            # 测试结束后自动 rollback，不影响其他测试
+    """
+    from app.core.database import SessionLocal
+    session = SessionLocal()
+    try:
+        yield session
+        session.rollback()
+    finally:
+        session.close()
+
+
+@pytest.fixture(scope="function", autouse=False)
+def rollback_after_test():
+    """
+    可选 cleanup hook：在长时间运行的测试套件后手动调用清理。
+    默认禁用，避免干扰 session-scoped TestClient 的事务管理。
+    如需使用，在测试函数签名中加入此 fixture 即可。
+    """
+    yield
+    from app.core.database import SessionLocal
+    session = SessionLocal()
+    try:
+        session.rollback()
+    finally:
+        session.close()

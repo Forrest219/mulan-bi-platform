@@ -33,7 +33,7 @@ export default function AuditLogPage() {
 
   useEffect(() => {
     fetchLogs(toolNameFilter, statusFilter, page);
-  }, [statusFilter, page, fetchLogs]);
+  }, [toolNameFilter, statusFilter, page, fetchLogs]);
 
   const handleToolNameChange = (value: string) => {
     setToolNameFilter(value);

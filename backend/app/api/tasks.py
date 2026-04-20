@@ -11,7 +11,12 @@ router = APIRouter()
 
 @router.get("/{task_id}/status")
 async def get_task_status(task_id: str, request: Request):
-    """查询 Celery 任务状态"""
+    """查询 Celery 任务状态
+
+    注意（Spec 24 P0）：
+    此端点为 legacy 接口，标记为 deprecated。
+    TaskRun 编排能力请使用 /api/tasks/runs*（P1 实现后替代）。
+    """
     get_current_user(request)
 
     result = AsyncResult(task_id, app=celery_app)

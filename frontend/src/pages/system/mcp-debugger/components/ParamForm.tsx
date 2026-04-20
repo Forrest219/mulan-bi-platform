@@ -41,7 +41,8 @@ export default function ParamForm({ tool, initialValues, onSubmit, loading }: Pr
     }
     setValues(init);
     setErrors({});
-  }, [tool.name, initialValues]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool.name, tool.inputSchema, initialValues]);
 
   const handleChange = (key: string, value: FieldValue) => {
     setValues((prev) => ({ ...prev, [key]: value }));

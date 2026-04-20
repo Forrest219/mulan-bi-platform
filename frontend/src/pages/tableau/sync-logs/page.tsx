@@ -17,6 +17,7 @@ export default function SyncLogsPage() {
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const pageSize = 15;
@@ -30,7 +31,10 @@ export default function SyncLogsPage() {
         setTotal(data.total);
         setPages(data.pages);
       })
-      .catch(() => setLogs([]))
+      .catch((e: unknown) => {
+        setLogs([]);
+        setError(e instanceof Error ? e.message : '加载失败，请重试');
+      })
       .finally(() => setLoading(false));
   }, [connId, page]);
 
@@ -69,13 +73,36 @@ export default function SyncLogsPage() {
               {loading ? (
                 <tr>
                   <td colSpan={9} className="px-4 py-12 text-center text-gray-400">
-                    加载中...
+                    <div className="flex flex-col items-center gap-2">
+                      <i className="ri-loader-2-line animate-spin text-2xl" />
+                      <span>加载中...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : error ? (
+                <tr>
+                  <td colSpan={9} className="px-4 py-12 text-center text-red-500">
+                    <div className="flex flex-col items-center gap-2">
+                      <i className="ri-error-warning-line text-2xl" />
+                      <span>{error}</span>
+                      <button
+                        onClick={() => listSyncLogs(Number(connId), { page, page_size: pageSize })
+                          .then((d) => { setLogs(d.logs); setTotal(d.total); setPages(d.pages); setError(null); })
+                          .catch((e: unknown) => setError(e instanceof Error ? e.message : '加载失败'))}
+                        className="text-sm text-blue-500 hover:underline"
+                      >
+                        重试
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ) : logs.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="px-4 py-12 text-center text-gray-400">
-                    暂无同步记录
+                    <div className="flex flex-col items-center gap-2">
+                      <i className="ri-file-list-3-line text-3xl opacity-50" />
+                      <span>暂无同步记录</span>
+                    </div>
                   </td>
                 </tr>
               ) : (

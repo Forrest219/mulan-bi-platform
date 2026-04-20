@@ -12,15 +12,6 @@ interface SearchResultProps {
 }
 
 export function SearchResult({ result, onRetry }: SearchResultProps) {
-  if (result.type === 'number') {
-    return <NumberCard data={result.data as NumberData} confidence={result.confidence} datasource={result.datasource} />;
-  }
-  if (result.type === 'table') {
-    return <TableResult data={result.data as TableData} />;
-  }
-  if (result.type === 'text') {
-    return <TextAnswer answer={result.answer} />;
-  }
   if (result.type === 'error') {
     return (
       <ErrorCard
@@ -30,17 +21,44 @@ export function SearchResult({ result, onRetry }: SearchResultProps) {
       />
     );
   }
-  if (result.type === 'ambiguous') {
-    const data = result.data as { candidates?: Array<{ id: number; name: string }> };
-    return (
-      <AmbiguousPicker
-        candidates={data?.candidates || []}
-        question={result.answer}
-        onRetry={onRetry}
-      />
-    );
-  }
-  return null;
+
+  const isAiContent = ['number', 'table', 'text', 'ambiguous'].includes(result.type);
+
+  return (
+    <div>
+      {result.type === 'number' && (
+        <NumberCard data={result.data as NumberData} confidence={result.confidence} datasource={result.datasource} />
+      )}
+      {result.type === 'table' && (
+        <TableResult data={result.data as TableData} />
+      )}
+      {result.type === 'text' && (
+        <TextAnswer answer={result.answer} />
+      )}
+      {result.type === 'ambiguous' && (() => {
+        const data = result.data as { candidates?: Array<{ id: number; name: string }> };
+        return (
+          <AmbiguousPicker
+            candidates={data?.candidates || []}
+            question={result.answer}
+            onRetry={onRetry}
+          />
+        );
+      })()}
+
+      {/* AI 问答免责声明 */}
+      {isAiContent && (
+        <div className="mt-3 px-1">
+          <div className="flex items-start gap-2 py-2 px-3 rounded-lg bg-slate-50 border border-slate-200">
+            <i className="ri-information-line text-slate-400 text-base shrink-0 mt-0.5" />
+            <p className="text-xs text-slate-400 leading-relaxed">
+              AI 分析结果仅供参考，请以实际数据为准。AI 模型可能产生事实性错误，请务必核实后再用于决策。
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── NumberCard ───────────────────────────────────────────────────────────────

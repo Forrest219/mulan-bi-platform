@@ -23,15 +23,12 @@ const EXPANDED_WIDTH = 240;
 // ────────────────────────────────────────────────────────────
 // 判断单个菜单项是否对当前用户可见
 // ────────────────────────────────────────────────────────────
-function isItemVisible(item: MenuItem, userRole: string): boolean {
+function isItemVisible(item: MenuItem, userRole: string, hasPermission: (perm: string) => boolean): boolean {
   const { permission } = item;
   if (!permission) return true;
   if (permission.adminOnly) return userRole === 'admin';
   if (permission.requiredRole) return hasRoleLevel(userRole, permission.requiredRole);
-  if (permission.requiredPermission) {
-    // 本版本 MenuItem.permission.requiredPermission 暂未启用（Spec 18 §3.3 仍在讨论）
-    return true;
-  }
+  if (permission.requiredPermission) return hasPermission(permission.requiredPermission);
   return true;
 }
 
@@ -118,17 +115,19 @@ function DomainGroup({
   onToggle,
   collapsed,
   userRole,
+  hasPermission,
 }: {
   domain: MenuDomain;
   expanded: boolean;
   onToggle: () => void;
   collapsed: boolean;
   userRole: string;
+  hasPermission: (perm: string) => boolean;
 }) {
   const location = useLocation();
 
   // 域下是否有可见菜单项
-  const visibleItems = domain.items.filter((item) => isItemVisible(item, userRole));
+  const visibleItems = domain.items.filter((item) => isItemVisible(item, userRole, hasPermission));
   if (visibleItems.length === 0) return null;
 
   // 当前路径是否激活本域
@@ -203,7 +202,7 @@ interface AppSidebarProps {
 }
 
 export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarProps) {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const userRole = user?.role ?? 'user';
   const location = useLocation();
 
@@ -282,6 +281,7 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
               onToggle={() => toggleDomain(domain.key)}
               collapsed={collapsed}
               userRole={userRole}
+              hasPermission={hasPermission}
             />
           );
         })}

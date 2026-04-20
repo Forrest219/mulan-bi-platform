@@ -23,6 +23,7 @@ export interface HomeUrlState {
   tab: AssetTab;
   connectionId: string | null;
   scopeProject: string | null;
+  selectedConvId: string | null;
 }
 
 export interface HomeUrlActions {
@@ -53,6 +54,7 @@ export function useHomeUrlState(): HomeUrlState & HomeUrlActions {
   const tab = parseTab(searchParams.get('tab'));
   const connectionId = searchParams.get('connection');
   const scopeProject = searchParams.get('scope_project');
+  const selectedConvId = searchParams.get('conv');
 
   // --- 辅助：基于当前 params 构建新的 URLSearchParams，只更新指定 key ---
   const buildParams = useCallback(
@@ -118,6 +120,7 @@ export function useHomeUrlState(): HomeUrlState & HomeUrlActions {
     tab,
     connectionId,
     scopeProject,
+    selectedConvId,
     // actions
     openAsset,
     closeAsset,

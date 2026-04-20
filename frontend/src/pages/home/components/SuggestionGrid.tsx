@@ -2,7 +2,10 @@
  * SuggestionGrid — open-webui 风格 2×2 建议卡片
  *
  * 固定 4 条，每张卡 = 主问题 + 补充说明。
+ * 挂载时尝试从 GET /api/chat/suggestions 获取动态建议；
+ * 请求失败（网络、404、非 OK）时回退到本地 SUGGESTIONS 数组。
  */
+import { useState, useEffect } from 'react';
 
 interface Suggestion {
   title: string;
@@ -21,9 +24,75 @@ interface SuggestionGridProps {
 }
 
 export function SuggestionGrid({ onPick }: SuggestionGridProps) {
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [fromApi, setFromApi] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchSuggestions = async () => {
+      try {
+        const response = await fetch('/api/chat/suggestions', { credentials: 'include' });
+        if (!response.ok) throw new Error('non-ok response');
+        const data: unknown = await response.json();
+
+        let parsed: Suggestion[] | null = null;
+        if (Array.isArray(data)) {
+          parsed = data as Suggestion[];
+        } else if (
+          data !== null &&
+          typeof data === 'object' &&
+          'suggestions' in data &&
+          Array.isArray((data as { suggestions: unknown }).suggestions)
+        ) {
+          parsed = (data as { suggestions: Suggestion[] }).suggestions;
+        }
+
+        if (!cancelled) {
+          const loaded = Array.isArray(parsed) && parsed.length > 0;
+          setSuggestions(loaded ? parsed : SUGGESTIONS);
+          setFromApi(loaded);
+        }
+      } catch {
+        if (!cancelled) {
+          setSuggestions(SUGGESTIONS);
+          setFromApi(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void fetchSuggestions();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="grid grid-cols-2 gap-2.5 w-full max-w-2xl mx-auto">
+        {[0, 1, 2, 3].map((i) => (
+          <div
+            key={i}
+            className="h-16 rounded-xl bg-slate-100 animate-pulse"
+          />
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-2 gap-2.5 w-full max-w-2xl mx-auto">
-      {SUGGESTIONS.map((s) => (
+      {!fromApi && (
+        <p className="col-span-2 text-center text-xs text-slate-400 mb-1">
+          使用默认推荐问题
+        </p>
+      )}
+      {suggestions.map((s) => (
         <button
           key={s.title}
           onClick={() => onPick(s.title)}
