@@ -35,6 +35,9 @@ interface User {
   email: string | null;
   role: UserRole;
   permissions: string[];
+  all_permissions?: string[];  // 后端合并后的生效权限（角色默认+个人+组继承）
+  group_ids?: number[];       // 所属用户组 ID 列表
+  group_names?: string[];     // 所属用户组名称列表
   is_active: boolean;
   created_at: string;
   last_login: string | null;
@@ -194,10 +197,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const hasPermission = (permission: string): boolean => {
     if (!user) return false;
     if (user.role === 'admin') return true;  // admin has all permissions
-    // 合并角色默认权限和个人权限
-    const rolePerms = ROLE_DEFAULT_PERMISSIONS[user.role] || [];
-    const personalPerms = user.permissions || [];
-    return [...rolePerms, ...personalPerms].includes(permission);
+    // 优先使用后端合并后的 all_permissions（含组继承）；兜底本地计算
+    const effective = user.all_permissions ?? [
+      ...(ROLE_DEFAULT_PERMISSIONS[user.role] || []),
+      ...(user.permissions || []),
+    ];
+    return effective.includes(permission);
   };
 
   const updateUser = (updatedUser: User) => {

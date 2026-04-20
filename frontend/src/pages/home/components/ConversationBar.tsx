@@ -65,10 +65,10 @@ export function ConversationBar({ collapsed: _collapsed, onToggleCollapse }: Con
   const navigate = useNavigate();
   const location = useLocation();
 
-  // 当前对话 id（从 URL /chat/:id 解析）
+  // 当前对话 id（从 URL /chat/:id 或 /?conv= 解析）
   const currentId = location.pathname.startsWith('/chat/')
     ? location.pathname.split('/chat/')[1]
-    : null;
+    : new URLSearchParams(location.search).get('conv');
 
   const handleNew = useCallback(async () => {
     const id = await addConversation();
@@ -183,7 +183,13 @@ export function ConversationBar({ collapsed: _collapsed, onToggleCollapse }: Con
                   key={conv.id}
                   conv={conv}
                   isActive={conv.id === currentId}
-                  onSelect={() => navigate(`/chat/${conv.id}`)}
+                  onSelect={() => {
+                    if (location.pathname === '/') {
+                      navigate(`/?conv=${conv.id}`);
+                    } else {
+                      navigate(`/chat/${conv.id}`);
+                    }
+                  }}
                   onDelete={() => setDeleteTarget(conv)}
                   onRename={updateConversationTitle}
                 />

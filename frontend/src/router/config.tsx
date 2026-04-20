@@ -48,6 +48,7 @@ const LLMAdminPage         = lazy(() => import('../pages/admin/llm/page'));
 const AdminTasksPage        = lazy(() => import('../pages/admin/tasks/page'));
 const ActivityAdminPage     = lazy(() => import('../pages/admin/activity/page'));
 const ForgotPasswordPage    = lazy(() => import('../pages/forgot-password/page'));
+const EmptyStatePage        = lazy(() => import('../pages/empty/EmptyStatePage'));
 
 // ──────────────────────────────────────────────────────────────
 // 路由定义
@@ -252,6 +253,12 @@ const routes: RouteObject[] = [
             ),
           },
         ],
+      },
+
+      // ── 空状态占位页 /empty/:feature ──
+      {
+        path: 'empty/:feature',
+        element: <EmptyStatePage />,
       },
 
       // ── 域 5：系统管理 /system ──

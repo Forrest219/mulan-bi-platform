@@ -114,7 +114,12 @@ export default function LLMAdminPage() {
       });
       setMessage({ type: 'success', text: 'LLM 配置已删除' });
     } catch (e: unknown) {
-      setMessage({ type: 'error', text: getErrorMessage(e) });
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes('410') || msg.toLowerCase().includes('gone') || msg.includes('已废弃')) {
+        setMessage({ type: 'error', text: '此接口已废弃，请前往「LLM 多配置」页面管理配置' });
+      } else {
+        setMessage({ type: 'error', text: msg });
+      }
     }
   }
 

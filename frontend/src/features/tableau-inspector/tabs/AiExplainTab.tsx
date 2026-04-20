@@ -65,7 +65,7 @@ export function AiExplainTab({
           <div className="text-center py-8">
             <div className="text-orange-500 text-sm mb-2">LLM 未配置</div>
             <p className="text-slate-500 text-xs mb-3">请联系管理员配置 LLM 后再试</p>
-            <Link to="/admin/llm" className="text-sm text-blue-500 hover:underline">
+            <Link to="/system/llm-configs" className="text-sm text-blue-500 hover:underline">
               去配置 LLM
             </Link>
           </div>

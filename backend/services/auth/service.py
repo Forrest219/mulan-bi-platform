@@ -208,6 +208,8 @@ class AuthService:
             return False
         user.role = role
         self._db.update_user(user)
+        # 撤销该用户所有 Refresh Token，强制重新登录以获取新角色
+        self._db.revoke_all_user_refresh_tokens(user_id)
         return True
 
     def toggle_user_active(self, user_id: int) -> bool:
@@ -225,7 +227,11 @@ class AuthService:
         for perm in permissions:
             if perm not in self.ALL_PERMISSIONS:
                 return False
-        return self._db.update_user_permissions(user_id, permissions)
+        result = self._db.update_user_permissions(user_id, permissions)
+        if result:
+            # 撤销该用户所有 Refresh Token，权限变更立即生效
+            self._db.revoke_all_user_refresh_tokens(user_id)
+        return result
 
     def get_effective_permissions(self, user_id: int) -> List[str]:
         """获取用户实际生效的权限（角色默认 + 个人额外）"""
@@ -255,6 +261,31 @@ class AuthService:
     def delete_user(self, user_id: int) -> bool:
         """删除用户"""
         return self._db.delete_user(user_id)
+
+    def update_user_info(self, user_id: int, display_name: str = None, email: str = None) -> Optional[Dict[str, Any]]:
+        """更新用户基础信息（display_name / email）"""
+        user = self._db.get_user(user_id)
+        if not user:
+            return None
+        if display_name is not None:
+            user.display_name = display_name
+        if email is not None:
+            user.email = email
+        self._db.update_user(user)
+        return user.to_dict()
+
+    def change_password(self, user_id: int, old_password: str, new_password: str) -> bool:
+        """修改密码（验证旧密码后更新）"""
+        user = self._db.get_user(user_id)
+        if not user:
+            return False
+        if not self.verify_password(old_password, user.password_hash):
+            return False
+        user.password_hash = self.hash_password(new_password)
+        self._db.update_user(user)
+        # 修改密码后撤销所有 Refresh Token，强制重新登录
+        self._db.revoke_all_user_refresh_tokens(user_id)
+        return True
 
     # ========== 用户组管理 ==========
 

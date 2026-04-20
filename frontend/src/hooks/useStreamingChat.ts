@@ -14,6 +14,9 @@ export interface StreamingMessage {
   role: 'user' | 'assistant';
   content: string;
   isStreaming?: boolean;
+  isError?: boolean;
+  metadata?: { sources_count: number; top_sources: string[] };
+  traceId?: string;
 }
 
 export interface UseStreamingChatReturn {
@@ -118,18 +121,63 @@ export function useStreamingChat(): UseStreamingChatReturn {
             if (!jsonStr) continue;
 
             try {
-              const parsed: { token?: string; done?: boolean; error?: string } =
-                JSON.parse(jsonStr);
+              const parsed: {
+                token?: string;
+                done?: boolean;
+                error?: string;
+                type?: string;
+                content?: string;
+                trace_id?: string;
+                sources_count?: number;
+                top_sources?: string[];
+              } = JSON.parse(jsonStr);
 
-              if (parsed.done) {
+              // 结构化 type 字段处理
+              if (parsed.type === 'metadata') {
+                const id = streamingIdRef.current;
+                if (id) {
+                  const sourcesCount = parsed.sources_count ?? 0;
+                  const topSources = parsed.top_sources ?? [];
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === id
+                        ? { ...m, metadata: { sources_count: sourcesCount, top_sources: topSources } }
+                        : m,
+                    ),
+                  );
+                }
+              } else if (parsed.type === 'token') {
+                bufferRef.current += parsed.content ?? '';
+              } else if (parsed.type === 'done') {
+                const id = streamingIdRef.current;
+                if (id && parsed.trace_id) {
+                  const traceId = parsed.trace_id;
+                  setMessages((prev) =>
+                    prev.map((m) => (m.id === id ? { ...m, traceId } : m)),
+                  );
+                }
                 done = true;
                 break;
-              }
-
-              if (parsed.error) {
-                bufferRef.current += `\n\n⚠️ ${parsed.error}`;
-              } else if (parsed.token) {
-                bufferRef.current += parsed.token;
+              } else {
+                // 原有 flat format fallback
+                if (parsed.done) {
+                  if (parsed.trace_id) {
+                    const id = streamingIdRef.current;
+                    if (id) {
+                      const traceId = parsed.trace_id;
+                      setMessages((prev) =>
+                        prev.map((m) => (m.id === id ? { ...m, traceId } : m)),
+                      );
+                    }
+                  }
+                  done = true;
+                  break;
+                }
+                if (parsed.error) {
+                  bufferRef.current += `\n\n⚠️ ${parsed.error}`;
+                } else if (parsed.token) {
+                  bufferRef.current += parsed.token;
+                }
               }
 
               // 注册 rAF（幂等：若已有待执行 rAF 则跳过）
@@ -143,8 +191,16 @@ export function useStreamingChat(): UseStreamingChatReturn {
         }
       } catch (err: unknown) {
         if (err instanceof Error && err.name !== 'AbortError') {
-          // 网络错误：将错误信息写入 buffer
-          bufferRef.current += '\n\n⚠️ 连接中断，请重试。';
+          const errId = streamingIdRef.current;
+          if (errId) {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === errId
+                  ? { ...m, content: '连接中断，请重试。', isError: true }
+                  : m,
+              ),
+            );
+          }
         }
         // AbortError 是用户主动 stop，静默处理
       } finally {

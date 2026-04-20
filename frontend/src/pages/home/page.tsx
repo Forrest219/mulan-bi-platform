@@ -8,11 +8,11 @@
  *
  * 对话历史存 localStorage（C2），由 HomeLayout 提供的 ConversationProvider 管理。
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { LOGO_URL } from '../../config';
-import { AskBar } from './components/AskBar';
+import AskBar from './components/AskBar';
 import { SearchResult } from './components/SearchResult';
 import { WelcomeHero } from './components/WelcomeHero';
 import { SuggestionGrid } from './components/SuggestionGrid';
@@ -22,13 +22,15 @@ import { ScopeProvider } from './context/ScopeContext';
 import { ScopePicker } from './components/ScopePicker';
 import { AssetInspectorDrawer } from './components/AssetInspectorDrawer';
 import { useHomeUrlState } from './hooks/useHomeUrlState';
+import { conversationsApi } from '../../api/conversations';
 // Gap-05: SSE streaming hook — state 与 AskBar 完全隔离（§11 陷阱6）
 import { useStreamingChat } from '../../hooks/useStreamingChat';
-import { MessageActions } from './components/MessageActions';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import MessageList from './components/MessageList';
 
 type HomeUiState = 'HOME_IDLE' | 'HOME_SUBMITTING' | 'HOME_RESULT' | 'HOME_ERROR' | 'HOME_OFFLINE';
+
+// 后端就绪后改为 false
+const USE_MOCK = false;
 
 function HomePageInner() {
   const [homeState, setHomeState] = useState<HomeUiState>('HOME_IDLE');
@@ -38,13 +40,42 @@ function HomePageInner() {
   const [lastQuestion, setLastQuestion] = useState('');
   const lastQuestionRef = useRef('');
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
+  const [historyMessages, setHistoryMessages] = useState<Array<{role: 'user'|'assistant'; content: string}>>([]);
 
   const { user, hasPermission } = useAuth();
   const { addConversation, appendMessage } = useConversations();
-  const { assetId, tab, connectionId, closeAsset, openAsset } = useHomeUrlState();
+  const { assetId, tab, connectionId, closeAsset, selectedConvId } = useHomeUrlState();
 
   // Gap-05: streaming state 完全独立，不与 AskBar 的 input/loading state 共享
   const { messages: streamingMessages, isStreaming, sendMessage, abort } = useStreamingChat();
+
+  // Task 1: URL conv= 参数驱动历史消息恢复
+  const loadConvHistory = useCallback(async (convId: string) => {
+    try {
+      const detail = await conversationsApi.get(convId);
+      const msgs = detail.messages.map((m) => ({ role: m.role, content: m.content }));
+      setHistoryMessages(msgs);
+      setCurrentConversationId(convId);
+      setHomeState('HOME_RESULT');
+    } catch {
+      setHistoryMessages([]);
+      setHomeState('HOME_ERROR');
+      setError({ code: 'LOAD_HISTORY_FAILED', message: '历史对话加载失败，请刷新重试' });
+    }
+  }, []);
+
+  // Mock 流路径：onStreamToken 逐 token 追加到此 state 用于展示
+  const [mockStreamingContent, setMockStreamingContent] = useState('');
+  const [isMockStreaming, setIsMockStreaming] = useState(false);
+
+  // Task 1: 监听 URL ?conv= 变化，加载历史对话
+  useEffect(() => {
+    if (selectedConvId) {
+      void loadConvHistory(selectedConvId);
+    } else {
+      setHistoryMessages([]);
+    }
+  }, [selectedConvId, loadConvHistory]);
 
   useEffect(() => {
     if (homeState !== 'HOME_OFFLINE') {
@@ -72,6 +103,41 @@ function HomePageInner() {
       window.removeEventListener('online', handleOnline);
     };
   }, []);
+
+  // 真实 SSE 路径：流结束后推进页面状态
+  useEffect(() => {
+    if (!USE_MOCK && !isStreaming && streamingMessages.length > 0) {
+      setHomeState('HOME_RESULT');
+    }
+  }, [isStreaming, streamingMessages.length]);
+
+  // 真实 SSE 路径：流结束后将新消息持久化到 conversationStore
+  const savedMessageCountRef = useRef(0);
+  const currentConversationIdRef = useRef<string | null>(null);
+  currentConversationIdRef.current = currentConversationId;
+  const streamingMessagesRef = useRef(streamingMessages);
+  streamingMessagesRef.current = streamingMessages;
+  const addConversationRef = useRef(addConversation);
+  addConversationRef.current = addConversation;
+  const appendMessageRef = useRef(appendMessage);
+  appendMessageRef.current = appendMessage;
+
+  useEffect(() => {
+    if (USE_MOCK || isStreaming || streamingMessagesRef.current.length <= savedMessageCountRef.current) return;
+    const newMessages = streamingMessagesRef.current.slice(savedMessageCountRef.current);
+    savedMessageCountRef.current = streamingMessagesRef.current.length;
+    void (async () => {
+      let convId = currentConversationIdRef.current;
+      if (!convId) {
+        convId = await addConversationRef.current();
+        currentConversationIdRef.current = convId;
+        setCurrentConversationId(convId);
+      }
+      for (const msg of newMessages) {
+        appendMessageRef.current(convId, { role: msg.role, content: msg.content });
+      }
+    })();
+  }, [isStreaming, streamingMessages.length]);
 
   // ── 未登录态 ─────────────────────────────────────────────────────────────
   if (!user) {
@@ -129,9 +195,15 @@ function HomePageInner() {
   const handleLoading = (loading: boolean) => {
     if (loading) {
       setHomeState('HOME_SUBMITTING');
-      // Gap-05: 使用 ref 同步读取最新问题（state 更新是异步的，ref 在同一 tick 已更新）
-      const connId = connectionId ? Number(connectionId) : undefined;
-      void sendMessage(lastQuestionRef.current, connId);
+      // Mock 路径由 AskBar 内部的 mockStreamAskData 驱动，不走 sendMessage（后端未就绪）
+      // 非 Mock 路径才走 useStreamingChat 的 sendMessage
+      if (!USE_MOCK) {
+        const connId = connectionId ? Number(connectionId) : undefined;
+        void sendMessage(lastQuestionRef.current, connId);
+      } else {
+        setMockStreamingContent('');
+        setIsMockStreaming(true);
+      }
     }
   };
 
@@ -156,7 +228,15 @@ function HomePageInner() {
 
   // AskBar 回调包装：拦截 onResult 注入 lastQuestion
   const handleAskBarResult = (r: SearchAnswer) => {
+    setIsMockStreaming(false);
     void handleResult(r, lastQuestion);
+  };
+
+  const handleRegenerate = () => {
+    const question = lastQuestionRef.current;
+    if (!question || isStreaming) return;
+    const connId = connectionId ? Number(connectionId) : undefined;
+    void sendMessage(question, connId);
   };
 
   // ── 渲染 ──────────────────────────────────────────────────────────────────
@@ -202,80 +282,22 @@ function HomePageInner() {
             </div>
           )}
 
-          {/* Gap-05: SSE 流式消息展示区 */}
-          {streamingMessages.length > 0 && (
-            <div className="space-y-4 flex flex-col">
-              {(() => {
-                let lastUserQuestion = '';
-                return streamingMessages.map((msg, msgIndex) => {
-                  if (msg.role === 'user') {
-                    lastUserQuestion = msg.content;
-                  }
-                  const questionForAction = lastUserQuestion;
-                  return (
-                    <div
-                      key={msg.id}
-                      className={`group rounded-xl px-4 py-3 text-sm leading-relaxed ${
-                        msg.role === 'user'
-                          ? 'bg-blue-600 text-white self-end max-w-[85%] ml-auto'
-                          : 'bg-white border border-slate-200 text-slate-800 mr-auto max-w-[85%]'
-                      }`}
-                    >
-                      {/* Batch 4.2: AI 消息品牌标识 */}
-                      {msg.role === 'assistant' && (
-                        <div className="flex items-center gap-1.5 mb-2">
-                          <div className="w-5 h-5 rounded-full bg-blue-700 flex items-center justify-center">
-                            <i className="ri-robot-line text-white text-[10px]" />
-                          </div>
-                          <span className="text-xs text-slate-400">木兰</span>
-                        </div>
-                      )}
-                      {msg.role === 'assistant' && msg.isStreaming && !msg.content && (
-                        <span className="inline-flex items-center gap-1.5 text-slate-400">
-                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce [animation-delay:0ms]" />
-                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce [animation-delay:150ms]" />
-                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce [animation-delay:300ms]" />
-                        </span>
-                      )}
-                      {msg.content && (
-                        <div className={msg.role === 'assistant' ? 'prose prose-sm max-w-none prose-slate' : ''}>
-                          {msg.role === 'assistant' ? (
-                            <>
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                {msg.content}
-                              </ReactMarkdown>
-                              {msg.isStreaming && (
-                                <span className="inline-block w-0.5 h-4 ml-0.5 bg-slate-600 animate-pulse align-text-bottom" />
-                              )}
-                            </>
-                          ) : (
-                            <span className="whitespace-pre-wrap">
-                              {msg.content}
-                              {msg.isStreaming && (
-                                <span className="inline-block w-0.5 h-4 ml-0.5 bg-slate-600 animate-pulse align-text-bottom" />
-                              )}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                      {/* Batch 2.2: AI 消息操作区（仅在消息完成后显示） */}
-                      {msg.role === 'assistant' && !msg.isStreaming && (
-                        <MessageActions
-                          content={msg.content}
-                          conversationId={currentConversationId}
-                          messageIndex={msgIndex}
-                          question={questionForAction}
-                        />
-                      )}
-                    </div>
-                  );
-                });
-              })()}
+          {/* Gap-05: 消息展示区（真实 SSE 路径 + Mock 路径 + 历史恢复 统一由 MessageList 渲染） */}
+          {(streamingMessages.length > 0 || isMockStreaming || mockStreamingContent || historyMessages.length > 0) && (
+            <div className="flex-1 overflow-y-auto">
+              <MessageList
+                messages={streamingMessages}
+                mockContent={mockStreamingContent}
+                isMockStreaming={isMockStreaming}
+                lastQuestion={lastQuestion}
+                onRegenerate={handleRegenerate}
+                historyMessages={historyMessages}
+              />
             </div>
           )}
 
           {/* SearchResult（非流式路径，流式激活后完全隐藏） */}
-          {homeState === 'HOME_RESULT' && result && !isStreaming && streamingMessages.length === 0 && (
+          {homeState === 'HOME_RESULT' && result && !isStreaming && streamingMessages.length === 0 && !USE_MOCK && (
             <SearchResult
               result={result}
               onRetry={() => { if (lastQuestion) handleExamplePick(lastQuestion); }}
@@ -318,8 +340,12 @@ function HomePageInner() {
               onQuestionChange={(q) => { setLastQuestion(q); lastQuestionRef.current = q; }}
               conversationId={currentConversationId ?? undefined}
               connectionId={connectionId}
-              isStreaming={isStreaming}
-              onAbort={abort}
+              isStreaming={USE_MOCK ? isMockStreaming : isStreaming}
+              onAbort={USE_MOCK ? () => { setIsMockStreaming(false); } : abort}
+              useMock={USE_MOCK}
+              onStreamToken={(token) => {
+                setMockStreamingContent((prev) => prev + token);
+              }}
             />
             <p className="mt-2 text-center text-[11px] text-slate-400">
               回答由 AI 生成，请核对关键数据后使用

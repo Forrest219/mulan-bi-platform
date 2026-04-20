@@ -2,7 +2,6 @@
  * 5 域菜单配置（Spec 18 §5.2）
  *
  * P0 约束：
- * - ddl-generator / nl-query / publish-logs 必须配置 requiredRole + disabled
  * - 绝对禁止对 src/api/ 目录下的后端 API 路径做替换
  */
 
@@ -65,111 +64,30 @@ export interface MenuDomain {
 // ============================================================
 export const menuConfig: MenuDomain[] = [
   // ──────────────────────────────────────────────────
-  // 域 0：运维工作台 /（登录即可访问）
+  // 域 0：看板（登录即可访问）
   // ──────────────────────────────────────────────────
   {
     key: 'ops',
-    label: '运维工作台',
-    icon: 'ri-dashboard-3-line',
+    label: '看板',
+    icon: 'ri-home-4-line',
     description: '资产浏览与问数一体化工作台',
     defaultOpen: false,
     items: [
       {
         key: 'ops-home',
-        label: '工作台',
-        icon: 'ri-dashboard-3-line',
+        label: '首页',
+        icon: 'ri-home-4-line',
         path: '/',
       },
     ],
   },
 
   // ──────────────────────────────────────────────────
-  // 域 1：数据开发 /dev
-  // ──────────────────────────────────────────────────
-  {
-    key: 'dev',
-    label: '数据开发',
-    icon: 'ri-terminal-box-line',
-    description: '数据库开发工具与规范管理',
-    defaultOpen: false,
-    items: [
-      {
-        key: 'ddl-validator',
-        label: 'DDL 检查',
-        icon: 'ri-code-s-slash-line',
-        path: '/dev/ddl-validator',
-      },
-      // ⚠️ 待开发：analyst+ 可访问，disabled 置灰
-      {
-        key: 'ddl-generator',
-        label: 'DDL 生成器',
-        icon: 'ri-file-code-line',
-        path: '/dev/ddl-generator',
-        permission: { requiredRole: 'analyst' },
-        disabled: true,
-      },
-      {
-        key: 'rule-config',
-        label: '规则配置',
-        icon: 'ri-settings-3-line',
-        path: '/dev/rule-config',
-        permission: { requiredRole: 'data_admin' },
-      },
-    ],
-  },
-
-  // ──────────────────────────────────────────────────
-  // 域 2：数据治理 /governance
-  // ──────────────────────────────────────────────────
-  {
-    key: 'governance',
-    label: '数据治理',
-    icon: 'ri-shield-star-line',
-    description: '数据质量、语义治理与合规管理',
-    defaultOpen: true,
-    permission: { requiredRole: 'analyst' },
-    items: [
-      {
-        key: 'health',
-        label: '健康扫描',
-        icon: 'ri-heart-pulse-line',
-        path: '/governance/health',
-      },
-      {
-        key: 'quality',
-        label: '质量监控',
-        icon: 'ri-shield-check-line',
-        path: '/governance/quality',
-      },
-      {
-        key: 'semantic-ds',
-        label: '语义 - 数据源',
-        icon: 'ri-database-2-line',
-        path: '/governance/semantic/datasources',
-      },
-      {
-        key: 'semantic-fields',
-        label: '语义 - 字段',
-        icon: 'ri-list-settings-line',
-        path: '/governance/semantic/fields',
-      },
-      // ⚠️ 待开发：权限跟随域（analyst+）
-      {
-        key: 'publish-logs',
-        label: '发布日志',
-        icon: 'ri-file-list-3-line',
-        path: '/governance/semantic/publish-logs',
-        disabled: true,
-      },
-    ],
-  },
-
-  // ──────────────────────────────────────────────────
-  // 域 3：数据资产 /assets
+  // 域 1：资产 /assets
   // ──────────────────────────────────────────────────
   {
     key: 'assets',
-    label: '数据资产',
+    label: '资产',
     icon: 'ri-stack-line',
     description: 'BI 资产浏览与数据源连接管理',
     defaultOpen: false,
@@ -205,39 +123,101 @@ export const menuConfig: MenuDomain[] = [
   },
 
   // ──────────────────────────────────────────────────
-  // 域 4：智能分析 /analytics
+  // 域 2：实验室（数据开发 + 智能分析合并）
   // ──────────────────────────────────────────────────
   {
-    key: 'analytics',
-    label: '智能分析',
-    icon: 'ri-brain-line',
-    description: 'AI 驱动的数据分析与知识管理',
+    key: 'lab',
+    label: '实验室',
+    icon: 'ri-flask-line',
+    description: '数据库开发工具、规范管理与 AI 分析',
     defaultOpen: false,
     items: [
-      // ⚠️ 待开发：analyst+ 可访问，disabled 置灰
+      {
+        key: 'ddl-validator',
+        label: 'DDL 检查',
+        icon: 'ri-code-s-slash-line',
+        path: '/dev/ddl-validator',
+      },
+      {
+        key: 'ddl-generator',
+        label: 'DDL 生成器',
+        icon: 'ri-file-code-line',
+        path: '/empty/ddl-generator',
+        permission: { requiredRole: 'analyst' },
+      },
+      {
+        key: 'rule-config',
+        label: '规则配置',
+        icon: 'ri-settings-3-line',
+        path: '/dev/rule-config',
+        permission: { requiredRole: 'data_admin' },
+      },
       {
         key: 'nl-query',
         label: '自然语言查询',
         icon: 'ri-chat-search-line',
-        path: '/analytics/nl-query',
+        path: '/empty/nl-query',
         permission: { requiredRole: 'analyst' },
-        disabled: true,
       },
       {
         key: 'knowledge',
         label: '知识库',
         icon: 'ri-book-open-line',
-        path: '/analytics/knowledge',
+        path: '/empty/knowledge-base',
       },
     ],
   },
 
   // ──────────────────────────────────────────────────
-  // 域 5：系统管理 /system
+  // 域 3：治理 /governance
+  // ──────────────────────────────────────────────────
+  {
+    key: 'governance',
+    label: '治理',
+    icon: 'ri-shield-star-line',
+    description: '数据质量、语义治理与合规管理',
+    defaultOpen: true,
+    permission: { requiredRole: 'analyst' },
+    items: [
+      {
+        key: 'health',
+        label: '健康扫描',
+        icon: 'ri-heart-pulse-line',
+        path: '/governance/health',
+      },
+      {
+        key: 'quality',
+        label: '质量监控',
+        icon: 'ri-shield-check-line',
+        path: '/governance/quality',
+      },
+      {
+        key: 'semantic-ds',
+        label: '语义 - 数据源',
+        icon: 'ri-database-2-line',
+        path: '/governance/semantic/datasources',
+      },
+      {
+        key: 'semantic-fields',
+        label: '语义 - 字段',
+        icon: 'ri-list-settings-line',
+        path: '/governance/semantic/fields',
+      },
+      {
+        key: 'publish-logs',
+        label: '发布日志',
+        icon: 'ri-file-list-3-line',
+        path: '/empty/publish-logs',
+      },
+    ],
+  },
+
+  // ──────────────────────────────────────────────────
+  // 域 4：设置 /system
   // ──────────────────────────────────────────────────
   {
     key: 'system',
-    label: '系统管理',
+    label: '设置',
     icon: 'ri-settings-2-line',
     description: '平台配置、用户管理与系统监控',
     defaultOpen: false,

@@ -3,7 +3,7 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.core.dependencies import get_current_user, require_roles
@@ -120,21 +120,22 @@ async def get_rules(
 
 
 @router.put("/{rule_id}/toggle")
-async def toggle_rule(rule_id: str, request: Request):
+async def toggle_rule(
+    rule_id: str,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+):
     """切换规则启用/禁用状态。
 
     关键变更（disable）使用同一 DB 事务同步写入审计日志。
     """
-    require_roles(request, ["admin", "data_admin"])
     rule_db = RuleConfigDatabase()
 
     rule = rule_db.get_by_rule_id(rule_id)
     if not rule:
         raise HTTPException(status_code=404, detail={"code": "DDL_002", "message": "规则不存在"})
 
-    user = get_current_user(request)
-    operator = user.get("username", "unknown")
-    operator_id = user.get("id")
+    operator = current_user.get("username", "unknown")
+    operator_id = current_user.get("id")
 
     old_snapshot = rule.to_dict()
     old_enabled = rule.enabled
@@ -185,9 +186,11 @@ async def toggle_rule(rule_id: str, request: Request):
 
 
 @router.post("/")
-async def create_custom_rule(rule: ValidationRule, request: Request):
+async def create_custom_rule(
+    rule: ValidationRule,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+):
     """创建自定义规则"""
-    require_roles(request, ["admin", "data_admin"])
     rule_db = RuleConfigDatabase()
 
     existing = rule_db.get_by_rule_id(rule.id)
@@ -195,9 +198,8 @@ async def create_custom_rule(rule: ValidationRule, request: Request):
         raise HTTPException(status_code=409, detail=f"规则 ID '{rule.id}' 已存在")
 
     # 获取操作人信息
-    user = get_current_user(request)
-    operator = user.get("username", "unknown")
-    operator_id = user.get("id")
+    operator = current_user.get("username", "unknown")
+    operator_id = current_user.get("id")
 
     new_rule = rule_db.create_rule(
         rule_id=rule.id,
@@ -233,12 +235,14 @@ async def create_custom_rule(rule: ValidationRule, request: Request):
 
 
 @router.delete("/{rule_id}")
-async def delete_custom_rule(rule_id: str, request: Request):
+async def delete_custom_rule(
+    rule_id: str,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+):
     """删除自定义规则。
 
     删除操作使用同步 DB 事务写入审计日志，确保可靠性。
     """
-    require_roles(request, ["admin", "data_admin"])
     rule_db = RuleConfigDatabase()
 
     rule = rule_db.get_by_rule_id(rule_id)
@@ -247,9 +251,8 @@ async def delete_custom_rule(rule_id: str, request: Request):
     if not rule.is_custom:
         raise HTTPException(status_code=403, detail={"code": "DDL_403", "message": "无法删除内置规则"})
 
-    user = get_current_user(request)
-    operator = user.get("username", "unknown")
-    operator_id = user.get("id")
+    operator = current_user.get("username", "unknown")
+    operator_id = current_user.get("id")
 
     old_snapshot = rule.to_dict()
 
@@ -278,12 +281,14 @@ async def delete_custom_rule(rule_id: str, request: Request):
 
 
 @router.post("/test")
-async def test_rule(request: Request, body: DryRunRequest):
+async def test_rule(
+    body: DryRunRequest,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+):
     """Dry Run：测试新规则对指定 DDL 的拦截效果（不保存规则）。
 
     用于管理员在修改规则配置后，预验证规则是否按预期拦截/放行。
     """
-    require_roles(request, ["admin", "data_admin"])
 
     from services.ddl_checker.parser import DDLParser
 

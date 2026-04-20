@@ -77,17 +77,25 @@ def get_current_admin(request: Request, db: Session = Depends(get_db)) -> dict:
     return user
 
 
-def require_roles(request: Request, allowed_roles: List[str], db: Session = Depends(get_db)) -> dict:
+def require_roles(allowed_roles: List[str]):
     """
-    依赖：验证用户角色
+    依赖工厂：验证用户角色是否在允许列表中。
+
+    用法：Depends(require_roles(["admin", "data_admin"]))
 
     Args:
         allowed_roles: 允许的角色列表，如 ["admin", "data_admin"]
 
     Returns:
-        {"id": int, "username": str, "role": str}
+        可传入 Depends() 的依赖闭包
     """
-    user = get_current_user(request, db)
-    if user.get("role") not in allowed_roles:
-        raise AuthError.insufficient_permissions()
-    return user
+    async def require_roles_dep(
+        request: Request,
+        db: Session = Depends(get_db),
+    ) -> dict:
+        user = get_current_user(request, db)
+        if user.get("role") not in allowed_roles:
+            raise AuthError.insufficient_permissions()
+        return user
+
+    return require_roles_dep

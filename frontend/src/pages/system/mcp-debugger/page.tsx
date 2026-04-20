@@ -50,7 +50,8 @@ export default function McpDebuggerPage() {
     }).catch(() => {
       setToolsLoaded(true);
     });
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const handleToolSelect = useCallback((tool: McpTool) => {
     setSelectedTool(tool);

@@ -14,6 +14,7 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import type { Components } from 'react-markdown';
+import ThinkingBlock from '../../pages/home/components/ThinkingBlock';
 
 // ─── CodeBlock ────────────────────────────────────────────────────────────────
 
@@ -98,6 +99,18 @@ const markdownComponents: Components = {
     );
   },
 
+  thead({ children }) {
+    return <thead className="bg-slate-100">{children}</thead>;
+  },
+
+  tr({ children }) {
+    return (
+      <tr className="border-b border-slate-100 even:bg-slate-50 odd:bg-white last:border-0">
+        {children}
+      </tr>
+    );
+  },
+
   th({ children }) {
     return (
       <th className="border border-slate-200 bg-slate-50 px-3 py-2 text-left font-medium text-slate-700">
@@ -115,18 +128,28 @@ const markdownComponents: Components = {
   },
 };
 
+// ─── parseThought ─────────────────────────────────────────────────────────────
+
+function parseThought(content: string): { thought: string | null; body: string } {
+  const match = content.match(/^<Thought>([\s\S]*?)<\/Thought>\s*([\s\S]*)$/);
+  if (!match) return { thought: null, body: content };
+  return { thought: match[1], body: match[2] };
+}
+
 // ─── MessageBubble ────────────────────────────────────────────────────────────
 
 export interface MessageBubbleProps {
   role: 'user' | 'assistant';
   content: string;
   isStreaming?: boolean;
+  isError?: boolean;
 }
 
 export default function MessageBubble({
   role,
   content,
   isStreaming = false,
+  isError = false,
 }: MessageBubbleProps) {
   const isUser = role === 'user';
 
@@ -141,17 +164,29 @@ export default function MessageBubble({
       >
         {isUser ? (
           <p className="whitespace-pre-wrap break-words">{content}</p>
+        ) : isError ? (
+          <div className="flex items-center gap-2 text-sm text-red-500 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+            <i className="ri-wifi-off-line" />
+            <span>连接中断，请重试。</span>
+          </div>
+        ) : isStreaming ? (
+          <div className="prose prose-sm max-w-none prose-slate">
+            <p className="whitespace-pre-wrap break-words leading-relaxed m-0">{content}</p>
+            <span className="inline-block w-2 h-4 bg-slate-400 animate-pulse ml-0.5 align-middle rounded-sm" />
+          </div>
         ) : (
           <div className="prose prose-sm max-w-none prose-slate">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={markdownComponents}
-            >
-              {content}
-            </ReactMarkdown>
-            {isStreaming && (
-              <span className="inline-block w-2 h-4 bg-slate-400 animate-pulse ml-0.5 align-middle rounded-sm" />
-            )}
+            {(() => {
+              const { thought, body } = parseThought(content);
+              return (
+                <>
+                  {thought != null && <ThinkingBlock content={thought} />}
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                    {body}
+                  </ReactMarkdown>
+                </>
+              );
+            })()}
           </div>
         )}
       </div>

@@ -1,8 +1,13 @@
-"""NL-to-Query 搜索 API（PRD §14 §6）"""
+"""NL-to-Query 搜索 API（PRD §14 §6）
+
+Spec 24 P0 改动：
+- trace_id 响应头透传：优先继承 X-Trace-ID 请求头，无则生成新的 UUID v4
+- task_run_id 可空字段：响应中补充此字段，向后兼容
+"""
 import logging
 from typing import Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -35,6 +40,10 @@ from services.tableau.mcp_client import get_tableau_mcp_client
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# META 路径经由后端代理（维护 MCP session），不直连 MCP server
+import os as _os
+_MCP_PROXY_URL = _os.environ.get("INTERNAL_API_BASE", "http://localhost:8000") + "/tableau-mcp"
+
 
 class QueryRequest(BaseModel):
     """POST /api/search/query 请求体（PRD §6.2）"""
@@ -45,6 +54,7 @@ class QueryRequest(BaseModel):
     conversation_id: Optional[str] = None
     options: Optional[dict] = None
     use_conversation_context: bool = False  # P2：追问时携带上轮上下文
+    task_run_id: Optional[str] = None  # Spec 24 P0：关联 TaskRun（可选）
 
 
 def _require_role(user, min_role: str) -> None:
@@ -84,6 +94,24 @@ def _nlq_error_response(code: str, message: str, details: dict = None):
             "details": details or {},
         },
     )
+
+
+def _parse_mcp_resp(resp) -> dict:
+    """MCP 响应可能是 SSE (text/event-stream) 或纯 JSON，统一解析成 dict。
+
+    Tableau MCP ≥1.18 在 HTTP 传输模式下返回 SSE 格式：
+      event: message
+      data: {"result":...,"jsonrpc":"2.0","id":N}
+    直接调 resp.json() 会因 'event:' 前缀而 JSONDecodeError。
+    """
+    import json as _json
+    for line in resp.text.splitlines():
+        line = line.strip()
+        if line.startswith("data:"):
+            payload = line[5:].strip()
+            if payload and payload != "[DONE]":
+                return _json.loads(payload)
+    return resp.json()
 
 
 async def _mcp_list_datasources(
@@ -143,7 +171,7 @@ async def _mcp_list_datasources(
             },
             headers=headers,
         )
-        list_data = list_resp.json()
+        list_data = _parse_mcp_resp(list_resp)
         if "error" in list_data:
             err = list_data["error"]
             raise RuntimeError(f"MCP list-datasources 错误 [{err.get('code')}]: {err.get('message')}")
@@ -208,7 +236,7 @@ async def _mcp_get_datasource_metadata(
             },
             headers=headers,
         )
-        meta_data = meta_resp.json()
+        meta_data = _parse_mcp_resp(meta_resp)
         if "error" in meta_data:
             err = meta_data["error"]
             raise RuntimeError(f"MCP get-datasource-metadata 错误 [{err.get('code')}]: {err.get('message')}")
@@ -260,7 +288,7 @@ async def _mcp_list_workbooks(mcp_base_url: str, timeout: float = 30.0) -> list:
             },
             headers=headers,
         )
-        data = resp.json()
+        data = _parse_mcp_resp(resp)
         if "error" in data:
             err = data["error"]
             raise RuntimeError(f"MCP list-workbooks 错误 [{err.get('code')}]: {err.get('message')}")
@@ -312,7 +340,7 @@ async def _mcp_get_upstream_tables(mcp_base_url: str, ds_name: str, timeout: flo
             },
             headers=headers,
         )
-        data = resp.json()
+        data = _parse_mcp_resp(resp)
         if "error" in data:
             err = data["error"]
             raise RuntimeError(f"MCP get-datasource-upstream-tables 错误 [{err.get('code')}]: {err.get('message')}")
@@ -364,7 +392,7 @@ async def _mcp_get_downstream_workbooks(mcp_base_url: str, ds_name: str, timeout
             },
             headers=headers,
         )
-        data = resp.json()
+        data = _parse_mcp_resp(resp)
         if "error" in data:
             err = data["error"]
             raise RuntimeError(f"MCP get-datasource-downstream-workbooks 错误 [{err.get('code')}]: {err.get('message')}")
@@ -542,7 +570,7 @@ async def _handle_meta_datasource_list(connection_id: int, db: Session) -> dict:
 
 async def _handle_meta_datasource_list_all(connections: list, db: Session) -> dict:
     """跨所有活跃连接，实时调用 MCP list-datasources 获取数据源列表。"""
-    mcp_base_url = "http://localhost:8000/tableau-mcp"
+    mcp_base_url = _MCP_PROXY_URL
     try:
         ds_list = await _mcp_list_datasources(mcp_base_url, "", "", "", "")
     except Exception as e:
@@ -582,7 +610,7 @@ async def _handle_meta_field_list_all(connections: list, db: Session, question: 
     META handler：查询指定数据源的字段列表。
     实时调用 MCP，不依赖本地 DB 缓存。
     """
-    mcp_base_url = "http://localhost:8000/tableau-mcp"
+    mcp_base_url = _MCP_PROXY_URL
 
     # 1. 通过 MCP 拉全量数据源列表（用于名称匹配）
     try:
@@ -821,7 +849,7 @@ async def _handle_meta_semantic_quality_all(connections: list, db: Session) -> d
 
 async def _handle_meta_workbook_count(connections: list, db: Session) -> dict:
     """Q2：平台上有多少个报表（工作簿）。"""
-    mcp_base_url = "http://localhost:8000/tableau-mcp"
+    mcp_base_url = _MCP_PROXY_URL
     try:
         wb_list = await _mcp_list_workbooks(mcp_base_url)
     except Exception as e:
@@ -854,7 +882,7 @@ async def _handle_meta_workbook_count(connections: list, db: Session) -> dict:
 
 async def _handle_meta_physical_table(connections: list, db: Session, question: str = "") -> dict:
     """Q4：数据源对应后台的物理表叫什么名字。"""
-    mcp_base_url = "http://localhost:8000/tableau-mcp"
+    mcp_base_url = _MCP_PROXY_URL
 
     # 先拉数据源列表，从问题中匹配数据源名称
     try:
@@ -929,7 +957,7 @@ async def _handle_meta_physical_table(connections: list, db: Session, question: 
 
 async def _handle_meta_downstream_workbooks(connections: list, db: Session, question: str = "") -> dict:
     """Q5：哪些看板和报表用了某个数据源。"""
-    mcp_base_url = "http://localhost:8000/tableau-mcp"
+    mcp_base_url = _MCP_PROXY_URL
 
     try:
         all_ds = await _mcp_list_datasources(mcp_base_url, "", "", "", "")
@@ -1027,7 +1055,7 @@ async def _handle_meta_datasource_new_in_period(connections: list, db: Session, 
     """Q6：最近一个月新增了哪些数据源。"""
     from datetime import datetime, timezone, timedelta
 
-    mcp_base_url = "http://localhost:8000/tableau-mcp"
+    mcp_base_url = _MCP_PROXY_URL
     try:
         ds_list = await _mcp_list_datasources(mcp_base_url, "", "", "", "")
     except Exception as e:
@@ -1084,7 +1112,7 @@ async def _handle_meta_datasource_recently_updated(connections: list, db: Sessio
     """Q7：过去一周哪些数据源被改过了。"""
     from datetime import datetime, timezone, timedelta
 
-    mcp_base_url = "http://localhost:8000/tableau-mcp"
+    mcp_base_url = _MCP_PROXY_URL
     try:
         ds_list = await _mcp_list_datasources(mcp_base_url, "", "", "", "")
     except Exception as e:
@@ -1149,7 +1177,7 @@ async def _handle_meta_datasource_top_by_size(connections: list, db: Session, qu
     """Q8：占用空间最大的前 N 个数据源。"""
     import re
 
-    mcp_base_url = "http://localhost:8000/tableau-mcp"
+    mcp_base_url = _MCP_PROXY_URL
     try:
         ds_list = await _mcp_list_datasources(mcp_base_url, "", "", "", "")
     except Exception as e:
@@ -1200,7 +1228,7 @@ async def _handle_meta_datasource_top_by_size(connections: list, db: Session, qu
 
 async def _handle_meta_datasource_incomplete_metadata(connections: list, db: Session) -> dict:
     """Q9：哪些数据源的备注和定义没写全。"""
-    mcp_base_url = "http://localhost:8000/tableau-mcp"
+    mcp_base_url = _MCP_PROXY_URL
     try:
         ds_list = await _mcp_list_datasources(mcp_base_url, "", "", "", "")
     except Exception as e:
@@ -1238,7 +1266,7 @@ async def _handle_meta_datasource_incomplete_metadata(connections: list, db: Ses
 
 async def _handle_meta_datasource_duplicates(connections: list, db: Session) -> dict:
     """Q10：有没有重名的数据源。"""
-    mcp_base_url = "http://localhost:8000/tableau-mcp"
+    mcp_base_url = _MCP_PROXY_URL
     try:
         ds_list = await _mcp_list_datasources(mcp_base_url, "", "", "", "")
     except Exception as e:
@@ -1283,11 +1311,21 @@ async def _handle_meta_datasource_duplicates(connections: list, db: Session) -> 
 async def query(
     body: QueryRequest,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
 ):
     """自然语言查询（PRD §6.2）POST /api/search/query — analyst+
     将用户自然语言问题转换为数据查询并返回结果。
+
+    Spec 24 P0：
+    - trace_id 优先继承 X-Trace-ID 请求头，无则生成新的 UUID v4
+    - 响应头 X-Trace-ID 透传 trace_id
+    - 响应体包含可空 task_run_id（向后兼容）
     """
+    # Spec 24 P0: trace_id 继承策略
+    incoming_trace = request.headers.get("X-Trace-ID")
+    trace_id = incoming_trace if incoming_trace else new_trace_id()
+
     user = get_current_user(request=request, db=db)
     _require_role(user, "analyst")
 
@@ -1333,9 +1371,9 @@ async def query(
             f"问题长度不能超过 {MAX_QUERY_LENGTH} 字符",
         )
 
-    # 初始化审计记录
+    # 初始化审计记录（Spec 24 P0: trace_id 已在此 scope 顶部统一）
     audit_record = InvocationRecord(
-        trace_id=new_trace_id(),
+        trace_id=trace_id,
         principal_id=user_id,
         principal_role=user.get("role", "user"),
         capability="query_metric",
@@ -1345,8 +1383,9 @@ async def query(
 
     try:
         # ── META 查询优先检测（Q1-Q3 业务口径，不走 VizQL 流水线）────────
-        # classify_meta_intent 基于规则关键词，无 LLM 调用，优先于 VizQL 意图分类
-        meta_intent = classify_meta_intent(question)
+        # X-Intent-Hint 由 ask_data.py per-user 缓存注入，命中时跳过重复关键词匹配
+        _intent_hint = request.headers.get("X-Intent-Hint", "")
+        meta_intent = _intent_hint if _intent_hint else classify_meta_intent(question)
         if meta_intent:
             audit_record.params_jsonb["intent"] = meta_intent
             if connection_id is None:
@@ -1355,8 +1394,11 @@ async def query(
             else:
                 result = await handle_meta_query(meta_intent, connection_id, db, user, question=question)
             audit_record.status = "ok"
+            # Spec 24 P0: 响应头透传 trace_id
+            response.headers["X-Trace-ID"] = audit_record.trace_id
             return {
                 "trace_id": audit_record.trace_id,
+                "task_run_id": body.task_run_id,  # Spec 24 P0: 可空，向后兼容
                 **result,
             }
 
@@ -1694,8 +1736,12 @@ async def query(
             latency_ms=audit_record.latency_ms,
         )
 
+        # Spec 24 P0: 响应头透传 trace_id
+        response.headers["X-Trace-ID"] = audit_record.trace_id
+
         return {
             "trace_id": audit_record.trace_id,
+            "task_run_id": body.task_run_id,  # Spec 24 P0: 可空，向后兼容
             **api_data,
             "response_type": response_type,
             "intent": intent.intent_type if intent else None,

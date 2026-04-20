@@ -64,9 +64,12 @@ async def list_datasources(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/")
-async def create_datasource(request: CreateDataSourceRequest, req: Request, db: Session = Depends(get_db)):
+async def create_datasource(
+    request: CreateDataSourceRequest,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
+):
     """创建数据源"""
-    user = require_roles(req, ["admin", "data_admin"], db)
     _db = DataSourceDatabase()
 
     encrypted_password = _encrypt(request.password)
@@ -81,7 +84,7 @@ async def create_datasource(request: CreateDataSourceRequest, req: Request, db: 
         database_name=request.database_name,
         username=request.username,
         password_encrypted=encrypted_password,
-        owner_id=user["id"],
+        owner_id=current_user["id"],
         extra_config=extra_config,
     )
 
@@ -107,17 +110,19 @@ async def get_datasource(ds_id: int, request: Request, db: Session = Depends(get
 
 @router.put("/{ds_id}")
 async def update_datasource(
-    ds_id: int, request: UpdateDataSourceRequest, req: Request, db: Session = Depends(get_db)
+    ds_id: int,
+    request: UpdateDataSourceRequest,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
 ):
     """更新数据源"""
-    user = require_roles(req, ["admin", "data_admin"], db)
     _db = DataSourceDatabase()
 
     ds = _db.get(db, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="数据源不存在")
 
-    if user["role"] != "admin" and ds.owner_id != user["id"]:
+    if current_user["role"] != "admin" and ds.owner_id != current_user["id"]:
         raise HTTPException(status_code=403, detail="无权修改该数据源")
 
     update_data = request.model_dump(exclude_unset=True)
@@ -131,16 +136,19 @@ async def update_datasource(
 
 
 @router.delete("/{ds_id}")
-async def delete_datasource(ds_id: int, request: Request, db: Session = Depends(get_db)):
+async def delete_datasource(
+    ds_id: int,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
+):
     """删除数据源（软删除）"""
-    user = require_roles(request, ["admin", "data_admin"], db)
     _db = DataSourceDatabase()
 
     ds = _db.get(db, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="数据源不存在")
 
-    if user["role"] != "admin" and ds.owner_id != user["id"]:
+    if current_user["role"] != "admin" and ds.owner_id != current_user["id"]:
         raise HTTPException(status_code=403, detail="无权删除该数据源")
 
     _db.delete(db, ds_id)
@@ -148,18 +156,21 @@ async def delete_datasource(ds_id: int, request: Request, db: Session = Depends(
 
 
 @router.post("/{ds_id}/test")
-async def test_connection(ds_id: int, request: Request, db: Session = Depends(get_db)):
+async def test_connection(
+    ds_id: int,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
+):
     """测试数据源连接（10秒超时）"""
     import asyncio
 
-    user = require_roles(request, ["admin", "data_admin"], db)
     _db = DataSourceDatabase()
 
     ds = _db.get(db, ds_id)
     if not ds:
         raise HTTPException(status_code=404, detail="数据源不存在")
 
-    if user["role"] != "admin" and ds.owner_id != user["id"]:
+    if current_user["role"] != "admin" and ds.owner_id != current_user["id"]:
         raise HTTPException(status_code=403, detail="无权操作该数据源")
 
     try:

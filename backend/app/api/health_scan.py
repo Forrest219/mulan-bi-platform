@@ -24,10 +24,12 @@ class ScanRequest(BaseModel):
 
 
 @router.post("/scan")
-async def trigger_scan(body: ScanRequest, request: Request, db: Session = Depends(get_db)):
+async def trigger_scan(
+    body: ScanRequest,
+    user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
+):
     """发起健康扫描"""
-    user = get_current_user(request, db)
-    require_roles(request, ["admin", "data_admin"], db)
 
     ds_db = DataSourceDatabase()
     ds = ds_db.get(db, body.datasource_id)

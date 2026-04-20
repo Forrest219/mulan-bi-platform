@@ -7,7 +7,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Session
 
-from app.core.database import Base, JSONB, sa_func
+from app.core.database import Base, JSONB, sa_func, sa_text
 
 
 class BiEvent(Base):
@@ -18,9 +18,9 @@ class BiEvent(Base):
     event_type = Column(String(64), nullable=False, index=True)
     source_module = Column(String(32), nullable=False)
     source_id = Column(String(128), nullable=True)
-    severity = Column(String(16), nullable=False, server_default="'info'")
+    severity = Column(String(16), nullable=False, server_default=sa_text("'info'"))
     actor_id = Column(BigInteger, ForeignKey("auth_users.id", ondelete="SET NULL"), nullable=True)
-    payload_json = Column(JSONB, nullable=False, server_default="'{}'")
+    payload_json = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"))
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
 
     __table_args__ = (
@@ -51,8 +51,8 @@ class BiNotification(Base):
     user_id = Column(BigInteger, ForeignKey("auth_users.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String(256), nullable=False)
     content = Column(Text, nullable=False)
-    level = Column(String(16), nullable=False, server_default="'info'")
-    is_read = Column(Boolean, nullable=False, server_default="false")
+    level = Column(String(16), nullable=False, server_default=sa_text("'info'"))
+    is_read = Column(Boolean, nullable=False, server_default=sa_text("false"))
     read_at = Column(DateTime, nullable=True)
     link = Column(String(512), nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
