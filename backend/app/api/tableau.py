@@ -103,7 +103,7 @@ def _test_connection_rest(server_url: str, site: str, token_name: str,
                     timeout=5
                 )
             except Exception:
-                pass  # signout 清理失败可忽略
+                logger.debug("Tableau signout failed (non-critical): %s", e)
             return {"success": True, "message": f"REST API 连接成功 (site_id={site_id})"}
         else:
             detail = resp.text[:200]

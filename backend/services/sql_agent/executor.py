@@ -103,8 +103,10 @@ class BaseExecutor(ABC):
         self.timeout_seconds = timeout_seconds
 
     @abstractmethod
-    def execute(self, sql: str) -> Tuple[List[dict], List[str]]:
-        """执行 SQL，返回 (rows, column_names)"""
+    def execute(
+        self, sql: str, params: Optional[Tuple] = None
+    ) -> Tuple[List[dict], List[str]]:
+        """执行 SQL，返回 (rows, column_names)。params 用于参数化查询防注入。"""
         ...
 
     def _rows_to_dicts(self, cursor) -> Tuple[List[dict], List[str]]:
@@ -115,30 +117,36 @@ class BaseExecutor(ABC):
 
 
 class MySQLExecutor(BaseExecutor):
-    def execute(self, sql: str) -> Tuple[List[dict], List[str]]:
+    def execute(
+        self, sql: str, params: Optional[Tuple] = None
+    ) -> Tuple[List[dict], List[str]]:
         with _get_target_db_connection(self.datasource_config, self.db_type, self.timeout_seconds) as conn:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                cursor.execute(sql)
+                cursor.execute(sql, params)
                 rows, columns = self._rows_to_dicts(cursor)
                 conn.commit()
                 return rows, columns
 
 
 class PostgreSQLExecutor(BaseExecutor):
-    def execute(self, sql: str) -> Tuple[List[dict], List[str]]:
+    def execute(
+        self, sql: str, params: Optional[Tuple] = None
+    ) -> Tuple[List[dict], List[str]]:
         with _get_target_db_connection(self.datasource_config, self.db_type, self.timeout_seconds) as conn:
             with conn.cursor() as cursor:
-                cursor.execute(sql)
+                cursor.execute(sql, params)
                 rows, columns = self._rows_to_dicts(cursor)
                 conn.commit()
                 return rows, columns
 
 
 class StarRocksExecutor(BaseExecutor):
-    def execute(self, sql: str) -> Tuple[List[dict], List[str]]:
+    def execute(
+        self, sql: str, params: Optional[Tuple] = None
+    ) -> Tuple[List[dict], List[str]]:
         with _get_target_db_connection(self.datasource_config, self.db_type, self.timeout_seconds) as conn:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                cursor.execute(sql)
+                cursor.execute(sql, params)
                 rows, columns = self._rows_to_dicts(cursor)
                 conn.commit()
                 return rows, columns

@@ -400,7 +400,7 @@ class SQLAgentService:
 
         try:
             executor = get_executor(db_type, ds_config, timeout)
-            rows, _ = executor.execute(col_sql, params if db_type == "mysql" else None)
+            rows, _ = executor.execute(col_sql, params)
             return rows
         except Exception:
             return []
