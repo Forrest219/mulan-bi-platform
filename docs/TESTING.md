@@ -44,6 +44,25 @@ cd frontend && npm test
 
 - **覆盖率**：merge-to-main 时达到 50%+
 
+### E2E / Smoke Mock 闭环要求
+
+Playwright 测试若使用 `page.route()` / `route.fulfill()` / mock SSE / mock fetch，必须同时验证 mock 数据进入用户可见 DOM 或进入后续请求体。禁止只断言请求发出、URL 命中、HTTP 状态码或“页面未报错”。
+
+示例：
+```ts
+await page.route('**/api/chat/stream**', route => route.fulfill({
+  status: 200,
+  body: 'data: {"done":true,"answer":"答案是 42","trace_id":"t1"}\n\n',
+}));
+await page.locator('textarea[data-askbar-input]').fill('问题');
+await page.keyboard.press('Enter');
+
+// 必须断言 mock answer 渲染到 DOM
+await expect(page.locator('text=答案是 42')).toBeVisible();
+```
+
+对于 metadata、列表、详情、权限、反馈等 mock 响应，断言必须覆盖至少一个来自 mock payload 的唯一字段值。例如 `trace_id` 进入反馈请求体、`top_sources` 进入来源徽章、列表项名称进入表格行。
+
 ---
 
 ## CI 配置
@@ -63,6 +82,8 @@ cd frontend && npm test
 | 核心 happy path | 主流程可跑通，无 500 / 报错 |
 | 关键异常场景 | 至少 1 个错误输入有正确的错误响应 |
 | SPEC 验收标准覆盖 | SPEC.md 中每条 AC 都有对应测试断言 |
+| mock 闭环 | E2E 中所有 `page.route`/`route.fulfill` 的 mock 数据均有 DOM 或后续请求体断言 |
+| IDOR 负例 | 属主资源写入/删除/动作接口覆盖跨用户资源 403/404 场景 |
 | 类型检查 | `npm run type-check` 零错误 |
 | lint | `eslint` / `flake8` 无新增警告 |
 | 无遗留 EMERGENCY 注释 | 未经 ADR 登记的临时代码不得进入 PR |

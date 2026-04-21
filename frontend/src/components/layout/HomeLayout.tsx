@@ -60,43 +60,27 @@ export default function HomeLayout() {
 
   return (
     <div
-      className="flex min-h-screen bg-white"
-      style={{ '--conv-bar-w': collapsed ? '0px' : '260px' } as React.CSSProperties}
+      className="flex flex-row h-screen bg-white dark:bg-[#171717] text-gray-900 dark:text-gray-200"
+      style={{ '--sidebar-width': collapsed ? '0px' : '260px' } as React.CSSProperties}
     >
-        {/* 左侧对话历史栏 */}
-        <div
-          className="shrink-0 transition-all duration-200 overflow-hidden"
-          style={{ width: collapsed ? 0 : SIDEBAR_WIDTH }}
-        >
-          <div style={{ width: SIDEBAR_WIDTH }} className="h-full">
-            <ConversationBar
-              collapsed={collapsed}
-              onToggleCollapse={handleToggleCollapse}
-            />
-          </div>
-        </div>
+      <ConversationBar collapsed={collapsed} onToggleCollapse={handleToggleCollapse} />
 
-        {/* 侧边栏折叠时，在左边缘渲染展开按钮（逃生门） */}
+      <div
+        className="w-full flex-1 min-w-0 transition-[margin-left] duration-300"
+        style={{ marginLeft: collapsed ? 0 : 'var(--sidebar-width)' }}
+      >
         {collapsed && (
           <button
             onClick={handleToggleCollapse}
             title="展开侧边栏"
             aria-label="展开侧边栏"
-            className="fixed left-0 top-1/2 -translate-y-1/2 z-50
-                       w-5 h-10 flex items-center justify-center
-                       bg-white border border-l-0 border-slate-200
-                       rounded-r-lg shadow-sm
-                       text-slate-400 hover:text-slate-700 hover:bg-slate-50
-                       transition-colors duration-150"
+            className="fixed top-1/2 -translate-y-1/2 left-0 z-50 w-6 h-12 flex items-center justify-center bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-r-lg shadow-md transition-colors"
           >
-            <i className="ri-arrow-right-s-line text-base" />
+            <i className="ri-sidebar-fold-line text-gray-500 dark:text-gray-400 text-sm" />
           </button>
         )}
-
-        {/* 右侧主内容区 */}
-        <div className="flex-1 min-w-0">
-          <Outlet />
-        </div>
+        <Outlet />
       </div>
+    </div>
   );
 }

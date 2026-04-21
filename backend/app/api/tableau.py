@@ -705,15 +705,20 @@ async def get_connection_health_overview(conn_id: int, request: Request, db: Ses
     from services.tableau.health import compute_asset_health, get_health_level
 
     assets, total = _db.get_assets(conn_id, include_deleted=False, page=1, page_size=9999)
+    asset_ids = [asset.id for asset in assets]
+    datasources_by_asset = _db.get_asset_datasources_bulk(asset_ids)
+    fields_by_asset = _db.get_datasource_fields_bulk(asset_ids)
+    health_by_asset = {}
     results = []
     total_score = 0.0
     level_counts = {"excellent": 0, "good": 0, "warning": 0, "poor": 0}
     top_issues = {}
 
     for asset in assets:
-        datasources = _db.get_asset_datasources(asset.id)
-        fields = _db.get_datasource_fields(asset.id)
+        datasources = datasources_by_asset.get(asset.id, [])
+        fields = fields_by_asset.get(asset.id, [])
         health = compute_asset_health(asset.to_dict(), datasources, fields)
+        health_by_asset[asset.id] = health
         total_score += health["score"]
         level_counts[health["level"]] += 1
 
@@ -729,7 +734,7 @@ async def get_connection_health_overview(conn_id: int, request: Request, db: Ses
             "level": health["level"],
         })
 
-        _db.update_asset_health(asset.id, health["score"], health) # JSONB 字段直接传入 dict
+    _db.update_assets_health_bulk(health_by_asset)
 
     avg_score = round(total_score / len(assets), 1) if assets else 0
     sorted_issues = sorted(top_issues.items(), key=lambda x: x[1], reverse=True)
@@ -797,4 +802,3 @@ async def get_mcp_status():
                 "error": type(e).__name__,
                 "retried": True,
             }
-

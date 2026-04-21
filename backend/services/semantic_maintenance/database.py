@@ -600,12 +600,12 @@ class SemanticMaintenanceDatabase:
         finally:
             s.close()
 
-    def get_publish_log(self, log_id: int) -> Optional[TableauPublishLog]:
+    def get_publish_log(self, log_id: int, connection_id: Optional[int] = None) -> Optional[TableauPublishLog]:
         s = self.session
         try:
-            return s.query(TableauPublishLog).filter(
-                TableauPublishLog.id == log_id
-            ).first()
+            query = s.query(TableauPublishLog).filter(TableauPublishLog.id == log_id)
+            if connection_id is not None:
+                query = query.filter(TableauPublishLog.connection_id == connection_id)
+            return query.first()
         finally:
             s.close()
-

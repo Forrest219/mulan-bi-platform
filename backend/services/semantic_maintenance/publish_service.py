@@ -415,9 +415,9 @@ class PublishService:
 
         return False, not_supported_message
 
-    def retry_publish(self, log_id: int, operator: int = None) -> Tuple[Dict[str, Any], Optional[str]]:
+    def retry_publish(self, log_id: int, operator: int = None, connection_id: Optional[int] = None) -> Tuple[Dict[str, Any], Optional[str]]:
         """重试失败的发布任务"""
-        log = self.db.get_publish_log(log_id)
+        log = self.db.get_publish_log(log_id, connection_id=connection_id)
         if not log:
             return {}, "发布日志不存在"
         if log.status != PublishStatus.FAILED:
@@ -450,9 +450,9 @@ class PublishService:
         self.db.update_publish_log_status(log.id, PublishStatus.FAILED, "重试 3 次后仍失败")
         return {}, "重试 3 次后仍失败"
 
-    def rollback_publish(self, log_id: int, operator: int = None) -> Tuple[Dict[str, Any], Optional[str]]:
+    def rollback_publish(self, log_id: int, operator: int = None, connection_id: Optional[int] = None) -> Tuple[Dict[str, Any], Optional[str]]:
         """回滚已发布的语义（将 Tableau 字段恢复为发布前的值）"""
-        log = self.db.get_publish_log(log_id)
+        log = self.db.get_publish_log(log_id, connection_id=connection_id)
         if not log:
             return {}, "发布日志不存在"
         if log.status != PublishStatus.SUCCESS:

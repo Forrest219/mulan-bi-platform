@@ -46,8 +46,8 @@ _crypto = get_tableau_crypto()
 
 def _get_publish_service(connection_id: int, user: dict, db: Session) -> PublishService:
     """创建 PublishService 实例（带认证），使用 ORM 获取连接信息"""
-    tableau_db = TableauDatabase() # 不再需要 db_path
-    conn = tableau_db.get_connection(connection_id) # 使用 ORM 获取连接
+    tableau_db = TableauDatabase(session=db)  # Use injected session
+    conn = tableau_db.get_connection(connection_id)  # Use ORM 获取连接
     if not conn:
         raise HTTPException(status_code=404, detail="连接不存在")
     try:
@@ -60,8 +60,6 @@ def _get_publish_service(connection_id: int, user: dict, db: Session) -> Publish
         token_name=conn.token_name,
         token_value=token_value,
         api_version=conn.api_version or "3.21",
-        # db_path 不再需要，PublishService 内部会使用 refactored SemanticMaintenanceDatabase
-        # db_path=_db_path(),
     )
     if not service.connect():
         raise HTTPException(status_code=502, detail="无法连接到 Tableau Server")
@@ -182,7 +180,7 @@ async def retry_publish(req: RetryPublishRequest, request: Request, db: Session 
 
     service = _get_publish_service(req.connection_id, user, db) # 传递 db
     try:
-        result, err = service.retry_publish(log_id=req.log_id, operator=user["id"])
+        result, err = service.retry_publish(log_id=req.log_id, operator=user["id"], connection_id=req.connection_id)
     finally:
         service.disconnect()
 
@@ -201,11 +199,10 @@ async def rollback_publish(req: RollbackPublishRequest, request: Request, db: Se
 
     service = _get_publish_service(req.connection_id, user, db) # 传递 db
     try:
-        result, err = service.rollback_publish(log_id=req.log_id, operator=user["id"])
+        result, err = service.rollback_publish(log_id=req.log_id, operator=user["id"], connection_id=req.connection_id)
     finally:
         service.disconnect()
 
     if err:
         raise HTTPException(status_code=400, detail=err)
     return result
-

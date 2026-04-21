@@ -326,7 +326,7 @@ function HomePageInner() {
       {/* AskBar 固定底部容器 */}
       <div
         className="fixed bottom-0 right-0 z-20 pointer-events-none"
-        style={{ left: 'var(--conv-bar-w)', transition: 'left 200ms' }}
+        style={{ left: 'var(--sidebar-width)', transition: 'left 300ms' }}
       >
         {/* 上缘渐变过渡条（纯装饰） */}
         <div className="h-3 w-full bg-gradient-to-t from-white to-white/0" aria-hidden="true" />

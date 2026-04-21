@@ -6,6 +6,7 @@ Create Date: 2026-04-16 01:00:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 revision = '20260416_010000'
 down_revision = 'add_llm_purpose_columns'
@@ -51,7 +52,7 @@ def upgrade() -> None:
         ),
         sa.Column('role', sa.String(20), nullable=False),   # 'user' | 'assistant'
         sa.Column('content', sa.Text, nullable=False),
-        sa.Column('query_context', sa.JSONB, nullable=True),  # P2 预留，支持 GIN 索引
+        sa.Column('query_context', postgresql.JSONB(astext_type=sa.Text()), nullable=True),  # P2 预留，支持 GIN 索引
         sa.Column(
             'created_at',
             sa.DateTime(timezone=True),

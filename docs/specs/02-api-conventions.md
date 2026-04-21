@@ -96,6 +96,34 @@ if user["role"] != "admin":
         raise HTTPException(403, "Access denied")
 ```
 
+#### 3.3.1 查询层隔离硬约束
+
+属主资源的写入、删除、动作触发类 API（`POST` / `PUT` / `PATCH` / `DELETE`）不得只执行“按 `id` 查询对象 → Python 判断 `owner_id` → 再按 `id` 更新/删除”的两段式校验。非 admin 路径必须在数据库查询或写入语句中携带属主谓词：
+
+```python
+# ✅ 非 admin 更新：查询层同时限定 id + owner_id
+query = db.query(Model).filter(Model.id == resource_id)
+if user["role"] != "admin":
+    query = query.filter(Model.owner_id == user["id"])
+resource = query.first()
+if not resource:
+    raise HTTPException(status_code=404, detail="资源不存在")
+```
+
+对于服务层复用方法，必须提供 owner-aware 签名或由调用方传入已验证对象，禁止服务方法内部再次只按 `id` mutation：
+
+```python
+# ✅ 推荐
+service.update_resource(db, resource_id=id, owner_id=user["id"], **fields)
+
+# ❌ 禁止
+service.update_resource(db, resource_id=id, **fields)  # 内部仅 WHERE id=:id
+```
+
+涉及间接属主的资源（例如发布日志、语义记录、资产字段）必须通过所属连接或父资源做链式隔离，数据库查询需同时包含 `child.id` 与父级 `connection_id/owner_id` 的约束，不能只验证请求体里的 `connection_id` 后再按独立 `log_id/object_id` 操作。
+
+验收测试必须覆盖跨属主负例：用户 A 拥有资源 A，用户 B 拥有资源 B，用户 A 传入自己的 `connection_id` 加 B 的 `log_id/object_id` 时必须返回 403 或 404。
+
 ---
 
 ## 4. 请求/响应约定

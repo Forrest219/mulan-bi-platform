@@ -139,10 +139,32 @@ erDiagram
   }
 }
 ```
-> 若用户已启用 MFA，`mfa_required` 为 `true`，`message` 为"请输入 MFA 验证码完成登录"，session cookie 已预置。
+> 若用户已启用 MFA，登录接口必须返回 `mfa_required: true`，`message` 为"请输入 MFA 验证码完成登录"，且不得返回完整 `user` 对象。此响应只表示进入 MFA Challenge，不表示登录完成。
 > 同时设置两个 HTTP-only Cookie：
 > - `session=<JWT>`：Access Token，7 天有效（`Max-Age=604800`）
 > - `refresh_token=<Token>`：Refresh Token，30 天 Sliding Window（`Max-Age=2592000`）
+
+**MFA Challenge Response (200):**
+```json
+{
+  "success": true,
+  "message": "请输入 MFA 验证码完成登录",
+  "mfa_required": true,
+  "user": null
+}
+```
+
+MFA Challenge 期间的 `session` Cookie 必须带可识别的 pending 状态（例如 JWT claim `mfa_pending=true`），仅允许调用 `/api/auth/mfa/verify`、`/api/auth/logout` 等完成/退出流程的端点。所有业务 API、`/api/auth/me` 和刷新 token 流程不得把 pending session 视为完整登录态。
+
+前端类型必须建模为可判别联合类型：
+```ts
+type LoginResponse =
+  | { success: true; mfa_required: true; message: string; user?: null }
+  | { success: true; mfa_required: false; message: string; user: User }
+  | { success: false; message: string };
+```
+
+验收标准：启用 MFA 的账号在调用 `/api/auth/login` 后，前端不得设置 AuthContext user，不得进入首页；只有 `/api/auth/mfa/verify` 成功后才设置 user 并颁发 refresh token。
 
 #### POST /api/auth/register
 

@@ -112,11 +112,11 @@ export function AssetInspector({ assetId, layout = 'page', onClose }: AssetInspe
                     {ASSET_TYPE_LABELS[asset.asset_type] || asset.asset_type}
                   </span>
                   <span className="text-sm text-slate-400">{asset.project_name || '未分类'}</span>
-                  {asset.tags && (
+                  {Array.isArray(asset.tags) && asset.tags.length > 0 && (
                     <div className="flex items-center gap-1">
-                      {asset.tags.split(',').map(tag => (
+                      {asset.tags.map(tag => (
                         <span key={tag} className="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
-                          {tag.trim()}
+                          {tag}
                         </span>
                       ))}
                     </div>

@@ -58,6 +58,11 @@ interface AuthContextType {
   updateUser: (user: User) => void;
 }
 
+type LoginResponse =
+  | { success: true; mfa_required: true; message: string; user?: null }
+  | { success: true; mfa_required?: false; message: string; user: User }
+  | { success: false; message?: string; detail?: string };
+
 // Access Token 剩余多少秒时触发 proactive refresh
 const ACCESS_TOKEN_REFRESH_THRESHOLD_SECONDS = 5 * 60; // 5 分钟
 
@@ -146,12 +151,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ username: email, password }),
       });
 
-      const data = await response.json();
+      const data = await response.json() as LoginResponse;
 
       if (response.ok && data.success) {
-        if (data.mfa_required) {
+        if (data.mfa_required === true) {
           // MFA enabled — 返回 MFA challenge，不设置用户上下文（验证未完成）
           return { success: true, message: data.message || '请输入 MFA 验证码', mfa_required: true };
+        }
+        if (!data.user) {
+          return { success: false, message: '登录响应缺少用户信息' };
         }
         // 正常登录完成
         setUser(data.user);
@@ -162,7 +170,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         scheduleProactiveRefresh(expiresAt);
         return { success: true, message: '登录成功' };
       } else {
-        return { success: false, message: data.detail || '登录失败' };
+        const detail = 'detail' in data ? data.detail : undefined;
+        return { success: false, message: detail || data.message || '登录失败' };
       }
     } catch {
       return { success: false, message: '网络错误' };

@@ -53,7 +53,7 @@ const GROUP_ORDER: TimeGroup[] = ['今天', '昨天', '过去 7 天', '更早'];
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ConversationBar({ collapsed: _collapsed, onToggleCollapse }: ConversationBarProps) {
+export function ConversationBar({ collapsed, onToggleCollapse }: ConversationBarProps) {
   const { conversations, addConversation, deleteConversation, updateConversationTitle } =
     useConversations();
   const { user, logout } = useAuth();
@@ -115,148 +115,162 @@ export function ConversationBar({ collapsed: _collapsed, onToggleCollapse }: Con
   }, [deleteTarget, deleteConversation, currentId, navigate]);
 
   return (
-    <div
-      className="bg-white border-r border-slate-200 flex flex-col h-full"
-      style={{ minHeight: '100vh' }}
+    <aside
+      id="sidebar"
+      className={[
+        'h-screen max-h-[100dvh] min-h-screen select-none',
+        'fixed top-0 left-0 z-50 shrink-0 overflow-x-hidden',
+        'text-sm text-gray-900 dark:text-gray-200',
+        collapsed
+          ? 'w-0 invisible'
+          : 'w-[var(--sidebar-width)] bg-gray-50/70 dark:bg-gray-950/70',
+        'transition-[width] duration-300',
+      ].join(' ')}
     >
-      {/* 顶部：折叠按钮 + 品牌区 + 新建图标按钮 */}
-      <div className="flex items-center justify-between h-14 px-3 border-b border-slate-100 flex-shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <button
-            onClick={onToggleCollapse}
-            title="折叠侧边栏"
-            aria-label="折叠侧边栏"
-            className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg
-                       text-slate-400 hover:bg-slate-100 hover:text-slate-700
-                       transition-colors duration-150"
-          >
-            <i className="ri-sidebar-fold-line text-base" />
-          </button>
-          <img
-            src={LOGO_URL}
-            alt=""
-            aria-hidden="true"
-            className="w-5 h-5 object-contain flex-shrink-0"
-          />
-          <span className="text-sm font-semibold text-slate-800 truncate">木兰平台</span>
-        </div>
-        <button
-          onClick={handleNew}
-          title="新对话  ⌘N"
-          aria-label="新对话"
-          className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg
-                     text-slate-400 hover:bg-slate-100 hover:text-slate-700
-                     transition-colors duration-150"
-        >
-          <i className="ri-edit-box-line text-base" />
-        </button>
-      </div>
+      {/* Inner flex container with my-auto */}
+      <div className="my-auto flex flex-col justify-between h-screen max-h-[100dvh] w-[var(--sidebar-width)] overflow-x-hidden scrollbar-hidden">
+        {/* Top section: sticky */}
+        <div className="sticky top-0 px-[0.5625rem] pt-2 pb-1.5 z-10 bg-gray-50/70 dark:bg-gray-950/70">
+          {/* Top: collapse button + brand + new icon */}
+          <div className="flex items-center justify-between h-12 px-1 flex-shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <button
+                onClick={onToggleCollapse}
+                title="折叠侧边栏"
+                aria-label="折叠侧边栏"
+                className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-xl
+                           text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-900
+                           transition-colors duration-150"
+              >
+                <i className="ri-sidebar-fold-line text-base" />
+              </button>
+              <img
+                src={LOGO_URL}
+                alt=""
+                aria-hidden="true"
+                className="w-5 h-5 object-contain flex-shrink-0"
+              />
+              <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate">木兰平台</span>
+            </div>
+            <button
+              onClick={handleNew}
+              title="新对话  ⌘N"
+              aria-label="新对话"
+              className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-xl
+                         text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-900
+                         transition-colors duration-150"
+            >
+              <i className="ri-edit-box-line text-base" />
+            </button>
+          </div>
 
-      {/* 搜索框 */}
-      <div className="px-3 pb-2">
-        <div className="relative">
-          <i className="ri-search-line absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
+          {/* Search box */}
+          <div className="px-1 pb-2">
+            <div className="relative">
+              <i className="ri-search-line absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="搜索对话..."
+                className="w-full pl-7 pr-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-900 border border-transparent
+                           rounded-xl focus:outline-none focus:bg-white dark:focus:bg-gray-800 focus:border-gray-200 dark:focus:border-gray-700 placeholder-gray-400"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Conversation list: overflow-y-auto */}
+        <div className="flex-1 overflow-y-auto px-2">
+          {GROUP_ORDER.map((group) => {
+            const items = grouped[group];
+            if (!items || items.length === 0) return null;
+            return (
+              <div key={group} className="mb-3">
+                <div className="text-xs text-gray-400 dark:text-gray-500 font-medium px-2 py-1">{group}</div>
+                {items.map((conv) => (
+                  <ConversationItem
+                    key={conv.id}
+                    conv={conv}
+                    isActive={conv.id === currentId}
+                    onSelect={() => {
+                      if (location.pathname === '/') {
+                        navigate(`/?conv=${conv.id}`);
+                      } else {
+                        navigate(`/chat/${conv.id}`);
+                      }
+                    }}
+                    onDelete={() => setDeleteTarget(conv)}
+                    onRename={updateConversationTitle}
+                  />
+                ))}
+              </div>
+            );
+          })}
+
+          {/* Load more (pagination, F-P1-6) */}
+          {hasMore && (
+            <button
+              onClick={() => setPage((p) => p + 1)}
+              className="w-full py-2 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-900
+                         rounded-xl transition-colors"
+            >
+              加载更多（剩余 {filtered.length - page * PAGE_SIZE} 条）
+            </button>
+          )}
+
+          {filtered.length === 0 && (
+            <div className="text-xs text-gray-400 dark:text-gray-500 text-center py-8">
+              {search ? '无匹配对话' : '暂无对话记录'}
+            </div>
+          )}
+        </div>
+
+        {/* Bottom: sticky */}
+        <div className="sticky bottom-0 border-t border-gray-200/50 dark:border-gray-800/50 px-3 py-3 space-y-1 bg-gray-50/70 dark:bg-gray-950/70">
+          {/* User info row */}
+          <div className="flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors cursor-pointer">
+            <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center shrink-0">
+              <span className="text-xs text-gray-600 dark:text-gray-300 font-bold">
+                {user?.display_name?.[0] ?? user?.username?.[0] ?? '?'}
+              </span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm text-gray-800 dark:text-gray-200 font-semibold truncate">
+                {user?.display_name ?? user?.username ?? '未知用户'}
+              </div>
+              <div className="text-xs text-gray-400 dark:text-gray-500">{user?.role ?? 'user'}</div>
+            </div>
+          </div>
+
+          {/* Settings entry (admin only) */}
+          {user?.role === 'admin' && (
+            <Link
+              to="/system/users"
+              className="flex items-center gap-2 px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400
+                         rounded-xl hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
+            >
+              <i className="ri-settings-3-line text-base" />
+              设置
+            </Link>
+          )}
+
+          {/* Logout */}
+          <button
+            onClick={async () => {
+              await logout();
+              navigate('/login');
             }}
-            placeholder="搜索对话..."
-            className="w-full pl-7 pr-3 py-1.5 text-sm bg-slate-50 border border-slate-200
-                       rounded-lg focus:outline-none focus:border-blue-300 placeholder-slate-400"
-          />
-        </div>
-      </div>
-
-      {/* 对话列表 */}
-      <div className="flex-1 overflow-y-auto px-2">
-        {GROUP_ORDER.map((group) => {
-          const items = grouped[group];
-          if (!items || items.length === 0) return null;
-          return (
-            <div key={group} className="mb-3">
-              <div className="text-xs text-slate-400 font-medium px-2 py-1">{group}</div>
-              {items.map((conv) => (
-                <ConversationItem
-                  key={conv.id}
-                  conv={conv}
-                  isActive={conv.id === currentId}
-                  onSelect={() => {
-                    if (location.pathname === '/') {
-                      navigate(`/?conv=${conv.id}`);
-                    } else {
-                      navigate(`/chat/${conv.id}`);
-                    }
-                  }}
-                  onDelete={() => setDeleteTarget(conv)}
-                  onRename={updateConversationTitle}
-                />
-              ))}
-            </div>
-          );
-        })}
-
-        {/* 加载更多（分页，F-P1-6） */}
-        {hasMore && (
-          <button
-            onClick={() => setPage((p) => p + 1)}
-            className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 hover:bg-slate-100
-                       rounded-lg transition-colors"
+            className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400
+                       rounded-xl hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
           >
-            加载更多（剩余 {filtered.length - page * PAGE_SIZE} 条）
+            <i className="ri-logout-box-line text-base" />
+            退出登录
           </button>
-        )}
-
-        {filtered.length === 0 && (
-          <div className="text-xs text-slate-400 text-center py-8">
-            {search ? '无匹配对话' : '暂无对话记录'}
-          </div>
-        )}
-      </div>
-
-      {/* 底部：用户信息 + 设置 + 退出 */}
-      <div className="border-t border-slate-200 px-3 py-3 space-y-1">
-        {/* 用户信息行 */}
-        <div className="flex items-center gap-2.5 px-2 py-2">
-          <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-            <span className="text-xs text-blue-600 font-bold">
-              {user?.display_name?.[0] ?? user?.username?.[0] ?? '?'}
-            </span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm text-slate-800 font-semibold truncate">
-              {user?.display_name ?? user?.username ?? '未知用户'}
-            </div>
-            <div className="text-xs text-slate-400">{user?.role ?? 'user'}</div>
-          </div>
         </div>
-
-        {/* 设置入口（仅 admin 可见） */}
-        {user?.role === 'admin' && (
-          <Link
-            to="/system/users"
-            className="flex items-center gap-2 px-2 py-1.5 text-sm text-slate-500
-                       rounded-lg hover:bg-slate-100 hover:text-slate-700 transition-colors"
-          >
-            <i className="ri-settings-3-line text-base" />
-            设置
-          </Link>
-        )}
-
-        {/* 退出登录 */}
-        <button
-          onClick={async () => {
-            await logout();
-            navigate('/login');
-          }}
-          className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-slate-500
-                     rounded-lg hover:bg-slate-100 hover:text-slate-700 transition-colors"
-        >
-          <i className="ri-logout-box-line text-base" />
-          退出登录
-        </button>
       </div>
 
       {/* 删除确认弹窗 */}
@@ -270,7 +284,7 @@ export function ConversationBar({ collapsed: _collapsed, onToggleCollapse }: Con
         onConfirm={handleDeleteConfirm}
         onCancel={() => setDeleteTarget(null)}
       />
-    </div>
+    </aside>
   );
 }
 

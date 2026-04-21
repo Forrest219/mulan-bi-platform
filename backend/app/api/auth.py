@@ -43,7 +43,7 @@ _REGISTER_RATE_LIMIT = 5
 _REGISTER_RATE_WINDOW = 60  # seconds
 
 
-def _create_session_token(user_id: int, username: str, role: str) -> str:
+def _create_session_token(user_id: int, username: str, role: str, mfa_pending: bool = False) -> str:
     """创建带签名和过期时间的 JWT session token"""
     payload = {
         "sub": str(user_id),
@@ -51,6 +51,7 @@ def _create_session_token(user_id: int, username: str, role: str) -> str:
         "role": role,
         "exp": int(time.time()) + _JWT_EXPIRE_SECONDS,
         "iat": int(time.time()),
+        "mfa_pending": mfa_pending,
     }
     return jwt.encode(payload, _JWT_SECRET, algorithm=_JWT_ALGORITHM)
 
@@ -62,7 +63,8 @@ def _decode_session_token(token: str) -> Optional[dict]:
         return {
             "id": int(payload["sub"]),
             "username": payload["username"],
-            "role": payload["role"]
+            "role": payload["role"],
+            "mfa_pending": payload.get("mfa_pending", False),
         }
     except jwt.ExpiredSignatureError:
         return None
@@ -131,8 +133,8 @@ async def login(request: LoginRequest, response: Response, http_request: Request
 
     # 检查 MFA 是否启用
     if user.get("mfa_enabled"):
-        # MFA 启用：颁发临时 session cookie，但返回 MFA challenge
-        token = _create_session_token(user["id"], user["username"], user["role"])
+        # MFA 启用：颁发 pending session cookie，返回 MFA challenge，不返回完整用户
+        token = _create_session_token(user["id"], user["username"], user["role"], mfa_pending=True)
         _is_secure = os.environ.get("SECURE_COOKIES", "true").lower() == "true"
         response.set_cookie(
             key="session",
@@ -145,7 +147,8 @@ async def login(request: LoginRequest, response: Response, http_request: Request
         return LoginResponse(
             success=True,
             message="请输入 MFA 验证码完成登录",
-            user=user
+            mfa_required=True,
+            user=None,
         )
 
     # MFA 未启用：完整登录流程
@@ -351,26 +354,39 @@ async def mfa_status(request: Request):
 
 
 @router.post("/mfa/verify")
-async def mfa_verify(request: MFAVerifyRequest, response: Response):
+async def mfa_verify(request: MFAVerifyRequest, response: Response, http_request: Request):
     """完成 MFA 登录验证（登录流程的第二步）。
 
     在登录返回 mfa_required=True 后，前端调用此接口验证 TOTP Code。
     验证成功后颁发 Refresh Token 完成登录。
     """
-    user_info = _get_current_user(request)
+    user_info = _decode_session_token(http_request.cookies.get("session") or "")
     if not user_info:
         raise HTTPException(status_code=401, detail="会话已过期，请重新登录")
+
+    if not user_info.get("mfa_pending"):
+        raise HTTPException(status_code=400, detail="当前会话不需要 MFA 验证")
 
     if not auth_service.verify_mfa_code(user_info["id"], request.code):
         raise HTTPException(status_code=400, detail="MFA 验证码不正确")
 
-    # MFA 验证成功：颁发 Refresh Token 完成登录
-    _device = request.headers.get("User-Agent", "")[:128]
+    # MFA 验证成功：颁发新的非 pending session cookie + Refresh Token
+    new_token = _create_session_token(user_info["id"], user_info["username"], user_info["role"], mfa_pending=False)
+    _is_secure = os.environ.get("SECURE_COOKIES", "true").lower() == "true"
+    response.set_cookie(
+        key="session",
+        value=new_token,
+        httponly=True,
+        samesite="lax",
+        secure=_is_secure,
+        max_age=_JWT_EXPIRE_SECONDS,
+    )
+
+    _device = http_request.headers.get("User-Agent", "")[:128]
     refresh_token = auth_service.create_refresh_token(
         user_id=user_info["id"],
         device_fingerprint=_device,
     )
-    _is_secure = os.environ.get("SECURE_COOKIES", "true").lower() == "true"
     response.set_cookie(
         key=_REFRESH_TOKEN_COOKIE_NAME,
         value=refresh_token,

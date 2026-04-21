@@ -122,6 +122,18 @@ class TableauAsset(Base):
     connection = relationship("TableauConnection", back_populates="assets")
     datasources = relationship("TableauAssetDatasource", back_populates="asset", cascade="all, delete-orphan")
 
+    def _normalized_tags(self) -> Optional[List[str]]:
+        if self.tags is None:
+            return None
+        if isinstance(self.tags, str):
+            values = self.tags.split(",")
+        elif isinstance(self.tags, list):
+            values = self.tags
+        else:
+            return None
+        tags = [str(tag).strip() for tag in values if str(tag).strip()]
+        return tags or None
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
@@ -140,7 +152,7 @@ class TableauAsset(Base):
             "ai_summary_generated_at": self.ai_summary_generated_at.strftime("%Y-%m-%d %H:%M:%S") if self.ai_summary_generated_at else None,
             "parent_workbook_id": self.parent_workbook_id,
             "parent_workbook_name": self.parent_workbook_name,
-            "tags": self.tags, # JSONB 字段直接是 Python 对象
+            "tags": self._normalized_tags(),
             "sheet_type": self.sheet_type,
             "created_on_server": self.created_on_server.strftime("%Y-%m-%d %H:%M:%S") if self.created_on_server else None,
             "updated_on_server": self.updated_on_server.strftime("%Y-%m-%d %H:%M:%S") if self.updated_on_server else None,
@@ -525,6 +537,18 @@ class TableauDatabase:
     def get_asset_datasources(self, asset_id: int) -> List[TableauAssetDatasource]:
         return self.session.query(TableauAssetDatasource).filter(TableauAssetDatasource.asset_id == asset_id).all()
 
+    def get_asset_datasources_bulk(self, asset_ids: List[int]) -> Dict[int, List[TableauAssetDatasource]]:
+        """批量获取多个资产的数据源关联，避免健康总览 N+1 查询。"""
+        if not asset_ids:
+            return {}
+        rows = self.session.query(TableauAssetDatasource).filter(
+            TableauAssetDatasource.asset_id.in_(asset_ids)
+        ).all()
+        grouped: Dict[int, List[TableauAssetDatasource]] = {asset_id: [] for asset_id in asset_ids}
+        for row in rows:
+            grouped.setdefault(row.asset_id, []).append(row)
+        return grouped
+
     def update_asset_summary(self, asset_id: int, summary: str) -> bool:
         """更新资产 AI 摘要"""
         asset = self.get_asset(asset_id)
@@ -564,6 +588,22 @@ class TableauDatabase:
         asset.health_details = details_json
         self.session.commit()
         return True
+
+    def update_assets_health_bulk(self, health_results: Dict[int, Dict[str, Any]]) -> int:
+        """批量更新资产健康评分，一次 commit。"""
+        if not health_results:
+            return 0
+        assets = self.session.query(TableauAsset).filter(
+            TableauAsset.id.in_(list(health_results.keys()))
+        ).all()
+        for asset in assets:
+            result = health_results.get(asset.id)
+            if result is None:
+                continue
+            asset.health_score = result["score"]
+            asset.health_details = result
+        self.session.commit()
+        return len(assets)
 
     def get_children_assets(self, parent_tableau_id: str, connection_id: int) -> List[TableauAsset]:
         """获取 workbook 下属的 view/dashboard"""
@@ -661,6 +701,18 @@ class TableauDatabase:
             TableauDatasourceField.asset_id == asset_id
         ).order_by(TableauDatasourceField.role, TableauDatasourceField.field_name).all()
 
+    def get_datasource_fields_bulk(self, asset_ids: List[int]) -> Dict[int, List[TableauDatasourceField]]:
+        """批量获取多个资产的字段列表，避免健康总览 N+1 查询。"""
+        if not asset_ids:
+            return {}
+        rows = self.session.query(TableauDatasourceField).filter(
+            TableauDatasourceField.asset_id.in_(asset_ids)
+        ).order_by(TableauDatasourceField.asset_id, TableauDatasourceField.role, TableauDatasourceField.field_name).all()
+        grouped: Dict[int, List[TableauDatasourceField]] = {asset_id: [] for asset_id in asset_ids}
+        for row in rows:
+            grouped.setdefault(row.asset_id, []).append(row)
+        return grouped
+
     def update_field_annotation(self, field_id: int, ai_caption: str = None,
                                  ai_description: str = None, ai_role: str = None,
                                  ai_confidence: float = None) -> bool:
@@ -694,4 +746,3 @@ class TableauDatabase:
             conn.last_sync_duration_sec = duration_sec
         self.session.commit()
         return True
-

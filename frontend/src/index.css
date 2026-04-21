@@ -8,6 +8,7 @@
   --color-text-light: #5C6B7B;
   --color-404-text: #34495E;
   --color-background-light: #F8F8F8;
+  --sidebar-width: 260px;
 }
 
 @layer base {
@@ -17,8 +18,8 @@
   }
 
   ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
   }
 
   ::-webkit-scrollbar-track {
@@ -33,6 +34,16 @@
   ::-webkit-scrollbar-thumb:hover {
     background-color: #94A3B8;
   }
+
+  body {
+    @apply bg-white text-gray-900 antialiased;
+  }
+
+  .dark body,
+  .dark {
+    background-color: #171717;
+    color: #eee;
+  }
 }
 
 @layer components {
@@ -43,4 +54,127 @@
   .link-secondary {
     @apply text-gray-600 hover:text-gray-700;
   }
+
+  .font-primary {
+    font-family: 'Archivo', 'Vazirmatn', system-ui, sans-serif;
+  }
+
+  .markdown-prose {
+    @apply text-gray-900 dark:text-gray-100;
+  }
+
+  .markdown-prose-sm {
+    @apply text-sm;
+  }
+
+  .markdown-prose p {
+    @apply mb-2;
+  }
+
+  .markdown-prose p:last-child {
+    @apply mb-0;
+  }
+
+  .scrollbar-hidden {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .scrollbar-hidden::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('/assets/fonts/Inter-Variable.ttf');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Archivo';
+  src: url('/assets/fonts/Archivo-Variable.ttf');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/assets/fonts/Vazirmatn-Variable.ttf');
+  font-display: swap;
+}
+
+:root {
+  --app-text-scale: 1;
+}
+
+html {
+  word-break: break-word;
+  font-size: calc(1rem * var(--app-text-scale, 1));
+}
+
+body {
+  background: #fff;
+  color: #000;
+}
+
+.dark body {
+  background: #171717;
+  color: #eee;
+}
+
+.font-primary {
+  font-family: 'Archivo', 'Vazirmatn', sans-serif;
+}
+
+.markdown-prose {
+  @apply prose dark:prose-invert prose-blockquote:border-s-gray-100 prose-blockquote:dark:border-gray-800 prose-blockquote:border-s-2 prose-blockquote:not-italic prose-blockquote:font-normal prose-headings:font-semibold prose-hr:my-4 prose-hr:border-gray-50 prose-hr:dark:border-gray-850 prose-p:my-0 prose-img:my-1 prose-headings:my-1 prose-pre:my-0 prose-table:my-0 prose-blockquote:my-0 prose-ul:-my-0 prose-ol:-my-0 prose-li:-my-0 whitespace-pre-line;
+}
+
+.markdown-prose-sm {
+  @apply text-sm prose dark:prose-invert prose-blockquote:border-s-gray-100 prose-blockquote:dark:border-gray-800 prose-blockquote:border-s-2 prose-blockquote:not-italic prose-blockquote:font-normal prose-headings:font-semibold prose-hr:my-2 prose-hr:border-gray-50 prose-hr:dark:border-gray-850 prose-p:my-0 prose-img:my-1 prose-headings:my-1 prose-pre:my-0 prose-table:my-0 prose-blockquote:my-0 prose-ul:-my-0 prose-ol:-my-0 prose-li:-my-0 whitespace-pre-line;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(215, 215, 215, 0.6);
+  border-color: rgba(255, 255, 255, var(--tw-border-opacity));
+  border-radius: 9999px;
+  border-width: 1px;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background-color: rgba(67, 67, 67, 0.6);
+  border-color: rgba(0, 0, 0, var(--tw-border-opacity));
+}
+
+::-webkit-scrollbar {
+  height: 0.45rem;
+  width: 0.45rem;
+}
+
+::-webkit-scrollbar-track {
+  background-color: transparent;
+  border-radius: 9999px;
+}
+
+.scrollbar-hidden:active::-webkit-scrollbar-thumb,
+.scrollbar-hidden:focus::-webkit-scrollbar-thumb,
+.scrollbar-hidden:hover::-webkit-scrollbar-thumb {
+  visibility: visible;
+}
+
+.scrollbar-hidden::-webkit-scrollbar-thumb {
+  visibility: hidden;
+}
+
+.scrollbar-hidden::-webkit-scrollbar-corner {
+  display: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }

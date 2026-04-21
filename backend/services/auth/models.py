@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Table, Text, Index, CheckConstraint
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, selectinload
 from app.core.database import Base, JSONB, sa_func, sa_text # 导入中央配置的 Base, JSONB, func, text
 
 # 关联表：用户-组
@@ -107,7 +107,17 @@ class UserGroup(Base):
             "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
         }
         if include_members:
-            result["members"] = [m.to_dict() for m in self.members] if self.members else []
+            result["members"] = [
+                {
+                    "id": m.id,
+                    "username": m.username,
+                    "display_name": m.display_name,
+                    "email": m.email,
+                    "role": m.role,
+                    "is_active": m.is_active,
+                }
+                for m in self.members
+            ] if self.members else []
         return result
 
     def get_permissions(self) -> List[str]:
@@ -190,19 +200,27 @@ class UserDatabase:
 
     def get_user(self, user_id: int) -> Optional[User]:
         """获取用户"""
-        return self.session.query(User).filter(User.id == user_id).first()
+        return self.session.query(User).options(
+            selectinload(User.groups).selectinload(UserGroup.group_perms)
+        ).filter(User.id == user_id).first()
 
     def get_user_by_username(self, username: str) -> Optional[User]:
         """根据用户名获取用户"""
-        return self.session.query(User).filter(User.username == username).first()
+        return self.session.query(User).options(
+            selectinload(User.groups).selectinload(UserGroup.group_perms)
+        ).filter(User.username == username).first()
 
     def get_user_by_email(self, email: str) -> Optional[User]:
         """根据邮箱获取用户"""
-        return self.session.query(User).filter(User.email == email).first()
+        return self.session.query(User).options(
+            selectinload(User.groups).selectinload(UserGroup.group_perms)
+        ).filter(User.email == email).first()
 
     def get_users(self, limit: int = 100, role: str = None) -> List[User]:
         """获取用户列表"""
-        query = self.session.query(User)
+        query = self.session.query(User).options(
+            selectinload(User.groups).selectinload(UserGroup.group_perms)
+        )
         if role:
             query = query.filter(User.role == role)
         return query.order_by(User.created_at.desc()).limit(limit).all()
@@ -240,7 +258,10 @@ class UserDatabase:
 
     def get_group(self, group_id: int) -> Optional[UserGroup]:
         """获取用户组"""
-        return self.session.query(UserGroup).filter(UserGroup.id == group_id).first()
+        return self.session.query(UserGroup).options(
+            selectinload(UserGroup.members),
+            selectinload(UserGroup.group_perms),
+        ).filter(UserGroup.id == group_id).first()
 
     def get_group_by_name(self, name: str) -> Optional[UserGroup]:
         """根据名称获取用户组"""
@@ -248,7 +269,10 @@ class UserDatabase:
 
     def get_groups(self) -> List[UserGroup]:
         """获取所有用户组"""
-        return self.session.query(UserGroup).order_by(UserGroup.created_at.desc()).all()
+        return self.session.query(UserGroup).options(
+            selectinload(UserGroup.members),
+            selectinload(UserGroup.group_perms),
+        ).order_by(UserGroup.created_at.desc()).all()
 
     def update_group(self, group_id: int, name: str = None, description: str = None) -> bool:
         """更新用户组"""
@@ -295,14 +319,18 @@ class UserDatabase:
 
     def get_group_members(self, group_id: int) -> List[User]:
         """获取组成员"""
-        group = self.session.query(UserGroup).filter(UserGroup.id == group_id).first()
+        group = self.session.query(UserGroup).options(
+            selectinload(UserGroup.members).selectinload(User.groups).selectinload(UserGroup.group_perms)
+        ).filter(UserGroup.id == group_id).first()
         if group:
             return group.members
         return []
 
     def get_user_groups(self, user_id: int) -> List[UserGroup]:
         """获取用户所属的组"""
-        user = self.session.query(User).filter(User.id == user_id).first()
+        user = self.session.query(User).options(
+            selectinload(User.groups).selectinload(UserGroup.group_perms)
+        ).filter(User.id == user_id).first()
         if user:
             return user.groups
         return []
@@ -469,4 +497,3 @@ class UserDatabase:
     # close 方法不再需要，因为 session 由 SessionLocal 管理
     # def close(self):
     #     self.session.close()
-

@@ -39,7 +39,7 @@ export interface TableauAsset {
   // Phase 2a: hierarchy
   parent_workbook_id: string | null;
   parent_workbook_name: string | null;
-  tags: string | null;
+  tags: string[] | null;
   sheet_type: string | null;
   created_on_server: string | null;
   updated_on_server: string | null;

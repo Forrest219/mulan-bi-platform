@@ -242,6 +242,10 @@ Tableau Server/Cloud 的 PAT 认证连接配置。
 | field_count | Integer | nullable | 字段数量 |
 | is_certified | Boolean | nullable | 是否已认证（datasource） |
 
+**API 类型契约**：
+- `tags` 是 JSONB 数组字段，对外响应必须统一为 `string[] | null`，不得返回逗号拼接字符串。
+- 前端不得对 `tags` 直接调用字符串方法（如 `.split()`），必须按数组渲染；兼容历史数据时应先做运行时归一化。
+
 **唯一约束**：`(connection_id, tableau_id)` -> `uq_asset_conn_tid`
 
 **索引**：
@@ -1102,11 +1106,33 @@ decrypted = crypto.decrypt(encrypted)     # 使用时解密
 
 - `to_dict()` 方法不暴露 `token_encrypted` 字段
 - 连接列表仅返回 `token_name`，不返回 token 密文或明文
+- `tableau_assets.tags` 对外响应保持 JSON 数组语义，禁止在后端 `json.dumps()` 后让前端按字符串解析
 
 ### 6.4 传输安全
 
 - Tableau Server 连接使用 HTTPS
 - REST API 调用设置超时限制（认证 20s，数据请求 30s，signout 5s）
+
+### 6.5 发布日志授权边界
+
+语义发布、重试、回滚接口必须同时验证请求连接与目标发布日志/语义对象属于同一连接，并且该连接对当前用户可访问。
+
+禁止模式：
+```python
+verify_connection_access(req.connection_id, user, db)
+log = get_publish_log(req.log_id)  # ❌ 未限定 connection_id
+rollback(log.connection_id, log.object_id)
+```
+
+必须模式：
+```python
+log = get_publish_log(req.log_id, connection_id=req.connection_id)
+if not log:
+    raise HTTPException(status_code=404, detail="发布日志不存在")
+verify_connection_access(log.connection_id, user, db)
+```
+
+所有按 `log_id`、`asset_id`、`field_id`、`ds_id` 触发副作用的接口，都必须在数据库查询层绑定父级 `connection_id`。传入的 `connection_id` 只能作为查询谓词，不得只作为前置权限校验凭据。
 
 ---
 
@@ -1268,6 +1294,8 @@ Celery Beat (每60s)          scheduled_sync_all          PostgreSQL         syn
 | UPSERT 幂等性 | 已有同步数据 | 二次同步后数据不重复，is_deleted 正确恢复 |
 | 软删除 | Tableau 上删除资产后同步 | 本地 is_deleted=true，后续查询不返回 |
 | 权限隔离 | 两个 data_admin 用户 | 用户 A 无法访问用户 B 的连接 |
+| 发布日志 IDOR | 用户 A 拥有连接 A，用户 B 拥有连接 B，B 有发布日志 L | 用户 A 使用 `connection_id=A` + `log_id=L` 调用 retry/rollback 必须 403/404 |
+| tags 契约 | 资产 tags 为 JSON 数组 | API 返回数组；前端资产详情不报错且逐个渲染标签 |
 | 加密密钥轮换 | 变更 TABLEAU_ENCRYPTION_KEY | 旧连接测试返回解密失败提示 |
 
 ### 9.3 性能测试

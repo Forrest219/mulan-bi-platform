@@ -24,7 +24,8 @@ def _decode_session_token(token: str) -> Optional[dict]:
         return {
             "id": int(payload["sub"]),
             "username": payload["username"],
-            "role": payload["role"]
+            "role": payload["role"],
+            "mfa_pending": payload.get("mfa_pending", False),
         }
     except jwt.ExpiredSignatureError:
         return None
@@ -47,6 +48,10 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> dict:
         raise AuthError.session_expired()
     token_info = _decode_session_token(token)
     if not token_info:
+        raise AuthError.session_expired()
+
+    # Pending MFA session is not a full login - reject until MFA is verified
+    if token_info.get("mfa_pending"):
         raise AuthError.session_expired()
 
     # 从数据库验证用户当前状态和角色（防止 token 中的角色过期）
