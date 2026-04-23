@@ -302,7 +302,6 @@ async def generate_field_ai(field_id: int, req: GenerateFieldAIRequest, request:
 class ResolveFieldRequest(BaseModel):
     """向量字段解析请求模型"""
     fuzzy_name: str
-    datasource_luid: Optional[str] = None
     top_k: int = Field(default=5, ge=1, le=20)
 
 
@@ -338,7 +337,6 @@ async def resolve_field_semantics(
     candidates, err = sm.resolve_field_by_embedding(
         connection_id=connection_id,
         fuzzy_name=req.fuzzy_name,
-        datasource_luid=req.datasource_luid,
         top_k=req.top_k,
     )
 

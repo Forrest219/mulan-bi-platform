@@ -797,27 +797,37 @@ class SemanticMaintenanceService:
         self,
         connection_id: int,
         fuzzy_name: str,
-        datasource_luid: str = None,
         top_k: int = 5,
     ) -> tuple:
         """
         向量语义字段解析（Spec 26 §P0 — /fields/resolve）。
 
         1. 对 fuzzy_name 生成 embedding
-        2. 在 kb_embeddings（HNSW） 中搜索 source_type='field'
-        3. 对每个候选，通过 field_registry_id join tableau_datasource_fields 补全 role / data_type
+        2. 在 tableau_field_semantics（HNSW 索引）搜索 source_type='field'
+        3. SQL JOIN tableau_datasource_fields 补全 role / data_type（无 N+1）
         4. 返回带 similarity 置信度的候选列表
         """
         from services.llm.service import llm_service
         from services.knowledge_base.embedding_service import embedding_service
         from services.tableau.models import TableauDatasourceField
 
-        # Step 1: 生成 query embedding（async → sync bridge）
+        # Step 1: 生成 query embedding（兼容 sync / async 上下文）
+        from services.knowledge_base.embedding_service import embedding_service
         try:
             import asyncio
-            query_embedding = asyncio.run(
-                embedding_service.embed_text(fuzzy_name)
-            )
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is None:
+                query_embedding = asyncio.run(embedding_service.embed_text(fuzzy_name))
+            else:
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(
+                        lambda: asyncio.run(embedding_service.embed_text(fuzzy_name))
+                    )
+                    query_embedding = future.result()
         except Exception as e:
             logger.warning("resolve_field_by_embedding: embed_text 失败，fallback 到空列表: %s", e)
             return [], None
@@ -844,11 +854,6 @@ class SemanticMaintenanceService:
             if fid in seen_ids:
                 continue
             seen_ids.add(fid)
-
-            # datasource_luid 过滤（如果指定了）
-            if datasource_luid and row.get("datasource_luid") and row["datasource_luid"] != datasource_luid:
-                continue
-
             confidence = float(row.get("similarity", 0.0))
             candidates.append({
                 "field_semantic_id": fid,
@@ -859,6 +864,7 @@ class SemanticMaintenanceService:
                 "role": row.get("role"),
                 "data_type": row.get("data_type"),
                 "connection_id": row.get("connection_id"),
+                "chunk_text": row.get("chunk_text"),
                 "confidence": round(confidence, 4),
                 "match_source": "vector_hnsw",
             })
