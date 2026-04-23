@@ -622,24 +622,19 @@ class SemanticMaintenanceDatabase:
         model_name: str = "text-embedding-3-small",
         token_count: int = None,
     ) -> None:
-        """Upsert 字段的语义向量（source_type='field'）。"""
-        from services.knowledge_base.models import KbEmbedding
+        """将字段语义 embedding 写入 tableau_field_semantics.embedding 列（HNSW 索引）。"""
         s = self.session
         try:
-            s.query(KbEmbedding).filter(
-                KbEmbedding.source_type == "field",
-                KbEmbedding.source_id == field_semantic_id,
-            ).delete(synchronize_session=False)
-            e = KbEmbedding(
-                source_type="field",
-                source_id=field_semantic_id,
-                chunk_index=0,
-                chunk_text=chunk_text,
-                embedding=embedding,
-                model_name=model_name,
-                token_count=token_count,
-            )
-            s.add(e)
+            field = s.query(TableauFieldSemantics).filter(
+                TableauFieldSemantics.id == field_semantic_id
+            ).first()
+            if not field:
+                logger.warning("upsert_field_embedding: field_semantic_id=%d 不存在，跳过", field_semantic_id)
+                return
+            field.embedding = embedding  # Vector(1024) 列，SQLAlchemy 自动转为 pgvector
+            field.embedding_model = model_name
+            from datetime import datetime
+            field.embedding_generated_at = datetime.utcnow()
             s.commit()
         finally:
             s.close()
@@ -652,34 +647,34 @@ class SemanticMaintenanceDatabase:
         threshold: float = 0.5,
     ) -> List[Dict]:
         """
-        向量相似度搜索字段语义（HNSW 索引，pgvector 余弦距离）。
-        source_type='field' 的 kb_embeddings 记录关联 field_semantic_id，
-        再 join tableau_field_semantics 获取字段信息。
+        向量相似度搜索字段语义（HNSW 索引）。
+
+        直接在 tableau_field_semantics.embedding 列上做 cosine similarity 搜索，
+        通过 field_registry_id join tableau_datasource_fields 补全 role / data_type。
         """
         from sqlalchemy import text
         s = self.session
         try:
             sql = text("""
                 SELECT
-                    kb.id,
-                    kb.source_id        AS field_semantic_id,
-                    kb.chunk_text,
-                    kb.model_name,
-                    kb.created_at,
-                    tfs.connection_id,
+                    tfs.id             AS field_semantic_id,
                     tfs.tableau_field_id,
                     tfs.semantic_name,
                     tfs.semantic_name_zh,
                     tfs.semantic_definition,
                     tfs.field_registry_id,
-                    1 - (kb.embedding <=> :qe::vector) AS similarity
-                FROM kb_embeddings kb
-                JOIN tableau_field_semantics tfs
-                    ON tfs.id = kb.source_id
-                    AND kb.source_type = 'field'
+                    tfs.connection_id,
+                    tfs.embedding      AS chunk_text,
+                    tdsf.role,
+                    tdsf.data_type,
+                    1 - (tfs.embedding <=> :qe::vector) AS similarity
+                FROM tableau_field_semantics tfs
+                LEFT JOIN tableau_datasource_fields tdsf
+                    ON tdsf.id = tfs.field_registry_id
                 WHERE tfs.connection_id = :conn_id
-                  AND 1 - (kb.embedding <=> :qe::vector) > :threshold
-                ORDER BY kb.embedding <=> :qe::vector
+                  AND tfs.embedding IS NOT NULL
+                  AND 1 - (tfs.embedding <=> :qe::vector) > :threshold
+                ORDER BY tfs.embedding <=> :qe::vector
                 LIMIT :top_k
             """)
             rows = s.execute(sql, {

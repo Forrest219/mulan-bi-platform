@@ -260,7 +260,33 @@ class SemanticMaintenanceService:
                 user_id=user_id,
                 **data
             )
+        # 触发 embedding 生成（向量搜索依赖）
+        self._upsert_field_embedding(obj.id, data)
         return obj.to_dict()
+
+    def _upsert_field_embedding(self, field_semantic_id: int, data: Dict[str, Any]) -> None:
+        """为字段语义生成并写入 embedding 向量（HNSW）。"""
+        import asyncio
+        from services.knowledge_base.embedding_service import embedding_service
+        chunk_text = " ".join(filter(None, [
+            data.get("semantic_name", ""),
+            data.get("semantic_name_zh", ""),
+            data.get("semantic_definition", ""),
+        ]))
+        if not chunk_text.strip():
+            return
+        try:
+            embedding = asyncio.run(
+                embedding_service.embed_text(chunk_text)
+            )
+            self.db.upsert_field_embedding(
+                field_semantic_id=field_semantic_id,
+                chunk_text=chunk_text,
+                embedding=embedding,
+                model_name="text-embedding-3-small",
+            )
+        except Exception as e:
+            logger.warning("_upsert_field_embedding: field_id=%d 生成失败: %s", field_semantic_id, e)
 
     def update_field_semantics(
         self,
@@ -291,6 +317,8 @@ class SemanticMaintenanceService:
         if not success:
             return False, "更新失败"
         updated = self.db.get_field_semantics_by_id(field_id)
+        # 触发 embedding 重新生成（语义字段变更时）
+        self._upsert_field_embedding(field_id, fields)
         return True, updated.to_dict()
 
     def submit_field_for_review(self, field_id: int, user_id: int = None) -> tuple:
@@ -761,7 +789,7 @@ class SemanticMaintenanceService:
         if not query_embedding:
             return [], None
 
-        # Step 2: 向量搜索
+        # Step 2: 向量搜索（HNSW，role/data_type 已在 JOIN 中返回）
         rows = self.db.search_field_embeddings(
             query_embedding=query_embedding,
             connection_id=connection_id,
@@ -770,44 +798,30 @@ class SemanticMaintenanceService:
         )
 
         if not rows:
-            logger.info("resolve_field_by_embedding: connection_id=%d 命中 0 条，向量可能尚未生成", connection_id)
+            logger.info("resolve_field_by_embedding: connection_id=%d 命中 0 条（embedding 可能尚未生成）", connection_id)
 
-        # Step 3: 补全 field_registry_id → role / data_type
+        # Step 3: 构造候选列表（role/data_type 来自 SQL JOIN，无 N+1）
         candidates = []
-        seen_field_ids = set()
+        seen_ids = set()
         for row in rows:
-            field_semantic_id = row.get("field_semantic_id")
-            if field_semantic_id in seen_field_ids:
+            fid = row.get("field_semantic_id")
+            if fid in seen_ids:
                 continue
-            seen_field_ids.add(field_semantic_id)
+            seen_ids.add(fid)
 
-            # 获取 role / data_type（通过 tableau_datasource_fields）
-            role = None
-            data_type = None
-            if row.get("field_registry_id"):
-                db_session = self.db.session
-                try:
-                    fld = db_session.query(TableauDatasourceField).filter(
-                        TableauDatasourceField.id == row["field_registry_id"]
-                    ).first()
-                    if fld:
-                        role = fld.role
-                        data_type = fld.data_type
-                        # 若指定了 datasource_luid，还需要过滤
-                        if datasource_luid and fld.datasource_luid != datasource_luid:
-                            continue
-                finally:
-                    db_session.close()
+            # datasource_luid 过滤（如果指定了）
+            if datasource_luid and row.get("datasource_luid") and row["datasource_luid"] != datasource_luid:
+                continue
 
             confidence = float(row.get("similarity", 0.0))
             candidates.append({
-                "field_semantic_id": field_semantic_id,
+                "field_semantic_id": fid,
                 "tableau_field_id": row.get("tableau_field_id"),
                 "semantic_name": row.get("semantic_name"),
                 "semantic_name_zh": row.get("semantic_name_zh"),
                 "semantic_definition": row.get("semantic_definition"),
-                "role": role,
-                "data_type": data_type,
+                "role": row.get("role"),
+                "data_type": row.get("data_type"),
                 "connection_id": row.get("connection_id"),
                 "confidence": round(confidence, 4),
                 "match_source": "vector_hnsw",

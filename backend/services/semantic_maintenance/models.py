@@ -6,7 +6,8 @@ from sqlalchemy import (
     Text, Float, ForeignKey, UniqueConstraint, Index
 )
 from sqlalchemy.orm import relationship
-from app.core.database import Base, JSONB, sa_func, sa_text # 导入中央配置的 Base, JSONB, func, text
+from app.core.database import Base, JSONB, sa_func, sa_text
+from pgvector.sqlalchemy import Vector
 
 # --- 枚举常量 ---
 class SemanticStatus:
@@ -173,6 +174,10 @@ class TableauFieldSemantics(Base):
     version = Column(Integer, default=1, server_default=sa_func.cast(1, Integer()))
     published_to_tableau = Column(Boolean, default=False, server_default=sa_text('false')) # Boolean 默认值
     published_at = Column(DateTime, nullable=True)
+    # 向量 embedding（HNSW 索引，migration 已建列）
+    embedding = Column(Vector(1024), nullable=True)
+    embedding_model = Column(String(64), nullable=True)
+    embedding_generated_at = Column(DateTime, nullable=True)
     created_by = Column(Integer, nullable=True)
     updated_by = Column(Integer, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
@@ -202,6 +207,9 @@ class TableauFieldSemantics(Base):
             "version": self.version,
             "published_to_tableau": self.published_to_tableau,
             "published_at": self.published_at.strftime("%Y-%m-%d %H:%M:%S") if self.published_at else None,
+            "embedding": self.embedding,
+            "embedding_model": self.embedding_model,
+            "embedding_generated_at": self.embedding_generated_at.strftime("%Y-%m-%d %H:%M:%S") if self.embedding_generated_at else None,
             "created_by": self.created_by,
             "updated_by": self.updated_by,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
