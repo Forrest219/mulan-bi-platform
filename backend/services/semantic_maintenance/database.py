@@ -653,6 +653,16 @@ class SemanticMaintenanceDatabase:
         通过 field_registry_id join tableau_datasource_fields 补全 role / data_type。
         """
         from sqlalchemy import text
+        # 边界校验
+        if not query_embedding or not isinstance(query_embedding, (list, tuple)):
+            logger.warning("search_field_embeddings: query_embedding 无效，跳过")
+            return []
+        if len(query_embedding) != 1024:
+            logger.warning("search_field_embeddings: query_embedding 维度=%d，需为 1024，跳过", len(query_embedding))
+            return []
+        top_k = max(1, min(top_k, 100))
+        threshold = max(0.0, min(float(threshold), 1.0))
+
         s = self.session
         try:
             sql = text("""
@@ -664,7 +674,7 @@ class SemanticMaintenanceDatabase:
                     tfs.semantic_definition,
                     tfs.field_registry_id,
                     tfs.connection_id,
-                    tfs.embedding      AS chunk_text,
+                    tfs.embedding,
                     tdsf.role,
                     tdsf.data_type,
                     1 - (tfs.embedding <=> :qe::vector) AS similarity

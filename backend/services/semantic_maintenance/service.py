@@ -260,14 +260,34 @@ class SemanticMaintenanceService:
                 user_id=user_id,
                 **data
             )
-        # 触发 embedding 生成（向量搜索依赖）
-        self._upsert_field_embedding(obj.id, data)
+        # 触发 embedding 生成（新建记录必然生成，跳过 diff check）
+        self._upsert_field_embedding(obj.id, data, skip_diff_check=True)
         return obj.to_dict()
 
-    def _upsert_field_embedding(self, field_semantic_id: int, data: Dict[str, Any]) -> None:
-        """为字段语义生成并写入 embedding 向量（HNSW）。"""
+    def _semantic_fields_changed(self, old: "TableauFieldSemantics", new_data: Dict[str, Any]) -> bool:
+        """检查语义字段（参与 embedding 计算的字段）是否有变化。"""
+        SEMANTIC_KEYS = ("semantic_name", "semantic_name_zh", "semantic_definition")
+        for key in SEMANTIC_KEYS:
+            old_val = getattr(old, key, None) or ""
+            new_val = new_data.get(key, "") or ""
+            if old_val != new_val:
+                return True
+        return False
+
+    def _upsert_field_embedding(self, field_semantic_id: int, data: Dict[str, Any], skip_diff_check: bool = False) -> None:
+        """为字段语义生成并写入 embedding 向量（HNSW）。只在语义字段实际变化时触发。"""
         import asyncio
+        from semantic_maintenance.models import TableauFieldSemantics
         from services.knowledge_base.embedding_service import embedding_service
+
+        # Diff 检查：跳过 update 场景由调用方保证；get_or_create 强制生成
+        if not skip_diff_check:
+            existing = self.db.session.query(TableauFieldSemantics).filter(
+                TableauFieldSemantics.id == field_semantic_id
+            ).first()
+            if existing and not self._semantic_fields_changed(existing, data):
+                return
+
         chunk_text = " ".join(filter(None, [
             data.get("semantic_name", ""),
             data.get("semantic_name_zh", ""),
@@ -276,9 +296,20 @@ class SemanticMaintenanceService:
         if not chunk_text.strip():
             return
         try:
-            embedding = asyncio.run(
-                embedding_service.embed_text(chunk_text)
-            )
+            # 兼容 async / sync 上下文
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is None:
+                embedding = asyncio.run(embedding_service.embed_text(chunk_text))
+            else:
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(
+                        lambda: asyncio.run(embedding_service.embed_text(chunk_text))
+                    )
+                    embedding = future.result()
             self.db.upsert_field_embedding(
                 field_semantic_id=field_semantic_id,
                 chunk_text=chunk_text,
@@ -317,8 +348,13 @@ class SemanticMaintenanceService:
         if not success:
             return False, "更新失败"
         updated = self.db.get_field_semantics_by_id(field_id)
-        # 触发 embedding 重新生成（语义字段变更时）
-        self._upsert_field_embedding(field_id, fields)
+        # 触发 embedding 重新生成（语义字段变更时）；传入完整记录以保证 chunk_text 完整
+        full_record = {
+            "semantic_name": getattr(updated, "semantic_name", None),
+            "semantic_name_zh": getattr(updated, "semantic_name_zh", None),
+            "semantic_definition": getattr(updated, "semantic_definition", None),
+        }
+        self._upsert_field_embedding(field_id, full_record, skip_diff_check=True)
         return True, updated.to_dict()
 
     def submit_field_for_review(self, field_id: int, user_id: int = None) -> tuple:
