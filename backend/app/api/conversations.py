@@ -35,6 +35,7 @@ def list_conversations(
         LEFT JOIN conversation_messages m ON m.conversation_id = c.id
         WHERE c.user_id = :user_id
         GROUP BY c.id, c.title, c.updated_at
+        HAVING COUNT(m.id) > 0
         ORDER BY c.updated_at DESC
         LIMIT 100
     """), {"user_id": user["id"]}).fetchall()
@@ -75,6 +76,7 @@ def search_conversations(
         WHERE c.user_id = :user_id
           AND (c.title ILIKE :q OR m.content ILIKE :q)
         GROUP BY c.id, c.title, c.updated_at
+        HAVING COUNT(m.id) > 0
         ORDER BY c.updated_at DESC
         LIMIT 20
     """), {"user_id": user["id"], "q": like}).fetchall()

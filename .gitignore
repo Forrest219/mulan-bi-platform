@@ -15,6 +15,7 @@ config/tableau.yaml
 .idea/
 *.swp
 *.swo
+.claude/worktrees/
 
 # Testing
 .pytest_cache/

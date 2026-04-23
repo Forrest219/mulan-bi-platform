@@ -1,0 +1,80 @@
+[
+  {
+    "datasource_id": 1,
+    "schema_name": "dws",
+    "table_name": "dws_order_daily",
+    "display_name": "订单日汇总表",
+    "description": "按天聚合的订单事实表",
+    "dimension_weights": {
+      "completeness": 0.2,
+      "accuracy": 0.2,
+      "timeliness": 0.2,
+      "validity": 0.15,
+      "uniqueness": 0.15,
+      "consistency": 0.1
+    },
+    "signal_thresholds": {
+      "p0_score": 60,
+      "p1_score": 80,
+      "drift_p0": 20,
+      "drift_p1": 10,
+      "confidence_p0": 60,
+      "confidence_p1": 80
+    },
+    "status": "enabled",
+    "owner_id": 1,
+    "created_by": 1
+  },
+  {
+    "datasource_id": 1,
+    "schema_name": "ods",
+    "table_name": "ods_user_log",
+    "display_name": "用户行为日志",
+    "description": "原始层用户行为日志，保留 90 天",
+    "dimension_weights": {
+      "completeness": 0.1667,
+      "accuracy": 0.1667,
+      "timeliness": 0.1667,
+      "validity": 0.1667,
+      "uniqueness": 0.1666,
+      "consistency": 0.1666
+    },
+    "signal_thresholds": {
+      "p0_score": 60,
+      "p1_score": 80,
+      "drift_p0": 20,
+      "drift_p1": 10,
+      "confidence_p0": 60,
+      "confidence_p1": 80
+    },
+    "status": "enabled",
+    "owner_id": 1,
+    "created_by": 1
+  },
+  {
+    "datasource_id": 2,
+    "schema_name": "dws",
+    "table_name": "dws_finance_daily",
+    "display_name": "财务日汇总",
+    "description": "财务结算侧汇总表",
+    "dimension_weights": {
+      "completeness": 0.25,
+      "accuracy": 0.25,
+      "timeliness": 0.2,
+      "validity": 0.1,
+      "uniqueness": 0.1,
+      "consistency": 0.1
+    },
+    "signal_thresholds": {
+      "p0_score": 55,
+      "p1_score": 75,
+      "drift_p0": 15,
+      "drift_p1": 8,
+      "confidence_p0": 55,
+      "confidence_p1": 75
+    },
+    "status": "enabled",
+    "owner_id": 2,
+    "created_by": 2
+  }
+]

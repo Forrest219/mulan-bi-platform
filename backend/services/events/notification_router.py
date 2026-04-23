@@ -9,6 +9,10 @@ from .constants import (
     SEMANTIC_PUBLISHED, SEMANTIC_PUBLISH_FAILED,
     HEALTH_SCAN_COMPLETED, HEALTH_SCAN_FAILED, HEALTH_SCORE_DROPPED,
     AUTH_USER_ROLE_CHANGED, SYSTEM_MAINTENANCE, SYSTEM_ERROR,
+    METRIC_PUBLISHED, METRIC_ANOMALY_DETECTED, METRIC_CONSISTENCY_FAILED,
+    DQC_CYCLE_STARTED, DQC_CYCLE_COMPLETED,
+    DQC_ASSET_SIGNAL_CHANGED, DQC_ASSET_P0_TRIGGERED,
+    DQC_ASSET_P1_TRIGGERED, DQC_ASSET_RECOVERED,
 )
 
 
@@ -184,3 +188,90 @@ def route_system_maintenance(db: Session, event_type: str, payload: dict, actor_
 def route_system_error(db: Session, event_type: str, payload: dict, actor_id: int = None) -> List[int]:
     """系统错误：通知所有 admin"""
     return _get_users_by_role(db, "admin")
+
+
+# === Metrics Agent 模块路由 ===
+
+@register_route(METRIC_PUBLISHED)
+def route_metric_published(db: Session, event_type: str, payload: dict, actor_id: int = None) -> List[int]:
+    """指标发布：通知所有 data_admin + admin"""
+    admin_ids = _get_users_by_role(db, "admin")
+    data_admin_ids = _get_users_by_role(db, "data_admin")
+    return list(set(admin_ids + data_admin_ids))
+
+
+@register_route(METRIC_ANOMALY_DETECTED)
+def route_metric_anomaly_detected(db: Session, event_type: str, payload: dict, actor_id: int = None) -> List[int]:
+    """指标异常：通知所有 data_admin + admin"""
+    admin_ids = _get_users_by_role(db, "admin")
+    data_admin_ids = _get_users_by_role(db, "data_admin")
+    return list(set(admin_ids + data_admin_ids))
+
+
+@register_route(METRIC_CONSISTENCY_FAILED)
+def route_metric_consistency_failed(db: Session, event_type: str, payload: dict, actor_id: int = None) -> List[int]:
+    """一致性校验失败：通知所有 data_admin + admin"""
+    admin_ids = _get_users_by_role(db, "admin")
+    data_admin_ids = _get_users_by_role(db, "data_admin")
+    return list(set(admin_ids + data_admin_ids))
+
+
+# === DQC 模块路由 ===
+
+
+def _get_dqc_asset_owner_id(db: Session, asset_id) -> int:
+    """获取 DQC 资产 owner_id"""
+    if asset_id is None:
+        return None
+    from services.dqc.models import DqcMonitoredAsset
+    asset = db.query(DqcMonitoredAsset).filter(DqcMonitoredAsset.id == int(asset_id)).first()
+    return asset.owner_id if asset else None
+
+
+@register_route(DQC_CYCLE_STARTED)
+def route_dqc_cycle_started(db: Session, event_type: str, payload: dict, actor_id: int = None) -> List[int]:
+    """cycle 开始：不建通知，仅落事件审计"""
+    return []
+
+
+@register_route(DQC_CYCLE_COMPLETED)
+def route_dqc_cycle_completed(db: Session, event_type: str, payload: dict, actor_id: int = None) -> List[int]:
+    """cycle 完成：manual 通知触发者；scheduled 仅在出现 P0/P1 时通知 admin"""
+    trigger = payload.get("trigger_type")
+    if trigger == "manual" and actor_id:
+        return [int(actor_id)]
+    if (payload.get("p0_count") or 0) > 0 or (payload.get("p1_count") or 0) > 0:
+        return _get_users_by_role(db, "admin")
+    return []
+
+
+@register_route(DQC_ASSET_SIGNAL_CHANGED)
+def route_dqc_asset_signal_changed(db: Session, event_type: str, payload: dict, actor_id: int = None) -> List[int]:
+    """信号变化：通知资产 owner"""
+    owner = _get_dqc_asset_owner_id(db, payload.get("asset_id"))
+    return [owner] if owner else []
+
+
+@register_route(DQC_ASSET_P0_TRIGGERED)
+def route_dqc_asset_p0_triggered(db: Session, event_type: str, payload: dict, actor_id: int = None) -> List[int]:
+    """P0 触发：通知资产 owner + 所有 admin"""
+    owner = _get_dqc_asset_owner_id(db, payload.get("asset_id"))
+    admin_ids = _get_users_by_role(db, "admin")
+    targets = set(admin_ids)
+    if owner:
+        targets.add(owner)
+    return list(targets)
+
+
+@register_route(DQC_ASSET_P1_TRIGGERED)
+def route_dqc_asset_p1_triggered(db: Session, event_type: str, payload: dict, actor_id: int = None) -> List[int]:
+    """P1 触发：通知资产 owner"""
+    owner = _get_dqc_asset_owner_id(db, payload.get("asset_id"))
+    return [owner] if owner else []
+
+
+@register_route(DQC_ASSET_RECOVERED)
+def route_dqc_asset_recovered(db: Session, event_type: str, payload: dict, actor_id: int = None) -> List[int]:
+    """资产恢复：通知资产 owner"""
+    owner = _get_dqc_asset_owner_id(db, payload.get("asset_id"))
+    return [owner] if owner else []

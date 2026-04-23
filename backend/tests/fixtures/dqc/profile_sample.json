@@ -1,0 +1,60 @@
+{
+  "row_count": 2300512,
+  "sampled_rows": 10000,
+  "profiled_at": "2026-04-21 10:02:30",
+  "has_timestamp_column": true,
+  "candidate_timestamp_columns": ["created_at", "updated_at", "dt"],
+  "candidate_id_columns": ["order_id"],
+  "columns": [
+    {
+      "name": "order_id",
+      "data_type": "bigint",
+      "null_count": 0,
+      "null_rate": 0.0,
+      "distinct_count": 10000,
+      "min_value": 10000000001,
+      "max_value": 10000010000,
+      "sample_values": [10000000001, 10000000002, 10000000003]
+    },
+    {
+      "name": "user_id",
+      "data_type": "bigint",
+      "null_count": 23,
+      "null_rate": 0.0023,
+      "distinct_count": 8532,
+      "min_value": 1,
+      "max_value": 999999,
+      "sample_values": [1024, 2048, 4096, 8192]
+    },
+    {
+      "name": "amount",
+      "data_type": "decimal",
+      "null_count": 0,
+      "null_rate": 0.0,
+      "distinct_count": 7823,
+      "min_value": 0.0,
+      "max_value": 9999.99,
+      "sample_values": [19.9, 29.9, 99.0, 199.0, 999.0]
+    },
+    {
+      "name": "status",
+      "data_type": "varchar",
+      "null_count": 0,
+      "null_rate": 0.0,
+      "distinct_count": 4,
+      "min_value": "cancelled",
+      "max_value": "refunded",
+      "sample_values": ["paid", "pending", "cancelled", "refunded"]
+    },
+    {
+      "name": "updated_at",
+      "data_type": "timestamp",
+      "null_count": 0,
+      "null_rate": 0.0,
+      "distinct_count": 9985,
+      "min_value": "2026-04-20 00:00:00",
+      "max_value": "2026-04-21 03:59:59",
+      "sample_values": ["2026-04-21 03:59:59", "2026-04-21 03:50:10"]
+    }
+  ]
+}

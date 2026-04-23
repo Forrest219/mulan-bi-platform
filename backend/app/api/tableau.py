@@ -802,3 +802,293 @@ async def get_mcp_status():
                 "error": type(e).__name__,
                 "retried": True,
             }
+
+
+# ── V2: Tableau MCP Direct Connect REST Endpoints ────────────────────────────
+
+from services.tableau.mcp_client import get_tableau_mcp_client, TableauMCPError
+from services.tableau.models import TableauDatabase
+
+
+class VizQLQueryRequest(BaseModel):
+    """简化的 VizQL 查询结构"""
+    measures: list[dict] = []
+    dimensions: list[dict] = []
+    filters: list[dict] = []
+    limit: int = 100
+
+
+class TableauQueryRequest(BaseModel):
+    connection_id: int
+    datasource_luid: str
+    vizql: VizQLQueryRequest
+    timeout: int = 30
+
+
+def _build_vizql_query(vizql: VizQLQueryRequest) -> dict:
+    """将简化 VizQL 结构转换为 MCP query-datasource 格式"""
+    fields = []
+    for m in vizql.measures:
+        f = {"fieldCaption": m["field"]}
+        if m.get("aggregation"):
+            f["function"] = m["aggregation"]
+        if m.get("alias"):
+            f["fieldAlias"] = m["alias"]
+        fields.append(f)
+    for d in vizql.dimensions:
+        f = {"fieldCaption": d["field"]}
+        if d.get("alias"):
+            f["fieldAlias"] = d["alias"]
+        fields.append(f)
+    query = {"fields": fields}
+    if vizql.filters:
+        query["filters"] = vizql.filters
+    return query
+
+
+def _mcp_error_response(exc: TableauMCPError) -> tuple[int, dict]:
+    """将 TableauMCPError 映射为 HTTP 状态码 + 错误体"""
+    code_map = {
+        "NLQ_006": "MCP_003",
+        "NLQ_007": "MCP_004",
+        "NLQ_009": "MCP_005",
+        "MCP_010": "MCP_006",
+    }
+    http_status = {
+        "MCP_003": 503,
+        "MCP_004": 504,
+        "MCP_005": 401,
+        "MCP_006": 400,
+    }.get(code_map.get(exc.code, ""), 503)
+    return http_status, {
+        "error_code": code_map.get(exc.code, "MCP_001"),
+        "message": exc.message,
+    }
+
+
+@router.post("/query")
+async def tableau_v2_query(
+    req: TableauQueryRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """V2-1: MCP Direct Connect — 执行 VizQL 查询"""
+    user = get_current_user(request, db)
+    _db = TableauDatabase(session=db)
+
+    verify_connection_access(req.connection_id, user, db)
+    conn = _db.get_connection(req.connection_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="连接不存在")
+
+    if not getattr(conn, "mcp_direct_enabled", False):
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "MCP_010", "message": "连接未开启 V2 直连模式，请使用 V1 API"},
+        )
+
+    vizql_query = _build_vizql_query(req.vizql)
+
+    try:
+        client = get_tableau_mcp_client(req.connection_id)
+        result = client.query_datasource(
+            datasource_luid=req.datasource_luid,
+            query=vizql_query,
+            limit=min(req.vizql.limit, 10000),
+            timeout=req.timeout,
+            connection_id=req.connection_id,
+        )
+
+        # 解析 MCP 返回：{"fields": [...], "rows": [[...]], ...}
+        raw_fields = result.get("fields", [])
+        raw_rows = result.get("rows", [])
+
+        # 映射为统一列定义
+        columns = []
+        for f in raw_fields:
+            name = f.get("fieldAlias") or f.get("fieldCaption") or f.get("fieldName", "?")
+            columns.append({"name": name, "dataType": f.get("dataType", "STRING")})
+
+        return {
+            "columns": columns,
+            "rows": raw_rows,
+            "row_count": len(raw_rows),
+            "truncated": result.get("truncated", False),
+            "datasource_luid": req.datasource_luid,
+            "executed_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+        }
+
+    except TableauMCPError as e:
+        status, body = _mcp_error_response(e)
+        raise HTTPException(status_code=status, detail=body)
+
+
+@router.get("/datasources/{asset_id}/metadata")
+async def tableau_v2_metadata(
+    asset_id: int,
+    request: Request,
+    refresh: bool = False,
+    db: Session = Depends(get_db),
+):
+    """V2-2: 获取数据源字段元数据（带缓存）"""
+    user = get_current_user(request, db)
+    _db = TableauDatabase(session=db)
+
+    asset = _db.get_asset(asset_id)
+    if not asset or asset.is_deleted:
+        raise HTTPException(status_code=404, detail="资产不存在")
+    if asset.asset_type != "datasource":
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "MCP_010", "message": "该资产不是 datasource 类型"},
+        )
+
+    verify_connection_access(asset.connection_id, user, db)
+    conn = _db.get_connection(asset.connection_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="连接不存在")
+
+    cached_fields = _db.get_datasource_fields(asset_id)
+    now = _time.time()
+    cache_ttl = 24 * 3600  # 24h
+
+    def _fields_to_dict(fields):
+        return [
+            {
+                "name": f.field_name,
+                "caption": f.field_caption or "",
+                "data_type": f.data_type or "STRING",
+                "role": f.role or "dimension",
+                "description": f.description or "",
+                "aggregation": f.aggregation,
+            }
+            for f in fields
+        ]
+
+    # 缓存命中且未过期
+    if cached_fields and not refresh:
+        oldest = min((f.fetched_at.timestamp() for f in cached_fields), default=0)
+        if now - oldest < cache_ttl:
+            return {
+                "datasource_luid": asset.tableau_id,
+                "fields": _fields_to_dict(cached_fields),
+                "cache_status": "cached",
+                "cached_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime(oldest)),
+            }
+
+    # 需要拉取（首次 or refresh=true）
+    try:
+        client = get_tableau_mcp_client(asset.connection_id)
+        raw = client.get_datasource_metadata(asset.tableau_id, timeout=30)
+        raw_fields = raw.get("fields", [])
+
+        # 写入缓存
+        if raw_fields:
+            parsed = []
+            for f in raw_fields:
+                parsed.append({
+                    "field_name": f.get("fieldName", ""),
+                    "field_caption": f.get("fieldCaption", ""),
+                    "data_type": f.get("dataType", "STRING"),
+                    "role": f.get("role", "dimension").lower(),
+                    "description": f.get("description", ""),
+                    "aggregation": f.get("aggregation"),
+                    "is_calculated": f.get("isCalculated", False),
+                    "formula": f.get("formula"),
+                    "metadata_json": f,
+                })
+            _db.upsert_datasource_fields(asset.id, asset.tableau_id, parsed)
+
+        # 重新读取（包含新数据）
+        cached_fields = _db.get_datasource_fields(asset_id)
+        oldest = min((f.fetched_at.timestamp() for f in cached_fields), default=0)
+        return {
+            "datasource_luid": asset.tableau_id,
+            "fields": _fields_to_dict(cached_fields),
+            "cache_status": "fresh",
+            "cached_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime(oldest)) if cached_fields else None,
+        }
+
+    except TableauMCPError:
+        # MCP 不可达，降级返回缓存数据
+        if cached_fields:
+            oldest = min((f.fetched_at.timestamp() for f in cached_fields), default=0)
+            return {
+                "datasource_luid": asset.tableau_id,
+                "fields": _fields_to_dict(cached_fields),
+                "cache_status": "stale",
+                "cached_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime(oldest)),
+            }
+        raise HTTPException(
+            status_code=503,
+            detail={"error_code": "MCP_003", "message": "MCP Server 不可达，且无缓存数据"},
+        )
+
+
+@router.get("/datasources/{asset_id}/preview")
+async def tableau_v2_preview(
+    asset_id: int,
+    request: Request,
+    limit: int = Query(20, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    """V2-3: 数据预览（自动选取字段）"""
+    user = get_current_user(request, db)
+    _db = TableauDatabase(session=db)
+
+    asset = _db.get_asset(asset_id)
+    if not asset or asset.is_deleted:
+        raise HTTPException(status_code=404, detail="资产不存在")
+    if asset.asset_type != "datasource":
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "MCP_010", "message": "该资产不是 datasource 类型"},
+        )
+
+    verify_connection_access(asset.connection_id, user, db)
+
+    # 从缓存字段中选取前几个（dimension 优先）
+    fields = _db.get_datasource_fields(asset_id)
+    preview_fields = []
+    for f in fields:
+        if len(preview_fields) >= 10:
+            break
+        preview_fields.append(f)
+
+    vizql_fields = []
+    for f in preview_fields:
+        vizql_fields.append({"fieldCaption": f.field_name})
+        if f.role == "measure":
+            vizql_fields[-1]["function"] = "NONE"
+
+    query = {"fields": vizql_fields}
+
+    try:
+        client = get_tableau_mcp_client(asset.connection_id)
+        result = client.query_datasource(
+            datasource_luid=asset.tableau_id,
+            query=query,
+            limit=limit,
+            timeout=30,
+            connection_id=asset.connection_id,
+        )
+
+        raw_fields = result.get("fields", [])
+        raw_rows = result.get("rows", [])
+        columns = []
+        for f in raw_fields:
+            name = f.get("fieldAlias") or f.get("fieldCaption") or f.get("fieldName", "?")
+            columns.append({"name": name, "dataType": f.get("dataType", "STRING")})
+
+        return {
+            "columns": columns,
+            "rows": raw_rows,
+            "row_count": len(raw_rows),
+            "truncated": result.get("truncated", False),
+            "datasource_luid": asset.tableau_id,
+            "executed_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+        }
+
+    except TableauMCPError as e:
+        status, body = _mcp_error_response(e)
+        raise HTTPException(status_code=status, detail=body)

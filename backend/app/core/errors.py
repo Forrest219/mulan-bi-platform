@@ -377,3 +377,85 @@ class GOVError:
     @staticmethod
     def datasource_connection_failed(detail: dict = None):
         return MulanError("GOV_004", "数据源连接失败", 400, detail)
+
+
+# ---------------------------------------------------------------------------
+# DQC — Data Quality Core 流水线  DQC_001~099
+# ---------------------------------------------------------------------------
+
+class DQCError:
+    @staticmethod
+    def asset_not_found():
+        return MulanError("DQC_001", "监控资产不存在", 404)
+
+    @staticmethod
+    def asset_already_exists(detail: dict = None):
+        return MulanError("DQC_002", "监控资产已存在", 409, detail)
+
+    @staticmethod
+    def datasource_not_found_or_inactive(detail: dict = None):
+        return MulanError("DQC_003", "数据源不存在或未激活", 400, detail)
+
+    @staticmethod
+    def not_asset_owner():
+        return MulanError("DQC_004", "非资产所有者", 403)
+
+    @staticmethod
+    def invalid_dimension_weights(detail: dict = None):
+        return MulanError("DQC_010", "维度权重非法", 400, detail)
+
+    @staticmethod
+    def invalid_signal_thresholds(detail: dict = None):
+        return MulanError("DQC_011", "信号阈值非法", 400, detail)
+
+    @staticmethod
+    def unsupported_rule_type(detail: dict = None):
+        return MulanError("DQC_020", "规则类型不支持", 400, detail)
+
+    @staticmethod
+    def invalid_rule_config(detail: dict = None):
+        return MulanError("DQC_021", "规则配置参数无效", 400, detail)
+
+    @staticmethod
+    def dimension_rule_incompatible(detail: dict = None):
+        return MulanError("DQC_022", "维度与规则类型不兼容", 400, detail)
+
+    @staticmethod
+    def rule_already_exists(detail: dict = None):
+        return MulanError("DQC_023", "规则已存在", 409, detail)
+
+    @staticmethod
+    def rule_not_found():
+        return MulanError("DQC_024", "规则不存在", 404)
+
+    @staticmethod
+    def custom_sql_not_readonly(detail: dict = None):
+        return MulanError("DQC_025", "custom_sql 非只读", 400, detail)
+
+    @staticmethod
+    def cycle_in_progress():
+        return MulanError("DQC_030", "DQC cycle 正在运行", 409)
+
+    @staticmethod
+    def cycle_not_found():
+        return MulanError("DQC_031", "cycle 不存在", 404)
+
+    @staticmethod
+    def target_connection_failed(detail: dict = None):
+        return MulanError("DQC_040", "目标数据库连接失败", 502, detail)
+
+    @staticmethod
+    def target_query_timeout(detail: dict = None):
+        return MulanError("DQC_041", "目标数据库查询超时", 504, detail)
+
+    @staticmethod
+    def scan_rows_exceeded(detail: dict = None):
+        return MulanError("DQC_042", "扫描行数超限", 422, detail)
+
+    @staticmethod
+    def llm_call_failed(detail: dict = None):
+        return MulanError("DQC_050", "LLM 调用失败", 502, detail)
+
+    @staticmethod
+    def llm_response_parse_failed(detail: dict = None):
+        return MulanError("DQC_051", "LLM 响应解析失败", 502, detail)

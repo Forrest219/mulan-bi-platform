@@ -397,7 +397,7 @@ async def get_asset_summary(asset_id: int, request: Request, refresh: bool = Fal
 
     import datetime
 
-    from tableau.models import TableauDatabase
+    from services.tableau.models import TableauDatabase
 
     db = TableauDatabase()
     asset = db.get_asset(asset_id)
@@ -435,7 +435,7 @@ async def get_asset_explanation(asset_id: int, request: Request, refresh: bool =
 
     import datetime
 
-    from tableau.models import TableauDatabase
+    from services.tableau.models import TableauDatabase
 
     db = TableauDatabase()
     asset = db.get_asset(asset_id)

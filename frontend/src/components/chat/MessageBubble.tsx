@@ -158,10 +158,18 @@ export default function MessageBubble({
       <div
         className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${
           isUser
-            ? 'bg-blue-700 text-white'
+            ? 'bg-blue-600 text-white'
             : 'bg-white border border-slate-200 text-slate-800 shadow-sm'
         }`}
       >
+        {!isUser && (
+          <div className="flex items-center gap-1 mb-1">
+            <span className="w-5 h-5 rounded-full bg-slate-200 flex items-center justify-center">
+              <i className="ri-robot-2-line text-[10px] text-slate-500" />
+            </span>
+            <span className="text-xs text-slate-400">木兰</span>
+          </div>
+        )}
         {isUser ? (
           <p className="whitespace-pre-wrap break-words">{content}</p>
         ) : isError ? (

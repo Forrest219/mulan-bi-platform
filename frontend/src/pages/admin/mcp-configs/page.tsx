@@ -8,6 +8,7 @@
  * - 新增 / 编辑内嵌表单
  * - 连接测试（显示延迟或错误）
  * - 删除按钮（ConfirmModal）
+ * - 问数配置：为每个 Tableau 连接配置 Connected App 密钥（T-09）
  *
  * 后端 API：
  *   GET    /api/mcp-configs/         → McpServerItem[]
@@ -15,6 +16,11 @@
  *   PUT    /api/mcp-configs/:id      → McpServerItem
  *   DELETE /api/mcp-configs/:id      → { ok: true }
  *   POST   /api/mcp-configs/:id/test → { status, latency_ms, ... }
+ *
+ * T-09 新增 API：
+ *   GET    /api/admin/query/connected-app?connection_id=<id>  → ConnectedAppStatus
+ *   PUT    /api/admin/query/connected-app                     → { ok, connection_id, ... }
+ *   DELETE /api/admin/query/connected-app?connection_id=<id>  → { ok, deactivated }
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../../context/AuthContext';
@@ -203,6 +209,390 @@ function CredentialField({
   );
 }
 
+// ─── T-09: Connected App 密钥配置相关类型和 API ──────────────────────────────
+
+interface TableauConnectionItem {
+  id: number;
+  name: string;
+  server_url: string;
+  site: string;
+  is_active: boolean;
+}
+
+interface ConnectedAppStatus {
+  configured: boolean;
+  connection_id: number | null;
+  client_id: string | null;
+  secret_masked: string | null;
+  is_active: boolean | null;
+  created_at: string | null;
+}
+
+const QUERY_ADMIN_BASE = '/api/admin/query';
+
+async function apiGetConnectedApp(connectionId: number): Promise<ConnectedAppStatus> {
+  const res = await fetch(`${QUERY_ADMIN_BASE}/connected-app?connection_id=${connectionId}`, {
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+async function apiUpsertConnectedApp(data: {
+  connection_id: number;
+  client_id: string;
+  secret_value: string;
+}): Promise<{ ok: boolean; connection_id: number; client_id: string; is_active: boolean; created_at: string }> {
+  const res = await fetch(`${QUERY_ADMIN_BASE}/connected-app`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+async function apiDeactivateConnectedApp(connectionId: number): Promise<{ ok: boolean; deactivated: number }> {
+  const res = await fetch(
+    `${QUERY_ADMIN_BASE}/connected-app?connection_id=${connectionId}`,
+    { method: 'DELETE', credentials: 'include' }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// ─── ConnectedAppPanel ────────────────────────────────────────────────────────
+// 单个 Tableau 连接的 Connected App 密钥配置折叠面板
+
+function ConnectedAppPanel({
+  connection,
+  onToast,
+}: {
+  connection: TableauConnectionItem;
+  onToast: (msg: string, variant?: 'success' | 'error') => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [status, setStatus] = useState<ConnectedAppStatus | null>(null);
+  const [loadingStatus, setLoadingStatus] = useState(false);
+  const [clientId, setClientId] = useState('');
+  const [secretValue, setSecretValue] = useState('');
+  const [showSecret, setShowSecret] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deactivating, setDeactivating] = useState(false);
+  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const loadStatus = useCallback(() => {
+    setLoadingStatus(true);
+    apiGetConnectedApp(connection.id)
+      .then(setStatus)
+      .catch(() => setStatus(null))
+      .finally(() => setLoadingStatus(false));
+  }, [connection.id]);
+
+  // 展开时加载状态
+  useEffect(() => {
+    if (expanded && status === null) {
+      loadStatus();
+    }
+  }, [expanded, status, loadStatus]);
+
+  const handleSave = async () => {
+    if (!clientId.trim()) {
+      setFormError('Client ID 不能为空');
+      return;
+    }
+    if (!secretValue.trim()) {
+      setFormError('Secret Value 不能为空');
+      return;
+    }
+    setFormError(null);
+    setSaving(true);
+    try {
+      await apiUpsertConnectedApp({
+        connection_id: connection.id,
+        client_id: clientId.trim(),
+        secret_value: secretValue,
+      });
+      setClientId('');
+      setSecretValue('');
+      setStatus(null); // 触发重新加载
+      loadStatus();
+      onToast('Connected App 密钥已保存', 'success');
+    } catch (e: unknown) {
+      onToast(e instanceof Error ? e.message : '保存失败', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeactivate = async () => {
+    setDeactivating(true);
+    try {
+      await apiDeactivateConnectedApp(connection.id);
+      setStatus(null);
+      loadStatus();
+      onToast('Connected App 密钥已停用', 'success');
+    } catch (e: unknown) {
+      onToast(e instanceof Error ? e.message : '停用失败', 'error');
+    } finally {
+      setDeactivating(false);
+      setConfirmDeactivate(false);
+    }
+  };
+
+  return (
+    <div className="border border-slate-200 rounded-lg overflow-hidden">
+      {/* 折叠标题行 */}
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-white hover:bg-slate-50 transition-colors text-left"
+      >
+        <div className="flex items-center gap-3">
+          <i className="ri-bar-chart-2-line text-blue-500 text-base" />
+          <div>
+            <span className="text-sm font-medium text-slate-700">{connection.name}</span>
+            <span className="ml-2 text-xs text-slate-400">{connection.server_url}</span>
+          </div>
+          {/* 已配置徽标 */}
+          {status?.configured === true && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
+              <i className="ri-checkbox-circle-line" />
+              已配置
+            </span>
+          )}
+          {status?.configured === false && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+              <i className="ri-error-warning-line" />
+              未配置
+            </span>
+          )}
+        </div>
+        <i className={`text-slate-400 transition-transform ${expanded ? 'ri-arrow-up-s-line' : 'ri-arrow-down-s-line'}`} />
+      </button>
+
+      {/* 折叠内容 */}
+      {expanded && (
+        <div className="px-4 pb-4 pt-3 border-t border-slate-100 bg-slate-50 space-y-4">
+          {/* 当前状态 */}
+          {loadingStatus && (
+            <div className="flex items-center gap-2 text-slate-400 text-sm py-2">
+              <span className="w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+              加载中...
+            </div>
+          )}
+
+          {!loadingStatus && status?.configured && (
+            <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-1.5">
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">当前配置</p>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-slate-500 w-24 shrink-0">Client ID</span>
+                <code className="text-slate-700 font-mono text-xs bg-slate-50 px-2 py-0.5 rounded">
+                  {status.client_id}
+                </code>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-slate-500 w-24 shrink-0">Secret</span>
+                <code className="text-slate-700 font-mono text-xs bg-slate-50 px-2 py-0.5 rounded">
+                  {status.secret_masked}
+                </code>
+              </div>
+              {status.created_at && (
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-slate-500 w-24 shrink-0">配置时间</span>
+                  <span className="text-slate-600 text-xs">{new Date(status.created_at).toLocaleString('zh-CN')}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 表单区 */}
+          <div className="space-y-3">
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
+              {status?.configured ? '更新密钥' : '配置密钥'}
+            </p>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Client ID <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="text"
+                value={clientId}
+                onChange={(e) => { setClientId(e.target.value); setFormError(null); }}
+                placeholder="Connected App Client ID（从 Tableau 管理后台获取）"
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Secret Value <span className="text-red-400">*</span>
+              </label>
+              <div className="relative">
+                <input
+                  type={showSecret ? 'text' : 'password'}
+                  value={secretValue}
+                  onChange={(e) => { setSecretValue(e.target.value); setFormError(null); }}
+                  placeholder="Connected App Secret Value（HS256 签名密钥）"
+                  className="w-full px-3 py-2 pr-10 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSecret((v) => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  tabIndex={-1}
+                >
+                  <i className={showSecret ? 'ri-eye-off-line' : 'ri-eye-line'} />
+                </button>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">
+                仅用于签发 JWT，保存后不再回显。更新时重新填写即可覆盖旧密钥。
+              </p>
+            </div>
+
+            {formError && (
+              <div className="px-3 py-2 bg-red-50 border border-red-200 text-red-600 text-xs rounded-lg flex items-center gap-1.5">
+                <i className="ri-error-warning-line" />
+                {formError}
+              </div>
+            )}
+
+            {/* 操作按钮 */}
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className="flex items-center gap-1.5 px-4 py-2 bg-slate-900 text-white text-xs rounded-lg hover:bg-slate-800 disabled:opacity-50 transition-colors"
+              >
+                {saving ? (
+                  <>
+                    <i className="ri-loader-4-line animate-spin" />
+                    保存中...
+                  </>
+                ) : (
+                  <>
+                    <i className="ri-save-line" />
+                    保存密钥
+                  </>
+                )}
+              </button>
+
+              {status?.configured && !confirmDeactivate && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmDeactivate(true)}
+                  className="flex items-center gap-1.5 px-4 py-2 text-xs text-red-500 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+                >
+                  <i className="ri-forbid-line" />
+                  停用配置
+                </button>
+              )}
+
+              {/* 二次确认停用 */}
+              {confirmDeactivate && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg">
+                  <span className="text-xs text-red-600">确认停用？停用后问数将无法使用 JWT 鉴权。</span>
+                  <button
+                    type="button"
+                    onClick={handleDeactivate}
+                    disabled={deactivating}
+                    className="px-2.5 py-1 text-xs bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 transition-colors"
+                  >
+                    {deactivating ? '停用中...' : '确认停用'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeactivate(false)}
+                    className="px-2.5 py-1 text-xs text-slate-500 hover:text-slate-700 rounded-md hover:bg-slate-100 transition-colors"
+                  >
+                    取消
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ConnectedAppSection ──────────────────────────────────────────────────────
+// 问数配置区块：拉取所有 Tableau 连接，为每个连接渲染 ConnectedAppPanel
+
+function ConnectedAppSection({ onToast }: { onToast: (msg: string, variant?: 'success' | 'error') => void }) {
+  const [connections, setConnections] = useState<TableauConnectionItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch('/api/tableau/connections?include_inactive=false', { credentials: 'include' })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data: { connections: TableauConnectionItem[] }) => {
+        setConnections(data.connections || []);
+      })
+      .catch((e: Error) => setLoadError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div className="mt-8">
+      {/* 区块标题 */}
+      <div className="flex items-center gap-2 mb-4">
+        <i className="ri-key-2-line text-slate-500 text-base" />
+        <h2 className="text-base font-semibold text-slate-800">问数配置 — Connected App 密钥</h2>
+        <span className="ml-1 text-xs text-slate-400 font-normal">Tableau JWT 用户模拟，用于 RLS 数据权限隔离</span>
+      </div>
+
+      {loading && (
+        <div className="flex items-center gap-2 text-slate-400 text-sm py-4">
+          <span className="w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+          加载 Tableau 连接...
+        </div>
+      )}
+
+      {loadError && (
+        <div className="px-4 py-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg flex items-center gap-2">
+          <i className="ri-error-warning-line" />
+          加载 Tableau 连接失败：{loadError}
+        </div>
+      )}
+
+      {!loading && !loadError && connections.length === 0 && (
+        <div className="py-8 text-center text-slate-400 text-sm border border-dashed border-slate-200 rounded-lg">
+          <i className="ri-bar-chart-2-line text-3xl block mb-2 text-slate-200" />
+          暂无激活的 Tableau 连接。请先在「Tableau 连接」页面添加连接。
+        </div>
+      )}
+
+      {!loading && connections.length > 0 && (
+        <div className="space-y-2">
+          {connections.map((conn) => (
+            <ConnectedAppPanel key={conn.id} connection={conn} onToast={onToast} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── McpConfigsPage ──────────────────────────────────────────────────────────
 
 export default function McpConfigsPage() {
@@ -211,6 +601,16 @@ export default function McpConfigsPage() {
   const [servers, setServers] = useState<McpServerItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Toast 提示（T-09 Connected App 操作反馈）
+  const [toastMsg, setToastMsg] = useState('');
+  const [toastVariant, setToastVariant] = useState<'success' | 'error'>('success');
+
+  const showToast = (msg: string, variant: 'success' | 'error' = 'success') => {
+    setToastMsg(msg);
+    setToastVariant(variant);
+    setTimeout(() => setToastMsg(''), 3000);
+  };
 
   // 表单相关
   const [showForm, setShowForm] = useState(false);
@@ -606,6 +1006,9 @@ export default function McpConfigsPage() {
                 </table>
               </div>
             )}
+
+            {/* ── T-09: 问数配置 — Connected App 密钥 ─────────────── */}
+            <ConnectedAppSection onToast={showToast} />
           </>
         )}
 
@@ -901,6 +1304,18 @@ export default function McpConfigsPage() {
         onConfirm={handleDeleteConfirm}
         onCancel={() => setDeleteTarget(null)}
       />
+
+      {/* Toast 提示（T-09 Connected App 操作反馈） */}
+      {toastMsg && (
+        <div
+          className={`fixed bottom-6 right-6 text-white text-sm px-4 py-2.5 rounded-lg z-50 flex items-center gap-2 shadow-lg ${
+            toastVariant === 'error' ? 'bg-red-600' : 'bg-slate-800'
+          }`}
+        >
+          <i className={toastVariant === 'error' ? 'ri-error-warning-line' : 'ri-checkbox-circle-line'} />
+          {toastMsg}
+        </div>
+      )}
     </div>
   );
 }

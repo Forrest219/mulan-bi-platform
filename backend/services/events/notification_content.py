@@ -176,6 +176,84 @@ def build_system_error_content(payload: Dict[str, Any]) -> tuple:
     return title, content
 
 
+def build_metric_published_content(payload: Dict[str, Any]) -> tuple:
+    """metric.published"""
+    title = "指标发布成功"
+    content = (
+        f"指标「{payload.get('name', '未知')}」已成功发布，现已激活生效。"
+    )
+    return title, content
+
+
+def build_metric_anomaly_detected_content(payload: Dict[str, Any]) -> tuple:
+    """metric.anomaly.detected"""
+    title = "指标异常告警"
+    content = (
+        f"指标「{payload.get('metric_name', '未知')}」通过 {payload.get('detection_method', '未知')} "
+        f"检测到异常，偏差分数：{payload.get('deviation_score', 0):.4f}，请及时排查。"
+    )
+    return title, content
+
+
+def build_metric_consistency_failed_content(payload: Dict[str, Any]) -> tuple:
+    """metric.consistency.failed"""
+    title = "指标一致性校验失败"
+    diff_pct = payload.get('difference_pct')
+    diff_str = f"{diff_pct:.2f}%" if diff_pct is not None else "N/A"
+    content = (
+        f"指标「{payload.get('metric_name', '未知')}」跨数据源一致性校验失败，"
+        f"差异百分比：{diff_str}，请检查数据源数据一致性。"
+    )
+    return title, content
+
+
+def build_dqc_cycle_completed_content(payload: Dict[str, Any]) -> tuple:
+    """dqc.cycle.completed"""
+    title = "DQC 巡检完成"
+    p0 = payload.get("p0_count", 0)
+    p1 = payload.get("p1_count", 0)
+    duration = payload.get("duration_sec", 0)
+    count = payload.get("assets_processed", 0)
+    scope = payload.get("scope", "full")
+    content = f"DQC {scope} 巡检完成，处理 {count} 张表，P0={p0}，P1={p1}，耗时 {duration} 秒。"
+    return title, content
+
+
+def build_dqc_asset_signal_changed_content(payload: Dict[str, Any]) -> tuple:
+    """dqc.asset.signal_changed"""
+    asset_name = payload.get("display_name") or f"{payload.get('schema_name', '')}.{payload.get('table_name', '')}"
+    title = f"资产信号变化：{asset_name}"
+    content = f"信号从 {payload.get('prev_signal')} → {payload.get('current_signal')}，置信度 {payload.get('prev_confidence_score')} → {payload.get('current_confidence_score')}"
+    return title, content
+
+
+def build_dqc_asset_p0_triggered_content(payload: Dict[str, Any]) -> tuple:
+    """dqc.asset.p0_triggered"""
+    asset_name = payload.get("display_name") or f"{payload.get('schema_name', '')}.{payload.get('table_name', '')}"
+    title = f"[P0] DQC 告警：{asset_name}"
+    cs = payload.get("current_confidence_score", 0)
+    content = f"资产置信度降至 {cs}，触发 P0 告警。请立即处理。"
+    return title, content
+
+
+def build_dqc_asset_p1_triggered_content(payload: Dict[str, Any]) -> tuple:
+    """dqc.asset.p1_triggered"""
+    asset_name = payload.get("display_name") or f"{payload.get('schema_name', '')}.{payload.get('table_name', '')}"
+    title = f"[P1] DQC 告警：{asset_name}"
+    cs = payload.get("current_confidence_score", 0)
+    content = f"资产置信度降至 {cs}，触发 P1 告警。"
+    return title, content
+
+
+def build_dqc_asset_recovered_content(payload: Dict[str, Any]) -> tuple:
+    """dqc.asset.recovered"""
+    asset_name = payload.get("display_name") or f"{payload.get('schema_name', '')}.{payload.get('table_name', '')}"
+    title = f"资产恢复：{asset_name}"
+    cs = payload.get("current_confidence_score", 0)
+    content = f"资产置信度恢复至 {cs}，信号已变为 GREEN。"
+    return title, content
+
+
 # 通知内容构建函数注册表
 CONTENT_BUILDERS = {
     "tableau.sync.completed": build_tableau_sync_completed_content,
@@ -196,6 +274,14 @@ CONTENT_BUILDERS = {
     "auth.user.role_changed": build_auth_user_role_changed_content,
     "system.maintenance": build_system_maintenance_content,
     "system.error": build_system_error_content,
+    "metric.published": build_metric_published_content,
+    "metric.anomaly.detected": build_metric_anomaly_detected_content,
+    "metric.consistency.failed": build_metric_consistency_failed_content,
+    "dqc.cycle.completed": build_dqc_cycle_completed_content,
+    "dqc.asset.signal_changed": build_dqc_asset_signal_changed_content,
+    "dqc.asset.p0_triggered": build_dqc_asset_p0_triggered_content,
+    "dqc.asset.p1_triggered": build_dqc_asset_p1_triggered_content,
+    "dqc.asset.recovered": build_dqc_asset_recovered_content,
 }
 
 

@@ -22,8 +22,6 @@ export function SearchResult({ result, onRetry }: SearchResultProps) {
     );
   }
 
-  const isAiContent = ['number', 'table', 'text', 'ambiguous'].includes(result.type);
-
   return (
     <div>
       {result.type === 'number' && (
@@ -46,17 +44,6 @@ export function SearchResult({ result, onRetry }: SearchResultProps) {
         );
       })()}
 
-      {/* AI 问答免责声明 */}
-      {isAiContent && (
-        <div className="mt-3 px-1">
-          <div className="flex items-start gap-2 py-2 px-3 rounded-lg bg-slate-50 border border-slate-200">
-            <i className="ri-information-line text-slate-400 text-base shrink-0 mt-0.5" />
-            <p className="text-xs text-slate-400 leading-relaxed">
-              AI 分析结果仅供参考，请以实际数据为准。AI 模型可能产生事实性错误，请务必核实后再用于决策。
-            </p>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

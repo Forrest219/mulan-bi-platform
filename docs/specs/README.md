@@ -1,6 +1,6 @@
 # Mulan BI Platform — 技术规格书索引
 
-> 最后更新：2026-04-04
+> 最后更新：2026-04-21
 
 ## 状态说明
 
@@ -9,6 +9,8 @@
 | :white_check_mark: | 已完成 |
 | :construction: | 编写中 |
 | :clipboard: | 待编写 |
+| :next_track_button: | Next（下一批开发） |
+| :pause_button: | Deferred（暂不开发） |
 
 ---
 
@@ -52,7 +54,11 @@
 | 18 | [菜单重构](18-menu-restructure-spec.md) | 5 域导航布局 | :white_check_mark: |
 | 19 | [发布日志](19-semantic-publish-logs-spec.md) | 回写审计日志 UI | :white_check_mark: |
 | 20 | [运维工作台](spec-20-ops-workbench.md) | Split-Pane 问数+资产+健康统一入口 | :construction: |
-| 26 | [Agentic Tableau MCP](26-agentic-tableau-mcp-spec.md) | 从"查数"到"控场"：字段匹配 + 视图控制 + 语义写回 | :construction: |
+| 26 | [Agentic Tableau MCP / Tableau Agent](26-agentic-tableau-mcp-spec.md) | 从"查数"到"控场"：字段匹配 + 视图控制 + 语义写回 | :pause_button: Deferred |
+| 26A | [Viz Agent](26-viz-agent-addendum.md) | 图表推荐 + Tableau 输出引导（Spec 26 附录） | :pause_button: Deferred |
+| 28 | [Data Agent](28-data-agent-spec.md) | 归因分析 + 自动报告生成 + 主动洞察（ReAct 框架） | :next_track_button: Next（第 2 批） |
+| 29 | [SQL Agent](29-sql-agent-spec.md) | 多方言 SQL 执行 + 安全校验 + 查询日志 | :white_check_mark: |
+| 30 | [Metrics Agent](30-metrics-agent-spec.md) | 指标注册 + 血缘追踪 + 一致性校验 + 异常检测 | :next_track_button: Next（第 1 批） |
 
 ---
 

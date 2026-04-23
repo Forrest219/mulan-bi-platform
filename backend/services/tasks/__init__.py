@@ -53,6 +53,24 @@ celery_app.conf.update(
             # 每周日凌晨 3:00 执行（在 reindex 之后）
             "options": {"expires": 3600},
         },
+        # DQC 每日完整 cycle（04:00，避开 Tableau 同步与健康扫描）
+        "dqc-cycle-daily": {
+            "task": "services.tasks.dqc_tasks.run_daily_full_cycle",
+            "schedule": crontab(minute=0, hour=4),
+            "options": {"expires": 3600},
+        },
+        # DQC 分区维护（每月 1 日 03:10）
+        "dqc-partition-maintenance": {
+            "task": "services.tasks.dqc_tasks.partition_maintenance",
+            "schedule": crontab(minute=10, hour=3, day_of_month=1),
+            "options": {"expires": 7200},
+        },
+        # DQC 分析/cycles 过期清理（每日 03:30）
+        "dqc-cleanup-old-analyses": {
+            "task": "services.tasks.dqc_tasks.cleanup_old_analyses",
+            "schedule": crontab(minute=30, hour=3),
+            "options": {"expires": 3600},
+        },
     },
 )
 

@@ -1,0 +1,57 @@
+[
+  {
+    "rule_id": 1,
+    "asset_id": 1,
+    "dimension": "completeness",
+    "rule_type": "null_rate",
+    "passed": false,
+    "actual_value": 0.082,
+    "expected_config": {"column": "user_id", "max_rate": 0.005},
+    "error_message": null,
+    "execution_time_ms": 230
+  },
+  {
+    "rule_id": 2,
+    "asset_id": 1,
+    "dimension": "uniqueness",
+    "rule_type": "uniqueness",
+    "passed": false,
+    "actual_value": 0.023,
+    "expected_config": {"columns": ["order_id"], "max_duplicate_rate": 0},
+    "error_message": null,
+    "execution_time_ms": 510
+  },
+  {
+    "rule_id": 3,
+    "asset_id": 1,
+    "dimension": "validity",
+    "rule_type": "range_check",
+    "passed": false,
+    "actual_value": 0.15,
+    "expected_config": {"column": "amount", "min": 0, "max": 10000000, "check_mode": "min_max_all"},
+    "error_message": null,
+    "execution_time_ms": 320
+  },
+  {
+    "rule_id": 4,
+    "asset_id": 1,
+    "dimension": "accuracy",
+    "rule_type": "range_check",
+    "passed": false,
+    "actual_value": 1.2,
+    "expected_config": {"column": "amount", "min": 10, "max": 5000, "check_mode": "avg"},
+    "error_message": null,
+    "execution_time_ms": 180
+  },
+  {
+    "rule_id": 5,
+    "asset_id": 1,
+    "dimension": "timeliness",
+    "rule_type": "freshness",
+    "passed": false,
+    "actual_value": 72.5,
+    "expected_config": {"column": "updated_at", "max_age_hours": 24},
+    "error_message": null,
+    "execution_time_ms": 42
+  }
+]

@@ -69,11 +69,14 @@ function HomePageInner() {
   const [isMockStreaming, setIsMockStreaming] = useState(false);
 
   // Task 1: 监听 URL ?conv= 变化，加载历史对话
+  // 当切换到新对话（无 conv 参数）时同时重置会话状态
   useEffect(() => {
     if (selectedConvId) {
       void loadConvHistory(selectedConvId);
     } else {
       setHistoryMessages([]);
+      setCurrentConversationId(null);
+      savedMessageCountRef.current = 0;
     }
   }, [selectedConvId, loadConvHistory]);
 
@@ -172,10 +175,23 @@ function HomePageInner() {
     setHomeState('HOME_RESULT');
 
     // 追加到对话历史（C2）
-    let convId = currentConversationId;
+    // 非 Mock 路径：conversation 在 useEffect（streaming 结束时）已创建，这里只追加消息
+    // Mock 路径：需要自己创建 conversation
+    const convId = currentConversationId;
     if (!convId) {
-      convId = await addConversation();
-      setCurrentConversationId(convId);
+      if (USE_MOCK) {
+        const id = await addConversation();
+        setCurrentConversationId(id);
+        appendMessage(id, { role: 'user', content: question });
+        const answerText =
+          r.type === 'text' ? r.answer :
+          r.type === 'error' ? `[错误] ${r.detail ?? r.reason ?? ''}` :
+          r.type === 'number' ? String(r.data) :
+          JSON.stringify(r.data ?? r.answer ?? '');
+        appendMessage(id, { role: 'assistant', content: answerText });
+      }
+      // 非 Mock 路径：streaming 结束后 useEffect 会创建 conversation，无需在此创建
+      return;
     }
     appendMessage(convId, { role: 'user', content: question });
     const answerText =

@@ -19,7 +19,20 @@ class AuthService:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._db = UserDatabase()
-            cls._instance._ensure_admin()
+            try:
+                cls._instance._ensure_admin()
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "管理员初始化失败（数据库 schema 可能未就绪）: %s", e
+                )
+                # 必须 rollback，否则 scoped_session 停留在失败事务中，
+                # 导致后续所有查询报 InFailedSqlTransaction
+                try:
+                    from app.core.database import SessionLocal
+                    SessionLocal().rollback()
+                except Exception:
+                    pass
         return cls._instance
 
     # 定义所有可用权限

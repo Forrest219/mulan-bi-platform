@@ -376,7 +376,7 @@ class LLMService:
         context: 可选的额外上下文信息
         Returns: { "explanation": str } or { "error": str }
         """
-        from tableau.models import TableauDatabase
+        from services.tableau.models import TableauDatabase
 
         from .prompts import ASSET_EXPLAIN_TEMPLATE
 

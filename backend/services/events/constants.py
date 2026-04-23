@@ -28,6 +28,19 @@ AUTH_USER_ROLE_CHANGED = "auth.user.role_changed"
 SYSTEM_MAINTENANCE = "system.maintenance"
 SYSTEM_ERROR = "system.error"
 
+# === Metrics Agent 模块事件 ===
+METRIC_PUBLISHED = "metric.published"
+METRIC_ANOMALY_DETECTED = "metric.anomaly.detected"
+METRIC_CONSISTENCY_FAILED = "metric.consistency.failed"
+
+# === DQC 模块事件 ===
+DQC_CYCLE_STARTED = "dqc.cycle.started"
+DQC_CYCLE_COMPLETED = "dqc.cycle.completed"
+DQC_ASSET_SIGNAL_CHANGED = "dqc.asset.signal_changed"
+DQC_ASSET_P0_TRIGGERED = "dqc.asset.p0_triggered"
+DQC_ASSET_P1_TRIGGERED = "dqc.asset.p1_triggered"
+DQC_ASSET_RECOVERED = "dqc.asset.recovered"
+
 # === 所有事件类型列表 ===
 ALL_EVENT_TYPES = [
     TABLEAU_SYNC_COMPLETED,
@@ -48,6 +61,15 @@ ALL_EVENT_TYPES = [
     AUTH_USER_ROLE_CHANGED,
     SYSTEM_MAINTENANCE,
     SYSTEM_ERROR,
+    METRIC_PUBLISHED,
+    METRIC_ANOMALY_DETECTED,
+    METRIC_CONSISTENCY_FAILED,
+    DQC_CYCLE_STARTED,
+    DQC_CYCLE_COMPLETED,
+    DQC_ASSET_SIGNAL_CHANGED,
+    DQC_ASSET_P0_TRIGGERED,
+    DQC_ASSET_P1_TRIGGERED,
+    DQC_ASSET_RECOVERED,
 ]
 
 # 来源模块枚举
@@ -56,6 +78,8 @@ SOURCE_MODULE_SEMANTIC = "semantic"
 SOURCE_MODULE_HEALTH = "health"
 SOURCE_MODULE_AUTH = "auth"
 SOURCE_MODULE_SYSTEM = "system"
+SOURCE_MODULE_METRICS = "metrics"
+SOURCE_MODULE_DQC = "dqc"
 
 # 严重级别枚举
 SEVERITY_INFO = "info"

@@ -1376,7 +1376,71 @@ sequenceDiagram
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-04-22 | v1.2 | 新增 §13「Hermes 施工交接」节，明确 REST 包装层缺口与验收标准 |
 | 2026-04-16 | v1.1 | P1 改造：单 session 全局单例 → per-site session 字典，LRU 驱逐上限 50。新增 `_get_site_key(conn)`、`_get_or_create_session_state(site_key, _max_sites=50)` 函数；`_ensure_session`、`_post_mcp`、`_build_headers`、`_invalidate_session` 均新增 `session_state`/`base_url`/`site_key` 参数；对外 `get_tableau_mcp_client`、`query_datasource` 签名不变。传输层改为标准 MCP Streamable-HTTP over JSON-RPC 2.0，删除自定义 REST 传输。 |
 | 2026-04-04 | v1.0 | 初始版本，单 session 全局单例模式 |
+
+---
+
+## 13. Hermes 施工交接（2026-04-22）
+
+> 本节为 Hermes（minimax M2.7）接手施工专用，不替代 §1–§12 的完整规格。
+
+### 13.1 已完成的基础设施（不得修改）
+
+| 组件 | 文件 | 说明 |
+|------|------|------|
+| MCP 客户端 | `backend/services/tableau/mcp_client.py` | 1179 行，`TableauMCPClient` 完整实现，含 `query_datasource()`、`get_datasource_metadata()`、`list_datasources()`、per-site session 池 |
+| V1 REST API | `backend/app/api/tableau.py` | 804 行，`/api/tableau/*` 全部 V1 端点（连接、资产、同步、健康评分），**绝对禁止修改** |
+| JSON-RPC 代理 | `backend/app/api/tableau_mcp.py` | 2640 行，`/tableau-mcp` 裸协议代理，供内部调试用，不属于 V2 REST 层 |
+| 字段缓存表 | `tableau_datasource_fields`（migration 已存在） | V2 元数据持久化表，已可用 |
+
+### 13.2 缺口清单（Hermes 需交付的内容）
+
+#### Task 1 — 新增 V2 REST 端点到 `tableau.py`
+
+在 `backend/app/api/tableau.py` 末尾追加以下三个端点（**不得改动已有路由**）：
+
+| 端点 | 方法 | 路径 | 调用的服务层方法 |
+|------|------|------|----------------|
+| V2-1 | POST | `/api/tableau/query` | `TableauMCPClient.query_datasource()` |
+| V2-2 | GET | `/api/tableau/datasources/{id}/metadata` | `TableauMCPClient.get_datasource_metadata()` + 写入 `tableau_datasource_fields` |
+| V2-3 | GET | `/api/tableau/datasources/{id}/preview` | `TableauMCPClient.query_datasource()` with auto-field selection |
+
+完整请求/响应 Schema 见 §5.1–§5.3，错误码见 §7。
+
+**降级规则**（见 §6）：
+- V2-1 (`/query`)：MCP 不可达时返回 503 + `MCP_001`，不降级
+- V2-2 (`/metadata`)：MCP 不可达时降级返回 `tableau_datasource_fields` 中已缓存数据，`cache_status: "stale"`
+- V2-3 (`/preview`)：同 V2-1，不降级
+
+#### Task 2 — 端到端测试
+
+在 `backend/tests/test_tableau.py` 补充以下测试（mock MCP Server）：
+
+| 测试编号 | 场景 | 验证点 |
+|---------|------|--------|
+| T1 | `POST /api/tableau/query` 正常查询 | 返回结构化 `rows/columns`，HTTP 200 |
+| T2 | `GET /api/tableau/datasources/{id}/metadata` 首次拉取 | `tableau_datasource_fields` 写入，`cache_status: "fresh"` |
+| T3 | `GET /api/tableau/datasources/{id}/metadata` 缓存命中 | 无 MCP 调用，`cache_status: "cached"` |
+| T4 | MCP 不可达时 `/metadata` 降级 | 返回缓存数据，`cache_status: "stale"` |
+| T5 | MCP 不可达时 `/query` 返回 503 | `error_code: "MCP_001"` |
+| T6 | V1 sync 与 V2 query 并发不互扰 | 两者均成功 |
+
+### 13.3 红线（禁止触碰）
+
+- `backend/services/tableau/mcp_client.py` — MCP 客户端完整，不改动
+- `backend/app/api/tableau.py` 中已有的全部路由函数 — V1 功能不可回归
+- `backend/services/tableau/sync_service.py` — 同步服务不改动
+- `backend/app/main.py` 中的路由注册 — 只允许追加，不允许修改或删除
+
+### 13.4 验收口径
+
+- [ ] `POST /api/tableau/query` 能正确执行 VizQL 查询并返回结构化结果（HTTP 200）
+- [ ] `GET /api/tableau/datasources/{id}/metadata?refresh=true` 强制重拉并更新缓存
+- [ ] MCP 不可达时，metadata 接口返回 stale 缓存而不是 500
+- [ ] MCP 不可达时，query 接口返回 503 + `MCP_001`
+- [ ] T1–T6 六个端到端测试全部通过
+- [ ] V1 原有 3 个测试（`test_get_connections_without_auth`、`test_get_connections`、`test_get_assets_requires_connection_id`）不退步
 
 *文档结束*

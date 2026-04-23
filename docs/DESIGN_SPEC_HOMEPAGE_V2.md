@@ -82,37 +82,31 @@
 
 ---
 
-### 改动 2：ConversationBar 头部加品牌区（open-webui 风格顶部）
+### 改动 2：ConversationBar 头部品牌区（仅文字 + 新建按钮）
+
+> ⚠️ **2026-04-21 用户永久决策：侧边栏顶部禁止加入 Logo 图标。**
+> 仅保留"木兰平台"文字 + 右侧新建按钮。
+> 禁止重新加入 `LOGO_URL` 图标或任何 `<img>` 到 `ConversationBar` 头部。
+> 根因：Logo 图标引发 spec 执行回归（已被修复 3+ 次），视觉上也不必要。
+> 同时禁止在 `ConversationBar` 内部渲染折叠按钮（折叠由 `HomeLayout` 控制）。
 
 **改动目标**
-顶部从"折叠按钮 + 大号新建按钮"改为"小 logo + 产品名 + 右侧新建图标按钮"的对称布局，贴近 open-webui 的侧边栏顶部模式，同时保留搜索框和 `⌘N` 快捷键提示。
+顶部从"折叠按钮 + 大号新建按钮"改为"产品名文字 + 右侧新建图标按钮"的简洁布局，不加 Logo 图标。
 
 **修改文件和位置**
 - 文件：`frontend/src/pages/home/components/ConversationBar.tsx`
-- 行号：L121-L140
 
-**旧 className**
-见改动 1 引用的代码块。
-
-**新 className**
+**最终正确代码（不得修改）**
 ```tsx
-{/* 顶部：品牌区 + 新建图标按钮 */}
-<div className="flex items-center justify-between h-14 px-3 border-b border-slate-100 flex-shrink-0">
-  <div className="flex items-center gap-2 min-w-0">
-    <img
-      src={LOGO_URL}
-      alt=""
-      aria-hidden="true"
-      className="w-5 h-5 object-contain flex-shrink-0"
-    />
-    <span className="text-sm font-semibold text-slate-800 truncate">木兰平台</span>
-  </div>
+{/* Top: brand + new icon */}
+<div className="flex items-center justify-between h-12 px-2 flex-shrink-0">
+  <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 px-1">木兰平台</span>
   <button
     onClick={handleNew}
     title="新对话  ⌘N"
     aria-label="新对话"
-    className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg
-               text-slate-400 hover:bg-slate-100 hover:text-slate-700
+    className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-xl
+               text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-900
                transition-colors duration-150"
   >
     <i className="ri-edit-box-line text-base" />
@@ -121,13 +115,10 @@
 ```
 
 **注意事项**
-- 需在文件顶部 import `LOGO_URL`：`import { LOGO_URL } from '../../../config';`（与 `WelcomeHero.tsx` 同模式）。
-- "木兰平台"文案必须与 Spec 25 §7.2 Sidebar 示例保持一致（L586/L659），避免两处侧边栏产品名不一致。
-- `⌘N` 快捷键提示从原先 inline 的 `<span>` 移到 `title` 属性中（浏览器原生 tooltip）。如果后续要保留可见的快捷键徽章，可改为：在 icon 按钮右下方用 `<kbd>` 标签做浮层，但不在本轮强求。
-- icon 选择 `ri-edit-box-line`（编辑/新写），比 `ri-add-line`（加号）更贴近 open-webui "新对话 = 打开一个空白写作面板"的语义；若 remixicon 集里该 icon 不存在可替换为 `ri-quill-pen-line` 或 `ri-pencil-line`。
-- 点击逻辑 `handleNew` 已存在（L72-L75），不需改。
-- 搜索框（L142-L158）保持不动，它在品牌区下方依旧工作。
-- `border-b border-slate-100` 让品牌区与搜索框之间有一条细分隔线，呼应 Spec 25 §7.2 L584 `border-b border-slate-100` 的做法。
+- **不要** import `LOGO_URL`，**不要** 添加 `<img>` 标签。
+- **不要** 在此处添加折叠/收缩按钮（`ri-sidebar-fold-line` 等）。折叠逻辑由 `HomeLayout.tsx` 控制，展开按钮在 `HomeLayout.tsx` 中 `collapsed && (...)` 内渲染，位置 `fixed top-3 left-3`。
+- `onToggleCollapse` prop 保留在 interface 中（供 Layout 传入），但 `ConversationBar` 内部以 `_onToggleCollapse` 接收（避免 lint unused 报错），不使用。
+- 搜索框保持不动，它在品牌区下方依旧工作。
 
 ---
 

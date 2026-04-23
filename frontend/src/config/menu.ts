@@ -209,11 +209,16 @@ export const menuConfig: MenuDomain[] = [
         icon: 'ri-file-list-3-line',
         path: '/empty/publish-logs',
       },
+      {
+        key: 'metrics',
+        label: '指标管理',
+        icon: 'ri-bar-chart-grouped-line',
+        path: '/governance/metrics',
+      },
     ],
   },
 
-  // ──────────────────────────────────────────────────
-  // 域 4：设置 /system
+  // ── 域 4：设置 /system
   // ──────────────────────────────────────────────────
   {
     key: 'system',
@@ -270,6 +275,13 @@ export const menuConfig: MenuDomain[] = [
         label: '操作日志',
         icon: 'ri-history-line',
         path: '/system/activity',
+      },
+      {
+        key: 'query-alerts',
+        label: '问数告警',
+        icon: 'ri-alarm-warning-line',
+        path: '/system/query-alerts',
+        permission: { adminOnly: true },
       },
     ],
   },

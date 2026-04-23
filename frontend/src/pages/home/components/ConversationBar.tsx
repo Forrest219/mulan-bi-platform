@@ -20,7 +20,6 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useConversations, type Conversation } from '../../../store/conversationStore';
 import { ConfirmModal } from '../../../components/ConfirmModal';
 import { useAuth } from '../../../context/AuthContext';
-import { LOGO_URL } from '../../../config';
 
 const PAGE_SIZE = 100;
 
@@ -53,8 +52,8 @@ const GROUP_ORDER: TimeGroup[] = ['今天', '昨天', '过去 7 天', '更早'];
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ConversationBar({ collapsed, onToggleCollapse }: ConversationBarProps) {
-  const { conversations, addConversation, deleteConversation, updateConversationTitle } =
+export function ConversationBar({ collapsed, onToggleCollapse: _onToggleCollapse }: ConversationBarProps) {
+  const { conversations, deleteConversation, updateConversationTitle } =
     useConversations();
   const { user, logout } = useAuth();
   const [search, setSearch] = useState('');
@@ -70,10 +69,9 @@ export function ConversationBar({ collapsed, onToggleCollapse }: ConversationBar
     ? location.pathname.split('/chat/')[1]
     : new URLSearchParams(location.search).get('conv');
 
-  const handleNew = useCallback(async () => {
-    const id = await addConversation();
-    navigate(`/chat/${id}`);
-  }, [addConversation, navigate]);
+  const handleNew = useCallback(() => {
+    navigate('/');
+  }, [navigate]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -131,27 +129,9 @@ export function ConversationBar({ collapsed, onToggleCollapse }: ConversationBar
       <div className="my-auto flex flex-col justify-between h-screen max-h-[100dvh] w-[var(--sidebar-width)] overflow-x-hidden scrollbar-hidden">
         {/* Top section: sticky */}
         <div className="sticky top-0 px-[0.5625rem] pt-2 pb-1.5 z-10 bg-gray-50/70 dark:bg-gray-950/70">
-          {/* Top: collapse button + brand + new icon */}
-          <div className="flex items-center justify-between h-12 px-1 flex-shrink-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <button
-                onClick={onToggleCollapse}
-                title="折叠侧边栏"
-                aria-label="折叠侧边栏"
-                className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-xl
-                           text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-900
-                           transition-colors duration-150"
-              >
-                <i className="ri-sidebar-fold-line text-base" />
-              </button>
-              <img
-                src={LOGO_URL}
-                alt=""
-                aria-hidden="true"
-                className="w-5 h-5 object-contain flex-shrink-0"
-              />
-              <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate">木兰平台</span>
-            </div>
+          {/* Top: brand + new icon */}
+          <div className="flex items-center justify-between h-12 px-2 flex-shrink-0">
+            <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 px-1">木兰平台</span>
             <button
               onClick={handleNew}
               title="新对话  ⌘N"

@@ -65,7 +65,7 @@ class TestHappyPath:
         query_result = {"fields": ["region", "sales"], "rows": [["North", 1000], ["South", 2000]]}
         send_calls = []
 
-        def mock_send(self, payload, timeout):
+        def mock_send(self, payload, timeout, **kwargs):
             send_calls.append(payload.get("method", ""))
             if payload.get("method") == "initialize":
                 return {"jsonrpc": "2.0", "id": 1, "result": {}}
@@ -106,7 +106,7 @@ class TestSessionIdReuse:
     def test_session_reused_across_calls(self):
         call_seq = []
 
-        def mock_send(self, payload, timeout):
+        def mock_send(self, payload, timeout, **kwargs):
             call_seq.append(payload.get("method", ""))
             if payload.get("method") == "initialize":
                 return {"jsonrpc": "2.0", "id": 1, "result": {}}
@@ -138,13 +138,13 @@ class TestSessionExpiredAutoRecover:
     def test_session_expired_then_recovered(self):
         post_count = [0]
 
-        def mock_ensure(timeout):
+        def mock_ensure(timeout, **kwargs):
             with mcp_mod._mcp_session_state.lock:
                 mcp_mod._mcp_session_state.session_id = "mock-sid"
                 mcp_mod._mcp_session_state._initialized = True
             return "mock-sid"
 
-        def mock_post(payload, method, timeout, expect_sse=True):
+        def mock_post(payload, method, timeout, expect_sse=True, **kwargs):
             """Mock _post_mcp: first tools/call raises _SessionExpiredError."""
             post_count[0] += 1
             if post_count[0] == 1:
@@ -178,7 +178,7 @@ class TestTimeout:
     """test_timeout_raises_nlq_007 — server 挂起超过 timeout"""
 
     def test_timeout_raises_nlq_007(self):
-        def mock_send(self, payload, timeout):
+        def mock_send(self, payload, timeout, **kwargs):
             raise TableauMCPError(
                 code="NLQ_007",
                 message=f"MCP 查询超时（{timeout}s）",
@@ -216,7 +216,7 @@ class Test5xxRetry:
             resp.text = 'event: message\ndata: {"error": {"code": "NLQ_006", "message": "HTTP 500"}}\n\n'
             return resp
 
-        def mock_ensure(timeout):
+        def mock_ensure(timeout, **kwargs):
             with mcp_mod._mcp_session_state.lock:
                 mcp_mod._mcp_session_state.session_id = "mock-sid"
                 mcp_mod._mcp_session_state._initialized = True
@@ -247,7 +247,7 @@ class Test4xxNoRetry:
     def test_4xx_no_retry(self):
         call_count = [0]
 
-        def mock_send(self, payload, timeout):
+        def mock_send(self, payload, timeout, **kwargs):
             call_count[0] += 1
             raise TableauMCPError(
                 code="NLQ_006",
@@ -275,7 +275,7 @@ class TestToolsCallIsError:
     """test_tools_call_iserror_true — isError: true 映射到 NLQ_006"""
 
     def test_iserror_true_raises(self):
-        def mock_send(self, payload, timeout):
+        def mock_send(self, payload, timeout, **kwargs):
             return {
                 "result": {
                     "content": [{"type": "text", "text": "VizQL error: invalid filter"}],
@@ -303,7 +303,7 @@ class TestInvalidJsonInContentText:
     """test_invalid_json_in_content_text — content[0].text 不是 JSON 时 raise"""
 
     def test_invalid_json_in_text(self):
-        def mock_send(self, payload, timeout):
+        def mock_send(self, payload, timeout, **kwargs):
             return {
                 "result": {
                     "content": [{"type": "text", "text": "not json at all {{{"}],
@@ -334,7 +334,7 @@ class TestContextvarsIsolation:
         seen_ids = []
         lock = threading.Lock()
 
-        def mock_send(self, payload, timeout):
+        def mock_send(self, payload, timeout, **kwargs):
             cid = mcp_mod.get_mcp_connection_id()
             with lock:
                 seen_ids.append(cid)
@@ -366,7 +366,7 @@ class TestInstanceCacheInvalidate:
     """test_instance_cache_invalidate — invalidate(cid) 后下次调用重建"""
 
     def test_invalidate_recreates_instance(self):
-        def mock_send(self, payload, timeout):
+        def mock_send(self, payload, timeout, **kwargs):
             if payload.get("method") == "initialize":
                 return {"jsonrpc": "2.0", "id": 1, "result": {}}
             elif "initialized" in payload.get("method", ""):

@@ -88,6 +88,15 @@ test.describe('登录页', () => {
     await expect(page.locator('text=管理员').first()).toBeVisible({ timeout: 5000 });
   });
 
+  test('admin/admin123 登录后能看到对话输入框', async ({ page }) => {
+    await page.goto('/login');
+    await page.locator('input[type="text"]').fill(ADMIN_USERNAME);
+    await page.locator('input[type="password"]').fill(ADMIN_PASSWORD);
+    await page.locator('button[type="submit"]').click();
+    await expect(page).toHaveURL('/', { timeout: 5000 });
+    await expect(page.locator('textarea, input[placeholder*="提问"], input[placeholder*="木兰"]').first()).toBeVisible({ timeout: 5000 });
+  });
+
   // ===== 键盘交互 =====
 
   test('用户名框按 Enter 提交表单', async ({ page }) => {

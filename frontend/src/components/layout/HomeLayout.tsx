@@ -11,7 +11,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { ConversationBar } from '../../pages/home/components/ConversationBar';
-import { useConversations } from '../../store/conversationStore';
 
 const STORAGE_KEY = 'mulan-home-sidebar-collapsed';
 const SIDEBAR_WIDTH = 260;
@@ -25,7 +24,6 @@ export default function HomeLayout() {
     }
   });
 
-  const { addConversation } = useConversations();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -42,7 +40,7 @@ export default function HomeLayout() {
       const isMod = e.metaKey || e.ctrlKey;
       if (isMod && e.key === 'n') {
         e.preventDefault();
-        addConversation().then((id) => navigate(`/chat/${id}`));
+        navigate('/');
       }
       if (isMod && e.key === 'k') {
         e.preventDefault();
@@ -54,7 +52,7 @@ export default function HomeLayout() {
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [addConversation, navigate]);
+  }, [navigate]);
 
   const handleToggleCollapse = useCallback(() => setCollapsed((c) => !c), []);
 
@@ -74,9 +72,13 @@ export default function HomeLayout() {
             onClick={handleToggleCollapse}
             title="展开侧边栏"
             aria-label="展开侧边栏"
-            className="fixed top-1/2 -translate-y-1/2 left-0 z-50 w-6 h-12 flex items-center justify-center bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-r-lg shadow-md transition-colors"
+            className="fixed top-3 left-3 z-50 w-8 h-8 flex items-center justify-center
+                       rounded-xl text-gray-500 dark:text-gray-400
+                       bg-gray-100 dark:bg-gray-800
+                       hover:bg-gray-200 dark:hover:bg-gray-700
+                       shadow-sm transition-colors duration-150"
           >
-            <i className="ri-sidebar-fold-line text-gray-500 dark:text-gray-400 text-sm" />
+            <i className="ri-sidebar-unfold-line text-base" />
           </button>
         )}
         <Outlet />

@@ -96,9 +96,9 @@ export function SuggestionGrid({ onPick }: SuggestionGridProps) {
         <button
           key={s.title}
           onClick={() => onPick(s.title)}
-          className="group flex flex-col items-start text-left
+          className="group flex flex-col justify-between text-left
                      rounded-xl border border-slate-200 bg-white
-                     px-4 py-3
+                     px-4 py-3 min-h-[72px]
                      hover:bg-slate-50 hover:border-slate-300
                      transition-colors duration-150
                      focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
@@ -107,7 +107,7 @@ export function SuggestionGrid({ onPick }: SuggestionGridProps) {
             {s.title}
           </span>
           {s.hint && (
-            <span className="mt-1 text-xs text-slate-500">
+            <span className="text-xs text-slate-500">
               {s.hint}
             </span>
           )}

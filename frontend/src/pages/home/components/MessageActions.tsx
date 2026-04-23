@@ -50,7 +50,7 @@ export function MessageActions({ content, conversationId, messageIndex, question
   };
 
   return (
-    <div className="flex items-center gap-0.5 mt-2 flex-wrap">
+    <div className="flex items-center gap-0.5 mt-2 flex-wrap opacity-0 group-hover:opacity-100 transition-opacity duration-150">
       <button
         onClick={() => handleRate('up')}
         disabled={rated !== null}

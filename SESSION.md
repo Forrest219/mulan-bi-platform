@@ -70,11 +70,11 @@
 
 ## 4. Batch 完成状态
 
-- [ ] Batch 1：结构性修复（双卡片消除 + 用户气泡右对齐 + 宽度调整）
-- [ ] Batch 2：AI 消息操作区（MessageActions 组件 + POST /api/feedback 对接）
-- [ ] Batch 3：输入框打磨（外观 + 停止按钮 + abort 方法）
-- [ ] Batch 4：Loading 状态统一（删 spinner + 品牌标识）
-- [ ] Feedback API：后端新建（feedback.py + migration + main.py 注册）
+- [x] Batch 1：结构性修复（双卡片消除 + 用户气泡右对齐 + 宽度调整）— bg-blue-600 / max-w-4xl 预存，双卡片 guard 已在 page.tsx
+- [x] Batch 2：AI 消息操作区（MessageActions 组件 + POST /api/feedback 对接）— hover 显隐由 Hermes 补完 2026-04-22
+- [x] Batch 3：输入框打磨（外观 + 停止按钮 + abort 方法）— rounded-3xl / placeholder / stop button 预存
+- [x] Batch 4：Loading 状态统一（删 spinner + 品牌标识）— 品牌标识由 Hermes 补完 2026-04-22，外部 spinner 已不存在
+- [x] Feedback API：后端新建（feedback.py + migration + main.py 注册）— 预存，runtime 验收待人工执行
 
 ---
 

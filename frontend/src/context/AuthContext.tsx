@@ -171,7 +171,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: true, message: '登录成功' };
       } else {
         const detail = 'detail' in data ? data.detail : undefined;
-        return { success: false, message: detail || data.message || '登录失败' };
+        // detail 可能是 FastAPI 返回的对象（如验证错误数组），必须转为字符串，
+        // 否则调用方 setError(result.message) 存入对象会导致 React 渲染崩溃
+        const detailStr =
+          typeof detail === 'string'
+            ? detail
+            : detail != null
+              ? JSON.stringify(detail)
+              : undefined;
+        const messageStr =
+          typeof data.message === 'string' ? data.message : undefined;
+        return { success: false, message: detailStr || messageStr || '登录失败' };
       }
     } catch {
       return { success: false, message: '网络错误' };

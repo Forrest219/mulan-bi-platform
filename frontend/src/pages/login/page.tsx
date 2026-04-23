@@ -33,7 +33,7 @@ export default function LoginPage() {
     if (result.success) {
       navigate('/');
     } else {
-      setError(result.message);
+      setError(typeof result.message === 'string' ? result.message : '登录失败，请重试');
     }
     setLoading(false);
   };
@@ -88,7 +88,7 @@ export default function LoginPage() {
         <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-8">
 
           {/* 错误提示 */}
-          {error && (
+          {typeof error === 'string' && error && (
             <div className="mb-4 px-3 py-2 rounded-md bg-red-50 border border-red-200 text-red-600 text-sm">
               {error}
             </div>

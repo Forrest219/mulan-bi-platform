@@ -40,6 +40,7 @@ const SyncLogsPage        = lazy(() => import('../pages/tableau/sync-logs/page')
 const SemanticDatasourceListPage  = lazy(() => import('../pages/semantic-maintenance/datasource-list/page'));
 const SemanticDatasourceDetailPage = lazy(() => import('../pages/semantic-maintenance/datasource-detail/page'));
 const SemanticFieldListPage = lazy(() => import('../pages/semantic-maintenance/field-list/page'));
+const MetricsPage = lazy(() => import('../pages/data-governance/metrics/page'));
 const KnowledgePage        = lazy(() => import('../pages/knowledge/page'));
 const UsersAdminPage       = lazy(() => import('../pages/admin/user-management/page'));
 const GroupsAdminPage      = lazy(() => import('../pages/admin/groups/page'));
@@ -47,8 +48,10 @@ const PermissionsAdminPage = lazy(() => import('../pages/admin/permissions/page'
 const LLMAdminPage         = lazy(() => import('../pages/admin/llm/page'));
 const AdminTasksPage        = lazy(() => import('../pages/admin/tasks/page'));
 const ActivityAdminPage     = lazy(() => import('../pages/admin/activity/page'));
+const QueryAlertsPage       = lazy(() => import('../pages/admin/query-alerts/page'));
 const ForgotPasswordPage    = lazy(() => import('../pages/forgot-password/page'));
 const EmptyStatePage        = lazy(() => import('../pages/empty/EmptyStatePage'));
+const QueryPage             = lazy(() => import('../pages/query/page'));
 
 // ──────────────────────────────────────────────────────────────
 // 路由定义
@@ -72,6 +75,18 @@ const routes: RouteObject[] = [
   { path: '/login',          element: <LoginPage /> },
   { path: '/register',       element: <RegisterPage /> },
   { path: '/forgot-password', element: <ForgotPasswordPage /> },
+
+  // =====================
+  // 问数模块（独立布局，与运维路由完全隔离）
+  // =====================
+  {
+    path: '/query',
+    element: (
+      <ProtectedRoute>
+        <QueryPage />
+      </ProtectedRoute>
+    ),
+  },
 
   // =====================
   // 统一侧边栏布局（5 域，Spec 18 §4.2）
@@ -162,6 +177,14 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute requiredPermission="database_monitor">
                 <DataHealthPage /> {/* 临时复用占位，待功能开发后替换 */}
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'metrics',
+            element: (
+              <ProtectedRoute>
+                <MetricsPage />
               </ProtectedRoute>
             ),
           },
@@ -331,6 +354,14 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute adminOnly>
                 <McpDebuggerPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'query-alerts',
+            element: (
+              <ProtectedRoute adminOnly>
+                <QueryAlertsPage />
               </ProtectedRoute>
             ),
           },

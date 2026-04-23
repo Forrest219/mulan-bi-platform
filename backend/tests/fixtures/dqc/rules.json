@@ -1,0 +1,134 @@
+[
+  {
+    "asset_id": 1,
+    "name": "user_id 非空率",
+    "description": "user_id 不应出现空值",
+    "dimension": "completeness",
+    "rule_type": "null_rate",
+    "rule_config": {"column": "user_id", "max_rate": 0.005},
+    "is_active": true,
+    "is_system_suggested": false,
+    "created_by": 1
+  },
+  {
+    "asset_id": 1,
+    "name": "order_id 唯一",
+    "description": "order_id 在当日维度唯一",
+    "dimension": "uniqueness",
+    "rule_type": "uniqueness",
+    "rule_config": {"columns": ["order_id"], "max_duplicate_rate": 0},
+    "is_active": true,
+    "is_system_suggested": false,
+    "created_by": 1
+  },
+  {
+    "asset_id": 1,
+    "name": "amount 合法值域",
+    "description": "订单金额必须在 [0, 1e7] 区间",
+    "dimension": "validity",
+    "rule_type": "range_check",
+    "rule_config": {"column": "amount", "min": 0, "max": 10000000, "check_mode": "min_max_all"},
+    "is_active": true,
+    "is_system_suggested": false,
+    "created_by": 1
+  },
+  {
+    "asset_id": 1,
+    "name": "amount 平均值",
+    "description": "订单金额平均应在合理区间",
+    "dimension": "accuracy",
+    "rule_type": "range_check",
+    "rule_config": {"column": "amount", "min": 10, "max": 5000, "check_mode": "avg"},
+    "is_active": true,
+    "is_system_suggested": false,
+    "created_by": 1
+  },
+  {
+    "asset_id": 1,
+    "name": "更新时效 24h",
+    "description": "updated_at 距 now 不应超过 24 小时",
+    "dimension": "timeliness",
+    "rule_type": "freshness",
+    "rule_config": {"column": "updated_at", "max_age_hours": 24},
+    "is_active": true,
+    "is_system_suggested": false,
+    "created_by": 1
+  },
+  {
+    "asset_id": 2,
+    "name": "user_id 非空率",
+    "description": "user_id 非空率 >= 99.5%",
+    "dimension": "completeness",
+    "rule_type": "null_rate",
+    "rule_config": {"column": "user_id", "max_rate": 0.005},
+    "is_active": true,
+    "is_system_suggested": true,
+    "created_by": 1
+  },
+  {
+    "asset_id": 2,
+    "name": "event_time 时效",
+    "description": "事件时间不应滞后 6 小时",
+    "dimension": "timeliness",
+    "rule_type": "freshness",
+    "rule_config": {"column": "event_time", "max_age_hours": 6},
+    "is_active": true,
+    "is_system_suggested": true,
+    "created_by": 1
+  },
+  {
+    "asset_id": 2,
+    "name": "session_id 非空",
+    "description": "session_id 不应出现空值",
+    "dimension": "completeness",
+    "rule_type": "null_rate",
+    "rule_config": {"column": "session_id", "max_rate": 0.01},
+    "is_active": true,
+    "is_system_suggested": false,
+    "created_by": 1
+  },
+  {
+    "asset_id": 3,
+    "name": "amount 非空",
+    "description": "amount 不应为空",
+    "dimension": "completeness",
+    "rule_type": "null_rate",
+    "rule_config": {"column": "amount", "max_rate": 0},
+    "is_active": true,
+    "is_system_suggested": false,
+    "created_by": 2
+  },
+  {
+    "asset_id": 3,
+    "name": "amount 范围",
+    "description": "amount 必须在 [0, 1e9] 区间",
+    "dimension": "validity",
+    "rule_type": "range_check",
+    "rule_config": {"column": "amount", "min": 0, "max": 1000000000, "check_mode": "min_max_all"},
+    "is_active": true,
+    "is_system_suggested": false,
+    "created_by": 2
+  },
+  {
+    "asset_id": 3,
+    "name": "对账键唯一",
+    "description": "(bill_no, dt) 组合唯一",
+    "dimension": "uniqueness",
+    "rule_type": "uniqueness",
+    "rule_config": {"columns": ["bill_no", "dt"], "max_duplicate_rate": 0},
+    "is_active": true,
+    "is_system_suggested": false,
+    "created_by": 2
+  },
+  {
+    "asset_id": 3,
+    "name": "结算时效",
+    "description": "settled_at 不应滞后 12 小时",
+    "dimension": "timeliness",
+    "rule_type": "freshness",
+    "rule_config": {"column": "settled_at", "max_age_hours": 12},
+    "is_active": true,
+    "is_system_suggested": false,
+    "created_by": 2
+  }
+]
