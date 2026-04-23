@@ -748,10 +748,12 @@ class SemanticMaintenanceService:
         from services.knowledge_base.embedding_service import embedding_service
         from services.tableau.models import TableauDatasourceField
 
-        # Step 1: 生成 query embedding
+        # Step 1: 生成 query embedding（async → sync bridge）
         try:
-            embed_result = embedding_service.embed_text(fuzzy_name)
-            query_embedding = embed_result
+            import asyncio
+            query_embedding = asyncio.run(
+                embedding_service.embed_text(fuzzy_name)
+            )
         except Exception as e:
             logger.warning("resolve_field_by_embedding: embed_text 失败，fallback 到空列表: %s", e)
             return [], None

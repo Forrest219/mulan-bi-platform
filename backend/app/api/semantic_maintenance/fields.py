@@ -324,10 +324,13 @@ async def resolve_field_semantics(
     """
     user = get_current_user(request, db)
 
-    # connection_id 必须由前端传入，放在 query string 中（避免 body 被篡改）
-    connection_id: int = request.query_params.get("connection_id", type=int)
-    if not connection_id:
+    # connection_id 放 query string（防 body 篡改）
+    try:
+        connection_id: int = int(request.query_params["connection_id"])
+    except KeyError:
         raise HTTPException(status_code=422, detail="缺少 required query param: connection_id")
+    except ValueError:
+        raise HTTPException(status_code=422, detail="connection_id 必须是整数")
 
     verify_connection_access(connection_id, user, db)
 
