@@ -802,16 +802,15 @@ class SemanticMaintenanceService:
         """
         向量语义字段解析（Spec 26 §P0 — /fields/resolve）。
 
-        1. 对 fuzzy_name 生成 embedding
-        2. 在 tableau_field_semantics（HNSW 索引）搜索 source_type='field'
+        1. 对 fuzzy_name 生成 embedding（空串短路）
+        2. 在 tableau_field_semantics（HNSW 索引）搜索
         3. SQL JOIN tableau_datasource_fields 补全 role / data_type（无 N+1）
-        4. 返回带 similarity 置信度的候选列表
+        4. 返回带 cosine_similarity 的候选列表，取值范围为 [-1, 1]
         """
-        from services.llm.service import llm_service
-        from services.knowledge_base.embedding_service import embedding_service
-        from services.tableau.models import TableauDatasourceField
+        fuzzy_name = (fuzzy_name or "").strip()
+        if not fuzzy_name:
+            return [], None
 
-        # Step 1: 生成 query embedding（兼容 sync / async 上下文）
         from services.knowledge_base.embedding_service import embedding_service
         try:
             import asyncio
@@ -846,17 +845,12 @@ class SemanticMaintenanceService:
         if not rows:
             logger.info("resolve_field_by_embedding: connection_id=%d 命中 0 条（embedding 可能尚未生成）", connection_id)
 
-        # Step 3: 构造候选列表（role/data_type 来自 SQL JOIN，无 N+1）
+        # Step 3: 构造候选列表（tfs.id 为主键，SQL 层已保证唯一，无需 seen_ids 去重）
         candidates = []
-        seen_ids = set()
         for row in rows:
-            fid = row.get("field_semantic_id")
-            if fid in seen_ids:
-                continue
-            seen_ids.add(fid)
-            confidence = float(row.get("similarity", 0.0))
+            cosine_similarity = float(row.get("cosine_similarity", 0.0))
             candidates.append({
-                "field_semantic_id": fid,
+                "field_semantic_id": row.get("field_semantic_id"),
                 "tableau_field_id": row.get("tableau_field_id"),
                 "semantic_name": row.get("semantic_name"),
                 "semantic_name_zh": row.get("semantic_name_zh"),
@@ -865,7 +859,7 @@ class SemanticMaintenanceService:
                 "data_type": row.get("data_type"),
                 "connection_id": row.get("connection_id"),
                 "chunk_text": row.get("chunk_text"),
-                "confidence": round(confidence, 4),
+                "cosine_similarity": round(cosine_similarity, 4),
                 "match_source": "vector_hnsw",
             })
 

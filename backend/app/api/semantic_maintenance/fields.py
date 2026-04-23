@@ -1,6 +1,6 @@
 """语义维护 - 字段语义 API
 """
-from typing import Optional
+from typing import Optional, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -301,7 +301,7 @@ async def generate_field_ai(field_id: int, req: GenerateFieldAIRequest, request:
 
 class ResolveFieldRequest(BaseModel):
     """向量字段解析请求模型"""
-    fuzzy_name: str
+    fuzzy_name: Annotated[str, Field(min_length=1)]
     top_k: int = Field(default=5, ge=1, le=20)
 
 
@@ -315,10 +315,11 @@ async def resolve_field_semantics(
     向量语义字段解析（Spec 26 §P0 — /fields/resolve）。
 
     将自然语言模糊字段名映射为语义层候选字段列表。
-    基于 embedding + HNSW 向量相似度搜索，返回带置信度的候选列表。
+    基于 embedding + HNSW 向量相似度搜索，返回带 `cosine_similarity` 的候选列表。
 
     - 连接权限由 connection_id 验证
     - 返回字段角色（dimension / measure）和数据类型（string / integer / datetime 等）
+    - `cosine_similarity` 范围为 [-1, 1]
     - 若向量尚未生成（命中 0 条），返回空列表（前端应降级为 LIKE 查询）
     """
     user = get_current_user(request, db)
@@ -334,11 +335,10 @@ async def resolve_field_semantics(
     verify_connection_access(connection_id, user, db)
 
     sm = _sm_service()
-    candidates, err = sm.resolve_field_by_embedding(
+    candidates, _ = sm.resolve_field_by_embedding(
         connection_id=connection_id,
         fuzzy_name=req.fuzzy_name,
         top_k=req.top_k,
     )
 
     return {"candidates": candidates}
-
