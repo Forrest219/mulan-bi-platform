@@ -178,6 +178,7 @@ class TableauFieldSemantics(Base):
     embedding = Column(Vector(1024), nullable=True)
     embedding_model = Column(String(64), nullable=True)
     embedding_generated_at = Column(DateTime, nullable=True)
+    chunk_text = Column(Text, nullable=True)  # embedding 对应的原始文本，方便 trace/debug
     created_by = Column(Integer, nullable=True)
     updated_by = Column(Integer, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
@@ -210,6 +211,7 @@ class TableauFieldSemantics(Base):
             "embedding": self.embedding,
             "embedding_model": self.embedding_model,
             "embedding_generated_at": self.embedding_generated_at.strftime("%Y-%m-%d %H:%M:%S") if self.embedding_generated_at else None,
+            "chunk_text": self.chunk_text,
             "created_by": self.created_by,
             "updated_by": self.updated_by,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,

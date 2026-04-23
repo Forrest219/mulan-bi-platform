@@ -635,6 +635,7 @@ class SemanticMaintenanceDatabase:
             field.embedding_model = model_name
             from datetime import datetime
             field.embedding_generated_at = datetime.utcnow()
+            field.chunk_text = chunk_text  # 记录 embedding 对应的原始文本
             s.commit()
         finally:
             s.close()
@@ -675,6 +676,7 @@ class SemanticMaintenanceDatabase:
                     tfs.field_registry_id,
                     tfs.connection_id,
                     tfs.embedding,
+                    tfs.chunk_text,
                     tdsf.role,
                     tdsf.data_type,
                     1 - (tfs.embedding <=> :qe::vector) AS similarity
