@@ -728,3 +728,87 @@ class SemanticMaintenanceService:
             return ds_result, field_result
         finally:
             session.close()
+
+    def resolve_field_by_embedding(
+        self,
+        connection_id: int,
+        fuzzy_name: str,
+        datasource_luid: str = None,
+        top_k: int = 5,
+    ) -> tuple:
+        """
+        向量语义字段解析（Spec 26 §P0 — /fields/resolve）。
+
+        1. 对 fuzzy_name 生成 embedding
+        2. 在 kb_embeddings（HNSW） 中搜索 source_type='field'
+        3. 对每个候选，通过 field_registry_id join tableau_datasource_fields 补全 role / data_type
+        4. 返回带 similarity 置信度的候选列表
+        """
+        from services.llm.service import llm_service
+        from services.knowledge_base.embedding_service import embedding_service
+        from services.tableau.models import TableauDatasourceField
+
+        # Step 1: 生成 query embedding
+        try:
+            embed_result = embedding_service.embed_text(fuzzy_name)
+            query_embedding = embed_result
+        except Exception as e:
+            logger.warning("resolve_field_by_embedding: embed_text 失败，fallback 到空列表: %s", e)
+            return [], None
+
+        if not query_embedding:
+            return [], None
+
+        # Step 2: 向量搜索
+        rows = self.db.search_field_embeddings(
+            query_embedding=query_embedding,
+            connection_id=connection_id,
+            top_k=top_k,
+            threshold=0.5,
+        )
+
+        if not rows:
+            logger.info("resolve_field_by_embedding: connection_id=%d 命中 0 条，向量可能尚未生成", connection_id)
+
+        # Step 3: 补全 field_registry_id → role / data_type
+        candidates = []
+        seen_field_ids = set()
+        for row in rows:
+            field_semantic_id = row.get("field_semantic_id")
+            if field_semantic_id in seen_field_ids:
+                continue
+            seen_field_ids.add(field_semantic_id)
+
+            # 获取 role / data_type（通过 tableau_datasource_fields）
+            role = None
+            data_type = None
+            if row.get("field_registry_id"):
+                db_session = self.db.session
+                try:
+                    fld = db_session.query(TableauDatasourceField).filter(
+                        TableauDatasourceField.id == row["field_registry_id"]
+                    ).first()
+                    if fld:
+                        role = fld.role
+                        data_type = fld.data_type
+                        # 若指定了 datasource_luid，还需要过滤
+                        if datasource_luid and fld.datasource_luid != datasource_luid:
+                            continue
+                finally:
+                    db_session.close()
+
+            confidence = float(row.get("similarity", 0.0))
+            candidates.append({
+                "field_semantic_id": field_semantic_id,
+                "tableau_field_id": row.get("tableau_field_id"),
+                "semantic_name": row.get("semantic_name"),
+                "semantic_name_zh": row.get("semantic_name_zh"),
+                "semantic_definition": row.get("semantic_definition"),
+                "role": role,
+                "data_type": data_type,
+                "connection_id": row.get("connection_id"),
+                "confidence": round(confidence, 4),
+                "match_source": "vector_hnsw",
+            })
+
+        return candidates, None

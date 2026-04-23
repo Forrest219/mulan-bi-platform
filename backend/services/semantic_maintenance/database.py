@@ -609,3 +609,85 @@ class SemanticMaintenanceDatabase:
             return query.first()
         finally:
             s.close()
+
+    # ============================================================
+    # 字段向量 Embedding（HNSW — 复用 kb_embeddings 表）
+    # ============================================================
+
+    def upsert_field_embedding(
+        self,
+        field_semantic_id: int,
+        chunk_text: str,
+        embedding: list,
+        model_name: str = "text-embedding-3-small",
+        token_count: int = None,
+    ) -> None:
+        """Upsert 字段的语义向量（source_type='field'）。"""
+        from services.knowledge_base.models import KbEmbedding
+        s = self.session
+        try:
+            s.query(KbEmbedding).filter(
+                KbEmbedding.source_type == "field",
+                KbEmbedding.source_id == field_semantic_id,
+            ).delete(synchronize_session=False)
+            e = KbEmbedding(
+                source_type="field",
+                source_id=field_semantic_id,
+                chunk_index=0,
+                chunk_text=chunk_text,
+                embedding=embedding,
+                model_name=model_name,
+                token_count=token_count,
+            )
+            s.add(e)
+            s.commit()
+        finally:
+            s.close()
+
+    def search_field_embeddings(
+        self,
+        query_embedding: list,
+        connection_id: int,
+        top_k: int = 5,
+        threshold: float = 0.5,
+    ) -> List[Dict]:
+        """
+        向量相似度搜索字段语义（HNSW 索引，pgvector 余弦距离）。
+        source_type='field' 的 kb_embeddings 记录关联 field_semantic_id，
+        再 join tableau_field_semantics 获取字段信息。
+        """
+        from sqlalchemy import text
+        s = self.session
+        try:
+            sql = text("""
+                SELECT
+                    kb.id,
+                    kb.source_id        AS field_semantic_id,
+                    kb.chunk_text,
+                    kb.model_name,
+                    kb.created_at,
+                    tfs.connection_id,
+                    tfs.tableau_field_id,
+                    tfs.semantic_name,
+                    tfs.semantic_name_zh,
+                    tfs.semantic_definition,
+                    tfs.field_registry_id,
+                    1 - (kb.embedding <=> :qe::vector) AS similarity
+                FROM kb_embeddings kb
+                JOIN tableau_field_semantics tfs
+                    ON tfs.id = kb.source_id
+                    AND kb.source_type = 'field'
+                WHERE tfs.connection_id = :conn_id
+                  AND 1 - (kb.embedding <=> :qe::vector) > :threshold
+                ORDER BY kb.embedding <=> :qe::vector
+                LIMIT :top_k
+            """)
+            rows = s.execute(sql, {
+                "qe": str(query_embedding),
+                "conn_id": connection_id,
+                "threshold": threshold,
+                "top_k": top_k,
+            }).fetchall()
+            return [dict(row._mapping) for row in rows]
+        finally:
+            s.close()

@@ -3,7 +3,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 # 导入中央数据库依赖和统一的权限验证函数
@@ -295,4 +295,49 @@ async def generate_field_ai(field_id: int, req: GenerateFieldAIRequest, request:
     if not success:
         raise HTTPException(status_code=400, detail=result)
     return {"item": result.to_dict(), "message": "AI 语义草稿已生成"} # 确保返回 dict
+
+
+# --- 向量字段解析（Spec 26 §P0） ---
+
+class ResolveFieldRequest(BaseModel):
+    """向量字段解析请求模型"""
+    fuzzy_name: str
+    datasource_luid: Optional[str] = None
+    top_k: int = Field(default=5, ge=1, le=20)
+
+
+@router.post("/fields/resolve")
+async def resolve_field_semantics(
+    req: ResolveFieldRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    向量语义字段解析（Spec 26 §P0 — /fields/resolve）。
+
+    将自然语言模糊字段名映射为语义层候选字段列表。
+    基于 embedding + HNSW 向量相似度搜索，返回带置信度的候选列表。
+
+    - 连接权限由 connection_id 验证
+    - 返回字段角色（dimension / measure）和数据类型（string / integer / datetime 等）
+    - 若向量尚未生成（命中 0 条），返回空列表（前端应降级为 LIKE 查询）
+    """
+    user = get_current_user(request, db)
+
+    # connection_id 必须由前端传入，放在 query string 中（避免 body 被篡改）
+    connection_id: int = request.query_params.get("connection_id", type=int)
+    if not connection_id:
+        raise HTTPException(status_code=422, detail="缺少 required query param: connection_id")
+
+    verify_connection_access(connection_id, user, db)
+
+    sm = _sm_service()
+    candidates, err = sm.resolve_field_by_embedding(
+        connection_id=connection_id,
+        fuzzy_name=req.fuzzy_name,
+        datasource_luid=req.datasource_luid,
+        top_k=req.top_k,
+    )
+
+    return {"candidates": candidates}
 
