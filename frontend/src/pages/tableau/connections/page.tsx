@@ -32,8 +32,8 @@ export default function TableauConnectionsPage() {
     try {
       const data = await listConnections(showInactive);
       setConnections(data.connections);
-    } catch (e: any) {
-      setLoadError(e.message || '加载失败，请检查是否已登录');
+    } catch (e: unknown) {
+      setLoadError(e instanceof Error ? e.message : '加载失败，请检查是否已登录');
     } finally {
       setLoading(false);
     }
@@ -53,8 +53,8 @@ export default function TableauConnectionsPage() {
       setShowModal(false);
       resetForm();
       fetchConnections();
-    } catch (e: any) {
-      setFormError(e.message);
+    } catch (e: unknown) {
+      setFormError(e instanceof Error ? e.message : '创建失败');
     }
   };
 
@@ -78,8 +78,8 @@ export default function TableauConnectionsPage() {
       setShowModal(false);
       resetForm();
       fetchConnections();
-    } catch (e: any) {
-      setFormError(e.message);
+    } catch (e: unknown) {
+      setFormError(e instanceof Error ? e.message : '更新失败');
     }
   };
 
@@ -88,8 +88,8 @@ export default function TableauConnectionsPage() {
       await deleteConnection(id);
       setModalNotify({ success: true, message: '连接已删除' });
       fetchConnections();
-    } catch (e: any) {
-      setModalNotify({ success: false, message: e.message || '删除失败' });
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: e instanceof Error ? e.message : '删除失败' });
     }
   };
 
@@ -237,7 +237,7 @@ export default function TableauConnectionsPage() {
                   {syncingId === conn.id ? <i className="ri-loader-4-line animate-spin" /> : <i className="ri-refresh-line" />}
                   同步
                 </button>
-                <button onClick={() => navigate(`/tableau/connections/${conn.id}/sync-logs`)}
+                <button onClick={() => navigate(`/assets/tableau-connections/${conn.id}/sync-logs`)}
                   className="flex-1 px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center justify-center gap-1">
                   <i className="ri-file-list-3-line" /> 日志
                 </button>

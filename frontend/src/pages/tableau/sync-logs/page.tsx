@@ -44,7 +44,7 @@ export default function SyncLogsPage() {
         {/* Header */}
         <div className="flex items-center gap-4 mb-6">
           <button
-            onClick={() => navigate('/tableau/connections')}
+            onClick={() => navigate('/assets/tableau-connections')}
             className="text-gray-500 hover:text-gray-700 text-sm flex items-center gap-1"
           >
             <i className="ri-arrow-left-line" /> 返回连接管理

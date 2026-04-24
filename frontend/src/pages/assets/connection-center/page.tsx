@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { listDataSources, type DataSource } from '../../../api/datasources';
 import { listConnections, type TableauConnection } from '../../../api/tableau';
 import { useAuth } from '../../../context/AuthContext';
@@ -21,11 +21,11 @@ type NormalizedConnectionItem = {
 };
 
 const TAB_DEFS: { key: ConnectionTab; label: string }[] = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'db', label: 'DB' },
+  { key: 'overview', label: '总览' },
+  { key: 'db', label: '数据库' },
   { key: 'tableau', label: 'Tableau' },
-  { key: 'sync-logs', label: 'Sync Logs' },
-  { key: 'policies', label: 'Policies' },
+  { key: 'sync-logs', label: '同步日志' },
+  { key: 'policies', label: '策略' },
 ];
 
 function getTabFromTypeQuery(type: string | null): ConnectionTab {
@@ -154,30 +154,26 @@ export default function ConnectionCenterPage() {
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-4">
         <div>
-          <h1 className="text-xl font-semibold text-slate-800">Connection Center</h1>
-          <p className="text-sm text-slate-500 mt-1">Unified shell for DB and Tableau connections</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button className="px-3 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">Import Placeholder</button>
-          <button className="px-3 py-2 text-sm bg-slate-900 text-white rounded-lg hover:bg-slate-800">New Connection (CTA)</button>
+          <h1 className="text-xl font-semibold text-slate-800">连接总览</h1>
+          <p className="text-sm text-slate-500 mt-1">查看所有数据库与 Tableau 连接状态</p>
         </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="text-xs text-slate-500">Total</div>
+          <div className="text-xs text-slate-500">总计</div>
           <div className="text-2xl font-semibold text-slate-800 mt-1">{kpis.total}</div>
         </div>
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-          <div className="text-xs text-emerald-700">Healthy</div>
+          <div className="text-xs text-emerald-700">正常</div>
           <div className="text-2xl font-semibold text-emerald-800 mt-1">{kpis.healthy}</div>
         </div>
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <div className="text-xs text-amber-700">Warning</div>
+          <div className="text-xs text-amber-700">警告</div>
           <div className="text-2xl font-semibold text-amber-800 mt-1">{kpis.warning}</div>
         </div>
         <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-          <div className="text-xs text-red-700">Failed</div>
+          <div className="text-xs text-red-700">失败</div>
           <div className="text-2xl font-semibold text-red-800 mt-1">{kpis.failed}</div>
         </div>
       </div>
@@ -205,7 +201,7 @@ export default function ConnectionCenterPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name / endpoint"
+            placeholder="搜索名称 / 地址..."
             className="md:col-span-2 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500"
           />
           <select
@@ -213,42 +209,45 @@ export default function ConnectionCenterPage() {
             onChange={(e) => setStatusFilter(e.target.value as 'all' | HealthStatus)}
             className="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:border-blue-500"
           >
-            <option value="all">All status</option>
-            <option value="healthy">Healthy</option>
-            <option value="warning">Warning</option>
-            <option value="failed">Failed</option>
+            <option value="all">全部状态</option>
+            <option value="healthy">正常</option>
+            <option value="warning">警告</option>
+            <option value="failed">失败</option>
           </select>
-          <select
-            disabled
-            className="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-500"
-          >
-            <option>Owner placeholder (all)</option>
-            <option>Me</option>
-          </select>
+          {(tab === 'db' || tab === 'overview') && (
+            <Link to="/assets/datasources" className="px-3 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">
+              管理数据源
+            </Link>
+          )}
+          {(tab === 'tableau' || tab === 'overview') && (
+            <Link to="/assets/tableau-connections" className="px-3 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">
+              管理 Tableau 连接
+            </Link>
+          )}
         </div>
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
         {loading ? (
-          <div className="text-center py-16 text-slate-500">Loading...</div>
+          <div className="text-center py-16 text-slate-500">加载中...</div>
         ) : error ? (
           <div className="text-center py-16 text-red-600">{error}</div>
         ) : tab === 'policies' ? (
           <div className="p-8">
-            <h3 className="text-base font-semibold text-slate-800">Policies (Admin Only)</h3>
-            <p className="text-sm text-slate-500 mt-2">Policy management shell placeholder. Backend/API integration is intentionally not required in this phase.</p>
+            <h3 className="text-base font-semibold text-slate-800">策略管理（仅管理员）</h3>
+            <p className="text-sm text-slate-500 mt-2">连接策略管理功能开发中，敬请期待。</p>
           </div>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Name</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Type</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Endpoint</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Owner</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Updated</th>
-                {tab === 'sync-logs' && <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Action</th>}
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">名称</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">类型</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">地址</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">负责人</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">状态</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">更新时间</th>
+                {tab === 'sync-logs' && <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">操作</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -260,7 +259,7 @@ export default function ConnectionCenterPage() {
                   <td className="px-4 py-3 text-slate-500">{item.owner}</td>
                   <td className="px-4 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${statusStyle[item.status]}`}>
-                      {item.status}
+                      {item.status === 'healthy' ? '正常' : item.status === 'warning' ? '警告' : '失败'}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-slate-500">{new Date(item.updatedAt).toLocaleString()}</td>
@@ -270,7 +269,7 @@ export default function ConnectionCenterPage() {
                         onClick={() => navigate(`/assets/tableau-connections/${item.rawId}/sync-logs`)}
                         className="px-2 py-1 text-xs rounded border border-slate-200 hover:bg-slate-50"
                       >
-                        Open Logs
+                        查看日志
                       </button>
                     </td>
                   )}
@@ -279,7 +278,7 @@ export default function ConnectionCenterPage() {
               {filteredItems.length === 0 && (
                 <tr>
                   <td colSpan={tab === 'sync-logs' ? 7 : 6} className="px-4 py-16 text-center text-slate-400">
-                    No records found
+                    暂无记录
                   </td>
                 </tr>
               )}
@@ -296,19 +295,19 @@ export default function ConnectionCenterPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-800">Connection Detail</h3>
+              <h3 className="text-lg font-semibold text-slate-800">连接详情</h3>
               <button className="text-slate-400 hover:text-slate-600" onClick={() => setSelectedItem(null)}>
                 <i className="ri-close-line text-xl" />
               </button>
             </div>
             <div className="mt-4 space-y-2 text-sm">
-              <div><span className="text-slate-500">Name:</span> {selectedItem.name}</div>
-              <div><span className="text-slate-500">Type:</span> {selectedItem.platform}</div>
-              <div><span className="text-slate-500">Endpoint:</span> {selectedItem.endpoint}</div>
-              <div><span className="text-slate-500">Owner:</span> {selectedItem.owner}</div>
-              <div><span className="text-slate-500">Status:</span> {selectedItem.status}</div>
-              <div><span className="text-slate-500">Updated:</span> {new Date(selectedItem.updatedAt).toLocaleString()}</div>
-              <div className="pt-2 text-slate-500">{selectedItem.note || 'Detail drawer placeholder (option C shell).'}</div>
+              <div><span className="text-slate-500">名称:</span> {selectedItem.name}</div>
+              <div><span className="text-slate-500">类型:</span> {selectedItem.platform}</div>
+              <div><span className="text-slate-500">地址:</span> {selectedItem.endpoint}</div>
+              <div><span className="text-slate-500">负责人:</span> {selectedItem.owner}</div>
+              <div><span className="text-slate-500">状态:</span> {selectedItem.status === 'healthy' ? '正常' : selectedItem.status === 'warning' ? '警告' : '失败'}</div>
+              <div><span className="text-slate-500">更新时间:</span> {new Date(selectedItem.updatedAt).toLocaleString()}</div>
+              {selectedItem.note && <div className="pt-2 text-slate-500">{selectedItem.note}</div>}
             </div>
           </div>
         </div>
