@@ -37,6 +37,8 @@ const TableauAssetDetailPage  = lazy(() => import('../pages/tableau/asset-detail
 const TableauHealthPage   = lazy(() => import('../pages/tableau/health/page'));
 const ConnectionCenterPage = lazy(() => import('../pages/assets/connection-center/page'));
 const SyncLogsPage        = lazy(() => import('../pages/tableau/sync-logs/page'));
+const DatasourcesPage     = lazy(() => import('../pages/assets/datasources/page'));
+const TableauConnectionsPage = lazy(() => import('../pages/tableau/connections/page'));
 const SemanticDatasourceListPage  = lazy(() => import('../pages/semantic-maintenance/datasource-list/page'));
 const SemanticDatasourceDetailPage = lazy(() => import('../pages/semantic-maintenance/datasource-detail/page'));
 const SemanticFieldListPage = lazy(() => import('../pages/semantic-maintenance/field-list/page'));
@@ -231,7 +233,7 @@ const routes: RouteObject[] = [
             path: 'datasources',
             element: (
               <ProtectedRoute requiredPermission="database_monitor">
-                <Navigate to="/assets/connection-center?type=db" replace />
+                <DatasourcesPage />
               </ProtectedRoute>
             ),
           },
@@ -239,7 +241,7 @@ const routes: RouteObject[] = [
             path: 'tableau-connections',
             element: (
               <ProtectedRoute requiredPermission="tableau">
-                <Navigate to="/assets/connection-center?type=tableau" replace />
+                <TableauConnectionsPage />
               </ProtectedRoute>
             ),
           },
@@ -389,6 +391,7 @@ const routes: RouteObject[] = [
   { path: '/admin/groups',                     element: <Navigate to="/system/groups" replace /> },
   { path: '/admin/permissions',                element: <Navigate to="/system/permissions" replace /> },
   { path: '/admin/llm',                        element: <Navigate to="/system/llm-configs" replace /> },
+  { path: '/admin/llm-configs',                element: <Navigate to="/system/llm-configs" replace /> },
   { path: '/system/llm',                       element: <Navigate to="/system/llm-configs" replace /> },
   { path: '/admin/tasks',                      element: <Navigate to="/system/tasks" replace /> },
   { path: '/admin/activity',                    element: <Navigate to="/system/activity" replace /> },

@@ -106,6 +106,13 @@ export const menuConfig: MenuDomain[] = [
         path: '/assets/tableau-health',
       },
       {
+        key: 'connection-center',
+        label: '连接总览',
+        icon: 'ri-links-line',
+        path: '/assets/connection-center',
+        permission: { requiredRole: 'data_admin' },
+      },
+      {
         key: 'datasources',
         label: '数据源管理',
         icon: 'ri-database-2-line',
@@ -113,9 +120,9 @@ export const menuConfig: MenuDomain[] = [
         permission: { requiredRole: 'data_admin' },
       },
       {
-        key: 'tableau-conn',
+        key: 'tableau-connections',
         label: 'Tableau 连接',
-        icon: 'ri-links-line',
+        icon: 'ri-bar-chart-box-line',
         path: '/assets/tableau-connections',
         permission: { requiredRole: 'data_admin' },
       },
