@@ -54,7 +54,7 @@ export async function askQuestion(req: AskQuestionRequest): Promise<SearchAnswer
   });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}));
-    const code = err?.detail?.code || err?.code || 'UNKNOWN';
+    const code = err?.detail?.error_code || err?.detail?.code || err?.code || 'UNKNOWN';
     const msg = err?.detail?.message || err?.message || `HTTP ${resp.status}`;
     throw new SearchError(code, msg);
   }

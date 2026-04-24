@@ -198,6 +198,28 @@ async def delete_mcp_server(id: int, request: Request):
         db.close()
 
 
+@router.post("/test-draft")
+async def test_mcp_draft(request: Request):
+    """新增配置前的连通性探测（不需要先保存）"""
+    get_current_admin(request)
+    body = await request.json()
+    url = body.get("server_url", "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="server_url is required")
+
+    import time as _time
+    import httpx as _httpx
+    start = _time.monotonic()
+    try:
+        async with _httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(url)
+        latency_ms = int((_time.monotonic() - start) * 1000)
+        return {"status": "online", "latency_ms": latency_ms, "http_status": resp.status_code}
+    except (_httpx.ConnectError, _httpx.TimeoutException) as e:
+        latency_ms = int((_time.monotonic() - start) * 1000)
+        return {"status": "offline", "latency_ms": latency_ms, "error": type(e).__name__}
+
+
 @router.post("/{id}/test")
 async def test_mcp_server(id: int, request: Request):
     """HTTP 可达性探测"""

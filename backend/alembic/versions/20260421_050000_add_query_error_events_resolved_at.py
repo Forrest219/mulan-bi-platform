@@ -23,10 +23,16 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "query_error_events",
-        sa.Column("resolved_at", sa.DateTime(), nullable=True),
-    )
+    conn = op.get_bind()
+    result = conn.execute(sa.text(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name='query_error_events' AND column_name='resolved_at'"
+    ))
+    if not result.fetchone():
+        op.add_column(
+            "query_error_events",
+            sa.Column("resolved_at", sa.DateTime(), nullable=True),
+        )
 
 
 def downgrade() -> None:

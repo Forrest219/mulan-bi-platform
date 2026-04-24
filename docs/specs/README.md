@@ -1,6 +1,6 @@
 # Mulan BI Platform — 技术规格书索引
 
-> 最后更新：2026-04-21
+> 最后更新：2026-04-24
 
 ## 状态说明
 
@@ -59,6 +59,20 @@
 | 28 | [Data Agent](28-data-agent-spec.md) | 归因分析 + 自动报告生成 + 主动洞察（ReAct 框架） | :next_track_button: Next（第 2 批） |
 | 29 | [SQL Agent](29-sql-agent-spec.md) | 多方言 SQL 执行 + 安全校验 + 查询日志 | :white_check_mark: |
 | 30 | [Metrics Agent](30-metrics-agent-spec.md) | 指标注册 + 血缘追踪 + 一致性校验 + 异常检测 | :next_track_button: Next（第 1 批） |
+| 31 | [DQC Pipeline](31-governance-dqc-pipeline-spec.md) | 数据质量核心流水线 + 评分 + 通知 | :white_check_mark: |
+| 32 | [MCP-Tableau Bridge](32-mcp-tableau-connection-bridge-spec.md) | MCP→Tableau 连接自动桥接 | :white_check_mark: |
+| 33 | [任务管理](33-task-management-spec.md) | Celery 任务调度与监控 | :white_check_mark: |
+| 34 | [连接管理整合](34-connection-management-spec.md) | 恢复 CRUD 路由 + 汉化 + 冒烟测试 + 导航修复 | :clipboard: 待实施 |
+
+## 附录 — 独立 Spec
+
+| 文档 | 说明 | 状态 |
+|------|------|------|
+| [MCP 统一配置](spec-mcp-configs.md) | MCP Server CRUD + AI 解析（v1.1 补 credentials） | :white_check_mark: |
+| [LLM-Tableau-MCP 配置](spec-llm-tableau-mcp-config.md) | 早期 MCP 状态卡（部分被 spec-mcp-configs 取代） | :white_check_mark: |
+| [首页 UI 修复](spec-homepage-ui-bug-fix.md) | 首页 Bug 修复 | :white_check_mark: |
+| [反馈 API](feedback-api-spec.md) | Ask Data 反馈接口 | :white_check_mark: |
+| [KB HNSW 维护](knowledge_base_hnsw_maintenance.md) | 知识库向量索引维护 | :white_check_mark: |
 
 ---
 

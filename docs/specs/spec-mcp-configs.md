@@ -1,9 +1,18 @@
 # SPEC：MCP 统一配置管理
 
-- **状态**：待实施
+- **状态**：已实施（v1.1 — 2026-04-24 补充 credentials 列）
 - **创建**：2026-04-17
 - **执行者**：coder
 - **背景**：Tableau MCP URL 仅能通过环境变量配置；用户将陆续接入 StarRocks、MySQL MCP，需要可管理的统一界面
+
+---
+
+## 变更日志
+
+| 日期 | 版本 | 变更 |
+|------|------|------|
+| 2026-04-17 | v1.0 | 初版 |
+| 2026-04-24 | v1.1 | 补充 credentials JSONB 列（实际已在 20260417_010000 迁移中实现）；补充 test-draft 端点；补充 parse 端点；标记 type 默认值修正为 `'tableau'` |
 
 ---
 
@@ -22,13 +31,41 @@
 ```sql
 id          INTEGER      PRIMARY KEY
 name        VARCHAR(128) NOT NULL UNIQUE
-type        VARCHAR(32)  NOT NULL DEFAULT 'custom'  -- tableau|starrocks|mysql|custom
+type        VARCHAR(32)  NOT NULL DEFAULT 'tableau'  -- tableau|starrocks
 server_url  VARCHAR(512) NOT NULL
 description TEXT         NULL
 is_active   BOOLEAN      NOT NULL DEFAULT false
+credentials JSONB        NULL     -- v1.1 新增：存储认证凭据（见下方 schema）
 created_at  DATETIME     NOT NULL DEFAULT now()
 updated_at  DATETIME     NOT NULL DEFAULT now()
 ```
+
+#### credentials JSONB Schema
+
+按 `type` 字段区分存储格式：
+
+**type=tableau**：
+```json
+{
+  "tableau_server": "https://online.tableau.com",
+  "site_name": "my_site",
+  "pat_name": "my-pat",
+  "pat_value": "UaN/B5UUSF+dw/+WGwrD6w==:LrWI0..."
+}
+```
+
+**type=starrocks**：
+```json
+{
+  "host": "localhost",
+  "port": "9030",
+  "user": "root",
+  "password": "xxx",
+  "database": "my_db"
+}
+```
+
+> ⚠️ **安全待办**：当前 credentials 以 JSONB 明文存储。应将敏感字段（`pat_value`、`password`）加密存储，复用 `TABLEAU_ENCRYPTION_KEY`。已登记为 P4 安全修复项。
 
 索引：
 - `UNIQUE INDEX ix_mcp_servers_name (name)`
@@ -131,11 +168,13 @@ class McpServerUpdateRequest(BaseModel):
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
+| POST | `/api/mcp-configs/parse` | AI 解析粘贴文本，返回结构化字段 |
 | GET | `/api/mcp-configs` | 列表，按 created_at DESC |
-| POST | `/api/mcp-configs` | 新建，name 重复返回 409 |
+| POST | `/api/mcp-configs` | 新建，name 重复返回 409；body 含 credentials |
 | PUT | `/api/mcp-configs/{id}` | 部分更新，id 不存在返回 404 |
 | DELETE | `/api/mcp-configs/{id}` | 删除，id 不存在返回 404 |
-| POST | `/api/mcp-configs/{id}/test` | 连通测试 |
+| POST | `/api/mcp-configs/test-draft` | 保存前连通测试（传 server_url，不需要先保存） |
+| POST | `/api/mcp-configs/{id}/test` | 已保存配置的连通测试 |
 
 所有端点：`get_current_admin(request)` 鉴权（与 `llm.py` 保持一致，不用 Depends(get_db)）。
 

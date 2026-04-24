@@ -14,10 +14,16 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "auth_user_groups",
-        sa.Column("updated_at", sa.DateTime(), nullable=True),
-    )
+    conn = op.get_bind()
+    result = conn.execute(sa.text(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name='auth_user_groups' AND column_name='updated_at'"
+    ))
+    if not result.fetchone():
+        op.add_column(
+            "auth_user_groups",
+            sa.Column("updated_at", sa.DateTime(), nullable=True),
+        )
 
 
 def downgrade() -> None:

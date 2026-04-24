@@ -69,6 +69,30 @@ test.describe('登录页', () => {
     await expect(page.locator('text=用户名或密码错误')).toBeVisible({ timeout: 5000 });
   });
 
+  test('登录失败的错误提示应为可读文本，不能显示原始对象', async ({ page }) => {
+    await page.route('**/api/auth/login', async (route) => {
+      await route.fulfill({
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          error_code: 'SYS_001',
+          message: '服务器内部错误',
+          detail: {},
+        }),
+      });
+    });
+    await page.goto('/login');
+    await page.locator('input[type="text"]').fill('admin');
+    await page.locator('input[type="password"]').fill('any');
+    await page.locator('button[type="submit"]').click();
+    // 错误提示区域不能渲染原始对象 "{}" 或 "[object Object]"
+    const errorArea = page.locator('.bg-red-50');
+    await expect(errorArea).toBeVisible({ timeout: 5000 });
+    const text = await errorArea.textContent();
+    expect(text).not.toContain('{}');
+    expect(text).not.toContain('[object Object]');
+  });
+
   test('正确凭据登录成功后跳转首页', async ({ page }) => {
     await page.goto('/login');
     await page.locator('input[type="text"]').fill(ADMIN_USERNAME);

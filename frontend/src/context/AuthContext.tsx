@@ -176,7 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const detailStr =
           typeof detail === 'string'
             ? detail
-            : detail != null
+            : detail != null && Object.keys(detail).length > 0
               ? JSON.stringify(detail)
               : undefined;
         const messageStr =

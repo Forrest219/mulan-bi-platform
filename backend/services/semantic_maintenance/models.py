@@ -208,7 +208,7 @@ class TableauFieldSemantics(Base):
             "version": self.version,
             "published_to_tableau": self.published_to_tableau,
             "published_at": self.published_at.strftime("%Y-%m-%d %H:%M:%S") if self.published_at else None,
-            "embedding": self.embedding,
+            "has_embedding": self.embedding is not None,
             "embedding_model": self.embedding_model,
             "embedding_generated_at": self.embedding_generated_at.strftime("%Y-%m-%d %H:%M:%S") if self.embedding_generated_at else None,
             "chunk_text": self.chunk_text,

@@ -80,6 +80,10 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
+      '/tableau-mcp': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
 });

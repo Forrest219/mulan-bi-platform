@@ -76,5 +76,15 @@ test.describe('MCP 配置管理 - 添加 Tableau MCP', () => {
     const h1 = page.locator('h1');
     const h1Text = await h1.textContent({ timeout: 5000 }).catch(() => '');
     expect(h1Text).toMatch(/MCP 配置管理|新增 MCP 配置/);
+
+    // cleanup: 通过 API 删除刚创建的测试记录
+    const listResp = await page.request.get('/api/mcp-configs/', { headers: { 'Accept': 'application/json' } });
+    if (listResp.ok()) {
+      const servers = await listResp.json();
+      const created = servers.find((s: { name: string }) => s.name === uniqueName);
+      if (created) {
+        await page.request.delete(`/api/mcp-configs/${created.id}`);
+      }
+    }
   });
 });

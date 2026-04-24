@@ -328,6 +328,34 @@ class TableauDatabase:
 
     # --- Connection CRUD ---
 
+    def ensure_connection_from_mcp(self, mcp_name: str, server_url: str, site: str,
+                                    token_name: str, token_encrypted: str,
+                                    mcp_server_url: str, owner_id: int = 1) -> tuple:
+        """从 MCP Server 记录桥接创建 tableau_connections 行（按 name 去重）。
+        返回 (connection, created: bool)。"""
+        existing = self.session.query(TableauConnection).filter(
+            TableauConnection.name == mcp_name
+        ).first()
+        if existing:
+            return existing, False
+        conn = TableauConnection(
+            name=mcp_name,
+            server_url=server_url,
+            site=site,
+            api_version="3.21",
+            connection_type="mcp",
+            token_name=token_name,
+            token_encrypted=token_encrypted,
+            owner_id=owner_id,
+            is_active=True,
+            auto_sync_enabled=True,
+            mcp_direct_enabled=True,
+            mcp_server_url=mcp_server_url,
+        )
+        self.session.add(conn)
+        self.session.commit()
+        return conn, True
+
     def create_connection(self, name: str, server_url: str, site: str,
                           token_name: str, token_encrypted: str,
                           owner_id: int, api_version: str = "3.21",

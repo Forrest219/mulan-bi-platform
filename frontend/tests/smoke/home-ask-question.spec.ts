@@ -167,3 +167,74 @@ test.describe('首页 - 问答功能', () => {
     await expect(page.locator('text=销售表')).toBeVisible();
   });
 });
+
+// ─── 回归测试：首页已修复 Bug ───────────────────────────────────────────────
+
+test.describe('首页 - 回归测试', () => {
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/login');
+    await page.locator('input[type="text"]').fill(ADMIN_USERNAME);
+    await page.locator('input[type="password"]').fill(ADMIN_PASSWORD);
+    await page.locator('button[type="submit"]').click();
+    await expect(page).toHaveURL('/', { timeout: 5000 });
+  });
+
+  test('"前往添加"链接应指向 /system/mcp-configs 而非 /admin/llm-configs', async ({ page }) => {
+    await page.route('**/api/tableau/connections**', async (route) => {
+      await route.fulfill({ status: 200, body: JSON.stringify([]) });
+    });
+    await page.goto('/');
+    const addLink = page.locator('a[href="/system/mcp-configs"]');
+    const wrongLink = page.locator('a[href="/admin/llm-configs"]');
+    await expect(wrongLink).toHaveCount(0);
+    if (await addLink.isVisible()) {
+      await addLink.click();
+      await expect(page).not.toHaveURL(/404/, { timeout: 3000 });
+    }
+  });
+
+  test('无数据源时点击默认问题应显示数据源缺失提示而非"未知错误"', async ({ page }) => {
+    await page.route('**/api/tableau/connections**', async (route) => {
+      await route.fulfill({ status: 200, body: JSON.stringify([]) });
+    });
+    await page.route('**/api/search/query**', async (route) => {
+      await route.fulfill({
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          detail: { error_code: 'NLQ_012', message: '暂无可用数据源，请先配置数据连接' },
+        }),
+      });
+    });
+    await page.goto('/');
+    const suggestion = page.locator('[data-suggestion]').first();
+    if (await suggestion.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await suggestion.click();
+      const errorCard = page.locator('text=暂无可用数据源');
+      const unknownError = page.locator('text=未知错误');
+      await expect(errorCard).toBeVisible({ timeout: 5000 });
+      await expect(unknownError).toHaveCount(0);
+    }
+  });
+
+  test('后端返回 SYS_001 时 ErrorCard 应显示"服务器内部错误"而非"未知错误"', async ({ page }) => {
+    await page.route('**/api/search/query**', async (route) => {
+      await route.fulfill({
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          detail: { error_code: 'SYS_001', message: '服务器内部错误', details: {} },
+        }),
+      });
+    });
+    await page.goto('/');
+    // 通过 suggestion card 触发 handleExamplePick（走 /api/search/query）
+    const suggestion = page.locator('[data-suggestion]').first();
+    if (await suggestion.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await suggestion.click();
+      await expect(page.locator('text=服务器内部错误')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('text=未知错误')).toHaveCount(0);
+    }
+  });
+});

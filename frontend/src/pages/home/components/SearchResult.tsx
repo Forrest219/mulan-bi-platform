@@ -308,6 +308,8 @@ export const ERROR_MESSAGES: Record<string, { title: string; hint: string }> = {
   NLQ_009: { title: '无权限', hint: '该数据源访问被拒绝' },
   NLQ_010: { title: '查询过于频繁', hint: '每分钟最多 20 次，请稍后再试' },
   NLQ_011: { title: '敏感数据不支持查询', hint: '该数据源为高敏级别，请联系管理员' },
+  NLQ_012: { title: '暂无可用数据源', hint: '请先在设置中配置数据连接' },
+  SYS_001: { title: '服务器内部错误', hint: '请稍后重试，如问题持续请联系管理员' },
   UNKNOWN: { title: '未知错误', hint: '请重试或联系管理员' },
 };
 

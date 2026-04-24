@@ -140,6 +140,20 @@ async function apiTest(id: number): Promise<TestResult> {
   return res.json();
 }
 
+async function apiTestDraft(serverUrl: string): Promise<TestResult> {
+  const res = await fetch(`${API_BASE}/test-draft`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ server_url: serverUrl }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 // ─── TypeBadge ───────────────────────────────────────────────────────────────
 
 function TypeBadge({ type }: { type: string }) {
@@ -782,14 +796,16 @@ export default function McpConfigsPage() {
 
   // 表单内测试连接
   const handleFormTest = async () => {
-    if (editingId === null) {
-      alert('请先保存后再测试');
+    if (editingId === null && !form.server_url.trim()) {
+      alert('请先填写 Server URL');
       return;
     }
     setFormTesting(true);
     setFormTestResult(null);
     try {
-      const result = await apiTest(editingId);
+      const result = editingId !== null
+        ? await apiTest(editingId)
+        : await apiTestDraft(form.server_url);
       setFormTestResult(result);
     } catch (e: unknown) {
       setFormTestResult({
@@ -1073,10 +1089,10 @@ export default function McpConfigsPage() {
                   <input
                     type="text"
                     value={form.name}
-                    readOnly={parsed}
+                    readOnly={false}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
                     placeholder="Tableau Dev"
-                    className={`w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none ${parsed ? 'bg-slate-50 text-slate-600 cursor-default' : 'focus:border-blue-500'}`}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
                   />
                 </div>
 
@@ -1085,9 +1101,9 @@ export default function McpConfigsPage() {
                   <label className="block text-sm font-medium text-slate-700 mb-1">类型</label>
                   <select
                     value={form.type}
-                    disabled={parsed}
+                    disabled={false}
                     onChange={(e) => setForm({ ...form, type: e.target.value, server_url: '', credentials: {} })}
-                    className={`w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none ${parsed ? 'bg-slate-50 text-slate-600 cursor-default' : 'focus:border-blue-500'}`}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
                   >
                     <option value="tableau">Tableau</option>
                     <option value="starrocks">StarRocks</option>
@@ -1102,10 +1118,10 @@ export default function McpConfigsPage() {
                   <input
                     type="text"
                     value={form.server_url}
-                    readOnly={parsed}
+                    readOnly={false}
                     onChange={(e) => setForm({ ...form, server_url: e.target.value })}
                     placeholder={URL_PLACEHOLDERS[form.type] ?? 'http://...'}
-                    className={`w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none ${parsed ? 'bg-slate-50 text-slate-600 cursor-default' : 'focus:border-blue-500'}`}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:border-blue-500"
                   />
                 </div>
 
@@ -1118,7 +1134,7 @@ export default function McpConfigsPage() {
                       placeholder="https://online.tableau.com"
                       form={form}
                       setForm={setForm}
-                      readOnly={parsed}
+                      readOnly={false}
                     />
                     <CredentialField
                       label="Site Name"
@@ -1126,7 +1142,7 @@ export default function McpConfigsPage() {
                       placeholder="留空表示默认站点"
                       form={form}
                       setForm={setForm}
-                      readOnly={parsed}
+                      readOnly={false}
                     />
                     <CredentialField
                       label="PAT 名称"
@@ -1134,7 +1150,7 @@ export default function McpConfigsPage() {
                       placeholder="Personal Access Token 名称"
                       form={form}
                       setForm={setForm}
-                      readOnly={parsed}
+                      readOnly={false}
                     />
                     <CredentialField
                       label="PAT 密钥"
@@ -1143,7 +1159,7 @@ export default function McpConfigsPage() {
                       sensitive
                       form={form}
                       setForm={setForm}
-                      readOnly={parsed}
+                      readOnly={false}
                     />
                   </CredentialSection>
                 )}
@@ -1157,7 +1173,7 @@ export default function McpConfigsPage() {
                       placeholder="localhost"
                       form={form}
                       setForm={setForm}
-                      readOnly={parsed}
+                      readOnly={false}
                     />
                     <CredentialField
                       label="Port"
@@ -1165,7 +1181,7 @@ export default function McpConfigsPage() {
                       placeholder="9030"
                       form={form}
                       setForm={setForm}
-                      readOnly={parsed}
+                      readOnly={false}
                     />
                     <CredentialField
                       label="用户名"
@@ -1173,7 +1189,7 @@ export default function McpConfigsPage() {
                       placeholder="root"
                       form={form}
                       setForm={setForm}
-                      readOnly={parsed}
+                      readOnly={false}
                     />
                     <CredentialField
                       label="密码"
@@ -1182,7 +1198,7 @@ export default function McpConfigsPage() {
                       sensitive
                       form={form}
                       setForm={setForm}
-                      readOnly={parsed}
+                      readOnly={false}
                     />
                     <CredentialField
                       label="默认数据库（可选）"
@@ -1190,7 +1206,7 @@ export default function McpConfigsPage() {
                       placeholder="可选"
                       form={form}
                       setForm={setForm}
-                      readOnly={parsed}
+                      readOnly={false}
                     />
                   </CredentialSection>
                 )}
@@ -1200,11 +1216,10 @@ export default function McpConfigsPage() {
                   <label className="block text-sm font-medium text-slate-700 mb-1">描述（可选）</label>
                   <textarea
                     value={form.description}
-                    readOnly={parsed}
                     onChange={(e) => setForm({ ...form, description: e.target.value })}
                     placeholder="关于此 MCP 服务器的简短说明"
                     rows={2}
-                    className={`w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none resize-none ${parsed ? 'bg-slate-50 text-slate-600 cursor-default' : 'focus:border-blue-500'}`}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none resize-none focus:border-blue-500"
                   />
                 </div>
 
@@ -1234,7 +1249,7 @@ export default function McpConfigsPage() {
                 <button
                   onClick={handleFormTest}
                   disabled={formTesting}
-                  title={editingId === null ? '请先保存后再测试' : undefined}
+                  title={!form.server_url.trim() ? '请先填写 Server URL' : undefined}
                   className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${
                     formTestResult?.status === 'online'
                       ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
@@ -1257,7 +1272,7 @@ export default function McpConfigsPage() {
                         ? '连接失败'
                         : editingId !== null
                           ? '测试连接'
-                          : '请先保存后再测试'}
+                          : '测试连接'}
                 </button>
                 {formTestResult?.status === 'offline' && formTestResult.error && (
                   <p className="text-xs px-2 py-1 rounded text-red-600 bg-red-50">

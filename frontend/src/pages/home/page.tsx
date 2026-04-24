@@ -18,7 +18,7 @@ import { WelcomeHero } from './components/WelcomeHero';
 import { SuggestionGrid } from './components/SuggestionGrid';
 import { useConversations } from '../../store/conversationStore';
 import type { SearchAnswer } from '../../api/search';
-import { ScopeProvider } from './context/ScopeContext';
+import { ScopeProvider, useScope } from './context/ScopeContext';
 import { ScopePicker } from './components/ScopePicker';
 import { AssetInspectorDrawer } from './components/AssetInspectorDrawer';
 import { useHomeUrlState } from './hooks/useHomeUrlState';
@@ -45,6 +45,8 @@ function HomePageInner() {
   const { user, hasPermission } = useAuth();
   const { addConversation, appendMessage } = useConversations();
   const { assetId, tab, connectionId, closeAsset, selectedConvId } = useHomeUrlState();
+  const { connections: scopeConnections, connectionsLoading } = useScope();
+  const noConnection = !connectionsLoading && scopeConnections.length === 0;
 
   // Gap-05: streaming state 完全独立，不与 AskBar 的 input/loading state 共享
   const { messages: streamingMessages, isStreaming, sendMessage, abort } = useStreamingChat();
@@ -224,6 +226,10 @@ function HomePageInner() {
   };
 
   const handleExamplePick = (question: string) => {
+    if (noConnection) {
+      handleError({ code: 'NLQ_012', message: '暂无可用数据源，请先配置数据连接' });
+      return;
+    }
     setLastQuestion(question);
     lastQuestionRef.current = question;
     setHomeState('HOME_SUBMITTING');

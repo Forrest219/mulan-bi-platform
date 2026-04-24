@@ -236,7 +236,7 @@ class SemanticMaintenanceService:
             if existing:
                 return existing.to_dict()
 
-        from semantic_maintenance.models import TableauFieldSemantics
+        from .models import TableauFieldSemantics
         existing = self.db.session.query(TableauFieldSemantics).filter(
             TableauFieldSemantics.connection_id == connection_id,
             TableauFieldSemantics.tableau_field_id == tableau_field_id,
@@ -277,7 +277,7 @@ class SemanticMaintenanceService:
     def _upsert_field_embedding(self, field_semantic_id: int, data: Dict[str, Any], skip_diff_check: bool = False) -> None:
         """为字段语义生成并写入 embedding 向量（HNSW）。只在语义字段实际变化时触发。"""
         import asyncio
-        from semantic_maintenance.models import TableauFieldSemantics
+        from .models import TableauFieldSemantics
         from services.knowledge_base.embedding_service import embedding_service
 
         # Diff 检查：跳过 update 场景由调用方保证；get_or_create 强制生成

@@ -379,7 +379,7 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
         {noConnectionHint && (
           <p className="mt-1.5 text-xs text-amber-600">
             尚未配置数据连接，请先
-            <Link to="/admin/llm-configs" className="underline hover:text-amber-700">
+            <Link to="/system/mcp-configs" className="underline hover:text-amber-700">
               前往添加
             </Link>
             。

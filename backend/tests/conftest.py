@@ -16,6 +16,7 @@ os.environ.setdefault("ADMIN_USERNAME", "admin")
 os.environ.setdefault("ADMIN_PASSWORD", "")  # 禁用自动创建管理员
 # TestClient 使用 HTTP，cookie 的 secure=True 会导致 cookie 不被发送，必须设为 false
 os.environ.setdefault("SECURE_COOKIES", "false")
+os.environ.setdefault("SERVICE_JWT_SECRET", "test-jwt-secret-for-service-auth-32ch")
 
 import pytest
 from fastapi.testclient import TestClient

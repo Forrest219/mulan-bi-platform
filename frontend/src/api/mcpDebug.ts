@@ -51,12 +51,13 @@ export interface McpDebugLogsResponse {
 export async function callMcpTool(
   toolName: string,
   args: Record<string, unknown>,
+  serverId?: number,
 ): Promise<McpDebugCallResponse> {
   const res = await fetch(`${API_BASE}/api/mcp-debug/call`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({ tool_name: toolName, arguments: args }),
+    body: JSON.stringify({ tool_name: toolName, arguments: args, server_id: serverId ?? null }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: '调用失败' }));
@@ -66,8 +67,9 @@ export async function callMcpTool(
 }
 
 /** 获取 MCP 工具列表（通过内置 /tableau-mcp 端点的 tools/list 方法） */
-export async function getMcpTools(): Promise<McpTool[]> {
-  const res = await fetch(`${API_BASE}/tableau-mcp`, {
+export async function getMcpTools(serverId?: number): Promise<McpTool[]> {
+  const qs = serverId != null ? `?server_id=${serverId}` : '';
+  const res = await fetch(`${API_BASE}/tableau-mcp${qs}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',

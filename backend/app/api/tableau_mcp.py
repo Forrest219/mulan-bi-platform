@@ -42,12 +42,23 @@ def _make_result(req_id, result: dict) -> dict:
     return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
 
-def _get_tableau_config() -> dict:
+def _get_tableau_config(server_id: int | None = None) -> dict:
     """
     读取 Tableau 连接配置，优先级：
-    1. 环境变量（TABLEAU_SERVER / TABLEAU_SITE / TABLEAU_PAT_NAME / TABLEAU_PAT_TOKEN）
-    2. DB 里 type='tableau' 且 is_active=True 的 McpServer credentials
+    1. 指定 server_id → 直接取该记录
+    2. 环境变量（TABLEAU_SERVER / TABLEAU_SITE / TABLEAU_PAT_NAME / TABLEAU_PAT_TOKEN）
+    3. DB 里 type='tableau' 且 is_active=True 的 McpServer credentials
     """
+    if server_id is not None:
+        db = SessionLocal()
+        try:
+            record = db.query(McpServer).filter(McpServer.id == server_id).first()
+            if not record or not record.credentials:
+                return {}
+            return dict(record.credentials)
+        finally:
+            db.close()
+
     # 环境变量优先，支持 tester 独立注入
     env_server = os.environ.get("TABLEAU_SERVER", "").rstrip("/")
     env_site = os.environ.get("TABLEAU_SITE", "")
@@ -1763,7 +1774,7 @@ async def _publish_field_semantic(
 
 # ── MCP JSON-RPC 核心处理（返回 dict，不含 HTTP 包装）────────────────────────
 
-async def _process_mcp_body(body: dict) -> dict:
+async def _process_mcp_body(body: dict, server_id: int | None = None) -> dict:
     """处理 MCP JSON-RPC 2.0 消息体，返回响应 dict（不含 JSONResponse 包装）。"""
     req_id = body.get("id")
     method = body.get("method", "")
@@ -2294,7 +2305,7 @@ async def _process_mcp_body(body: dict) -> dict:
         tool_name = params.get("name", "")
         arguments = params.get("arguments", {})
 
-        credentials = _get_tableau_config()
+        credentials = _get_tableau_config(server_id)
         if not credentials:
             return _make_error(req_id, -32001, "未找到 Tableau MCP 配置")
 
@@ -2608,6 +2619,9 @@ async def _process_mcp_body(body: dict) -> dict:
 @router.post("/")
 async def handle_mcp(request: Request):
     """处理 MCP JSON-RPC 2.0 请求，支持 JSON 和 SSE（HTTP Streamable Transport）。"""
+    server_id_raw = request.query_params.get("server_id")
+    server_id = int(server_id_raw) if server_id_raw and server_id_raw.isdigit() else None
+
     try:
         body = await request.json()
     except Exception:
@@ -2616,7 +2630,7 @@ async def handle_mcp(request: Request):
             content=_make_error(None, -32700, "Parse error: invalid JSON"),
         )
 
-    result = await _process_mcp_body(body)
+    result = await _process_mcp_body(body, server_id)
 
     if "text/event-stream" in request.headers.get("accept", ""):
         payload = json.dumps(result, ensure_ascii=False)

@@ -1,6 +1,8 @@
 # 数据模型总览
 
-> 版本：v1.0 | 状态：已完成 | 日期：2026-04-04
+> 版本：v1.1 | 状态：已完成 | 日期：2026-04-24
+>
+> v1.1 变更：新增 `mcp_servers` 表、`mcp_debug_logs` 表
 
 ---
 
@@ -471,6 +473,45 @@ V2 直连模式查询日志（详见 [Spec 13](13-tableau-mcp-v2-direct-connect-
 **索引**：
 - `ix_mcp_query_log_conn_created` = `(connection_id, created_at)`
 - `ix_mcp_query_log_status` = `status`
+
+---
+
+### 3.5 MCP 模块 `mcp_` (2 张)
+
+> v1.1 新增。详见 [spec-mcp-configs.md](spec-mcp-configs.md)
+
+#### `mcp_servers`
+
+| 列 | 类型 | 约束 | 默认值 | 说明 |
+|----|------|------|--------|------|
+| id | INTEGER | PK, AUTO | - | 主键 |
+| name | VARCHAR(128) | NOT NULL, UNIQUE | - | 配置名称 |
+| type | VARCHAR(32) | NOT NULL | `'tableau'` | tableau / starrocks |
+| server_url | VARCHAR(512) | NOT NULL | - | MCP Server 地址 |
+| description | TEXT | NULLABLE | - | 描述 |
+| is_active | BOOLEAN | NOT NULL | `false` | 是否启用 |
+| credentials | JSONB | NULLABLE | - | 认证凭据（按 type 区分 schema） |
+| created_at | TIMESTAMP | NOT NULL | `now()` | 创建时间 |
+| updated_at | TIMESTAMP | NOT NULL | `now()` | 更新时间 |
+
+索引：
+- `UNIQUE ix_mcp_servers_name` = `name`
+- `ix_mcp_servers_type_active` = `(type, is_active)`
+
+#### `mcp_debug_logs`
+
+| 列 | 类型 | 约束 | 默认值 | 说明 |
+|----|------|------|--------|------|
+| id | INTEGER | PK, AUTO | - | 主键 |
+| user_id | INTEGER | NOT NULL | - | 操作用户 ID |
+| username | VARCHAR(64) | NOT NULL | - | 操作用户名 |
+| tool_name | VARCHAR(128) | NOT NULL | - | 调用的 MCP 工具名 |
+| arguments_json | JSONB | NULLABLE | - | 调用参数 |
+| status | VARCHAR(16) | NOT NULL | - | success / error |
+| result_summary | TEXT | NULLABLE | - | 结果摘要 |
+| error_message | TEXT | NULLABLE | - | 错误信息 |
+| duration_ms | INTEGER | NULLABLE | - | 耗时(ms) |
+| created_at | TIMESTAMP | NOT NULL | `now()` | 调用时间 |
 
 ---
 

@@ -61,6 +61,7 @@ class McpDebugLog(Base):
 class McpDebugCallRequest(BaseModel):
     tool_name: str
     arguments: dict = {}
+    server_id: int | None = None
 
 
 class McpDebugCallResponse(BaseModel):
@@ -99,7 +100,7 @@ async def call_mcp_tool(
     result: Optional[dict] = None
 
     try:
-        result = await _process_mcp_body(mcp_body)
+        result = await _process_mcp_body(mcp_body, server_id=req.server_id)
     except Exception as exc:
         error = exc
         logger.warning("MCP tool call failed: %s — %s", req.tool_name, exc)
@@ -149,7 +150,7 @@ async def list_mcp_debug_logs(
 
     query = db.query(McpDebugLog)
     if tool_name:
-        query = query.filter(McpDebugLog.tool_name == tool_name)
+        query = query.filter(McpDebugLog.tool_name.ilike(f"%{tool_name}%"))
     if status:
         query = query.filter(McpDebugLog.status == status)
 

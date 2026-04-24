@@ -1402,9 +1402,21 @@ async def query(
                 **result,
             }
 
+        # ── 数据源可用性前置检查 ─────────────────────────────
+        if not datasource_luid and not connection_id:
+            from services.tableau.models import TableauConnection as _TC
+            _db_tmp = TableauDatabase()
+            _sess = _db_tmp.session
+            try:
+                _has_conn = _sess.query(_TC).filter(_TC.is_active == True).first()
+                if not _has_conn:
+                    raise _nlq_error_response("NLQ_012", "暂无可用数据源，请先配置数据连接")
+            finally:
+                _sess.close()
+
         # ── 意图分类（阶段0）─────────────────────────────────────
         intent = classify_intent(question)
-        audit_record.params_jsonb["intent"] = intent.intent_type if intent else None
+        audit_record.params_jsonb["intent"] = intent.type if intent else None
 
         # ── 数据源路由（PRD §7.1）─────────────────────────────
         chosen_ds = None
