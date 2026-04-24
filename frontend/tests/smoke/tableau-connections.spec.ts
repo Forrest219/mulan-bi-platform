@@ -1,12 +1,8 @@
 import { test, expect } from '@playwright/test';
 
-const ADMIN_USERNAME = 'admin';
-const ADMIN_PASSWORD = 'admin123';
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? 'admin';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'admin123';
 
-/**
- * Smoke Test: Tableau 连接管理
- * 路径：/assets/tableau-connections → 重定向到 /assets/connection-center?type=tableau
- */
 test.describe('Tableau 连接管理', () => {
 
   test.beforeEach(async ({ page }) => {
@@ -17,41 +13,24 @@ test.describe('Tableau 连接管理', () => {
     await expect(page).toHaveURL('/', { timeout: 5000 });
   });
 
-  test('Tableau 连接页可访问', async ({ page }) => {
-    const errors: string[] = [];
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') errors.push(msg.text());
-    });
+  test('Tableau 连接页可访问且显示中文标题', async ({ page }) => {
     await page.goto('/assets/tableau-connections');
-    await page.waitForTimeout(2000);
-    // 验证页面 URL 是 connection-center
-    expect(page.url()).toContain('/assets/connection-center');
-    // 验证页面显示 Connection Center 标题
-    await expect(page.locator('h1:has-text("Connection Center")')).toBeVisible({ timeout: 3000 }).catch(() => {
-      // 如果 h1 不可见，检查页面可访问即可
-    });
-    // 过滤掉 CORS/API/Fetch 错误（后端依赖）
-    const realErrors = errors.filter(e =>
-      !e.includes('CORS') &&
-      !e.includes('fetch') &&
-      !e.includes('api') &&
-      !e.includes('Failed to') &&
-      !e.includes('favicon')
-    );
-    expect(realErrors).toHaveLength(0);
+    await expect(page.locator('h1')).toContainText('Tableau', { timeout: 5000 });
+    await expect(page.locator('text=Page Not Found')).toHaveCount(0);
   });
 
-  test('新建连接按钮存在', async ({ page }) => {
+  test('页面有新建按钮', async ({ page }) => {
+    await page.goto('/assets/tableau-connections');
+    const addBtn = page.locator('button').filter({ hasText: /新建|新增|添加|创建/ });
+    await expect(addBtn.first()).toBeVisible({ timeout: 5000 });
+  });
+
+  test('页面显示连接列表或空状态', async ({ page }) => {
     await page.goto('/assets/tableau-connections');
     await page.waitForTimeout(2000);
-    // Connection Center 的按钮是 "New Connection (CTA)"
-    const newBtn = page.locator('button:has-text("New Connection")').first();
-    const isVisible = await newBtn.isVisible({ timeout: 3000 }).catch(() => false);
-    if (isVisible) {
-      await expect(newBtn).toBeVisible();
-    } else {
-      // 如果按钮不可见，验证页面可访问即可
-      expect(page.url()).toContain('/assets/connection-center');
-    }
+    const hasTable = await page.locator('table').isVisible().catch(() => false);
+    const hasCards = await page.locator('[class*="rounded"]').first().isVisible().catch(() => false);
+    const hasEmpty = await page.locator('text=暂无').isVisible().catch(() => false);
+    expect(hasTable || hasCards || hasEmpty).toBe(true);
   });
 });

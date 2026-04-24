@@ -91,7 +91,7 @@ export interface ProjectNode {
 export async function listConnections(includeInactive = false): Promise<{ connections: TableauConnection[]; total: number }> {
   const sp = new URLSearchParams({ include_inactive: String(includeInactive) });
   const res = await fetch(`${API_BASE}/api/tableau/connections?${sp}`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch connections');
+  if (!res.ok) throw new Error('获取连接列表失败');
   return res.json();
 }
 
@@ -112,7 +112,7 @@ export async function createConnection(data: {
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to create connection');
+    throw new Error(err.detail || '创建连接失败');
   }
   return res.json();
 }
@@ -137,7 +137,7 @@ export async function updateConnection(id: number, data: Partial<{
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to update connection');
+    throw new Error(err.detail || '更新连接失败');
   }
   return res.json();
 }
@@ -149,7 +149,7 @@ export async function deleteConnection(id: number): Promise<{ message: string }>
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || 'Failed to delete connection');
+    throw new Error(err.detail || '删除连接失败');
   }
   return res.json();
 }
@@ -193,13 +193,13 @@ export async function listAssets(params: {
     ...(params.page_size && { page_size: String(params.page_size) }),
   });
   const res = await fetch(`${API_BASE}/api/tableau/assets?${sp}`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch assets');
+  if (!res.ok) throw new Error('获取资产列表失败');
   return res.json();
 }
 
 export async function getAsset(id: number): Promise<TableauAsset> {
   const res = await fetch(`${API_BASE}/api/tableau/assets/${id}`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch asset');
+  if (!res.ok) throw new Error('获取资产详情失败');
   return res.json();
 }
 
@@ -218,13 +218,13 @@ export async function searchAssets(params: {
     ...(params.page_size && { page_size: String(params.page_size) }),
   });
   const res = await fetch(`${API_BASE}/api/tableau/assets/search?${sp}`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to search assets');
+  if (!res.ok) throw new Error('搜索资产失败');
   return res.json();
 }
 
 export async function getProjects(connection_id: number): Promise<{ projects: ProjectNode[] }> {
   const res = await fetch(`${API_BASE}/api/tableau/projects?connection_id=${connection_id}`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch projects');
+  if (!res.ok) throw new Error('获取项目列表失败');
   return res.json();
 }
 
@@ -239,13 +239,13 @@ export async function listSyncLogs(connId: number, params?: {
     ...(params?.page_size && { page_size: String(params.page_size) }),
   });
   const res = await fetch(`${API_BASE}/api/tableau/connections/${connId}/sync-logs?${sp}`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch sync logs');
+  if (!res.ok) throw new Error('获取同步日志列表失败');
   return res.json();
 }
 
 export async function getSyncLog(connId: number, logId: number): Promise<TableauSyncLog> {
   const res = await fetch(`${API_BASE}/api/tableau/connections/${connId}/sync-logs/${logId}`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch sync log');
+  if (!res.ok) throw new Error('获取同步日志详情失败');
   return res.json();
 }
 
@@ -258,7 +258,7 @@ export async function getSyncStatus(connId: number): Promise<{
   next_sync_at: string | null;
 }> {
   const res = await fetch(`${API_BASE}/api/tableau/connections/${connId}/sync-status`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch sync status');
+  if (!res.ok) throw new Error('获取同步状态失败');
   return res.json();
 }
 
@@ -266,13 +266,13 @@ export async function getSyncStatus(connId: number): Promise<{
 
 export async function getAssetChildren(assetId: number): Promise<{ children: TableauAsset[] }> {
   const res = await fetch(`${API_BASE}/api/tableau/assets/${assetId}/children`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch children');
+  if (!res.ok) throw new Error('获取子资产失败');
   return res.json();
 }
 
 export async function getAssetParent(assetId: number): Promise<{ parent: TableauAsset | null }> {
   const res = await fetch(`${API_BASE}/api/tableau/assets/${assetId}/parent`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch parent');
+  if (!res.ok) throw new Error('获取父资产失败');
   return res.json();
 }
 
@@ -291,7 +291,7 @@ export async function explainAsset(assetId: number, refresh = false): Promise<{
     credentials: 'include',
     body: JSON.stringify({ refresh }),
   });
-  if (!res.ok) throw new Error('Failed to explain asset');
+  if (!res.ok) throw new Error('AI 解释生成失败');
   return res.json();
 }
 

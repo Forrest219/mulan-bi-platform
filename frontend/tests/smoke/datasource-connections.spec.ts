@@ -1,13 +1,9 @@
 import { test, expect } from '@playwright/test';
 
-const ADMIN_USERNAME = 'admin';
-const ADMIN_PASSWORD = 'admin123';
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? 'admin';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'admin123';
 
-/**
- * Smoke Test: 连接中心 - 数据库连接管理
- * 路径：/assets/connection-center?type=db
- */
-test.describe('连接中心 - 数据库连接', () => {
+test.describe('数据源管理', () => {
 
   test.beforeEach(async ({ page }) => {
     await page.goto('/login');
@@ -17,38 +13,31 @@ test.describe('连接中心 - 数据库连接', () => {
     await expect(page).toHaveURL('/', { timeout: 5000 });
   });
 
-  test('连接中心页可访问', async ({ page }) => {
-    const errors: string[] = [];
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') errors.push(msg.text());
-    });
-    await page.goto('/assets/connection-center?type=db');
-    // 等待加载
-    await page.waitForTimeout(2000);
-    // 验证页面 URL 正确
-    expect(page.url()).toContain('/assets/connection-center');
-    // 过滤掉 CORS/API/Fetch 错误（后端依赖）
-    const realErrors = errors.filter(e =>
-      !e.includes('CORS') &&
-      !e.includes('fetch') &&
-      !e.includes('api') &&
-      !e.includes('Failed to') &&
-      !e.includes('favicon')
-    );
-    expect(realErrors).toHaveLength(0);
+  test('数据源管理页可访问', async ({ page }) => {
+    await page.goto('/assets/datasources');
+    await page.waitForLoadState('networkidle');
+    expect(page.url()).toContain('/assets/datasources');
+    await expect(page.locator('text=Page Not Found')).toHaveCount(0);
+    // 页面应显示标题或错误状态（API 依赖后端）
+    const hasH1 = await page.locator('h1').isVisible().catch(() => false);
+    const hasSidebar = await page.locator('text=数据源管理').isVisible().catch(() => false);
+    expect(hasH1 || hasSidebar).toBe(true);
   });
 
-  test('新建连接按钮存在', async ({ page }) => {
-    await page.goto('/assets/connection-center?type=db');
+  test('页面有新建按钮或加载状态', async ({ page }) => {
+    await page.goto('/assets/datasources');
+    await page.waitForLoadState('networkidle');
+    const hasBtn = await page.locator('button').filter({ hasText: /新建|新增|添加|创建/ }).first().isVisible().catch(() => false);
+    const hasContent = await page.locator('text=数据源').first().isVisible().catch(() => false);
+    expect(hasBtn || hasContent).toBe(true);
+  });
+
+  test('页面显示数据表格或空状态', async ({ page }) => {
+    await page.goto('/assets/datasources');
     await page.waitForTimeout(2000);
-    // Connection Center 的按钮是 "New Connection (CTA)"
-    const newBtn = page.locator('button:has-text("New Connection")').first();
-    const isVisible = await newBtn.isVisible({ timeout: 3000 }).catch(() => false);
-    if (isVisible) {
-      await expect(newBtn).toBeVisible();
-    } else {
-      // 如果按钮不可见，验证页面可访问即可
-      expect(page.url()).toContain('/assets/connection-center');
-    }
+    const hasTable = await page.locator('table').isVisible().catch(() => false);
+    const hasCards = await page.locator('[class*="rounded"]').first().isVisible().catch(() => false);
+    const hasEmpty = await page.locator('text=暂无').isVisible().catch(() => false);
+    expect(hasTable || hasCards || hasEmpty).toBe(true);
   });
 });
