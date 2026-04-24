@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { getMcpTools, type McpTool } from '../../../../api/mcpDebug';
 
-// 工具分类规则
 const TOOL_CATEGORIES: { label: string; pattern: RegExp }[] = [
   { label: '查询类', pattern: /^(list|get|search|query|describe)/i },
   { label: '字段类', pattern: /field|column|schema/i },
@@ -19,20 +18,24 @@ function categorizeTool(name: string): string {
 interface Props {
   selectedTool: McpTool | null;
   onSelect: (tool: McpTool) => void;
+  serverId?: number;
 }
 
-export default function ToolSelector({ selectedTool, onSelect }: Props) {
+export default function ToolSelector({ selectedTool, onSelect, serverId }: Props) {
   const [tools, setTools] = useState<McpTool[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    getMcpTools()
+    setLoading(true);
+    setError(null);
+    getMcpTools(serverId)
       .then(setTools)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [serverId]);
 
   const filtered = tools.filter(
     (t) =>
@@ -40,13 +43,16 @@ export default function ToolSelector({ selectedTool, onSelect }: Props) {
       (t.description || '').toLowerCase().includes(search.toLowerCase()),
   );
 
-  // 按分类分组
   const grouped: Record<string, McpTool[]> = {};
   for (const tool of filtered) {
     const cat = categorizeTool(tool.name);
     if (!grouped[cat]) grouped[cat] = [];
     grouped[cat].push(tool);
   }
+
+  const toggleCategory = (cat: string) => {
+    setCollapsed(prev => ({ ...prev, [cat]: !prev[cat] }));
+  };
 
   if (loading) {
     return (
@@ -68,47 +74,65 @@ export default function ToolSelector({ selectedTool, onSelect }: Props) {
 
   return (
     <div className="flex flex-col h-full gap-2">
-      <input
-        type="text"
-        placeholder="搜索工具..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-      />
+      <div className="flex items-center justify-between px-1">
+        <input
+          type="text"
+          placeholder="搜索工具..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+      </div>
+      <div className="text-xs text-slate-400 px-1">
+        共 {filtered.length} 个工具，{Object.keys(grouped).length} 个分类
+      </div>
 
-      <div className="flex-1 overflow-y-auto space-y-3">
+      <div className="flex-1 overflow-y-auto space-y-1">
         {Object.entries(grouped).map(([category, items]) => (
           <div key={category}>
-            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-1 mb-1">
-              {category}
-            </div>
-            <div className="space-y-1">
-              {items.map((tool) => {
-                const isSelected = selectedTool?.name === tool.name;
-                return (
-                  <button
-                    key={tool.name}
-                    onClick={() => onSelect(tool)}
-                    className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                      isSelected
-                        ? 'bg-blue-600 text-white'
-                        : 'text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    <div className="font-medium truncate">{tool.name}</div>
-                    {tool.description && (
-                      <div
-                        className={`text-xs mt-0.5 truncate ${
-                          isSelected ? 'text-blue-100' : 'text-slate-400'
-                        }`}
-                      >
-                        {tool.description}
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+            <button
+              onClick={() => toggleCategory(category)}
+              className="w-full flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-50 transition-colors"
+            >
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                {category}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="text-[10px] font-medium text-slate-400 bg-slate-100 rounded-full px-1.5 py-0.5 min-w-[20px] text-center">
+                  {items.length}
+                </span>
+                <i className={`ri-arrow-${collapsed[category] ? 'right' : 'down'}-s-line text-xs text-slate-400`} />
+              </span>
+            </button>
+            {!collapsed[category] && (
+              <div className="space-y-1 mt-1">
+                {items.map((tool) => {
+                  const isSelected = selectedTool?.name === tool.name;
+                  return (
+                    <button
+                      key={tool.name}
+                      onClick={() => onSelect(tool)}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                        isSelected
+                          ? 'bg-blue-600 text-white'
+                          : 'text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="font-medium truncate">{tool.name}</div>
+                      {tool.description && (
+                        <div
+                          className={`text-xs mt-0.5 truncate ${
+                            isSelected ? 'text-blue-100' : 'text-slate-400'
+                          }`}
+                        >
+                          {tool.description}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ))}
 

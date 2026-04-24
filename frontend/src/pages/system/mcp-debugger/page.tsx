@@ -1,11 +1,19 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { getMcpTools, callMcpTool, type McpTool, type McpDebugCallResponse } from '../../../api/mcpDebug';
+import { API_BASE } from '../../../config';
 import ToolSelector from './components/ToolSelector';
 import ParamForm from './components/ParamForm';
 import ResultViewer from './components/ResultViewer';
 import CallHistory, { type HistoryEntry } from './components/CallHistory';
 import AuditLogPage from './components/AuditLogPage';
+
+interface McpServerOption {
+  id: number;
+  name: string;
+  type: string;
+  is_active: boolean;
+}
 
 let historyCounter = 0;
 
@@ -13,6 +21,8 @@ export default function McpDebuggerPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const view = (searchParams.get('view') || 'debugger') as 'debugger' | 'logs';
 
+  const [servers, setServers] = useState<McpServerOption[]>([]);
+  const [serverId, setServerId] = useState<number | undefined>(undefined);
   const [selectedTool, setSelectedTool] = useState<McpTool | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<McpDebugCallResponse | null>(null);
@@ -20,6 +30,19 @@ export default function McpDebuggerPage() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [restoredArgs, setRestoredArgs] = useState<Record<string, unknown> | undefined>(undefined);
   const [toolsLoaded, setToolsLoaded] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/mcp-configs/`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : [])
+      .then((list: McpServerOption[]) => {
+        const active = list.filter(s => s.is_active);
+        setServers(active);
+        if (active.length > 0 && serverId === undefined) {
+          setServerId(active[0].id);
+        }
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const switchView = (v: 'debugger' | 'logs') => {
     setSearchParams(prev => {
@@ -33,7 +56,7 @@ export default function McpDebuggerPage() {
     const toolParam = searchParams.get('tool');
     if (!toolParam || toolsLoaded) return;
 
-    getMcpTools().then(tools => {
+    getMcpTools(serverId).then(tools => {
       setToolsLoaded(true);
       const matched = tools.find(t => t.name === toolParam);
       if (!matched) return;
@@ -71,7 +94,7 @@ export default function McpDebuggerPage() {
       let callErr: string | null = null;
 
       try {
-        callResult = await callMcpTool(selectedTool.name, args);
+        callResult = await callMcpTool(selectedTool.name, args, serverId);
         setResult(callResult);
       } catch (e) {
         callErr = e instanceof Error ? e.message : String(e);
@@ -93,7 +116,7 @@ export default function McpDebuggerPage() {
         ...prev,
       ]);
     },
-    [selectedTool],
+    [selectedTool, serverId],
   );
 
   const handleRestore = useCallback((entry: HistoryEntry) => {
@@ -106,14 +129,34 @@ export default function McpDebuggerPage() {
   return (
     <div className="flex flex-col h-full p-4 gap-4">
       {/* 页头 */}
-      <div className="shrink-0">
-        <h1 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
-          <i className="ri-bug-line text-blue-600" />
-          MCP 调试器
-        </h1>
-        <p className="text-sm text-slate-400 mt-0.5">
-          在线调用 MCP 工具并查看原始响应，仅限管理员使用
-        </p>
+      <div className="shrink-0 flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
+            <i className="ri-bug-line text-blue-600" />
+            MCP 调试器
+          </h1>
+          <p className="text-sm text-slate-400 mt-0.5">
+            在线调用 MCP 工具并查看原始响应，仅限管理员使用
+          </p>
+        </div>
+        {servers.length > 0 && (
+          <select
+            value={serverId ?? ''}
+            onChange={(e) => {
+              const id = e.target.value ? Number(e.target.value) : undefined;
+              setServerId(id);
+              setSelectedTool(null);
+              setResult(null);
+              setCallError(null);
+              setToolsLoaded(false);
+            }}
+            className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white focus:outline-none focus:border-blue-500"
+          >
+            {servers.map(s => (
+              <option key={s.id} value={s.id}>{s.name} ({s.type})</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* Tab 切换 */}
@@ -150,7 +193,7 @@ export default function McpDebuggerPage() {
                 工具列表
               </div>
               <div className="flex-1 min-h-0">
-                <ToolSelector selectedTool={selectedTool} onSelect={handleToolSelect} />
+                <ToolSelector selectedTool={selectedTool} onSelect={handleToolSelect} serverId={serverId} />
               </div>
             </div>
 

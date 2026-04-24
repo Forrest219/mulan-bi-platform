@@ -1,6 +1,28 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getMcpDebugLogs, type McpDebugLog, type McpDebugLogsResponse } from '../../../../api/mcpDebug';
 
+const TOOL_CATEGORIES: { label: string; pattern: RegExp }[] = [
+  { label: '查询类', pattern: /^(list|get|search|query|describe)/i },
+  { label: '字段类', pattern: /field|column|schema/i },
+  { label: '视图控制类', pattern: /view|workbook|dashboard/i },
+  { label: '写操作类', pattern: /create|update|delete|publish|move|add/i },
+];
+
+function categorizeTool(name: string): string {
+  for (const cat of TOOL_CATEGORIES) {
+    if (cat.pattern.test(name)) return cat.label;
+  }
+  return '其他';
+}
+
+const CATEGORY_COLORS: Record<string, string> = {
+  '查询类': 'bg-blue-50 text-blue-600',
+  '字段类': 'bg-purple-50 text-purple-600',
+  '视图控制类': 'bg-amber-50 text-amber-600',
+  '写操作类': 'bg-red-50 text-red-600',
+  '其他': 'bg-slate-100 text-slate-500',
+};
+
 export default function AuditLogPage() {
   const [data, setData] = useState<McpDebugLogsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -61,21 +83,33 @@ export default function AuditLogPage() {
 
   const getDateStr = () => new Date().toISOString().slice(0, 10);
 
-  const exportCsv = async () => {
-    setExportLoading(true);
-    try {
+  const fetchAllLogs = async (): Promise<McpDebugLog[]> => {
+    const all: McpDebugLog[] = [];
+    let p = 1;
+    while (true) {
       const result = await getMcpDebugLogs({
         tool_name: toolNameFilter || undefined,
         status: statusFilter || undefined,
-        page: 1,
-        page_size: 1000,
+        page: p,
+        page_size: 100,
       });
-      const logs: McpDebugLog[] = result.logs;
-      const header = 'id,tool_name,username,status,duration_ms,created_at,error_message';
+      all.push(...result.logs);
+      if (p >= result.pages) break;
+      p++;
+    }
+    return all;
+  };
+
+  const exportCsv = async () => {
+    setExportLoading(true);
+    try {
+      const logs = await fetchAllLogs();
+      const header = 'id,tool_name,category,username,status,duration_ms,created_at,error_message';
       const rows = logs.map(l =>
         [
           l.id,
           `"${l.tool_name}"`,
+          `"${categorizeTool(l.tool_name)}"`,
           `"${l.username}"`,
           l.status,
           l.duration_ms ?? '',
@@ -93,13 +127,8 @@ export default function AuditLogPage() {
   const exportJson = async () => {
     setExportLoading(true);
     try {
-      const result = await getMcpDebugLogs({
-        tool_name: toolNameFilter || undefined,
-        status: statusFilter || undefined,
-        page: 1,
-        page_size: 1000,
-      });
-      const json = JSON.stringify(result.logs, null, 2);
+      const logs = await fetchAllLogs();
+      const json = JSON.stringify(logs, null, 2);
       triggerDownload(json, `mcp-audit-${getDateStr()}.json`, 'application/json');
     } finally {
       setExportLoading(false);
@@ -174,6 +203,7 @@ export default function AuditLogPage() {
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">时间</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">工具名</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">分类</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">操作者</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">状态</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">耗时</th>
@@ -185,7 +215,7 @@ export default function AuditLogPage() {
                 <>
                   {[0, 1, 2].map(i => (
                     <tr key={i}>
-                      {[0, 1, 2, 3, 4, 5].map(j => (
+                      {[0, 1, 2, 3, 4, 5, 6].map(j => (
                         <td key={j} className="px-4 py-3">
                           <div className="h-4 bg-slate-200 rounded animate-pulse" />
                         </td>
@@ -199,6 +229,11 @@ export default function AuditLogPage() {
                     <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{formatTime(log.created_at)}</td>
                     <td className="px-4 py-3">
                       <span className="font-mono text-xs text-slate-700">{log.tool_name}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${CATEGORY_COLORS[categorizeTool(log.tool_name)] ?? CATEGORY_COLORS['其他']}`}>
+                        {categorizeTool(log.tool_name)}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-600">{log.username}</td>
                     <td className="px-4 py-3">
@@ -218,7 +253,7 @@ export default function AuditLogPage() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-slate-400">暂无日志</td>
+                  <td colSpan={7} className="px-4 py-12 text-center text-slate-400">暂无日志</td>
                 </tr>
               )}
             </tbody>
