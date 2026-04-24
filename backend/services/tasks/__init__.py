@@ -75,3 +75,5 @@ celery_app.conf.update(
 )
 
 celery_app.autodiscover_tasks(["services.tasks"])
+
+from services.tasks import signals  # noqa: F401

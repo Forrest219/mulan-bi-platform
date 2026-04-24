@@ -16,6 +16,8 @@ from typing import Dict, Any, List, Optional
 
 from celery import shared_task
 
+from services.tasks.decorators import beat_guarded
+
 logger = logging.getLogger(__name__)
 
 
@@ -371,6 +373,7 @@ def _calculate_and_append_score(qdb, db, datasource_id: int, executed_at: dateti
 
 
 @shared_task
+@beat_guarded("quality-cleanup-old-results")
 def cleanup_old_quality_results():
     """清理过期的 bi_quality_results 历史数据
 

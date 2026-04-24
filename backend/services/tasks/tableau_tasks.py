@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timedelta
 
 from services.tasks import celery_app
+from services.tasks.decorators import beat_guarded
 
 logger = logging.getLogger(__name__)
 
@@ -100,11 +101,54 @@ def sync_connection_task(self, conn_id: int):
             return {"status": "error", "message": str(e)}
 
 
+def _bridge_mcp_to_connections(tableau_db, db_session):
+    """将 mcp_servers 中 type='tableau' 的活跃记录桥接到 tableau_connections。"""
+    from services.mcp.models import McpServer
+    from app.core.crypto import get_tableau_crypto
+
+    try:
+        mcp_servers = db_session.query(McpServer).filter(
+            McpServer.type == "tableau",
+            McpServer.is_active == True,
+        ).all()
+    except Exception as e:
+        logger.warning("Bridge: failed to query mcp_servers: %s", e)
+        return
+
+    crypto = get_tableau_crypto()
+    for mcp in mcp_servers:
+        creds = mcp.credentials or {}
+        pat_value = creds.get("pat_value", "")
+        if not pat_value:
+            logger.warning("Bridge: mcp_server '%s' has no pat_value, skipping", mcp.name)
+            continue
+
+        try:
+            token_encrypted = crypto.encrypt(pat_value)
+        except Exception as e:
+            logger.warning("Bridge: encrypt failed for '%s': %s", mcp.name, e)
+            continue
+
+        conn, created = tableau_db.ensure_connection_from_mcp(
+            mcp_name=mcp.name,
+            server_url=creds.get("tableau_server", mcp.server_url or ""),
+            site=creds.get("site_name", ""),
+            token_name=creds.get("pat_name", ""),
+            token_encrypted=token_encrypted,
+            mcp_server_url=mcp.server_url or "",
+        )
+        if created:
+            logger.info("Bridge: created tableau_connection '%s' (id=%d) from mcp_server id=%d",
+                        mcp.name, conn.id, mcp.id)
+
+
 @celery_app.task
+@beat_guarded("tableau-auto-sync")
 def scheduled_sync_all():
     """
     Beat 调度任务：每 60 秒检查所有活跃连接，
     对到期的连接触发 sync_connection_task。
+    启动前先桥接 mcp_servers → tableau_connections。
     Celery 任务层必须使用 get_db_context() 管理 Session（Spec 07 §7.3 P1）。
     """
     from services.tableau.models import TableauDatabase
@@ -112,6 +156,9 @@ def scheduled_sync_all():
 
     with get_db_context() as db:
         _db = TableauDatabase(session=db)
+
+        _bridge_mcp_to_connections(_db, db)
+
         connections = _db.get_all_connections(include_inactive=False)
 
         for conn in connections:

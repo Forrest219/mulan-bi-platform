@@ -19,6 +19,7 @@ from celery import shared_task
 from sqlalchemy import text
 
 from app.core.database import engine
+from services.tasks.decorators import beat_guarded
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ RETENTION_DAYS = 90
 
 
 @shared_task
+@beat_guarded("events-purge-old")
 def purge_old_events():
     """
     归档 90 天前的 bi_events 及级联通知记录。

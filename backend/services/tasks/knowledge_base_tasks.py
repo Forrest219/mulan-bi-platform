@@ -13,6 +13,7 @@ from sqlalchemy import text
 
 from app.core.database import engine
 from services.tasks import celery_app
+from services.tasks.decorators import beat_guarded
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,7 @@ def regenerate_glossary_embedding(self, glossary_id: int):
 # ──────────────────────────────────────────────────────────────
 
 @shared_task
+@beat_guarded("hnsw-reindex")
 def reindex_hnsw_task():
     """
     重建 HNSW 向量索引（ix_emb_hnsw）。
@@ -186,6 +188,7 @@ def reindex_hnsw_task():
 
 
 @shared_task
+@beat_guarded("hnsw-vacuum-analyze")
 def vacuum_analyze_embeddings_task():
     """
     对 kb_embeddings 表执行 VACUUM ANALYZE。

@@ -12,6 +12,8 @@ from typing import Optional
 
 from celery import shared_task
 
+from services.tasks.decorators import beat_guarded
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,6 +28,7 @@ logger = logging.getLogger(__name__)
     acks_late=True,
     max_retries=0,
 )
+@beat_guarded("dqc-cycle-daily")
 def run_daily_full_cycle(self):
     """每日 04:00 完整 cycle"""
     from services.dqc.orchestrator import CycleLockedError, DqcOrchestrator
@@ -144,6 +147,7 @@ def profile_and_suggest_task(self, asset_id: int):
 
 
 @shared_task(bind=True, name="services.tasks.dqc_tasks.partition_maintenance")
+@beat_guarded("dqc-partition-maintenance")
 def partition_maintenance(self):
     """滚动创建未来 3 个月分区 + DROP 超期分区
 
@@ -199,6 +203,7 @@ def partition_maintenance(self):
 
 
 @shared_task(bind=True, name="services.tasks.dqc_tasks.cleanup_old_analyses")
+@beat_guarded("dqc-cleanup-old-analyses")
 def cleanup_old_analyses(self):
     """删除 90 天前的 bi_dqc_llm_analyses 与 180 天前的 bi_dqc_cycles"""
     from app.core.database import SessionLocal
