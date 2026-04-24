@@ -64,25 +64,6 @@ export interface MenuDomain {
 // ============================================================
 export const menuConfig: MenuDomain[] = [
   // ──────────────────────────────────────────────────
-  // 域 0：看板（登录即可访问）
-  // ──────────────────────────────────────────────────
-  {
-    key: 'ops',
-    label: '看板',
-    icon: 'ri-home-4-line',
-    description: '资产浏览与问数一体化工作台',
-    defaultOpen: false,
-    items: [
-      {
-        key: 'ops-home',
-        label: '首页',
-        icon: 'ri-home-4-line',
-        path: '/',
-      },
-    ],
-  },
-
-  // ──────────────────────────────────────────────────
   // 域 1：资产 /assets
   // ──────────────────────────────────────────────────
   {
@@ -151,6 +132,7 @@ export const menuConfig: MenuDomain[] = [
         icon: 'ri-file-code-line',
         path: '/empty/ddl-generator',
         permission: { requiredRole: 'analyst' },
+        hidden: true,
       },
       {
         key: 'rule-config',
@@ -165,12 +147,14 @@ export const menuConfig: MenuDomain[] = [
         icon: 'ri-chat-search-line',
         path: '/empty/nl-query',
         permission: { requiredRole: 'analyst' },
+        hidden: true,
       },
       {
         key: 'knowledge',
         label: '知识库',
         icon: 'ri-book-open-line',
         path: '/empty/knowledge-base',
+        hidden: true,
       },
     ],
   },
@@ -215,6 +199,7 @@ export const menuConfig: MenuDomain[] = [
         label: '发布日志',
         icon: 'ri-file-list-3-line',
         path: '/empty/publish-logs',
+        hidden: true,
       },
       {
         key: 'metrics',

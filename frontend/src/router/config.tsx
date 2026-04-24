@@ -47,7 +47,6 @@ const KnowledgePage        = lazy(() => import('../pages/knowledge/page'));
 const UsersAdminPage       = lazy(() => import('../pages/admin/user-management/page'));
 const GroupsAdminPage      = lazy(() => import('../pages/admin/groups/page'));
 const PermissionsAdminPage = lazy(() => import('../pages/admin/permissions/page'));
-const LLMAdminPage         = lazy(() => import('../pages/admin/llm/page'));
 const AdminTasksPage        = lazy(() => import('../pages/admin/tasks/page'));
 const ActivityAdminPage     = lazy(() => import('../pages/admin/activity/page'));
 const QueryAlertsPage       = lazy(() => import('../pages/admin/query-alerts/page'));

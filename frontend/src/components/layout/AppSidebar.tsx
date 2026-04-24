@@ -265,6 +265,24 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
 
       {/* 域列表 */}
       <nav className="flex-1 overflow-y-auto px-2 pb-4">
+        {/* 首页直达 */}
+        <Link
+          to="/"
+          className={`
+            flex items-center gap-2.5 px-3 py-2.5 rounded-lg mb-3 transition-all duration-150
+            ${location.pathname === '/'
+              ? 'bg-blue-50 text-blue-700 font-semibold'
+              : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+            }
+          `}
+          title={collapsed ? '首页' : undefined}
+        >
+          <i className="ri-home-4-line text-base shrink-0" />
+          {!collapsed && (
+            <span className="text-[13px] font-medium truncate">首页</span>
+          )}
+        </Link>
+
         {menuConfig.map((domain) => {
           const domainPermission = domain.permission;
           if (domainPermission?.requiredRole && !hasRoleLevel(userRole, domainPermission.requiredRole)) {
