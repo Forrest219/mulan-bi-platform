@@ -105,7 +105,7 @@ def get_agent_stats(
     # 失败数
     failed_count: int = (
         db.query(func.count(BiAgentRun.id))
-        .filter(BiAgentRun.status == "error")
+        .filter(BiAgentRun.status.in_(("failed", "error")))
         .scalar()
         or 0
     )
@@ -203,7 +203,10 @@ def list_agent_runs(
     _user: dict = Depends(require_roles(["admin", "data_admin"])),
     limit: int = Query(20, ge=1, le=100, description="每页条数"),
     offset: int = Query(0, ge=0, description="偏移量"),
-    status: Optional[str] = Query(None, description="状态筛选: running / completed / error"),
+    status: Optional[str] = Query(
+        None,
+        description="状态筛选: running / completed / failed（兼容历史值 error）",
+    ),
 ):
     """
     GET /api/admin/agent/runs

@@ -34,3 +34,4 @@ htmlcov/
 Thumbs.db
 frontend/out/
 backend/.venv/
+frontend/test-results/
