@@ -1,13 +1,10 @@
 """
 Streaming SSE chat endpoint — Gap-05 (§8.5 + §11 陷阱6)
 
-Phase 1 实现：
-- 调用内部 POST /api/search/query 获取完整响应
-- 将结果按 word chunk 拆分，以 SSE 格式流式输出
-- 每 chunk 约 50ms，前端 useRef buffer + requestAnimationFrame 每 ~16ms 批量 flush
-
-不直接依赖 nlq_service 内部函数，借用已有的鉴权 cookie/header 向自身转发请求，
-避免重复 session 管理与流水线代码。
+Phase 2 改造：
+- 直接调用 Data Agent ReActEngine（通过 factory + runner，无 httpx 自环回）
+- Agent 事件映射至 chat SSE 格式：{"type":"token","content":"..."} → {"token":"..."}
+- fallback 至 POST /api/search/query（Phase 1 逻辑）
 """
 import asyncio
 import json
@@ -16,15 +13,83 @@ import os
 from typing import AsyncGenerator, Optional
 
 import httpx
-from fastapi import APIRouter, Cookie, Header, Query, Request
+from fastapi import APIRouter, Cookie, Depends, Header, Query, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.core.dependencies import get_current_user
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
-# 内部 API base URL（容器内自环回，默认 localhost:8000）
+# 内部 API base URL — still needed for Phase 1 fallback (_resolve_answer)
 _INTERNAL_BASE = os.environ.get("INTERNAL_API_BASE", "http://localhost:8000")
+
+
+async def _stream_via_agent_direct(
+    question: str,
+    connection_id: Optional[int],
+    current_user: dict,
+    db: Session,
+) -> AsyncGenerator[str, None]:
+    """
+    Call the Data Agent engine in-process and yield chat-format SSE strings.
+    """
+    import uuid as uuid_lib
+    from services.data_agent.factory import create_engine
+    from services.data_agent.runner import run_agent
+    from services.data_agent.session import SessionManager
+    from services.data_agent.tool_base import ToolContext
+
+    session_mgr = SessionManager(db)
+    trace_id = f"t-{uuid_lib.uuid4().hex[:8]}"
+
+    session = session_mgr.create_session(
+        user_id=current_user["id"],
+        connection_id=connection_id,
+    )
+
+    context = ToolContext(
+        session_id=str(session.conversation_id),
+        user_id=current_user["id"],
+        connection_id=connection_id,
+        trace_id=trace_id,
+    )
+
+    engine, _registry = create_engine()
+
+    session_mgr.persist_message(
+        session=session,
+        role="user",
+        content=question,
+        trace_id=trace_id,
+    )
+
+    async for event in run_agent(
+        engine=engine,
+        context=context,
+        session_mgr=session_mgr,
+        session=session,
+        question=question,
+        trace_id=trace_id,
+        current_user=current_user,
+        db=db,
+        connection_id=connection_id,
+    ):
+        if event.type == "done":
+            # Emit per-char tokens then a done signal
+            answer = event.content.get("answer", "")
+            for char in answer:
+                yield f"data: {json.dumps({'token': char}, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.01)
+            yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+        elif event.type == "error":
+            error_content = event.content if isinstance(event.content, dict) else {"message": str(event.content)}
+            message = error_content.get("message", str(error_content))
+            yield f"data: {json.dumps({'error': message}, ensure_ascii=False)}\n\n"
+        # metadata, thinking, tool_call, tool_result → skip (chat format doesn't use them)
 
 
 async def _resolve_answer(
@@ -36,8 +101,9 @@ async def _resolve_answer(
     """
     向内部 POST /api/search/query 转发请求，返回纯文本 answer 字符串。
     使用调用方原始 Authorization header 和 Cookie，保证鉴权一致。
+    (Phase 1 fallback)
     """
-    headers: dict[str, str] = {"Content-Type": "application/json"}
+    headers: dict = {"Content-Type": "application/json"}
     if authorization:
         headers["Authorization"] = authorization
     if cookie:
@@ -108,13 +174,25 @@ async def _stream_llm_response(
     connection_id: Optional[int],
     authorization: Optional[str],
     cookie: Optional[str],
+    current_user: Optional[dict] = None,
+    db: Optional[Session] = None,
 ) -> AsyncGenerator[str, None]:
     """
-    Generator：先完整获取 NLQ 响应，再按 word-chunk 分批 yield SSE 事件。
+    Generator：先尝试 Agent 流，失败则 fallback 至 Phase 1 word-chunk 逻辑。
 
     chunk_size=3 words / 50ms → ~20 chunks/s。
     前端通过 requestAnimationFrame (~16ms) 批量 flush，约 1 帧消费 1 chunk。
     """
+    # Phase 2: 优先走 Agent 直连（需要 current_user 和 db）
+    if current_user is not None and db is not None:
+        try:
+            async for event in _stream_via_agent_direct(question, connection_id, current_user, db):
+                yield event
+            return  # Agent stream succeeded
+        except Exception as agent_exc:
+            logger.debug("Agent direct call failed (%s), falling back to search", agent_exc)
+
+    # Phase 1 fallback: 走 search/query + word-chunk pseudo-stream
     try:
         answer = await _resolve_answer(question, connection_id, authorization, cookie)
 
@@ -147,7 +225,7 @@ async def _stream_llm_response(
 
     except Exception as exc:
         logger.warning("SSE stream error: %s", exc)
-        payload = json.dumps({"error": str(exc)}, ensure_ascii=False)
+        payload = json.dumps({"error": "服务器内部错误，请稍后重试"}, ensure_ascii=False)
         yield f"data: {payload}\n\n"
 
 
@@ -158,6 +236,8 @@ async def chat_stream(
     connection_id: Optional[int] = Query(None, description="连接 ID"),
     authorization: Optional[str] = Header(None, alias="Authorization"),
     cookie: Optional[str] = Header(None, alias="Cookie"),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     GET /api/chat/stream — Streaming SSE chat endpoint (Gap-05)
@@ -171,7 +251,10 @@ async def chat_stream(
     AskBar 状态隔离：streaming content 存在 useStreamingChat hook，不污染 AskBar state。
     """
     return StreamingResponse(
-        _stream_llm_response(q, connection_id, authorization, cookie),
+        _stream_llm_response(
+            q, connection_id, authorization, cookie,
+            current_user=current_user, db=db,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

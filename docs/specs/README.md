@@ -63,6 +63,8 @@
 | 32 | [MCP-Tableau Bridge](32-mcp-tableau-connection-bridge-spec.md) | MCP→Tableau 连接自动桥接 | :white_check_mark: |
 | 33 | [任务管理](33-task-management-spec.md) | Celery 任务调度与监控 | :white_check_mark: |
 | 34 | [连接管理整合](34-connection-management-spec.md) | 恢复 CRUD 路由 + 汉化 + 冒烟测试 + 导航修复 | :clipboard: 待实施 |
+| 35 | [StarRocks 数仓合规巡检](35-starrocks-compliance-inspection-spec.md) | 扩展健康扫描引擎，25 条 StarRocks 规则 + 数仓合规 Tab | :construction: |
+| 36 | [Data Agent 架构](36-data-agent-architecture-spec.md) | Agent 框架（ReAct 引擎 + 工具注册 + 首页接入），Spec 28 的实施基座 | :construction: |
 
 ## 附录 — 独立 Spec
 

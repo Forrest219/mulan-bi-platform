@@ -3,14 +3,17 @@ POST /api/ask-data — SSE 智能问数端点
 POST /api/ask-data/feedback — 问数结果点赞/踩
 SSE 协议严格遵循 frontend/src/api/ask_data_contract.ts
 
-event 格式（text/event-stream）：
-  data: {"type":"metadata","sources_count":N,"top_sources":[...]}\\n\\n
-  data: {"type":"token","content":"..."}\\n\\n
-  data: {"type":"done","answer":"...","trace_id":"..."}\\n\\n
-  data: {"type":"error","code":"MCP_003","message":"..."}\\n\\n
+Phase 2 改造：
+- 直接调用 Data Agent ReActEngine（通过 factory + runner，无 httpx 自环回）
+- Agent 事件映射至 ask_data SSE 格式
+- fallback 至 POST /api/search/query（Phase 1 逻辑）
 
-实现策略：内部转发至 POST /api/search/query，复用完整 NLQ 流水线，
-再将同步 JSON 结果按 word-chunk 伪流式输出，避免重复流水线代码。
+event 格式（text/event-stream）：
+  data: {"type":"metadata","sources_count":N,"top_sources":[...]}\n\n
+  data: {"type":"token","content":"..."}\n\n
+  data: {"type":"done","answer":"...","trace_id":"..."}\n\n
+  data: {"type":"error","code":"MCP_003","message":"..."}\n\n
+
 MCP 错误码依照 Spec 01 §5.10 映射（NLQ_006/007/009 → MCP_003/004）。
 
 性能优化：per-user intent 结果缓存 5 分钟，规避重复 classify_meta_intent 开销。
@@ -27,7 +30,7 @@ from typing import AsyncGenerator, Optional
 import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -40,12 +43,12 @@ except ImportError:
     _RedisCache = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(prefix="/api/ask-data", tags=["智能问数"])
 
 _INTERNAL_BASE = os.environ.get("INTERNAL_API_BASE", "http://localhost:8000")
 
 # NLQ error code → (Spec 01 error_code, 面向用户中文消息)
-_MCP_CODE_MAP: dict[str, tuple[str, str]] = {
+_MCP_CODE_MAP: dict = {
     "NLQ_006": ("MCP_003", "MCP 服务不可用，请检查 Tableau MCP Server 是否运行"),
     "NLQ_007": ("MCP_004", "MCP 查询超时（30s），数据量过大或服务响应慢"),
     "NLQ_009": ("MCP_003", "MCP 连接无效，请确认 Tableau 连接配置正确"),
@@ -57,7 +60,7 @@ _INTENT_NONE_SENTINEL = "__none__"
 
 
 class AskDataRequest(BaseModel):
-    question: str
+    question: str = Field(..., min_length=1)
     connection_id: Optional[int] = None
     conversation_id: Optional[str] = None
 
@@ -83,6 +86,105 @@ class _NLQError(Exception):
 
 def _sse(event: dict) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+async def _stream_via_agent_direct(
+    question: str,
+    connection_id: Optional[int],
+    conversation_id: Optional[str],
+    current_user: dict,
+    db: Session,
+) -> AsyncGenerator[str, None]:
+    """
+    Call the Data Agent engine in-process and yield ask_data-format SSE strings.
+    """
+    import uuid as uuid_lib
+    from services.data_agent.factory import create_engine
+    from services.data_agent.runner import run_agent
+    from services.data_agent.session import SessionManager
+    from services.data_agent.tool_base import ToolContext
+
+    session_mgr = SessionManager(db)
+    trace_id = f"t-{uuid_lib.uuid4().hex[:8]}"
+
+    # 创建或续接会话
+    if conversation_id:
+        try:
+            conv_uuid = uuid_lib.UUID(conversation_id)
+        except ValueError:
+            yield _sse({"type": "error", "code": "AGENT_007", "message": "无效的会话 ID"})
+            return
+
+        session = session_mgr.resume_session(conv_uuid, current_user["id"])
+        if not session:
+            yield _sse({"type": "error", "code": "AGENT_004", "message": "会话不存在"})
+            return
+    else:
+        session = session_mgr.create_session(
+            user_id=current_user["id"],
+            connection_id=connection_id,
+        )
+
+    context = ToolContext(
+        session_id=str(session.conversation_id),
+        user_id=current_user["id"],
+        connection_id=connection_id,
+        trace_id=trace_id,
+    )
+
+    engine, _registry = create_engine()
+
+    session_mgr.persist_message(
+        session=session,
+        role="user",
+        content=question,
+        trace_id=trace_id,
+    )
+
+    async for event in run_agent(
+        engine=engine,
+        context=context,
+        session_mgr=session_mgr,
+        session=session,
+        question=question,
+        trace_id=trace_id,
+        current_user=current_user,
+        db=db,
+        connection_id=connection_id,
+    ):
+        if event.type == "metadata":
+            content = event.content if isinstance(event.content, dict) else {}
+            yield _sse({
+                "type": "metadata",
+                "sources_count": 0,
+                "top_sources": [],
+                "conversation_id": content.get("conversation_id", ""),
+            })
+        elif event.type == "done":
+            content = event.content if isinstance(event.content, dict) else {}
+            # Emit per-char tokens before the done event
+            answer = content.get("answer", "")
+            for char in answer:
+                yield _sse({"type": "token", "content": char})
+                await asyncio.sleep(0.01)
+            yield _sse({
+                "type": "done",
+                "answer": answer,
+                "trace_id": content.get("trace_id", ""),
+            })
+        elif event.type == "error":
+            error_content = event.content if isinstance(event.content, dict) else {"message": str(event.content)}
+            error_code = error_content.get("error_code", "AGENT_003")
+            if error_code.startswith("AGENT_"):
+                code = error_code
+            else:
+                code = "SYS_001"
+            yield _sse({
+                "type": "error",
+                "code": code,
+                "message": error_content.get("message", str(error_content)),
+            })
+        # thinking, tool_call, tool_result → skip
 
 
 def _intent_cache_key(user_id: int, question: str) -> str:
@@ -113,7 +215,7 @@ def _set_cached_intent(user_id: int, question: str, intent: Optional[str]) -> No
         pass
 
 
-def _extract_answer_and_trace(data: dict) -> tuple[str, str]:
+def _extract_answer_and_trace(data: dict) -> tuple:
     """从 search/query 响应中提取 (answer_text, trace_id)"""
     trace_id = data.get("trace_id", "")
     rt = data.get("response_type", "text")
@@ -180,7 +282,7 @@ async def _call_search(
     user_id: Optional[int] = None,
 ) -> dict:
     """内部转发至 POST /api/search/query，保留原始鉴权上下文和 trace 链路。"""
-    headers: dict[str, str] = {
+    headers: dict = {
         "Content-Type": "application/json",
         "X-Trace-ID": trace_id,
     }
@@ -233,9 +335,27 @@ async def _generate_events(
     authorization: Optional[str],
     cookie: Optional[str],
     user_id: Optional[int] = None,
+    current_user: Optional[dict] = None,
+    db: Optional[Session] = None,
 ) -> AsyncGenerator[str, None]:
     trace_id = str(uuid.uuid4())
 
+    # Phase 2: 优先走 Agent 直连（需要 current_user 和 db）
+    agent_success = False
+    if current_user is not None and db is not None:
+        try:
+            async for event in _stream_via_agent_direct(
+                question, connection_id, conversation_id,
+                current_user, db,
+            ):
+                yield event
+                agent_success = True
+            if agent_success:
+                return  # Agent stream succeeded
+        except Exception as agent_exc:
+            logger.debug("Agent direct call failed for ask-data (%s), falling back to search", agent_exc)
+
+    # Phase 1 fallback: 走 search/query + word-chunk pseudo-stream
     try:
         data = await _call_search(
             question, connection_id, conversation_id,
@@ -278,6 +398,7 @@ async def ask_data(
     body: AskDataRequest,
     request: Request,
     current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     POST /api/ask-data — 智能问数 SSE 流（Spec 22 Ask Data Architecture）
@@ -292,6 +413,8 @@ async def ask_data(
             authorization=request.headers.get("Authorization"),
             cookie=request.headers.get("Cookie"),
             user_id=current_user.get("id"),
+            current_user=current_user,
+            db=db,
         ),
         media_type="text/event-stream",
         headers={
