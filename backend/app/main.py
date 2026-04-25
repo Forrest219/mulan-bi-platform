@@ -11,10 +11,11 @@ from fastapi.responses import JSONResponse
 
 from app.core.errors import MulanError
 
-from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm, health_scan, tasks, notifications, events, knowledge_base, search, conversations, chat, ask_data, query
+from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm, health_scan, tasks, notifications, events, knowledge_base, search, conversations, chat, ask_data, query, platform_settings
+from app.api.agent import router as data_agent_router
 from app.api.governance import api_contract_routes, dqc, quality
 from app.api.semantic_maintenance import datasources as sm_datasources, fields as sm_fields, review as sm_review, sync as sm_sync, publish as sm_publish
-from app.api import audit, governance_runtime, connection_hub
+from app.api import audit, governance_runtime, connection_hub, agent_admin
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +73,9 @@ app.include_router(knowledge_base.router, prefix="/api/knowledge-base", tags=["�
 app.include_router(search.router, prefix="/api/search", tags=["NL搜索"])
 app.include_router(conversations.router, prefix="/api/conversations", tags=["对话历史"])
 app.include_router(chat.router)  # Gap-05: /api/chat/stream (SSE), prefix 已在 router 内定义
-app.include_router(ask_data.router, prefix="/api/ask-data", tags=["智能问数"])
+app.include_router(ask_data.router)  # prefix/tags 已在 router 内定义
 app.include_router(query.router, prefix="/api/query", tags=["问数 Query"])
+app.include_router(data_agent_router)  # prefix="/api/agent" 已在 router 内部定义
 from app.api import query_admin
 app.include_router(query_admin.router, prefix="/api/admin/query", tags=["问数管理员配置"])
 app.include_router(sm_datasources.router, prefix="/api/semantic-maintenance", tags=["语义维护"])
@@ -93,6 +95,8 @@ app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
 app.include_router(audit.router, prefix="/api/audit", tags=["审计"])
 app.include_router(governance_runtime.router, prefix="/api/governance", tags=["治理"])
 app.include_router(connection_hub.router, prefix="/api/connection-hub", tags=["连接中心"])
+app.include_router(platform_settings.router, prefix="/api/platform-settings", tags=["平台设置"])
+app.include_router(agent_admin.router, prefix="/api/admin/agent", tags=["Agent 监控"])
 
 
 @app.get("/")
