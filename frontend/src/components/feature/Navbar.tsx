@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { LOGO_URL } from '../../config';
+import { usePlatformSettings } from '../../context/PlatformSettingsContext';
 
 const navItems = [
   { label: '数据治理', path: '/data-governance/health' },
@@ -13,6 +13,7 @@ const navItems = [
 export default function Navbar() {
   const location = useLocation();
   const { user, logout, isAdmin } = useAuth();
+  const { settings } = usePlatformSettings();
 
   const handleLogout = async () => {
     await logout();
@@ -25,12 +26,12 @@ export default function Navbar() {
       <div className="px-6 flex items-center h-14">
         <Link to="/" className="flex items-center gap-2.5 mr-10 shrink-0">
           <img
-            src={LOGO_URL}
-            alt="Mulan Platform Logo"
+            src={settings.logo_url}
+            alt={`${settings.platform_name} Logo`}
             className="w-7 h-7 object-contain"
           />
           <span className="text-[15px] font-semibold text-slate-800 tracking-wide">
-            Mulan <span className="text-slate-400 font-normal">Platform</span>
+            {settings.platform_name}
           </span>
         </Link>
 

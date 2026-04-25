@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { usePlatformSettings } from '../context/PlatformSettingsContext';
 
 interface MenuItem {
   path: string;
@@ -42,6 +43,7 @@ const mainMenuSections: MenuSection[] = [
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const { user, isAdmin, hasPermission } = useAuth();
+  const { settings } = usePlatformSettings();
 
   const isHome = location.pathname === '/';
 
@@ -81,7 +83,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           <div className="px-5 pt-5 pb-2">
             <Link to="/" className="block">
               <h1 className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                Mulan Platform
+                {settings.platform_name}
               </h1>
             </Link>
           </div>

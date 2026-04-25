@@ -31,10 +31,9 @@ const McpDebuggerPage     = lazy(() => import('../pages/system/mcp-debugger/page
 const DDLValidatorPage    = lazy(() => import('../pages/ddl-validator/page'));
 const RuleConfigPage      = lazy(() => import('../pages/rule-config/page'));
 const DataHealthPage      = lazy(() => import('../pages/data-governance/health/page'));
-const DataQualityPage     = lazy(() => import('../pages/data-governance/quality/page'));
+const HealthCenterPage    = lazy(() => import('../pages/data-governance/health-center/page'));
 const TableauAssetBrowserPage = lazy(() => import('../pages/tableau/assets/page'));
 const TableauAssetDetailPage  = lazy(() => import('../pages/tableau/asset-detail/page'));
-const TableauHealthPage   = lazy(() => import('../pages/tableau/health/page'));
 const ConnectionCenterPage = lazy(() => import('../pages/assets/connection-center/page'));
 const SyncLogsPage        = lazy(() => import('../pages/tableau/sync-logs/page'));
 const DatasourcesPage     = lazy(() => import('../pages/assets/datasources/page'));
@@ -50,8 +49,10 @@ const PermissionsAdminPage = lazy(() => import('../pages/admin/permissions/page'
 const AdminTasksPage        = lazy(() => import('../pages/admin/tasks/page'));
 const ActivityAdminPage     = lazy(() => import('../pages/admin/activity/page'));
 const QueryAlertsPage       = lazy(() => import('../pages/admin/query-alerts/page'));
+const PlatformSettingsPage  = lazy(() => import('../pages/admin/platform-settings/page'));
 const ForgotPasswordPage    = lazy(() => import('../pages/forgot-password/page'));
 const EmptyStatePage        = lazy(() => import('../pages/empty/EmptyStatePage'));
+const AgentMonitorPage      = lazy(() => import('../pages/admin/agent-monitor/page'));
 const QueryPage             = lazy(() => import('../pages/query/page'));
 
 // ──────────────────────────────────────────────────────────────
@@ -133,20 +134,20 @@ const routes: RouteObject[] = [
         path: '/governance',
         children: [
           {
-            path: 'health',
+            path: 'health-center',
             element: (
               <ProtectedRoute requiredPermission="database_monitor">
-                <DataHealthPage />
+                <HealthCenterPage />
               </ProtectedRoute>
             ),
           },
           {
+            path: 'health',
+            element: <Navigate to="/governance/health-center?tab=warehouse" replace />,
+          },
+          {
             path: 'quality',
-            element: (
-              <ProtectedRoute requiredPermission="database_monitor">
-                <DataQualityPage />
-              </ProtectedRoute>
-            ),
+            element: <Navigate to="/governance/health-center?tab=quality" replace />,
           },
           {
             path: 'semantic/datasources',
@@ -214,19 +215,19 @@ const routes: RouteObject[] = [
           },
           {
             path: 'tableau-health',
-            element: (
-              <ProtectedRoute requiredPermission="tableau">
-                <TableauHealthPage />
-              </ProtectedRoute>
-            ),
+            element: <Navigate to="/governance/health-center?tab=tableau" replace />,
           },
           {
-            path: 'connection-center',
+            path: 'connections',
             element: (
               <ProtectedRoute>
                 <ConnectionCenterPage />
               </ProtectedRoute>
             ),
+          },
+          {
+            path: 'connection-center',
+            element: <Navigate to="/assets/connections" replace />,
           },
           {
             path: 'datasources',
@@ -366,6 +367,22 @@ const routes: RouteObject[] = [
               </ProtectedRoute>
             ),
           },
+          {
+            path: 'agent-monitor',
+            element: (
+              <ProtectedRoute adminOnly>
+                <AgentMonitorPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'platform-settings',
+            element: (
+              <ProtectedRoute adminOnly>
+                <PlatformSettingsPage />
+              </ProtectedRoute>
+            ),
+          },
         ],
       },
 
@@ -378,14 +395,14 @@ const routes: RouteObject[] = [
   // =====================
   { path: '/ddl-validator',                    element: <Navigate to="/dev/ddl-validator" replace /> },
   { path: '/rule-config',                      element: <Navigate to="/dev/rule-config" replace /> },
-  { path: '/data-governance/health',           element: <Navigate to="/governance/health" replace /> },
-  { path: '/data-governance/quality',           element: <Navigate to="/governance/quality" replace /> },
+  { path: '/data-governance/health',           element: <Navigate to="/governance/health-center?tab=warehouse" replace /> },
+  { path: '/data-governance/quality',           element: <Navigate to="/governance/health-center?tab=quality" replace /> },
   { path: '/semantic-maintenance/datasources', element: <Navigate to="/governance/semantic/datasources" replace /> },
   { path: '/semantic-maintenance/datasources/:id', element: <Navigate to="/governance/semantic/datasources/:id" replace /> },
   { path: '/semantic-maintenance/fields',       element: <Navigate to="/governance/semantic/fields" replace /> },
   { path: '/tableau/assets',                   element: <Navigate to="/assets/tableau" replace /> },
   { path: '/tableau/assets/:id',               element: <Navigate to="/assets/tableau/:id" replace /> },
-  { path: '/tableau/health',                   element: <Navigate to="/assets/tableau-health" replace /> },
+  { path: '/tableau/health',                   element: <Navigate to="/governance/health-center?tab=tableau" replace /> },
   { path: '/admin/users',                      element: <Navigate to="/system/users" replace /> },
   { path: '/admin/groups',                     element: <Navigate to="/system/groups" replace /> },
   { path: '/admin/permissions',                element: <Navigate to="/system/permissions" replace /> },
@@ -394,6 +411,7 @@ const routes: RouteObject[] = [
   { path: '/system/llm',                       element: <Navigate to="/system/llm-configs" replace /> },
   { path: '/admin/tasks',                      element: <Navigate to="/system/tasks" replace /> },
   { path: '/admin/activity',                    element: <Navigate to="/system/activity" replace /> },
+  { path: '/admin/platform-settings',           element: <Navigate to="/system/platform-settings" replace /> },
   { path: '/admin/datasources',                element: <Navigate to="/assets/datasources" replace /> },
   { path: '/admin/tableau/connections',         element: <Navigate to="/assets/tableau-connections" replace /> },
   { path: '/knowledge/:sub',                   element: <Navigate to="/analytics/knowledge" replace /> },
@@ -402,7 +420,7 @@ const routes: RouteObject[] = [
   // =====================
   // 遗留兼容（原有杂项 redirect）
   // =====================
-  { path: '/database-monitor', element: <Navigate to="/governance/health" replace /> },
+  { path: '/database-monitor', element: <Navigate to="/governance/health-center?tab=warehouse" replace /> },
 
   // /ops → 运维工作台首页（别名）
   { path: '/ops', element: <Navigate to="/" replace /> },

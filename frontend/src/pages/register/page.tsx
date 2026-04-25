@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { API_BASE, LOGO_URL } from '../../config';
+import { usePlatformSettings } from '../../context/PlatformSettingsContext';
 
 export default function RegisterPage() {
+  const { settings } = usePlatformSettings();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -63,8 +64,8 @@ export default function RegisterPage() {
         {/* Logo */}
         <div className="text-center mb-6">
           <img
-            src={LOGO_URL}
-            alt="Mulan Platform Logo"
+            src={settings.logo_url}
+            alt={`${settings.platform_name} Logo`}
             className="mx-auto h-10 w-auto"
           />
         </div>
@@ -72,7 +73,7 @@ export default function RegisterPage() {
         {/* Title and Subtitle */}
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-gray-800 mb-2">注册账号</h1>
-          <p className="text-sm text-gray-600">加入 Mulan Platform</p>
+          <p className="text-sm text-gray-500">加入 {settings.platform_name}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">

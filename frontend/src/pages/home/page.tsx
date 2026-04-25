@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { LOGO_URL } from '../../config';
+import { usePlatformSettings } from '../../context/PlatformSettingsContext';
 import AskBar from './components/AskBar';
 import { SearchResult } from './components/SearchResult';
 import { WelcomeHero } from './components/WelcomeHero';
@@ -43,6 +43,7 @@ function HomePageInner() {
   const [historyMessages, setHistoryMessages] = useState<Array<{role: 'user'|'assistant'; content: string}>>([]);
 
   const { user, hasPermission } = useAuth();
+  const { settings } = usePlatformSettings();
   const { addConversation, appendMessage } = useConversations();
   const { assetId, tab, connectionId, closeAsset, selectedConvId } = useHomeUrlState();
   const { connections: scopeConnections, connectionsLoading } = useScope();
@@ -149,9 +150,9 @@ function HomePageInner() {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="bg-white rounded-xl border border-slate-200 p-10 w-full max-w-md text-center">
-          <img src={LOGO_URL} alt="Mulan Platform Logo" className="w-14 h-14 object-contain mx-auto mb-4" />
-          <h1 className="text-2xl font-bold text-slate-800 mb-2">Mulan Platform</h1>
-          <p className="text-sm text-slate-400 mb-8">数据建模与治理平台</p>
+          <img src={settings.logo_url} alt={`${settings.platform_name} Logo`} className="w-14 h-14 object-contain mx-auto mb-4" />
+          <h1 className="text-2xl font-bold text-slate-800 mb-2">{settings.platform_name}</h1>
+          <p className="text-sm text-slate-400 mb-8">{settings.platform_subtitle}</p>
           <p className="text-slate-500 mb-6">请先登录以访问平台功能</p>
           <Link
             to="/login"

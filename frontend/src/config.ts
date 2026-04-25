@@ -1,5 +1,6 @@
 export const API_BASE = '';
 
+// @deprecated 请使用 PlatformSettingsContext.settings.logo_url，此常量仅作 fallback
 export const LOGO_URL = 'https://public.readdy.ai/ai/img_res/d9bf8fa2-dfff-4c50-98cf-7b635309e7d6.png';
 
 export const AVATAR_GRADIENTS = [

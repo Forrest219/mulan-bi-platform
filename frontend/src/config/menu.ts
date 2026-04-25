@@ -70,7 +70,7 @@ export const menuConfig: MenuDomain[] = [
     key: 'assets',
     label: '资产',
     icon: 'ri-stack-line',
-    description: 'BI 资产浏览与数据源连接管理',
+    description: 'BI 资产浏览',
     defaultOpen: false,
     permission: { requiredRole: 'analyst' },
     items: [
@@ -81,17 +81,10 @@ export const menuConfig: MenuDomain[] = [
         path: '/assets/tableau',
       },
       {
-        key: 'tableau-health',
-        label: 'Tableau 健康',
-        icon: 'ri-pulse-line',
-        path: '/assets/tableau-health',
-      },
-      {
-        key: 'connection-center',
+        key: 'connections',
         label: '连接总览',
         icon: 'ri-links-line',
-        path: '/assets/connection-center',
-        permission: { requiredRole: 'data_admin' },
+        path: '/assets/connections',
       },
       {
         key: 'datasources',
@@ -100,18 +93,118 @@ export const menuConfig: MenuDomain[] = [
         path: '/assets/datasources',
         permission: { requiredRole: 'data_admin' },
       },
+    ],
+  },
+
+  // ──────────────────────────────────────────────────
+  // 域 2：治理 /governance
+  // ──────────────────────────────────────────────────
+  {
+    key: 'governance',
+    label: '治理',
+    icon: 'ri-shield-star-line',
+    description: '数据质量、语义治理与合规管理',
+    defaultOpen: true,
+    permission: { requiredRole: 'analyst' },
+    items: [
       {
-        key: 'tableau-connections',
-        label: 'Tableau 连接',
-        icon: 'ri-bar-chart-box-line',
-        path: '/assets/tableau-connections',
-        permission: { requiredRole: 'data_admin' },
+        key: 'health-center',
+        label: '健康中心',
+        icon: 'ri-heart-pulse-line',
+        path: '/governance/health-center',
+      },
+      {
+        key: 'semantic',
+        label: '语义治理',
+        icon: 'ri-database-2-line',
+        path: '/governance/semantic/datasources',
+      },
+      {
+        key: 'metrics',
+        label: '指标管理',
+        icon: 'ri-bar-chart-grouped-line',
+        path: '/governance/metrics',
+      },
+      {
+        key: 'publish-logs',
+        label: '发布日志',
+        icon: 'ri-file-list-3-line',
+        path: '/empty/publish-logs',
       },
     ],
   },
 
   // ──────────────────────────────────────────────────
-  // 域 2：实验室（数据开发 + 智能分析合并）
+  // 域 3：平台（基础设施、任务与监控）
+  // ──────────────────────────────────────────────────
+  {
+    key: 'platform',
+    label: '平台',
+    icon: 'ri-server-line',
+    description: '数据源连接、LLM/MCP 配置、任务调度与告警',
+    defaultOpen: false,
+    permission: { requiredRole: 'data_admin' },
+    items: [
+      {
+        key: 'connections',
+        label: '数据源与连接',
+        icon: 'ri-links-line',
+        path: '/assets/connections',
+      },
+      {
+        key: 'tableau-connections',
+        label: 'Tableau 连接',
+        icon: 'ri-plug-line',
+        path: '/assets/tableau-connections',
+        permission: { requiredPermission: 'tableau' },
+      },
+      {
+        key: 'llm',
+        label: 'LLM 配置',
+        icon: 'ri-robot-line',
+        path: '/system/llm-configs',
+        permission: { adminOnly: true },
+      },
+      {
+        key: 'mcp-configs',
+        label: 'MCP 配置',
+        icon: 'ri-plug-line',
+        path: '/system/mcp-configs',
+        permission: { adminOnly: true },
+      },
+      {
+        key: 'mcp-debugger',
+        label: 'MCP 调试器',
+        icon: 'ri-bug-line',
+        path: '/system/mcp-debugger',
+        permission: { adminOnly: true },
+      },
+      {
+        key: 'tasks',
+        label: '任务管理',
+        icon: 'ri-task-line',
+        path: '/system/tasks',
+        permission: { adminOnly: true },
+      },
+      {
+        key: 'query-alerts',
+        label: '问数告警',
+        icon: 'ri-alarm-warning-line',
+        path: '/system/query-alerts',
+        permission: { adminOnly: true },
+      },
+      {
+        key: 'agent-monitor',
+        label: 'Agent 监控',
+        icon: 'ri-robot-line',
+        path: '/system/agent-monitor',
+        permission: { adminOnly: true },
+      },
+    ],
+  },
+
+  // ──────────────────────────────────────────────────
+  // 域 4：实验室（数据开发 + 智能分析）
   // ──────────────────────────────────────────────────
   {
     key: 'lab',
@@ -160,63 +253,13 @@ export const menuConfig: MenuDomain[] = [
   },
 
   // ──────────────────────────────────────────────────
-  // 域 3：治理 /governance
-  // ──────────────────────────────────────────────────
-  {
-    key: 'governance',
-    label: '治理',
-    icon: 'ri-shield-star-line',
-    description: '数据质量、语义治理与合规管理',
-    defaultOpen: true,
-    permission: { requiredRole: 'analyst' },
-    items: [
-      {
-        key: 'health',
-        label: '健康扫描',
-        icon: 'ri-heart-pulse-line',
-        path: '/governance/health',
-      },
-      {
-        key: 'quality',
-        label: '质量监控',
-        icon: 'ri-shield-check-line',
-        path: '/governance/quality',
-      },
-      {
-        key: 'semantic-ds',
-        label: '语义 - 数据源',
-        icon: 'ri-database-2-line',
-        path: '/governance/semantic/datasources',
-      },
-      {
-        key: 'semantic-fields',
-        label: '语义 - 字段',
-        icon: 'ri-list-settings-line',
-        path: '/governance/semantic/fields',
-      },
-      {
-        key: 'publish-logs',
-        label: '发布日志',
-        icon: 'ri-file-list-3-line',
-        path: '/empty/publish-logs',
-        hidden: true,
-      },
-      {
-        key: 'metrics',
-        label: '指标管理',
-        icon: 'ri-bar-chart-grouped-line',
-        path: '/governance/metrics',
-      },
-    ],
-  },
-
-  // ── 域 4：设置 /system
+  // 域 5：设置（IAM + 审计）
   // ──────────────────────────────────────────────────
   {
     key: 'system',
     label: '设置',
     icon: 'ri-settings-2-line',
-    description: '平台配置、用户管理与系统监控',
+    description: '用户管理、权限配置与操作审计',
     defaultOpen: false,
     permission: { requiredRole: 'admin' },
     items: [
@@ -239,40 +282,16 @@ export const menuConfig: MenuDomain[] = [
         path: '/system/permissions',
       },
       {
-        key: 'llm',
-        label: 'LLM 配置',
-        icon: 'ri-robot-line',
-        path: '/system/llm-configs',
-      },
-      {
-        key: 'mcp-configs',
-        label: 'MCP 配置',
-        icon: 'ri-plug-line',
-        path: '/system/mcp-configs',
-      },
-      {
-        key: 'mcp-debugger',
-        label: 'MCP 调试器',
-        icon: 'ri-bug-line',
-        path: '/system/mcp-debugger',
-      },
-      {
-        key: 'tasks',
-        label: '任务管理',
-        icon: 'ri-task-line',
-        path: '/system/tasks',
-      },
-      {
         key: 'activity',
         label: '操作日志',
         icon: 'ri-history-line',
         path: '/system/activity',
       },
       {
-        key: 'query-alerts',
-        label: '问数告警',
-        icon: 'ri-alarm-warning-line',
-        path: '/system/query-alerts',
+        key: 'platform-settings',
+        label: 'Logo',
+        icon: 'ri-image-line',
+        path: '/system/platform-settings',
         permission: { adminOnly: true },
       },
     ],

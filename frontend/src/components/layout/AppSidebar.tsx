@@ -9,6 +9,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { usePlatformSettings } from '../../context/PlatformSettingsContext';
 import {
   menuConfig,
   type MenuDomain,
@@ -53,21 +54,21 @@ function SidebarItem({
   const content = (
     <div
       className={`
-        flex items-center gap-2.5 px-3 py-2.5 rounded-lg mb-0.5 transition-all duration-150 cursor-pointer
+        flex items-center gap-2.5 px-3 h-10 rounded-xl mb-2 transition-all duration-150 cursor-pointer
         ${isActive
-          ? 'bg-blue-50 text-blue-700 font-semibold'
+          ? 'bg-cyan-50 text-cyan-600'
           : item.disabled
             ? 'text-slate-300 cursor-not-allowed'
-            : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+            : 'text-slate-400 hover:bg-slate-50 hover:text-slate-500'
         }
       `}
       title={collapsed && !item.disabled ? item.label : undefined}
     >
       {item.icon && (
-        <i className={`${item.icon} text-base shrink-0`} />
+        <i className={`${item.icon} text-[15px] shrink-0`} />
       )}
       {!collapsed && (
-        <span className="text-[13px] font-medium truncate flex-1">
+        <span className={`text-[13px] truncate flex-1 ${isActive ? 'font-semibold' : 'font-medium'}`}>
           {item.label}
         </span>
       )}
@@ -143,12 +144,12 @@ function DomainGroup({
       <div className="relative group" title={`${domain.label}：${domain.description}`}>
         <button
           onClick={onToggle}
-          className={`
-            w-full flex flex-col items-center justify-center py-3 rounded-lg mb-1 transition-colors
-            ${isAnyActive ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}
-          `}
-        >
-          <i className={`${domain.icon} text-lg`} />
+        className={`
+          w-full flex flex-col items-center justify-center py-3 rounded-lg mb-1 transition-colors
+          ${isAnyActive ? 'bg-cyan-50 text-cyan-600' : 'text-slate-400 hover:bg-slate-50'}
+        `}
+      >
+        <i className={`${domain.icon} text-lg`} />
           <span className="text-[10px] mt-1 leading-tight text-center px-1">
             {domain.label}
           </span>
@@ -169,11 +170,11 @@ function DomainGroup({
         onClick={onToggle}
         className={`
           w-full flex items-center gap-2 px-3 py-2 rounded-lg mb-1 transition-colors
-          ${isAnyActive ? 'text-blue-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}
+          ${isAnyActive ? 'text-cyan-600' : 'text-slate-400 hover:text-slate-500 hover:bg-slate-50'}
         `}
       >
-        <i className={`${domain.icon} text-base`} />
-        <span className="text-[12px] font-semibold flex-1 text-left truncate">
+        <i className={`${domain.icon} text-lg`} />
+        <span className="text-[13px] font-semibold flex-1 text-left truncate">
           {domain.label}
         </span>
         <i
@@ -183,7 +184,7 @@ function DomainGroup({
 
       {/* 菜单项列表 */}
       {expanded && (
-        <div className="pl-1">
+        <div className="pl-10">
           {visibleItems.map((item) => (
             <SidebarItem key={item.key} item={item} collapsed={false} />
           ))}
@@ -203,6 +204,7 @@ interface AppSidebarProps {
 
 export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarProps) {
   const { user, hasPermission } = useAuth();
+  const { settings: platformSettings } = usePlatformSettings();
   const userRole = user?.role ?? 'user';
   const location = useLocation();
 
@@ -252,8 +254,15 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
       className="bg-white border-r border-slate-200 text-slate-700 flex flex-col shrink-0 transition-all duration-200"
       style={{ width, minWidth: width }}
     >
-      {/* 折叠/展开按钮 */}
-      <div className="flex items-center justify-end px-2 pt-4 pb-2">
+      {/* Logo + 平台名称 + 折叠按钮 */}
+      <div className="flex items-center justify-between px-2 pt-4 pb-2">
+        <div className="flex items-center gap-2 shrink-0">
+          <img src={platformSettings.logo_url} alt={platformSettings.platform_name} className="h-7 w-auto object-contain" />
+          <span className="text-[13px] font-semibold text-slate-600 tracking-wide hidden sm:block">
+            {platformSettings.platform_name}
+          </span>
+        </div>
+
         <button
           onClick={onToggleCollapse}
           className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors"
@@ -271,15 +280,15 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
           className={`
             flex items-center gap-2.5 px-3 py-2.5 rounded-lg mb-3 transition-all duration-150
             ${location.pathname === '/'
-              ? 'bg-blue-50 text-blue-700 font-semibold'
-              : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+              ? 'bg-cyan-50 text-cyan-600'
+              : 'text-slate-400 hover:bg-slate-50 hover:text-slate-500'
             }
           `}
           title={collapsed ? '首页' : undefined}
         >
           <i className="ri-home-4-line text-base shrink-0" />
           {!collapsed && (
-            <span className="text-[13px] font-medium truncate">首页</span>
+            <span className={`text-[13px] truncate ${location.pathname === '/' ? 'font-semibold' : 'font-medium'}`}>首页</span>
           )}
         </Link>
 
@@ -311,7 +320,7 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
           to="/"
           className={`
             flex items-center gap-2 px-3 py-2 rounded-lg transition-colors
-            ${location.pathname === '/' ? 'text-blue-600 bg-blue-50' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}
+            ${location.pathname === '/' ? 'text-cyan-600 bg-cyan-50' : 'text-slate-400 hover:text-slate-500 hover:bg-slate-50'}
           `}
           title={collapsed ? '返回首页' : undefined}
         >

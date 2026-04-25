@@ -3,8 +3,8 @@
  *
  * 风格：贴近 open-webui，问候语为唯一主角；logo 作为 24px 徽标点缀。
  */
-import { LOGO_URL } from '../../../config';
 import { useAuth } from '../../../context/AuthContext';
+import { usePlatformSettings } from '../../../context/PlatformSettingsContext';
 
 function greetingByHour(): string {
   const h = new Date().getHours();
@@ -17,13 +17,14 @@ function greetingByHour(): string {
 
 export function WelcomeHero() {
   const { user } = useAuth();
+  const { settings } = usePlatformSettings();
   const name = user?.display_name ?? user?.username ?? '';
   const greeting = name ? `${greetingByHour()}，${name}` : greetingByHour();
 
   return (
     <div className="flex flex-col items-center text-center">
       <img
-        src={LOGO_URL}
+        src={settings.logo_url}
         alt=""
         aria-hidden="true"
         className="w-6 h-6 object-contain mb-3 opacity-80"
@@ -32,7 +33,7 @@ export function WelcomeHero() {
         {greeting}
       </h1>
       <p className="mt-2 text-sm text-slate-500">
-        用自然语言向木兰提问，开始探索你的数据
+        用自然语言向{settings.platform_name}提问，开始探索你的数据
       </p>
     </div>
   );

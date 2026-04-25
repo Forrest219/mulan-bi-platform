@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { API_BASE, LOGO_URL } from '../../config';
+import { usePlatformSettings } from '../../context/PlatformSettingsContext';
 
 type LoginStep = 'credentials' | 'mfa';
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const { login, checkAuth } = useAuth();
+  const { settings } = usePlatformSettings();
 
   const [step, setStep] = useState<LoginStep>('credentials');
   const [username, setUsername] = useState('');
@@ -76,12 +77,12 @@ export default function LoginPage() {
         {/* Logo 区 */}
         <div className="flex flex-col items-start mb-6">
           <img
-            src={LOGO_URL}
-            alt="Mulan Platform Logo"
+            src={settings.logo_url}
+            alt={`${settings.platform_name} Logo`}
             className="w-12 h-12 object-contain mb-3"
           />
-          <h1 className="text-xl font-semibold text-slate-900 mb-1">Mulan Platform</h1>
-          <p className="text-sm text-slate-600">数据建模与治理平台</p>
+          <h1 className="text-xl font-semibold text-slate-900 mb-1">{settings.platform_name}</h1>
+          <p className="text-sm text-slate-600">{settings.platform_subtitle}</p>
         </div>
 
         {/* 卡片 */}

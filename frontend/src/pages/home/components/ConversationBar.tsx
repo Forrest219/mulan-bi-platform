@@ -20,6 +20,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useConversations, type Conversation } from '../../../store/conversationStore';
 import { ConfirmModal } from '../../../components/ConfirmModal';
 import { useAuth } from '../../../context/AuthContext';
+import { usePlatformSettings } from '../../../context/PlatformSettingsContext';
 
 const PAGE_SIZE = 100;
 
@@ -56,6 +57,7 @@ export function ConversationBar({ collapsed, onToggleCollapse: _onToggleCollapse
   const { conversations, deleteConversation, updateConversationTitle } =
     useConversations();
   const { user, logout } = useAuth();
+  const { settings } = usePlatformSettings();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
@@ -131,7 +133,7 @@ export function ConversationBar({ collapsed, onToggleCollapse: _onToggleCollapse
         <div className="sticky top-0 px-[0.5625rem] pt-2 pb-1.5 z-10 bg-gray-50/70 dark:bg-gray-950/70">
           {/* Top: brand + new icon */}
           <div className="flex items-center justify-between h-12 px-2 flex-shrink-0">
-            <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 px-1">木兰平台</span>
+            <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 px-1">{settings.platform_name}</span>
             <button
               onClick={handleNew}
               title="新对话  ⌘N"
@@ -229,7 +231,7 @@ export function ConversationBar({ collapsed, onToggleCollapse: _onToggleCollapse
           {/* Settings entry (admin only) */}
           {user?.role === 'admin' && (
             <Link
-              to="/system/users"
+              to="/system/platform-settings"
               className="flex items-center gap-2 px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400
                          rounded-xl hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
             >
