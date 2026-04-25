@@ -322,6 +322,7 @@ export default function AgentMonitorPage() {
           <div className="flex items-center gap-4">
             <h3 className="text-sm font-semibold text-slate-700">近期运行</h3>
             <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+              {/* Keep filter values aligned with backend statuses: running/completed/failed. */}
               {(
                 [
                   ['all', '全部'],

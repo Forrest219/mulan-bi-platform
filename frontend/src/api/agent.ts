@@ -231,6 +231,7 @@ export interface AgentRun {
   id: string;
   user_id: number;
   question: string;
+  /** Run status returned by admin API: running / completed / failed (legacy error may still appear in old data). */
   status: string;
   execution_time_ms: number | null;
   tools_used: string[] | null;
@@ -269,10 +270,12 @@ export const agentAdminApi = {
 
   /**
    * GET /api/admin/agent/runs?limit=&offset=&status=
+   * status filter uses running / completed / failed; backend also accepts legacy error.
    */
   getRuns: (params: {
     limit: number;
     offset: number;
+    /** Optional status filter: running / completed / failed. Legacy error remains backend-compatible. */
     status?: string;
   }): Promise<AgentRunsResponse> => {
     const query = new URLSearchParams({
