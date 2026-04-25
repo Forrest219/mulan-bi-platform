@@ -143,6 +143,14 @@ export interface MessageBubbleProps {
   content: string;
   isStreaming?: boolean;
   isError?: boolean;
+  /** ReAct reasoning text from SSE thinking event (Spec 29/30) */
+  thinking?: string;
+  /** trace_id for feedback/rating (Spec 36 §5) */
+  traceId?: string;
+  /** Tool calls made during this message (Spec 29/30 §5) */
+  toolCalls?: Array<{ tool: string; params: Record<string, unknown> }>;
+  /** Tool results from this message (Spec 29/30 §5) */
+  toolResults?: Array<{ tool: string; summary: string }>;
 }
 
 export default function MessageBubble({
@@ -150,6 +158,10 @@ export default function MessageBubble({
   content,
   isStreaming = false,
   isError = false,
+  thinking,
+  traceId: _traceId,
+  toolCalls: _toolCalls,
+  toolResults: _toolResults,
 }: MessageBubbleProps) {
   const isUser = role === 'user';
 
@@ -185,12 +197,14 @@ export default function MessageBubble({
         ) : (
           <div className="prose prose-sm max-w-none prose-slate">
             {(() => {
-              const { thought, body } = parseThought(content);
+              // Prefer SSE-provided thinking over content parsing (Spec 29/30)
+              const showThought = thinking ?? (parseThought(content).thought ?? null);
+              const bodyText = thinking ? content : parseThought(content).body;
               return (
                 <>
-                  {thought != null && <ThinkingBlock content={thought} />}
+                  {showThought != null && <ThinkingBlock content={showThought} />}
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                    {body}
+                    {bodyText}
                   </ReactMarkdown>
                 </>
               );

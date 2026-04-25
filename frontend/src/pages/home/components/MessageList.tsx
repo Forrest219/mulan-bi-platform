@@ -68,6 +68,10 @@ function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onR
                   content={msg.content}
                   isStreaming={msg.isStreaming}
                   isError={msg.isError}
+                  thinking={msg.thinking}
+                  traceId={msg.traceId}
+                  toolCalls={msg.toolCalls}
+                  toolResults={msg.toolResults}
                 />
                 {msg.role === 'assistant' && !msg.isStreaming && (
                   <>

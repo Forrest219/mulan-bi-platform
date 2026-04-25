@@ -10,60 +10,9 @@
  *   GET /api/admin/agent/runs/{run_id}/steps
  */
 import { useState, useEffect, useCallback } from 'react';
-import { API_BASE } from '../../../config';
+import { agentAdminApi, type AgentStats, type AgentRun, type AgentRunsResponse, type AgentStep } from '../../../api/agent';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-
-interface ToolCount {
-  name: string;
-  count: number;
-}
-
-interface FeedbackSummary {
-  up: number;
-  down: number;
-}
-
-interface AgentStats {
-  total_runs: number;
-  success_rate: number;
-  failed_count: number;
-  avg_execution_time_ms: number | null;
-  p95_execution_time_ms: number | null;
-  runs_today: number;
-  top_tools: ToolCount[];
-  feedback_summary: FeedbackSummary;
-}
-
-interface AgentRun {
-  id: string;
-  user_id: number;
-  question: string;
-  status: string;
-  execution_time_ms: number | null;
-  tools_used: string[] | null;
-  created_at: string | null;
-}
-
-interface AgentRunsResponse {
-  items: AgentRun[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
-interface AgentStep {
-  id: number;
-  run_id: string;
-  step_number: number;
-  step_type: string;
-  tool_name: string | null;
-  tool_params: Record<string, unknown> | null;
-  tool_result_summary: string | null;
-  content: string | null;
-  execution_time_ms: number | null;
-  created_at: string | null;
-}
 
 type StatusFilter = 'all' | 'running' | 'completed' | 'error';
 
@@ -133,13 +82,8 @@ export default function AgentMonitorPage() {
 
   const fetchStats = useCallback(async () => {
     try {
-      const resp = await fetch(`${API_BASE}/api/admin/agent/stats`, {
-        credentials: 'include',
-      });
-      if (resp.ok) {
-        const data: AgentStats = await resp.json();
-        setStats(data);
-      }
+      const data = await agentAdminApi.getStats();
+      setStats(data);
     } catch (err) {
       console.error('获取 Agent 统计失败', err);
     }
@@ -147,21 +91,13 @@ export default function AgentMonitorPage() {
 
   const fetchRuns = useCallback(async () => {
     try {
-      const params = new URLSearchParams({
-        limit: String(LIMIT),
-        offset: String(offset),
+      const data = await agentAdminApi.getRuns({
+        limit: LIMIT,
+        offset,
+        status: statusFilter !== 'all' ? statusFilter : undefined,
       });
-      if (statusFilter !== 'all') {
-        params.set('status', statusFilter);
-      }
-      const resp = await fetch(`${API_BASE}/api/admin/agent/runs?${params}`, {
-        credentials: 'include',
-      });
-      if (resp.ok) {
-        const data: AgentRunsResponse = await resp.json();
-        setRuns(data.items);
-        setRunsTotal(data.total);
-      }
+      setRuns(data.items);
+      setRunsTotal(data.total);
     } catch (err) {
       console.error('获取 Agent 运行列表失败', err);
     }
@@ -170,13 +106,8 @@ export default function AgentMonitorPage() {
   const fetchSteps = useCallback(async (runId: string) => {
     setStepsLoading(true);
     try {
-      const resp = await fetch(`${API_BASE}/api/admin/agent/runs/${runId}/steps`, {
-        credentials: 'include',
-      });
-      if (resp.ok) {
-        const data: AgentStep[] = await resp.json();
-        setSteps(data);
-      }
+      const data = await agentAdminApi.getRunSteps(runId);
+      setSteps(data);
     } catch (err) {
       console.error('获取步骤详情失败', err);
     } finally {

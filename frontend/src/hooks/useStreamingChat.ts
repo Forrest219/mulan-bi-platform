@@ -1,5 +1,6 @@
 /**
  * useStreamingChat — Gap-05 SSE Streaming Chat Hook
+ * Updated to use POST /api/agent/stream (Spec 36 §5)
  *
  * spec §8.5 + §11 陷阱6：
  * - 状态完全隔离于 AskBar（AskBar 的 input/attachedFiles 不被 re-render 污染）
@@ -8,6 +9,7 @@
  * - AbortController 支持 stopStreaming()
  */
 import { useState, useRef, useCallback } from 'react';
+import { streamAgent } from '../api/agent';
 
 export interface StreamingMessage {
   id: string;
@@ -17,12 +19,16 @@ export interface StreamingMessage {
   isError?: boolean;
   metadata?: { sources_count: number; top_sources: string[] };
   traceId?: string;
+  thinking?: string;        // ReAct reasoning text
+  toolsUsed?: string[];     // tools called
+  toolCalls?: Array<{ tool: string; params: Record<string, unknown> }>;
+  toolResults?: Array<{ tool: string; summary: string }>;
 }
 
 export interface UseStreamingChatReturn {
   messages: StreamingMessage[];
   isStreaming: boolean;
-  sendMessage: (question: string, connectionId?: number) => Promise<void>;
+  sendMessage: (question: string, connectionId?: number, conversationId?: string | null) => Promise<void>;
   stopStreaming: () => void;
   /** abort — 包装 stopStreaming，供 AskBar 停止按钮使用 */
   abort: () => void;
@@ -68,7 +74,7 @@ export function useStreamingChat(): UseStreamingChatReturn {
    * 5. done/error 事件：flush 剩余 buffer，标记 isStreaming=false
    */
   const sendMessage = useCallback(
-    async (question: string, connectionId?: number) => {
+    async (question: string, connectionId?: number, conversationId?: string | null) => {
       const userMsg: StreamingMessage = {
         id: crypto.randomUUID(),
         role: 'user',
@@ -87,106 +93,88 @@ export function useStreamingChat(): UseStreamingChatReturn {
       streamingIdRef.current = assistantId;
       bufferRef.current = '';
 
-      const params = new URLSearchParams({ q: question });
-      if (connectionId != null) params.set('connection_id', String(connectionId));
-
       abortRef.current = new AbortController();
 
       try {
-        const response = await fetch(`/api/chat/stream?${params.toString()}`, {
-          signal: abortRef.current.signal,
-          // credentials: 'include' 确保 cookie-based auth 正常传递
-          credentials: 'include',
-        });
-
-        if (!response.body) {
-          throw new Error('Response body is null — SSE not supported');
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
+        const stream = streamAgent(
+          { question, connection_id: connectionId, conversation_id: conversationId },
+          abortRef.current.signal
+        );
+        const reader = stream.getReader();
         let done = false;
 
         while (!done) {
           const { done: streamDone, value } = await reader.read();
           if (streamDone) break;
+          const event = value;
 
-          const text = decoder.decode(value, { stream: true });
-          // SSE 可能一次 chunk 包含多行，按 \n 拆分逐行处理
-          const lines = text.split('\n');
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const jsonStr = line.slice(6).trim();
-            if (!jsonStr) continue;
-
-            try {
-              const parsed: {
-                token?: string;
-                done?: boolean;
-                error?: string;
-                type?: string;
-                content?: string;
-                trace_id?: string;
-                sources_count?: number;
-                top_sources?: string[];
-              } = JSON.parse(jsonStr);
-
-              // 结构化 type 字段处理
-              if (parsed.type === 'metadata') {
-                const id = streamingIdRef.current;
-                if (id) {
-                  const sourcesCount = parsed.sources_count ?? 0;
-                  const topSources = parsed.top_sources ?? [];
-                  setMessages((prev) =>
-                    prev.map((m) =>
-                      m.id === id
-                        ? { ...m, metadata: { sources_count: sourcesCount, top_sources: topSources } }
-                        : m,
-                    ),
-                  );
-                }
-              } else if (parsed.type === 'token') {
-                bufferRef.current += parsed.content ?? '';
-              } else if (parsed.type === 'done') {
-                const id = streamingIdRef.current;
-                if (id && parsed.trace_id) {
-                  const traceId = parsed.trace_id;
-                  setMessages((prev) =>
-                    prev.map((m) => (m.id === id ? { ...m, traceId } : m)),
-                  );
-                }
-                done = true;
-                break;
-              } else {
-                // 原有 flat format fallback
-                if (parsed.done) {
-                  if (parsed.trace_id) {
-                    const id = streamingIdRef.current;
-                    if (id) {
-                      const traceId = parsed.trace_id;
-                      setMessages((prev) =>
-                        prev.map((m) => (m.id === id ? { ...m, traceId } : m)),
-                      );
-                    }
-                  }
-                  done = true;
-                  break;
-                }
-                if (parsed.error) {
-                  bufferRef.current += `\n\n⚠️ ${parsed.error}`;
-                } else if (parsed.token) {
-                  bufferRef.current += parsed.token;
-                }
-              }
-
-              // 注册 rAF（幂等：若已有待执行 rAF 则跳过）
-              if (bufferRef.current && rafRef.current === null) {
-                rafRef.current = requestAnimationFrame(flushBuffer);
-              }
-            } catch {
-              // 忽略非 JSON 行（SSE 注释、空行等）
+          if (event.type === 'metadata') {
+            // Store conversation_id / run_id in metadata
+            const id = streamingIdRef.current;
+            if (id) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === id
+                    ? { ...m, metadata: { sources_count: 0, top_sources: [] } }
+                    : m,
+                ),
+              );
             }
+          } else if (event.type === 'thinking') {
+            // Accumulate thinking text
+            const id = streamingIdRef.current;
+            if (id) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === id ? { ...m, thinking: (m.thinking ?? '') + event.content } : m,
+                ),
+              );
+            }
+          } else if (event.type === 'tool_call') {
+            const id = streamingIdRef.current;
+            if (id) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === id
+                    ? {
+                        ...m,
+                        toolCalls: [...(m.toolCalls ?? []), { tool: event.tool, params: event.params }],
+                        toolsUsed: [...(m.toolsUsed ?? []), event.tool],
+                      }
+                    : m,
+                ),
+              );
+            }
+          } else if (event.type === 'tool_result') {
+            const id = streamingIdRef.current;
+            if (id) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === id
+                    ? { ...m, toolResults: [...(m.toolResults ?? []), { tool: event.tool, summary: event.summary }] }
+                    : m,
+                ),
+              );
+            }
+          } else if (event.type === 'token') {
+            bufferRef.current += event.content;
+          } else if (event.type === 'done') {
+            const id = streamingIdRef.current;
+            if (id) {
+              const traceId = event.trace_id;
+              setMessages((prev) =>
+                prev.map((m) => (m.id === id ? { ...m, traceId } : m)),
+              );
+            }
+            done = true;
+          } else if (event.type === 'error') {
+            bufferRef.current += `\n\n⚠️ ${event.message}`;
+            done = true;
+          }
+
+          // Register rAF（幂等：若已有待执行 rAF 则跳过）
+          if (bufferRef.current && rafRef.current === null) {
+            rafRef.current = requestAnimationFrame(flushBuffer);
           }
         }
       } catch (err: unknown) {
@@ -202,7 +190,6 @@ export function useStreamingChat(): UseStreamingChatReturn {
             );
           }
         }
-        // AbortError 是用户主动 stop，静默处理
       } finally {
         // 取消待执行的 rAF（避免在 finally 后 flushBuffer 访问已失效 state）
         if (rafRef.current !== null) {

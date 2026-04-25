@@ -22,7 +22,7 @@ import { ScopeProvider, useScope } from './context/ScopeContext';
 import { ScopePicker } from './components/ScopePicker';
 import { AssetInspectorDrawer } from './components/AssetInspectorDrawer';
 import { useHomeUrlState } from './hooks/useHomeUrlState';
-import { conversationsApi } from '../../api/conversations';
+import { agentConversationsApi } from '../../api/agent';
 // Gap-05: SSE streaming hook — state 与 AskBar 完全隔离（§11 陷阱6）
 import { useStreamingChat } from '../../hooks/useStreamingChat';
 import MessageList from './components/MessageList';
@@ -55,9 +55,9 @@ function HomePageInner() {
   // Task 1: URL conv= 参数驱动历史消息恢复
   const loadConvHistory = useCallback(async (convId: string) => {
     try {
-      const detail = await conversationsApi.get(convId);
-      const msgs = detail.messages.map((m) => ({ role: m.role, content: m.content }));
-      setHistoryMessages(msgs);
+      const msgs = await agentConversationsApi.getMessages(convId);
+      const history = msgs.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+      setHistoryMessages(history);
       setCurrentConversationId(convId);
       setHomeState('HOME_RESULT');
     } catch {
@@ -218,7 +218,7 @@ function HomePageInner() {
       // 非 Mock 路径才走 useStreamingChat 的 sendMessage
       if (!USE_MOCK) {
         const connId = connectionId ? Number(connectionId) : undefined;
-        void sendMessage(lastQuestionRef.current, connId);
+        void sendMessage(lastQuestionRef.current, connId, currentConversationId);
       } else {
         setMockStreamingContent('');
         setIsMockStreaming(true);
@@ -259,7 +259,7 @@ function HomePageInner() {
     const question = lastQuestionRef.current;
     if (!question || isStreaming) return;
     const connId = connectionId ? Number(connectionId) : undefined;
-    void sendMessage(question, connId);
+    void sendMessage(question, connId, currentConversationId);
   };
 
   // ── 渲染 ──────────────────────────────────────────────────────────────────

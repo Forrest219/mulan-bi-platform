@@ -22,6 +22,7 @@ import {
   type ReactNode,
 } from 'react';
 import { conversationsApi } from '../api/conversations';
+import { agentConversationsApi } from '../api/agent';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -150,14 +151,14 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
-    conversationsApi
+    agentConversationsApi
       .list()
       .then((list) => {
         if (cancelled) return;
         // 将后端列表映射为本地 Conversation 结构（messages 为空，按需加载）
         const mapped: Conversation[] = list.map((item) => ({
           id: item.id,
-          title: item.title,
+          title: item.title ?? '新对话',
           updated_at: item.updated_at,
           messages: [],
         }));
