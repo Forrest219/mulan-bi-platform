@@ -98,20 +98,29 @@ class TestSchemaTool:
             trace_id="t1",
         )
 
-        # Mock remote DB query
+        # Mock remote DB query — use real list, wrapped in mock that returns it
         mock_tables = [("sales", "BASE TABLE", "YES"), ("orders", "BASE TABLE", "YES")]
-        mock_result = MagicMock()
-        mock_result.__iter__ = lambda self: iter(mock_tables)
+        
+        # Use a real list wrapper that mimics cursor result
+        class MockResult:
+            def __init__(self, rows):
+                self._rows = rows
+            def __iter__(self):
+                return iter(self._rows)
+        
         mock_conn = MagicMock()
-        mock_conn.execute.return_value = mock_result
+        mock_conn.execute.return_value = MockResult(mock_tables)
 
         mock_engine = MagicMock()
-        mock_engine.connect.return_value.__enter__.return_value = mock_conn
+        mock_engine.connect.return_value = mock_conn
         mock_engine.dispose = MagicMock()
 
         with patch("app.core.database.SessionLocal", return_value=mock_db):
             with patch("services.data_agent.tools.schema_tool.create_engine", return_value=mock_engine):
-                result = await tool.execute({"limit": 100}, context)
+                with patch("services.data_agent.tools.schema_tool.get_datasource_crypto") as mock_crypto:
+                    mock_crypto.return_value.decrypt.return_value = "test_password"
+                    with patch("services.data_agent.tools.schema_tool.asyncio.to_thread", side_effect=lambda fn, *a, **kw: fn(*a, **kw)):
+                        result = await tool.execute({"limit": 100}, context)
 
         assert result.success is True
         assert "tables" in result.data
@@ -149,34 +158,39 @@ class TestSchemaTool:
             trace_id="t1",
         )
 
-        # Mock table list result
-        mock_tables = [("sales", "BASE TABLE", "YES")]
-        mock_result = MagicMock()
-        mock_result.__iter__ = lambda self: iter(mock_tables)
+        # Mock remote DB query — use real list wrappers
+        class MockResult:
+            def __init__(self, rows):
+                self._rows = rows
+            def __iter__(self):
+                return iter(self._rows)
 
-        # Mock columns result
-        mock_columns = [
-            ("id", "integer", None, "NO", None, "YES"),  # identity column
+        # Three execute calls: tables query, columns query, PK query
+        mock_tables_result = MockResult([("sales", "BASE TABLE", "YES")])
+        mock_columns_result = MockResult([
+            ("id", "integer", None, "NO", None, "YES"),
             ("amount", "numeric", None, "YES", None, None),
-        ]
-        mock_columns_result = MagicMock()
-        mock_columns_result.__iter__ = lambda self: iter(mock_columns)
-
-        # Mock PK result
-        mock_pk = [("id",)]
-        mock_pk_result = MagicMock()
-        mock_pk_result.__iter__ = lambda self: iter(mock_pk)
+        ])
+        mock_pk_result = MockResult([("id",)])
 
         mock_conn = MagicMock()
-        mock_conn.execute.side_effect = [mock_result, mock_columns_result, mock_pk_result]
+        mock_conn.execute.side_effect = [
+            mock_tables_result,
+            mock_columns_result,
+            mock_pk_result,
+        ]
 
         mock_engine = MagicMock()
-        mock_engine.connect.return_value.__enter__.return_value = mock_conn
+        mock_engine.connect.return_value = mock_conn
         mock_engine.dispose = MagicMock()
 
         with patch("app.core.database.SessionLocal", return_value=mock_db):
             with patch("services.data_agent.tools.schema_tool.create_engine", return_value=mock_engine):
-                result = await tool.execute({"table_name": "sales"}, context)
+                with patch("services.data_agent.tools.schema_tool.get_datasource_crypto") as mock_crypto:
+                    mock_crypto.return_value.decrypt.return_value = "test_password"
+                    with patch("services.data_agent.tools.schema_tool.asyncio.to_thread",
+                               side_effect=lambda fn, *a, **kw: fn(*a, **kw)):
+                        result = await tool.execute({"table_name": "sales"}, context)
 
         assert result.success is True
         assert "tables" in result.data
@@ -217,16 +231,24 @@ class TestSchemaTool:
             trace_id="t1",
         )
 
-        mock_conn = MagicMock()
-        mock_conn.execute.side_effect = Exception("Connection refused")
+        # Use a real exception-raising wrapper instead of MagicMock side_effect
+        class RaisingMockConn:
+            def execute(self, *args, **kwargs):
+                raise Exception("Connection refused")
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
 
         mock_engine = MagicMock()
-        mock_engine.connect.return_value.__enter__.return_value = mock_conn
+        mock_engine.connect.return_value = RaisingMockConn()
         mock_engine.dispose = MagicMock()
 
         with patch("app.core.database.SessionLocal", return_value=mock_db):
             with patch("services.data_agent.tools.schema_tool.create_engine", return_value=mock_engine):
-                result = await tool.execute({}, context)
+                with patch("services.data_agent.tools.schema_tool.get_datasource_crypto") as mock_crypto:
+                    mock_crypto.return_value.decrypt.return_value = "test_password"
+                    result = await tool.execute({}, context)
 
         assert result.success is False
         assert "查询表结构失败" in result.error
@@ -256,7 +278,7 @@ class TestSchemaToolMySQL:
         mock_query = MagicMock()
         mock_query.filter.return_value.first.return_value = mock_ds
         mock_db = MagicMock()
-        mock_db.query = mock_query
+        mock_db.query.return_value = mock_query
 
         context = ToolContext(
             session_id="s1",
@@ -265,20 +287,27 @@ class TestSchemaToolMySQL:
             trace_id="t1",
         )
 
-        mock_tables = [("users", "BASE TABLE")]
-        mock_result = MagicMock()
-        mock_result.__iter__ = lambda self: iter(mock_tables)
+        # MockResult for MySQL (2-column tuple)
+        class MockResult:
+            def __init__(self, rows):
+                self._rows = rows
+            def __iter__(self):
+                return iter(self._rows)
 
         mock_conn = MagicMock()
-        mock_conn.execute.return_value = mock_result
+        mock_conn.execute.return_value = MockResult([("users", "BASE TABLE", "YES")])
 
         mock_engine = MagicMock()
-        mock_engine.connect.return_value.__enter__.return_value = mock_conn
+        mock_engine.connect.return_value = mock_conn
         mock_engine.dispose = MagicMock()
 
-        with patch("app.core.database.SessionLocal", return_value=mock_db):
+        with patch("services.data_agent.tools.schema_tool.SessionLocal", return_value=mock_db):
             with patch("services.data_agent.tools.schema_tool.create_engine", return_value=mock_engine):
-                result = await tool.execute({}, context)
+                with patch("services.data_agent.tools.schema_tool.get_datasource_crypto") as mock_crypto:
+                    mock_crypto.return_value.decrypt.return_value = "test_password"
+                    with patch("services.data_agent.tools.schema_tool.asyncio.to_thread",
+                               side_effect=lambda fn, *a, **kw: fn(*a, **kw)):
+                        result = await tool.execute({}, context)
 
         assert result.success is True
         assert result.data["db_type"] == "mysql"
@@ -308,8 +337,9 @@ class TestSchemaToolSqlServer:
 
         mock_query = MagicMock()
         mock_query.filter.return_value.first.return_value = mock_ds
+        mock_query.return_value = mock_query
         mock_db = MagicMock()
-        mock_db.query = mock_query
+        mock_db.query.return_value = mock_query
 
         context = ToolContext(
             session_id="s1",
@@ -318,20 +348,27 @@ class TestSchemaToolSqlServer:
             trace_id="t1",
         )
 
-        mock_tables = [("Sales", "BASE TABLE")]
-        mock_result = MagicMock()
-        mock_result.__iter__ = lambda self: iter(mock_tables)
+        class MockResult:
+            def __init__(self, rows):
+                self._rows = rows
+            def __iter__(self):
+                return iter(self._rows)
 
         mock_conn = MagicMock()
+        mock_result = MagicMock(fetchall=MagicMock(return_value=[("Sales", "BASE TABLE")]))
         mock_conn.execute.return_value = mock_result
 
         mock_engine = MagicMock()
-        mock_engine.connect.return_value.__enter__.return_value = mock_conn
+        mock_engine.connect.return_value = mock_conn
         mock_engine.dispose = MagicMock()
 
-        with patch("app.core.database.SessionLocal", return_value=mock_db):
+        with patch("services.data_agent.tools.schema_tool.SessionLocal", return_value=mock_db):
             with patch("services.data_agent.tools.schema_tool.create_engine", return_value=mock_engine):
-                result = await tool.execute({"table_name": "Sales"}, context)
+                with patch("services.data_agent.tools.schema_tool.get_datasource_crypto") as mock_crypto:
+                    mock_crypto.return_value.decrypt.return_value = "test_password"
+                    with patch("services.data_agent.tools.schema_tool.asyncio.to_thread",
+                               side_effect=lambda fn, *a, **kw: fn(*a, **kw)):
+                        result = await tool.execute({"table_name": "Sales"}, context)
 
         assert result.success is True
         assert result.data["db_type"] == "sqlserver"

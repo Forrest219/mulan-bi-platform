@@ -33,10 +33,11 @@ class TestCausationTool:
         )
 
         assert result.success is True
-        assert result.data["status"] == "not_implemented"
-        assert result.data["message"] == "归因分析功能开发中，敬请期待"
+        assert result.data["status"] == "completed"
         assert result.data["metric_name"] == "销售额"
         assert result.data["direction"] == "decrease"
+        assert result.data["time_range"] == "last_30d"
+        assert result.data["anomaly_confirmed"] is True
 
     # =============================================================================
     # TC-CAUSATION-002: 缺少 metric_name
@@ -98,6 +99,8 @@ class TestCausationTool:
         )
 
         assert result.success is True
+        assert result.success is True
+        assert result.data["metric_name"] == "订单数"
         assert result.data["connection_id"] == 42
         assert result.data["time_range"] == "last_30d"
 
@@ -116,6 +119,7 @@ class TestCausationTool:
             context,
         )
 
+        assert result.success is True
         assert result.success is True
         assert result.data["connection_id"] == 7
 

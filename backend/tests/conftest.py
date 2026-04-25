@@ -23,6 +23,33 @@ from fastapi.testclient import TestClient
 from app.core.database import Base, engine
 
 
+def _run_alembic_migrations():
+    """运行 alembic upgrade head — 确保所有迁移历史应用到测试数据库"""
+    import subprocess
+    import sys
+    env = {
+        "DATABASE_URL": "postgresql://mulan:mulan@localhost:5432/mulan_bi_test",
+        "PYTHONPATH": ".",
+        "SERVICE_JWT_SECRET": "test-jwt-secret-for-service-auth-32ch",
+        "SESSION_SECRET": "test-session-secret-for-ci-!!",
+        "DATASOURCE_ENCRYPTION_KEY": "test-datasource-key-32-bytes-ok!!",
+        "TABLEAU_ENCRYPTION_KEY": "test-tableau-key-32-bytes-ok!!",
+        "LLM_ENCRYPTION_KEY": "test-llm-key-32-bytes-ok!!!!",
+        "SECURE_COOKIES": "false",
+        "ADMIN_USERNAME": "admin",
+        "ADMIN_PASSWORD": "",
+    }
+    env.update(os.environ)
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=os.path.dirname(os.path.dirname(__file__)),  # backend/
+        env=env,
+        capture_output=True, text=True, timeout=120,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"alembic upgrade failed:\n{result.stderr}\n{result.stdout}")
+
+
 def _create_tables():
     """确保所有 ORM 模型对应的表已创建"""
     from app.core.database import SessionLocal
@@ -35,6 +62,7 @@ def _create_tables():
     import services.tableau.models  # noqa: F401
     import services.health_scan.models  # noqa: F401
     import services.semantic_maintenance.models  # noqa: F401
+    import services.data_agent.models  # noqa: F401 — registers agent/bi_agent/analysis tables
     Base.metadata.create_all(bind=engine)
 
 
@@ -95,7 +123,7 @@ def _ensure_admin():
 @pytest.fixture(scope="session", autouse=True)
 def setup_database():
     """session-scope: 只运行一次，为所有测试准备数据库"""
-    _create_tables()
+    _run_alembic_migrations()
     _ensure_admin()
 
 

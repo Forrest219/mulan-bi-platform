@@ -20,12 +20,16 @@ def create_engine() -> Tuple[ReActEngine, ToolRegistry]:
     from .tools.query_tool import QueryTool
     from .tools.schema_tool import SchemaTool
     from .tools.metrics_tool import MetricsTool
+    from .tools.causation_tool import CausationTool
+    from .tools.chart_tool import ChartTool
     from services.llm.service import LLMService
 
     registry = ToolRegistry()
     registry.register(QueryTool())
     registry.register(SchemaTool())
     registry.register(MetricsTool())
+    registry.register(CausationTool())
+    registry.register(ChartTool())
 
     llm_service = LLMService()
     engine = ReActEngine(registry=registry, llm_service=llm_service)

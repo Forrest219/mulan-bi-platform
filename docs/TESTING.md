@@ -65,28 +65,131 @@ await expect(page.locator('text=答案是 42')).toBeVisible();
 
 ### 冒烟测试用例索引
 
+> 共 **35 个** `.spec.ts` 文件，覆盖前端所有已开发页面。`npm run smoke` 运行全部。
+
+#### 认证模块（2 个）
 | 文件 | 覆盖链路 | 关键断言 |
 |------|---------|---------|
-| `login.spec.ts` | 登录页 | 登录成功跳转 |
+| `login.spec.ts` | 登录页 + 注册页 | 登录成功跳转、错误密码提示、loading 状态、键盘交互、注册页表单校验 |
 | `logout.spec.ts` | 登出 | 登出后回到登录页 |
-| `home-ask-question.spec.ts` | 首页问答 | SSE 回答渲染到 DOM |
-| `home-llm-integration.spec.ts` | 首页 LLM 集成 | LLM 响应渲染 |
-| `home-sidebar.spec.ts` | 首页侧边栏 | 导航菜单可见 |
-| `llm-config-add.spec.ts` | LLM 配置新增 | 表单提交 + 列表刷新 |
-| `llm-config-edit.spec.ts` | LLM 配置编辑 | 编辑保存 |
-| `llm-config-list.spec.ts` | LLM 配置列表 | 列表渲染 |
-| `mcp-config-add-tableau.spec.ts` | MCP Tableau 配置新增 | 表单提交 |
-| `mcp-config-list.spec.ts` | MCP 配置列表 | 列表渲染 |
-| `mcp-config-toggle.spec.ts` | MCP 配置启停 | 状态切换 |
-| `mcp-debugger.spec.ts` | MCP 调试器 | 工具列表 + 执行 + 审计日志 |
-| `tableau-assets.spec.ts` | Tableau 资产浏览 | 卡片渲染 + 同步按钮 + 错误提示 |
-| `datasource-to-mcp-debugger.spec.ts` | 数据源/视图/仪表板 → MCP 调试器 | 三种资产类型：参数填充 + 执行 + 概览渲染 + LUID 传参校验 |
-| `permission-redirect.spec.ts` | 权限重定向 | 无权限跳转 |
-| `user-management.spec.ts` | 用户管理 | 用户列表 |
-| `activity-log.spec.ts` | 活动日志 | 日志列表 |
-| `datasource-connections.spec.ts` | 数据源连接 | 连接列表 |
-| `connection-center.spec.ts` | 连接中心 | 连接管理 |
-| `rbac-permission.spec.ts` | RBAC 权限 | 角色权限控制 |
+
+#### 首页模块（4 个）
+| 文件 | 覆盖链路 | 关键断言 |
+|------|---------|---------|
+| `home-ask-question.spec.ts` | 首页问答 | SSE 回答渲染到 DOM、意图类型徽章、反馈功能 |
+| `home-llm-integration.spec.ts` | 首页 LLM 集成 | LLM 响应渲染、置信度展示 |
+| `home-sidebar.spec.ts` | 首页侧边栏 | 导航菜单可见、路由跳转 |
+| `rbac-permission.spec.ts` | RBAC 权限隔离 | adminOnly 页面拒绝、database_monitor 权限正向、无权限路由拒绝 |
+
+#### 系统管理 — 用户与权限（3 个）
+| 文件 | 覆盖链路 | 关键断言 |
+|------|---------|---------|
+| `user-management.spec.ts` | 用户管理 | 用户列表、搜索、创建/编辑表单 |
+| `activity-log.spec.ts` | 操作日志 | 日志列表、时间范围筛选 |
+| `rbac-permission.spec.ts` | 用户组、权限总览、任务管理、查询告警、Agent 监控、平台设置 | adminOnly 权限校验、database_monitor 正向授权 |
+
+#### 系统管理 — LLM 配置（4 个）
+| 文件 | 覆盖链路 | 关键断言 |
+|------|---------|---------|
+| `llm-config-list.spec.ts` | LLM 配置列表 | 列表渲染、API Key 字段脱敏展示 |
+| `llm-config-add.spec.ts` | LLM 配置新增（Mock） | 表单提交 + 列表刷新、错误处理 |
+| `llm-config-add-real.spec.ts` | LLM 配置新增（真实 API） | 真实 API 调用验证 |
+| `llm-config-edit.spec.ts` | LLM 配置编辑 | 编辑保存、字段回显 |
+
+#### 系统管理 — MCP 配置（6 个）
+| 文件 | 覆盖链路 | 关键断言 |
+|------|---------|---------|
+| `mcp-config-list.spec.ts` | MCP 配置列表 | 列表渲染、状态徽章 |
+| `mcp-config-add-tableau.spec.ts` | MCP Tableau 配置新增 | 表单字段验证、站点连接测试 |
+| `mcp-config-add-tableau-real.spec.ts` | MCP Tableau 新增（真实连接） | 真实 Tableau 连接验证 |
+| `mcp-config-add-starrocks.spec.ts` | MCP StarRocks 配置新增 | StarRocks 表单字段 |
+| `mcp-config-toggle.spec.ts` | MCP 配置启停 | 状态切换、API 验证 |
+| `mcp-debugger.spec.ts` | MCP 调试器 | 工具列表加载、执行调用、审计日志 |
+
+#### 系统管理 — 其他（5 个）
+| 文件 | 覆盖链路 | 关键断言 |
+|------|---------|---------|
+| `debug-mcp.spec.ts` | MCP 调试器（工具调试） | 工具执行、结果展示 |
+| `datasource-to-mcp-debugger.spec.ts` | 数据源/视图/仪表板 → MCP 调试器 | 三种资产类型参数填充、概览渲染 |
+| `rule-config.spec.ts` | 规则配置 | 规则列表、分类/级别筛选、新建入口 |
+| `permission-redirect.spec.ts` | 任务管理、查询告警、Agent 监控、平台设置 | adminOnly 权限校验 |
+
+#### 资产管理 — Tableau（4 个）
+| 文件 | 覆盖链路 | 关键断言 |
+|------|---------|---------|
+| `tableau-asset-list.spec.ts` | Tableau 资产列表 | 资产卡片/表格、连接选择器、搜索框 |
+| `tableau-asset-detail.spec.ts` | Tableau 资产详情 | Tab 切换（基本信息/关联数据源/字段元数据/健康度/AI解读）、面包屑导航 |
+| `tableau-connections.spec.ts` | Tableau 连接管理 | 新建连接 Modal、连接类型选择、禁用启用切换 |
+| `sync-logs.spec.ts` | 同步日志 | 日志列表、分页、状态标签（进行中/成功/失败）、错误详情展开 |
+
+#### 资产管理 — 连接中心（2 个）
+| 文件 | 覆盖链路 | 关键断言 |
+|------|---------|---------|
+| `connection-center.spec.ts` | 连接总览 | KPI 卡片（总计/正常/警告/失败）、Tab 切换（数据库/Tableau）、跳转链接 |
+| `datasource-connections.spec.ts` | 数据源管理 | 新建数据源 Modal、连接中心跳转、无占位文案残留 |
+
+#### 数据治理（7 个）
+| 文件 | 覆盖链路 | 关键断言 |
+|------|---------|---------|
+| `governance-health-center.spec.ts` | 健康中心 | Tab 切换（Warehouse/Quality/Tableau）、Scan 按钮、数据源选择器 |
+| `governance-quality.spec.ts` | 数据质量 | 质量规则内容、Tab 切换、无占位文案 |
+| `governance-metrics.spec.ts` | Metrics 指标 | 指标类型筛选（原子/派生/比率）、列表/空状态 |
+| `semantic-datasource-list.spec.ts` | 语义数据源 | 连接选择器、状态筛选、空状态 |
+| `semantic-field-list.spec.ts` | 语义字段列表 | 字段同步、连接选择、表格表头 |
+| `nl-query.spec.ts` | NL→SQL 查询 | AskBar 交互、SSE 流式响应、错误码处理（NLQ_012/SYS_001）、追问功能 |
+| `knowledge-base.spec.ts` | 知识库 | 术语/文档 CRUD、向量检索、Schema 管理、RBAC 权限 |
+
+#### 开发中/未覆盖模块
+| 路由 | 状态 | 说明 |
+|------|------|------|
+| `/governance/semantic/publish-logs` | 未覆盖 | 前端为占位页（`/empty/publish-logs`），后端 API 已就绪 |
+| `/dev/ddl-validator` | 未覆盖 | 前端使用 Mock 数据，未对接真实 DDL 检查 API |
+| `/system/groups` | 仅 RBAC | 功能页面无独立冒烟测试 |
+
+---
+
+### 冒烟测试规范
+
+#### 文件命名
+- 冒烟测试：`frontend/tests/smoke/*.spec.ts`
+- 单元测试：`frontend/tests/unit/**/*.test.{ts,tsx}`
+
+#### 登录模式（统一）
+```ts
+test.beforeEach(async ({ page }) => {
+  await page.goto('/login');
+  await page.getByPlaceholder('用户名').fill(process.env.ADMIN_USERNAME ?? 'admin');
+  await page.getByPlaceholder('密码').fill(process.env.ADMIN_PASSWORD ?? 'admin123');
+  await page.getByRole('button', { name: '登录' }).click();
+  await page.waitForURL('/', { timeout: 8000 });
+});
+```
+
+#### 密码管理
+- 禁止在测试文件中硬编码密码
+- 使用环境变量：`process.env.SMOKE_ADMIN_USERNAME` / `SMOKE_ADMIN_PASSWORD`
+- CI 中通过 secret 注入
+
+#### 错误过滤（统一）
+```ts
+const realErrors = errors.filter(e =>
+  !e.includes('401') &&
+  !e.includes('403') &&
+  !e.includes('fetch') &&
+  !e.includes('favicon') &&
+  !e.includes('net::ERR') &&
+  !e.includes('Failed to load resource')
+);
+```
+
+#### 冒烟测试最低断言要求
+每个测试至少包含：
+1. 页面/组件可访问（不报 404/500）
+2. 核心内容可见（表格/表单/标题/按钮之一）
+3. 无控制台 JS 错误
+
+#### Mock 闭环要求
+Playwright 测试若使用 `page.route()` / `route.fulfill()`，必须同时验证 mock 数据进入用户可见 DOM 或后续请求体。
 
 运行全部冒烟测试：
 

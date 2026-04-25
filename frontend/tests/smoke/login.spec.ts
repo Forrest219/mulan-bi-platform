@@ -1,9 +1,10 @@
 import { test, expect } from '@playwright/test';
 
 // 默认管理员账号（参考 README）
-const ADMIN_USERNAME = 'admin';
-const ADMIN_PASSWORD = 'admin123';
-const TEST_USER_PASSWORD = 'wrongpassword';
+const ADMIN_USERNAME = process.env.SMOKE_ADMIN_USERNAME ?? 'admin';
+const ADMIN_PASSWORD = process.env.SMOKE_ADMIN_PASSWORD ?? 'admin123';
+// 用于测试错误密码
+const WRONG_PASSWORD = 'wrong_password_123';
 
 /**
  * Smoke Test: 登录页完整测试套件
@@ -63,10 +64,10 @@ test.describe('登录页', () => {
   test('错误密码应显示错误提示', async ({ page }) => {
     await page.goto('/login');
     await page.locator('input[type="text"]').fill(ADMIN_USERNAME);
-    await page.locator('input[type="password"]').fill(TEST_USER_PASSWORD);
+    await page.locator('input[type="password"]').fill(WRONG_PASSWORD);
     await page.locator('button[type="submit"]').click();
     // 等待错误提示出现（后端返回"用户名或密码错误"）
-    await expect(page.locator('text=用户名或密码错误')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=用户名或密码错误')).toBeVisible();
   });
 
   test('登录失败的错误提示应为可读文本，不能显示原始对象', async ({ page }) => {
@@ -82,15 +83,14 @@ test.describe('登录页', () => {
       });
     });
     await page.goto('/login');
-    await page.locator('input[type="text"]').fill('admin');
-    await page.locator('input[type="password"]').fill('any');
+    await page.locator('input[type="text"]').fill(ADMIN_USERNAME);
+    await page.locator('input[type="password"]').fill(WRONG_PASSWORD);
     await page.locator('button[type="submit"]').click();
     // 错误提示区域不能渲染原始对象 "{}" 或 "[object Object]"
     const errorArea = page.locator('.bg-red-50');
-    await expect(errorArea).toBeVisible({ timeout: 5000 });
-    const text = await errorArea.textContent();
-    expect(text).not.toContain('{}');
-    expect(text).not.toContain('[object Object]');
+    await expect(errorArea).toBeVisible();
+    await expect(errorArea).not.toContainText('{}');
+    await expect(errorArea).not.toContainText('[object Object]');
   });
 
   test('正确凭据登录成功后跳转首页', async ({ page }) => {
@@ -99,7 +99,7 @@ test.describe('登录页', () => {
     await page.locator('input[type="password"]').fill(ADMIN_PASSWORD);
     await page.locator('button[type="submit"]').click();
     // 应跳转到首页 /
-    await expect(page).toHaveURL('/', { timeout: 5000 });
+    await expect(page).toHaveURL('/');
   });
 
   test('登录成功后页面显示管理员欢迎语', async ({ page }) => {
@@ -107,9 +107,9 @@ test.describe('登录页', () => {
     await page.locator('input[type="text"]').fill(ADMIN_USERNAME);
     await page.locator('input[type="password"]').fill(ADMIN_PASSWORD);
     await page.locator('button[type="submit"]').click();
-    await expect(page).toHaveURL('/', { timeout: 5000 });
+    await expect(page).toHaveURL('/');
     // 等待页面加载完成，管理员信息显示在头部用户菜单
-    await expect(page.locator('text=管理员').first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=管理员').first()).toBeVisible();
   });
 
   test('admin/admin123 登录后能看到对话输入框', async ({ page }) => {
@@ -117,8 +117,8 @@ test.describe('登录页', () => {
     await page.locator('input[type="text"]').fill(ADMIN_USERNAME);
     await page.locator('input[type="password"]').fill(ADMIN_PASSWORD);
     await page.locator('button[type="submit"]').click();
-    await expect(page).toHaveURL('/', { timeout: 5000 });
-    await expect(page.locator('textarea, input[placeholder*="提问"], input[placeholder*="木兰"]').first()).toBeVisible({ timeout: 5000 });
+    await expect(page).toHaveURL('/');
+    await expect(page.locator('textarea, input[placeholder*="提问"], input[placeholder*="木兰"]').first()).toBeVisible();
   });
 
   // ===== 键盘交互 =====
@@ -139,7 +139,7 @@ test.describe('登录页', () => {
     await page.locator('input[type="text"]').fill(ADMIN_USERNAME);
     await page.locator('input[type="password"]').fill(ADMIN_PASSWORD);
     await page.locator('input[type="password"]').press('Enter');
-    await expect(page).toHaveURL('/', { timeout: 5000 });
+    await expect(page).toHaveURL('/');
   });
 
   // ===== 页面导航 =====
@@ -195,7 +195,7 @@ test.describe('注册页', () => {
     await page.locator('input[placeholder="至少6位"]').fill('password123');
     await page.locator('input[placeholder="再次输入密码"]').fill('password456');
     await page.locator('button[type="submit"]').click();
-    await expect(page.locator('text=两次输入的密码不一致')).toBeVisible({ timeout: 3000 });
+    await expect(page.locator('text=两次输入的密码不一致')).toBeVisible();
   });
 
   test('点击去登录链接跳转登录页', async ({ page }) => {
