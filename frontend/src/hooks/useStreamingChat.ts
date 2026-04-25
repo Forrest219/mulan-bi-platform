@@ -18,9 +18,10 @@ export interface StreamingMessage {
   isStreaming?: boolean;
   isError?: boolean;
   metadata?: { sources_count: number; top_sources: string[] };
-  traceId?: string;
-  thinking?: string;        // ReAct reasoning text
-  toolsUsed?: string[];     // tools called
+  traceId?: string;           // run_id — Spec 36 §5.2 done event
+  executionTimeMs?: number;   // Spec 36 §5.2 done event execution_time_ms
+  thinking?: string;         // ReAct reasoning text
+  toolsUsed?: string[];      // tools called
   toolCalls?: Array<{ tool: string; params: Record<string, unknown> }>;
   toolResults?: Array<{ tool: string; summary: string }>;
 }
@@ -109,7 +110,7 @@ export function useStreamingChat(): UseStreamingChatReturn {
           const event = value;
 
           if (event.type === 'metadata') {
-            // Store conversation_id / run_id in metadata
+            // conversation_id is returned here; run_id comes in the done event
             const id = streamingIdRef.current;
             if (id) {
               setMessages((prev) =>
@@ -161,9 +162,16 @@ export function useStreamingChat(): UseStreamingChatReturn {
           } else if (event.type === 'done') {
             const id = streamingIdRef.current;
             if (id) {
-              const traceId = event.trace_id;
               setMessages((prev) =>
-                prev.map((m) => (m.id === id ? { ...m, traceId } : m)),
+                prev.map((m) =>
+                  m.id === id
+                    ? {
+                        ...m,
+                        traceId: event.trace_id,
+                        executionTimeMs: event.execution_time_ms,
+                      }
+                    : m,
+                ),
               );
             }
             done = true;

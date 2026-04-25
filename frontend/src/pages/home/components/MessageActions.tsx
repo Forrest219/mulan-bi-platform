@@ -23,27 +23,17 @@ export function MessageActions({ content, conversationId, messageIndex, question
     if (rated) return;
     setRated(rating);
     try {
+      // Spec 36 §5: POST /api/agent/feedback — 使用 run_id + rating
+      // MessageBubble 已通过 traceId 传入 run_id（见 MessageList.tsx）
       if (traceId) {
-        await fetch('/api/ask-data/feedback', {
+        await fetch('/api/agent/feedback', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ trace_id: traceId, rating, question }),
-        });
-      } else {
-        await fetch('/api/feedback', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            conversation_id: conversationId,
-            message_index: messageIndex,
-            question,
-            answer_summary: content.slice(0, 100),
-            rating,
-          }),
+          body: JSON.stringify({ run_id: traceId, rating }),
         });
       }
+      // Fallback: 如果没有 traceId 则静默忽略（老数据兼容）
     } catch {
       // 埋点失败不影响用户
     }

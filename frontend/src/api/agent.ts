@@ -40,7 +40,7 @@ export type AgentStreamEvent =
   | { type: 'tool_call'; tool: string; params: Record<string, unknown> }
   | { type: 'tool_result'; tool: string; summary: string }
   | { type: 'token'; content: string }
-  | { type: 'done'; answer: string; trace_id: string; run_id: string; tools_used: string[]; response_type: string; response_data: unknown; steps_count: number }
+  | { type: 'done'; answer: string; trace_id: string; run_id: string; tools_used: string[]; response_type: string; response_data: unknown; steps_count: number; execution_time_ms: number }
   | { type: 'error'; error_code: string; message: string };
 
 // ─── SSE Stream ──────────────────────────────────────────────────────────────
@@ -138,6 +138,7 @@ export function streamAgent(
                   response_type: raw['response_type'] as string ?? 'text',
                   response_data: raw['response_data'] as unknown,
                   steps_count: (raw['steps_count'] as number) ?? 0,
+                  execution_time_ms: (raw['execution_time_ms'] as number) ?? 0,
                 });
               } else if (raw['type'] === 'error') {
                 controller.enqueue({
@@ -187,6 +188,17 @@ export const agentConversationsApi = {
     }).then((r) => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
+    }),
+
+  /**
+   * DELETE /api/agent/conversations/{id} — 归档会话（Spec 36 §5）
+   */
+  deleteConversation: (conversationId: string): Promise<void> =>
+    fetch(`/api/agent/conversations/${conversationId}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    }).then((r) => {
+      if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`);
     }),
 };
 

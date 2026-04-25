@@ -6,11 +6,10 @@
  * 不引入 zustand，仅用原生 React API
  *
  * P1 变更：
- * - 初始化时调 GET /api/conversations，localStorage 作 fallback
- * - addConversation 先调后端 POST，成功后同步 state
- * - deleteConversation 先调后端 DELETE，成功后移除 state
- * - 新增 updateConversationTitle（用于 ConversationBar 重命名）
- * - appendMessage 只更新本地 state（消息由 search.py 写入后端）
+ * - 初始化时调 GET /api/agent/conversations（Spec 36 §5），localStorage 作 fallback
+ * - addConversation 本地创建（不调 API），由 SSE stream 的 metadata.conversation_id 驱动
+ * - deleteConversation 先调后端 DELETE（/api/agent/conversations/{id}），成功后再移除 state
+ * - appendMessage 只更新本地 state
  */
 import {
   createContext,
@@ -219,7 +218,8 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
 
   const deleteConversation = useCallback(async (id: string): Promise<void> => {
     try {
-      await conversationsApi.delete(id);
+      // Spec 36 §5: DELETE /api/agent/conversations/{id}
+      await agentConversationsApi.deleteConversation(id);
     } catch {
       // 忽略后端错误，仍然从本地移除
     }

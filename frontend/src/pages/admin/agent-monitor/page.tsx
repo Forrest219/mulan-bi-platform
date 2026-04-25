@@ -14,7 +14,7 @@ import { agentAdminApi, type AgentStats, type AgentRun, type AgentRunsResponse, 
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type StatusFilter = 'all' | 'running' | 'completed' | 'error';
+type StatusFilter = 'all' | 'running' | 'completed' | 'failed';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -39,7 +39,7 @@ function statusBadge(status: string) {
   const map: Record<string, { bg: string; text: string; label: string }> = {
     running: { bg: 'bg-blue-50', text: 'text-blue-700', label: '运行中' },
     completed: { bg: 'bg-emerald-50', text: 'text-emerald-700', label: '成功' },
-    error: { bg: 'bg-red-50', text: 'text-red-700', label: '失败' },
+    failed: { bg: 'bg-red-50', text: 'text-red-700', label: '失败' },
   };
   const s = map[status] || { bg: 'bg-slate-50', text: 'text-slate-600', label: status };
   return (
@@ -326,7 +326,7 @@ export default function AgentMonitorPage() {
                 [
                   ['all', '全部'],
                   ['completed', '成功'],
-                  ['error', '失败'],
+                  ['failed', '失败'],
                   ['running', '运行中'],
                 ] as [StatusFilter, string][]
               ).map(([value, label]) => (
