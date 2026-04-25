@@ -177,7 +177,7 @@ export default function TableauHealthPage() {
                           }`}>{cfg.label}</span>
                         </td>
                         <td className="px-4 py-3">
-                          <Link to={`/tableau/assets/${a.asset_id}`} className="text-[11px] text-blue-600 hover:underline">
+                          <Link to={`/assets/tableau/${a.asset_id}`} className="text-[11px] text-blue-600 hover:underline">
                             查看详情
                           </Link>
                         </td>

@@ -5,6 +5,7 @@ import {
   searchAssets,
   getProjects,
   listConnections,
+  syncConnection,
   TableauAsset,
   TableauConnection,
   ProjectNode,
@@ -40,6 +41,37 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
+
+  const handleSync = async () => {
+    if (!connectionId || syncing) return;
+    setSyncing(true);
+    setSyncMsg('');
+    try {
+      await syncConnection(connectionId);
+      setSyncMsg('同步任务已提交，数据将在后台刷新');
+      setTimeout(() => {
+        setPage(1);
+        setLoading(true);
+        const promise = search
+          ? searchAssets({ q: search, connection_id: connectionId, asset_type: assetTypeFilter || undefined, page: 1, page_size: 24 })
+          : listAssets({ connection_id: connectionId, asset_type: assetTypeFilter || undefined, page: 1, page_size: 24 });
+        Promise.all([
+          promise,
+          getProjects(connectionId).catch(() => ({ projects: [] as ProjectNode[] })),
+        ]).then(([assetsData, projectsData]) => {
+          setAssets(assetsData.assets);
+          setTotal(assetsData.total);
+          setProjects(projectsData.projects || []);
+        }).catch(() => {}).finally(() => setLoading(false));
+      }, 3000);
+    } catch (e: unknown) {
+      setSyncMsg(e instanceof Error ? e.message : '同步请求失败');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   /* eslint-disable react-hooks/exhaustive-deps -- connectionId/setSearchParams 故意不放入 deps */
   useEffect(() => {
@@ -81,7 +113,7 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
     if (onSelect) {
       onSelect(String(asset.id));
     } else {
-      navigate(`/tableau/assets/${asset.id}`);
+      navigate(`/assets/tableau/${asset.id}`);
     }
   };
 
@@ -193,7 +225,21 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
             ) : assets.length === 0 ? (
               <div className="text-center py-20 text-slate-400">
                 <i className="ri-folder-open-line text-3xl mb-2 block" />
-                <p>未找到资产，请先点击"同步"获取资产数据</p>
+                <p className="mb-4">未找到资产，请同步以获取资产数据</p>
+                {syncMsg && (
+                  <p className={`text-sm mb-3 ${syncMsg.includes('失败') ? 'text-red-500' : 'text-emerald-600'}`}>
+                    {syncMsg}
+                  </p>
+                )}
+                <button
+                  onClick={handleSync}
+                  disabled={syncing || !connectionId}
+                  data-testid="empty-sync-btn"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <i className={`${syncing ? 'ri-loader-4-line animate-spin' : 'ri-refresh-line'}`} />
+                  {syncing ? '同步中...' : '同步资产'}
+                </button>
               </div>
             ) : viewMode === 'grid' ? (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">

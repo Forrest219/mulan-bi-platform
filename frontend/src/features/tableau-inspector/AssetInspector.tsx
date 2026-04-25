@@ -78,7 +78,7 @@ export function AssetInspector({ assetId, layout = 'page', onClose }: AssetInspe
               {hasParent && parent && (
                 <>
                   <span className="text-slate-300">/</span>
-                  <Link to={`/tableau/assets/${parent.id}`} className="hover:text-blue-600 flex items-center gap-1">
+                  <Link to={`/assets/tableau/${parent.id}`} className="hover:text-blue-600 flex items-center gap-1">
                     <i className={ASSET_TYPE_ICONS['workbook']} />
                     {parent.name}
                   </Link>
@@ -253,7 +253,7 @@ export function AssetInspector({ assetId, layout = 'page', onClose }: AssetInspe
               <div className="bg-white border border-slate-200 rounded-xl p-5">
                 <h3 className="text-sm font-semibold text-slate-700 mb-3">所属工作簿</h3>
                 {parent ? (
-                  <Link to={`/tableau/assets/${parent.id}`}
+                  <Link to={`/assets/tableau/${parent.id}`}
                     className="flex items-center gap-2 p-2 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors">
                     <i className="ri-file-chart-line text-blue-500" />
                     <span className="text-sm text-blue-700 font-medium truncate">{parent.name}</span>
@@ -280,19 +280,29 @@ export function AssetInspector({ assetId, layout = 'page', onClose }: AssetInspe
               )}
               {asset.asset_type === 'datasource' && (
                 <button
-                  onClick={() => navigate(`/system/mcp-debugger?view=debugger&tool=get-datasource-metadata&arg_datasource_id=${asset.tableau_id}`)}
+                  onClick={() => navigate(`/system/mcp-debugger?view=debugger&tool=get-datasource-metadata&arg_datasource_luid=${asset.tableau_id}`)}
                   className="w-full text-left px-3 py-2 text-xs text-blue-600 hover:bg-blue-50 rounded-lg flex items-center gap-2 transition-colors"
                 >
                   <i className="ri-bug-line" /> 调试 get-datasource-metadata
                 </button>
               )}
               {(asset.asset_type === 'view' || asset.asset_type === 'dashboard') && (
-                <button
-                  onClick={() => navigate(`/system/mcp-debugger?view=debugger&tool=list-views&arg_workbook_id=${asset.tableau_id}`)}
-                  className="w-full text-left px-3 py-2 text-xs text-blue-600 hover:bg-blue-50 rounded-lg flex items-center gap-2 transition-colors"
-                >
-                  <i className="ri-bug-line" /> 调试 list-views
-                </button>
+                <>
+                  <button
+                    onClick={() => navigate(`/system/mcp-debugger?view=debugger&tool=get-view-data&arg_view_id=${asset.tableau_id}`)}
+                    className="w-full text-left px-3 py-2 text-xs text-blue-600 hover:bg-blue-50 rounded-lg flex items-center gap-2 transition-colors"
+                  >
+                    <i className="ri-bug-line" /> 调试 get-view-data
+                  </button>
+                  {parent && (
+                    <button
+                      onClick={() => navigate(`/system/mcp-debugger?view=debugger&tool=list-views&arg_workbook_id=${parent.tableau_id}`)}
+                      className="w-full text-left px-3 py-2 text-xs text-blue-600 hover:bg-blue-50 rounded-lg flex items-center gap-2 transition-colors"
+                    >
+                      <i className="ri-bug-line" /> 调试 list-views
+                    </button>
+                  )}
+                </>
               )}
             </div>
 

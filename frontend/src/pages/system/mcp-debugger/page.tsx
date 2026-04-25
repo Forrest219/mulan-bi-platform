@@ -54,7 +54,7 @@ export default function McpDebuggerPage() {
 
   useEffect(() => {
     const toolParam = searchParams.get('tool');
-    if (!toolParam || toolsLoaded) return;
+    if (!toolParam || toolsLoaded || serverId === undefined) return;
 
     getMcpTools(serverId).then(tools => {
       setToolsLoaded(true);
@@ -74,7 +74,7 @@ export default function McpDebuggerPage() {
       setToolsLoaded(true);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [searchParams, serverId]);
 
   const handleToolSelect = useCallback((tool: McpTool) => {
     setSelectedTool(tool);

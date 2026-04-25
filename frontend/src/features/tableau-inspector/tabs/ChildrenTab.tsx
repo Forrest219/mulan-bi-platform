@@ -38,7 +38,7 @@ export function ChildrenTab({ children, childrenLoading }: ChildrenTabProps) {
               {children.map(child => (
                 <tr
                   key={child.id}
-                  onClick={() => navigate(`/tableau/assets/${child.id}`)}
+                  onClick={() => navigate(`/assets/tableau/${child.id}`)}
                   className="hover:bg-slate-50 cursor-pointer"
                 >
                   <td className="px-4 py-3">

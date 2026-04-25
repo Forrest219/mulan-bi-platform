@@ -16,7 +16,10 @@ interface DatasourceMeta {
   updatedAt?: string;
   description?: string;
   projectName?: string;
+  project?: { id?: string; name?: string };
   siteName?: string;
+  type?: string;
+  owner?: { id?: string; name?: string };
   fields?: Field[];
   fieldCount?: number;
 }
@@ -26,11 +29,12 @@ interface Props {
   raw: Record<string, unknown>;
 }
 
-const INFO_FIELDS: { key: keyof DatasourceMeta; label: string }[] = [
+const INFO_FIELDS: { key: string; label: string; extract?: (m: DatasourceMeta) => string | undefined }[] = [
   { key: 'name', label: '名称' },
-  { key: 'luid', label: 'LUID' },
-  { key: 'projectName', label: '项目' },
-  { key: 'siteName', label: '站点' },
+  { key: 'id', label: 'LUID', extract: m => m.luid || m.id },
+  { key: 'project', label: '项目', extract: m => m.projectName || m.project?.name },
+  { key: 'type', label: '类型' },
+  { key: 'owner', label: '所有者', extract: m => m.owner?.name },
   { key: 'updatedAt', label: '更新时间' },
   { key: 'description', label: '描述' },
 ];
@@ -49,7 +53,9 @@ function formatDate(ts?: string) {
 export default function DatasourceMetaRenderer({ payload }: Props) {
   const [fieldSearch, setFieldSearch] = useState('');
 
-  const meta = (payload as DatasourceMeta) ?? {};
+  // Unwrap: payload may be { datasource: { ... } } or flat { name, fields, ... }
+  const raw = (payload ?? {}) as Record<string, unknown>;
+  const meta: DatasourceMeta = (raw.datasource as DatasourceMeta) ?? (raw as DatasourceMeta);
   const fields: Field[] = Array.isArray(meta.fields) ? meta.fields : [];
 
   const filtered = useMemo(() => {
@@ -71,8 +77,8 @@ export default function DatasourceMetaRenderer({ payload }: Props) {
           数据源信息
         </div>
         <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
-          {INFO_FIELDS.map(({ key, label }) => {
-            const val = meta[key];
+          {INFO_FIELDS.map(({ key, label, extract }) => {
+            const val = extract ? extract(meta) : (meta as Record<string, unknown>)[key];
             if (!val) return null;
             return (
               <div key={key} className="flex gap-2">

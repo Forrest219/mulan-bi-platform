@@ -63,6 +63,37 @@ await expect(page.locator('text=答案是 42')).toBeVisible();
 
 对于 metadata、列表、详情、权限、反馈等 mock 响应，断言必须覆盖至少一个来自 mock payload 的唯一字段值。例如 `trace_id` 进入反馈请求体、`top_sources` 进入来源徽章、列表项名称进入表格行。
 
+### 冒烟测试用例索引
+
+| 文件 | 覆盖链路 | 关键断言 |
+|------|---------|---------|
+| `login.spec.ts` | 登录页 | 登录成功跳转 |
+| `logout.spec.ts` | 登出 | 登出后回到登录页 |
+| `home-ask-question.spec.ts` | 首页问答 | SSE 回答渲染到 DOM |
+| `home-llm-integration.spec.ts` | 首页 LLM 集成 | LLM 响应渲染 |
+| `home-sidebar.spec.ts` | 首页侧边栏 | 导航菜单可见 |
+| `llm-config-add.spec.ts` | LLM 配置新增 | 表单提交 + 列表刷新 |
+| `llm-config-edit.spec.ts` | LLM 配置编辑 | 编辑保存 |
+| `llm-config-list.spec.ts` | LLM 配置列表 | 列表渲染 |
+| `mcp-config-add-tableau.spec.ts` | MCP Tableau 配置新增 | 表单提交 |
+| `mcp-config-list.spec.ts` | MCP 配置列表 | 列表渲染 |
+| `mcp-config-toggle.spec.ts` | MCP 配置启停 | 状态切换 |
+| `mcp-debugger.spec.ts` | MCP 调试器 | 工具列表 + 执行 + 审计日志 |
+| `tableau-assets.spec.ts` | Tableau 资产浏览 | 卡片渲染 + 同步按钮 + 错误提示 |
+| `datasource-to-mcp-debugger.spec.ts` | 数据源/视图/仪表板 → MCP 调试器 | 三种资产类型：参数填充 + 执行 + 概览渲染 + LUID 传参校验 |
+| `permission-redirect.spec.ts` | 权限重定向 | 无权限跳转 |
+| `user-management.spec.ts` | 用户管理 | 用户列表 |
+| `activity-log.spec.ts` | 活动日志 | 日志列表 |
+| `datasource-connections.spec.ts` | 数据源连接 | 连接列表 |
+| `connection-center.spec.ts` | 连接中心 | 连接管理 |
+| `rbac-permission.spec.ts` | RBAC 权限 | 角色权限控制 |
+
+运行全部冒烟测试：
+
+```bash
+cd frontend && npm run smoke
+```
+
 ---
 
 ## CI 配置
