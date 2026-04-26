@@ -393,7 +393,7 @@ PAT_VALUE=<填入,不入 git>
 
 ---
 
-## 9. 交付约束(按 `SPEC_DEVELOPER_PROMPT_TEMPLATE.md`)
+## 9. 交付约束(通用约束见 `.claude/rules/dev-constraints.md`)
 
 ### 9.1 强制检查清单
 

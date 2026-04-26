@@ -96,18 +96,28 @@ export default function TableauConnectionsPage() {
   const handleTest = async (id: number) => {
     setTestingId(id);
     setModalNotify(null);
-    const result = await testConnection(id);
-    setModalNotify(result);
-    setTestingId(null);
-    fetchConnections(); // 刷新以更新健康状态
+    try {
+      const result = await testConnection(id);
+      setModalNotify(result);
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: e instanceof Error ? e.message : '测试连接失败' });
+    } finally {
+      setTestingId(null);
+      fetchConnections();
+    }
   };
 
   const handleSync = async (id: number) => {
     setSyncingId(id);
-    const result = await syncConnection(id);
-    setModalNotify({ success: result.success, message: result.message });
-    setSyncingId(null);
-    fetchConnections();
+    try {
+      const result = await syncConnection(id);
+      setModalNotify({ success: result.success, message: result.message });
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: e instanceof Error ? e.message : '同步失败' });
+    } finally {
+      setSyncingId(null);
+      fetchConnections();
+    }
   };
 
   const openEditModal = (conn: TableauConnection) => {

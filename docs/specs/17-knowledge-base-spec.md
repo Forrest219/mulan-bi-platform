@@ -948,3 +948,53 @@ sequenceDiagram
 | OI-07 | Embedding 生成依赖 LLM 供应商在线服务，离线场景是否需要支持本地 Embedding 模型（如 sentence-transformers）？ | P2 | 待讨论 |
 | OI-08 | `kb_schemas` 的 `schema_yaml` 格式尚未标准化，需要定义 YAML Schema 规范（字段定义、关系描述等）。 | P1 | ✅ 已解决（见 §2.3 YAML Schema 规范 v1.0） |
 | OI-09 | RAG 检索结果的相关性阈值是否需要按场景动态调整，还是固定配置即可？ | P3 | 待讨论 |
+
+---
+
+## 13. 开发交付约束
+
+> 通用约束见 `.claude/rules/dev-constraints.md`（自动加载），以下为本模块特有约束。
+
+### 13.1 强制检查清单
+
+- [ ] **Ghost Data 修复**：文档重新上传前必须 DELETE `kb_embeddings` 再 INSERT
+- [ ] **tiktoken chunking**：512 token / 64 overlap，cl100k_base 编码
+- [ ] **RAG 预算公式**：`3000 - 200(system) - data_context_actual - 800(P0)`，P0 不扣减
+- [ ] **HNSW 向量索引**：m=16, ef_construction=200，不使用 IVFFlat
+- [ ] **YAML Schema 验证**：`kb_schemas` 写入前必须 JSON Schema v1.0 校验
+- [ ] **向量删除逻辑**：删除文档时同时删除 `kb_embeddings`（cascade 或手动）
+
+### 13.2 正确/错误示范
+
+```python
+# ✗ 错误 — 字符数截断
+chunks = [text[i:i+500] for i in range(0, len(text), 500)]
+
+# ✓ 正确 — token 截断
+import tiktoken
+enc = tiktoken.get_encoding("cl100k_base")
+tokens = enc.encode(text)
+MAX_TOKENS = 512
+OVERLAP = 64
+chunks = [enc.decode(tokens[i:i+MAX_TOKENS])
+          for i in range(0, len(tokens), MAX_TOKENS - OVERLAP)]
+```
+
+```python
+# ✗ 错误 — 直接 upsert，导致 ghost data
+db.add(KBEmbedding(...))
+db.commit()
+
+# ✓ 正确 — 先删再插
+db.query(KBEmbedding).filter(KBEmbedding.document_id == doc.id).delete()
+db.add(KBEmbedding(...))
+db.commit()
+```
+
+### 13.3 验证命令
+
+```bash
+grep -r "tiktoken" backend/services/knowledge/ || echo "FAIL: no tiktoken usage"
+ruff check backend/services/knowledge/ --output-format=github
+grep -r "\.add.*KBEmbedding" backend/services/knowledge/ && echo "CHECK: ensure delete-before-add pattern"
+```

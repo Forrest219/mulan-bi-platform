@@ -257,6 +257,7 @@ class DDLScanner:
                 columns=columns,
                 indexes=indexes,
                 comment=comment,
+                database=self._db_config.get("database", "") if self._db_config else "",
             )
 
         except Exception as e:

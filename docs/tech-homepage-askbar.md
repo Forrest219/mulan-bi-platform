@@ -26,7 +26,7 @@ related:
 
 ---
 
-## 1. 项目约束(来自 `SPEC_DEVELOPER_PROMPT_TEMPLATE.md`)
+## 1. 项目约束(通用约束见 `.claude/rules/dev-constraints.md`)
 
 - ❌ 不得硬编码 API URL(`http://localhost:8000/...`),走 Vite proxy `/api`
 - ❌ 不得 `import` 新页面为同步组件,必须 `React.lazy + Suspense`

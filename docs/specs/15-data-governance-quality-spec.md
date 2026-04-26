@@ -954,3 +954,48 @@ sequenceDiagram
 | 8 | Tableau 资产完整性检查的具体实现方案和集成时间点 | 集成 | P3 | 规划中 |
 | 9 | 是否需要支持跨数据源的关联质量规则（如 A 库与 B 库数据一致性） | 功能覆盖 | P3 | 待讨论 |
 | ~~10~~ | ~~评分快照 bi_quality_scores 是否需要保留历史记录~~ | ~~趋势分析~~ | ~~P2~~ | **已解决**：§2.1 明确 Append-Only 写入，每次评分计算新增一条，趋势 API 按 calculated_at 聚合 |
+
+---
+
+## 13. 开发交付约束
+
+> 通用约束见 `.claude/rules/dev-constraints.md`（自动加载），以下为本模块特有约束。
+
+### 13.1 强制检查清单
+
+- [ ] **Append-Only 写入**：`bi_quality_scores` 只允许 INSERT，禁止 UPSERT / `ON CONFLICT DO UPDATE`
+- [ ] **SQL Builder**：跨方言查询必须用 SQLAlchemy Core，不得硬编码原生 SQL
+- [ ] **max_scan_rows 熔断**：到达行数限制时立即中断查询并返回 partial result
+- [ ] **分区裁剪验证**：用 `EXPLAIN ANALYZE` 验证 `calculated_at` DATE 分区是否生效
+- [ ] **90 天清理**：Celery Beat 调度 `cleanup_expired_data.delay()` 已配置
+- [ ] **Freshness SQL 分支**：PostgreSQL 和 ClickHouse 分支互斥，无重复
+
+### 13.2 正确/错误示范
+
+```python
+# ✗ 错误 — UPSERT
+from sqlalchemy.dialects.postgresql import insert
+stmt = insert(bi_quality_scores).values(...).on_conflict_do_update(...)
+
+# ✓ 正确 — Append-Only
+stmt = insert(bi_quality_scores).values(...)
+```
+
+```python
+# ✗ 错误 — 硬编码方言
+if dialect == "postgresql":
+    sql = "SELECT * FROM table"
+elif dialect == "clickhouse":
+    sql = "SELECT * FROM table"
+
+# ✓ 正确 — SQLAlchemy Core
+from sqlalchemy import select, func
+query = select(func.count()).select_from(table)
+```
+
+### 13.3 验证命令
+
+```bash
+ruff check backend/services/health_scan/ --output-format=github
+grep -r "on_conflict" backend/services/health_scan/ && echo "FAIL: UPSERT in append-only module" || echo "PASS"
+```

@@ -12,6 +12,7 @@ import logging
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 # Add backend to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -38,7 +39,7 @@ def build_text(row) -> str:
     return " · ".join([p for p in parts if p])[:512]
 
 
-async def run(datasource_id: int | None, dry_run: bool):
+async def run(datasource_id: Optional[int], dry_run: bool):
     db = SessionLocal()
     where = "embedding IS NULL"
     params = {}

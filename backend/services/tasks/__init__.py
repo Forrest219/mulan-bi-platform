@@ -74,6 +74,15 @@ celery_app.conf.update(
     },
 )
 
-celery_app.autodiscover_tasks(["services.tasks"])
+celery_app.conf.include = [
+    "services.tasks.tableau_tasks",
+    "services.tasks.quality_tasks",
+    "services.tasks.event_tasks",
+    "services.tasks.dqc_tasks",
+    "services.tasks.health_scan_tasks",
+    "services.tasks.ddl_tasks",
+    "services.tasks.knowledge_base_tasks",
+    "services.tasks.api_contract_tasks",
+]
 
 from services.tasks import signals  # noqa: F401

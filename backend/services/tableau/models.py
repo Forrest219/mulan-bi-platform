@@ -330,13 +330,23 @@ class TableauDatabase:
 
     def ensure_connection_from_mcp(self, mcp_name: str, server_url: str, site: str,
                                     token_name: str, token_encrypted: str,
-                                    mcp_server_url: str, owner_id: int = 1) -> tuple:
-        """从 MCP Server 记录桥接创建 tableau_connections 行（按 name 去重）。
+                                    mcp_server_url: str, owner_id: int = 1,
+                                    is_active: bool = True) -> tuple:
+        """从 MCP Server 记录桥接创建或更新 tableau_connections 行（按 name 去重）。
         返回 (connection, created: bool)。"""
         existing = self.session.query(TableauConnection).filter(
             TableauConnection.name == mcp_name
         ).first()
         if existing:
+            existing.server_url = server_url
+            existing.site = site
+            existing.token_name = token_name
+            existing.token_encrypted = token_encrypted
+            existing.mcp_server_url = mcp_server_url
+            existing.is_active = is_active
+            if owner_id != 1:
+                existing.owner_id = owner_id
+            self.session.commit()
             return existing, False
         conn = TableauConnection(
             name=mcp_name,
@@ -347,7 +357,7 @@ class TableauDatabase:
             token_name=token_name,
             token_encrypted=token_encrypted,
             owner_id=owner_id,
-            is_active=True,
+            is_active=is_active,
             auto_sync_enabled=True,
             mcp_direct_enabled=True,
             mcp_server_url=mcp_server_url,
@@ -355,6 +365,17 @@ class TableauDatabase:
         self.session.add(conn)
         self.session.commit()
         return conn, True
+
+    def deactivate_connection_by_name(self, name: str) -> bool:
+        """按名称停用 tableau_connections 记录（保留 FK 完整性）。"""
+        conn = self.session.query(TableauConnection).filter(
+            TableauConnection.name == name
+        ).first()
+        if not conn:
+            return False
+        conn.is_active = False
+        self.session.commit()
+        return True
 
     def create_connection(self, name: str, server_url: str, site: str,
                           token_name: str, token_encrypted: str,

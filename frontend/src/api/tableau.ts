@@ -86,6 +86,17 @@ export interface ProjectNode {
   children: Record<string, { type: string; count: number }>;
 }
 
+export function extractErrorMessage(err: unknown, fallback: string): string {
+  if (!err || typeof err !== 'object') return fallback;
+  const e = err as Record<string, unknown>;
+  if (typeof e.detail === 'string') return e.detail;
+  if (e.detail && typeof e.detail === 'object') {
+    const d = e.detail as Record<string, unknown>;
+    if (typeof d.message === 'string') return d.message;
+  }
+  return fallback;
+}
+
 // Connections API
 
 export async function listConnections(includeInactive = false): Promise<{ connections: TableauConnection[]; total: number }> {
@@ -111,8 +122,8 @@ export async function createConnection(data: {
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || '创建连接失败');
+    const err = await res.json().catch(() => null);
+    throw new Error(extractErrorMessage(err, '创建连接失败'));
   }
   return res.json();
 }
@@ -136,8 +147,8 @@ export async function updateConnection(id: number, data: Partial<{
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || '更新连接失败');
+    const err = await res.json().catch(() => null);
+    throw new Error(extractErrorMessage(err, '更新连接失败'));
   }
   return res.json();
 }
@@ -148,8 +159,8 @@ export async function deleteConnection(id: number): Promise<{ message: string }>
     credentials: 'include',
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || '删除连接失败');
+    const err = await res.json().catch(() => null);
+    throw new Error(extractErrorMessage(err, '删除连接失败'));
   }
   return res.json();
 }
@@ -160,8 +171,8 @@ export async function testConnection(id: number): Promise<{ success: boolean; me
     credentials: 'include',
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: '测试请求失败' }));
-    throw new Error(err.detail || '测试连接失败');
+    const err = await res.json().catch(() => null);
+    throw new Error(extractErrorMessage(err, '测试连接失败'));
   }
   return res.json();
 }
@@ -172,8 +183,8 @@ export async function syncConnection(id: number): Promise<{ success: boolean; me
     credentials: 'include',
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: '同步请求失败' }));
-    throw new Error(err.detail || '同步失败');
+    const err = await res.json().catch(() => null);
+    throw new Error(extractErrorMessage(err, '同步失败'));
   }
   return res.json();
 }
@@ -324,12 +335,12 @@ export interface HealthOverview {
 
 export async function getAssetHealth(assetId: number): Promise<AssetHealth> {
   const res = await fetch(`${API_BASE}/api/tableau/assets/${assetId}/health`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch health');
+  if (!res.ok) throw new Error('获取健康评分失败');
   return res.json();
 }
 
 export async function getConnectionHealthOverview(connId: number): Promise<HealthOverview> {
   const res = await fetch(`${API_BASE}/api/tableau/connections/${connId}/health-overview`, { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch health overview');
+  if (!res.ok) throw new Error('获取健康概览失败');
   return res.json();
 }

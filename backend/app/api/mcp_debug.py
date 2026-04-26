@@ -61,7 +61,7 @@ class McpDebugLog(Base):
 class McpDebugCallRequest(BaseModel):
     tool_name: str
     arguments: dict = {}
-    server_id: int | None = None
+    server_id: Optional[int] = None
 
 
 class McpDebugCallResponse(BaseModel):

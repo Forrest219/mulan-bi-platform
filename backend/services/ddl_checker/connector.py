@@ -34,7 +34,7 @@ class DatabaseConnector:
             connect_args = {}
             db_type = self.config.get("db_type", "mysql")
             # P1 修复：网络数据库（MySQL/PostgreSQL）添加 10 秒连接超时，防止黑洞 IP 雪崩
-            if db_type in ("mysql", "postgresql"):
+            if db_type in ("mysql", "postgresql", "starrocks"):
                 connect_args["connect_timeout"] = 10
             self.engine = create_engine(
                 connection_string,
@@ -73,6 +73,9 @@ class DatabaseConnector:
             return f"postgresql://{user}:{password}@{host}:{port}/{database}"
         elif db_type == "sqlite":
             return f"sqlite:///{database}"
+        elif db_type == "starrocks":
+            port = self.config.get("port", 9030)
+            return f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
         else:
             raise ValueError(f"不支持的数据库类型: {db_type}")
 
@@ -111,7 +114,7 @@ class DatabaseConnector:
         if not self.inspector:
             raise RuntimeError("请先连接数据库")
 
-        if self.config.get("db_type") == "mysql":
+        if self.config.get("db_type") in ("mysql", "starrocks"):
             try:
                 with self.engine.connect() as conn:
                     result = conn.execute(
@@ -130,7 +133,7 @@ class DatabaseConnector:
         if not self.inspector:
             raise RuntimeError("请先连接数据库")
 
-        if self.config.get("db_type") == "mysql":
+        if self.config.get("db_type") in ("mysql", "starrocks"):
             try:
                 with self.engine.connect() as conn:
                     result = conn.execute(
