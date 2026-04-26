@@ -4,7 +4,7 @@ import {
   getPublishLogDetail,
   PublishLogListItem,
   PublishLogDetail,
-  PublishLogFilters,
+  PublishLogListParams,
 } from '../../../api/semantic-maintenance';
 import { PublishLogFilter } from './components/PublishLogFilter';
 import { PublishLogTable } from './components/PublishLogTable';
@@ -24,7 +24,7 @@ export default function SemanticPublishLogsPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   // Filter state
-  const [filters, setFilters] = useState<PublishLogFilters>({});
+  const [filters, setFilters] = useState<PublishLogListParams>({});
 
   // Get user role from sessionStorage (simple approach)
   const userRole = (window as any).__USER_ROLE__ || 'analyst';
@@ -53,7 +53,7 @@ export default function SemanticPublishLogsPage() {
     loadLogs();
   }, [loadLogs]);
 
-  const handleFilterChange = (newFilters: PublishLogFilters) => {
+  const handleFilterChange = (newFilters: PublishLogListParams) => {
     setFilters(newFilters);
     setPage(1); // Reset to first page when filters change
   };

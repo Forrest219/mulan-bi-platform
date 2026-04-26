@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { usePlatformSettings } from '../../context/PlatformSettingsContext';
+import { API_BASE } from '../../config';
 
 type LoginStep = 'credentials' | 'mfa';
 

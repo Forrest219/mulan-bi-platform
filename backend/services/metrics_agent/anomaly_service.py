@@ -14,7 +14,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.errors import MulanError
@@ -348,9 +347,11 @@ async def run_anomaly_detection(
         db.commit()
     except Exception:
         db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail={"error_code": "INTERNAL", "message": "异常记录写入失败，请重试"},
+        raise MulanError(
+            "MC_500",
+            "异常记录写入失败，请重试",
+            500,
+            {"error_code": "INTERNAL", "message": "异常记录写入失败，请重试"},
         )
 
     # commit 成功后批量发射事件（失败不阻断）
