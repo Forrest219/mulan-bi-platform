@@ -716,6 +716,37 @@ class SemanticMaintenanceService:
         log = self.db.get_publish_log(log_id)
         return log.to_dict() if log else None
 
+    def get_publish_log_detail(self, log_id: int) -> Optional[Dict[str, Any]]:
+        """获取发布日志详情（带连接名、对象名、操作人、完整 diff）"""
+        return self.db.get_publish_log_detail(log_id)
+
+    def list_publish_logs_with_filters(
+        self,
+        connection_id: Optional[int] = None,
+        object_type: Optional[str] = None,
+        status: Optional[str] = None,
+        operator_id: Optional[int] = None,
+        start_date=None,
+        end_date=None,
+        page: int = 1,
+        page_size: int = 20,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+    ) -> tuple:
+        """带多条件过滤的发布日志列表"""
+        return self.db.list_publish_logs_with_filters(
+            connection_id=connection_id,
+            object_type=object_type,
+            status=status,
+            operator_id=operator_id,
+            start_date=start_date,
+            end_date=end_date,
+            page=page,
+            page_size=page_size,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+
     # ============================================================
     # 定时清理任务
     # ============================================================

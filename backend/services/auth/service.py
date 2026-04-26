@@ -519,6 +519,8 @@ class AuthService:
         self,
         user_id: int,
         device_fingerprint: str = None,
+        ip_address: str = None,
+        user_agent: str = None,
     ) -> str:
         """
         创建并存储 refresh token，返回原始 token（供调用方写入 HTTP-only cookie）。
@@ -533,6 +535,8 @@ class AuthService:
             token_hash=token_hash,
             expires_at=expires_at,
             device_fingerprint=device_fingerprint,
+            ip_address=ip_address,
+            user_agent=user_agent,
         )
         return raw_token
 
@@ -559,6 +563,64 @@ class AuthService:
     def revoke_all_user_refresh_tokens(self, user_id: int) -> int:
         """撤销用户所有 refresh token（"退出所有设备"功能）"""
         return self._db.revoke_all_user_refresh_tokens(user_id)
+
+    # ========== 密码重置 ==========
+
+    _PASSWORD_RESET_RATE_LIMIT = 3  # 同邮箱每小时最多 3 次
+    _PASSWORD_RESET_RATE_WINDOW = 3600  # 1 小时（秒）
+
+    def create_password_reset_token_for_email(self, email: str) -> Optional[str]:
+        """
+        为邮箱创建密码重置 token。
+
+        返回原始 token（供通过 URL 传递），如果邮箱不存在返回 None。
+        限速：同邮箱每小时最多 _PASSWORD_RESET_RATE_LIMIT 次。
+        """
+        user = self._db.get_user_by_email(email)
+        if not user:
+            # 防枚举：即使邮箱不存在也返回 None，不暴露用户是否存在
+            return None
+
+        # 限速检查
+        count = self._db.get_password_reset_request_count(email, self._PASSWORD_RESET_RATE_WINDOW)
+        if count >= self._PASSWORD_RESET_RATE_LIMIT:
+            return None
+
+        # 生成 token
+        import secrets
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        expires_at = datetime.utcnow() + timedelta(minutes=15)
+
+        self._db.create_password_reset_token(user.id, token_hash, expires_at)
+        return raw_token
+
+    def reset_password_with_token(self, token: str, new_password: str) -> tuple:
+        """
+        验证 token 并重置密码。
+
+        返回 (success, message)
+        """
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        token_record = self._db.verify_password_reset_token(token_hash)
+        if not token_record:
+            return False, "Token 无效或已过期"
+
+        user = self._db.get_user(token_record.user_id)
+        if not user:
+            return False, "用户不存在"
+
+        # 更新密码
+        user.password_hash = self.hash_password(new_password)
+        self._db.update_user(user)
+
+        # 标记 token 为已使用
+        self._db.mark_password_reset_token_used(token_hash)
+
+        # 撤销该用户所有 refresh token，强制重新登录
+        self._db.revoke_all_user_refresh_tokens(user.id)
+
+        return True, "密码已重置，请使用新密码登录"
 
     # ========== 用户标签 ==========
 

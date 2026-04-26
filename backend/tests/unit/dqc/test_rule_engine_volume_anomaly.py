@@ -27,7 +27,7 @@ class TestVolumeAnomaly:
 
         engine = _engine()
         rule = make_rule(
-            rule_type="VOLUME_ANOMALY",
+            rule_type="volume_anomaly",
             dimension="completeness",
             rule_config={"direction": "drop", "threshold_pct": 0.80, "comparison_window": "1d", "min_row_count": 0},
         )
@@ -44,7 +44,7 @@ class TestVolumeAnomaly:
 
         engine = _engine()
         rule = make_rule(
-            rule_type="VOLUME_ANOMALY",
+            rule_type="volume_anomaly",
             dimension="completeness",
             rule_config={"direction": "rise", "threshold_pct": 1.0, "comparison_window": "1d"},
         )
@@ -60,7 +60,7 @@ class TestVolumeAnomaly:
 
         engine = _engine()
         rule = make_rule(
-            rule_type="VOLUME_ANOMALY",
+            rule_type="volume_anomaly",
             dimension="completeness",
             rule_config={"direction": "drop", "threshold_pct": 0.5, "min_row_count": 1000},
         )
@@ -76,7 +76,7 @@ class TestVolumeAnomaly:
 
         engine = _engine()
         rule = make_rule(
-            rule_type="VOLUME_ANOMALY",
+            rule_type="volume_anomaly",
             dimension="completeness",
             rule_config={"direction": "drop", "threshold_pct": 0.80, "comparison_window": "1d"},
         )
@@ -92,7 +92,7 @@ class TestVolumeAnomaly:
 
         engine = _engine()
         rule = make_rule(
-            rule_type="VOLUME_ANOMALY",
+            rule_type="volume_anomaly",
             dimension="completeness",
             rule_config={"direction": "drop", "threshold_pct": 0.80, "comparison_window": "1d"},
         )
@@ -108,7 +108,7 @@ class TestVolumeAnomaly:
 
         engine = _engine()
         rule = make_rule(
-            rule_type="VOLUME_ANOMALY",
+            rule_type="volume_anomaly",
             dimension="completeness",
             rule_config={"direction": "both", "threshold_pct": 0.80, "comparison_window": "1d"},
         )
@@ -124,7 +124,7 @@ class TestVolumeAnomaly:
 
         engine = _engine()
         rule = make_rule(
-            rule_type="VOLUME_ANOMALY",
+            rule_type="volume_anomaly",
             dimension="completeness",
             rule_config={"direction": "drop", "threshold_pct": 0.80, "comparison_window": "1d", "min_row_count": 1000},
         )
@@ -140,7 +140,7 @@ class TestVolumeAnomaly:
 
         engine = _engine()
         rule = make_rule(
-            rule_type="VOLUME_ANOMALY",
+            rule_type="volume_anomaly",
             dimension="completeness",
             rule_config={"direction": "drop", "threshold_pct": 0.80, "comparison_window": "1d", "min_row_count": 1000},
         )
@@ -155,7 +155,7 @@ class TestVolumeAnomaly:
 
         engine = _engine()
         rule = make_rule(
-            rule_type="VOLUME_ANOMALY",
+            rule_type="volume_anomaly",
             dimension="completeness",
             rule_config={"direction": "drop", "threshold_pct": 0.5, "comparison_window": "1d"},
         )
@@ -171,7 +171,7 @@ class TestVolumeAnomaly:
 
         engine = _engine()
         rule = make_rule(
-            rule_type="VOLUME_ANOMALY",
+            rule_type="volume_anomaly",
             dimension="completeness",
             rule_config={"direction": "drop", "threshold_pct": 0.80, "comparison_window": "7d"},
         )
@@ -187,7 +187,7 @@ class TestVolumeAnomaly:
 
         engine = _engine()
         rule = make_rule(
-            rule_type="VOLUME_ANOMALY",
+            rule_type="volume_anomaly",
             dimension="completeness",
             rule_config={"direction": "both", "threshold_pct": 0.80, "comparison_window": "30d"},
         )
@@ -201,7 +201,7 @@ class TestVolumeAnomaly:
 
         engine = _engine()
         rule = make_rule(
-            rule_type="VOLUME_ANOMALY",
+            rule_type="volume_anomaly",
             dimension="completeness",
             rule_config={"direction": "drop", "threshold_pct": 0.80},
         )
@@ -217,7 +217,7 @@ class TestVolumeAnomaly:
 
         engine = _engine()
         rule = make_rule(
-            rule_type="VOLUME_ANOMALY",
+            rule_type="volume_anomaly",
             dimension="completeness",
             rule_config={"direction": "drop", "threshold_pct": 0.5, "min_row_count": 1000},
         )
@@ -233,7 +233,7 @@ class TestVolumeAnomaly:
 
         engine = _engine()
         rule = make_rule(
-            rule_type="VOLUME_ANOMALY",
+            rule_type="volume_anomaly",
             dimension="completeness",
             rule_config={"direction": "rise", "threshold_pct": 1.0, "comparison_window": "1d"},
         )
@@ -250,7 +250,7 @@ class TestVolumeAnomaly:
 
         engine = _engine()
         rule = make_rule(
-            rule_type="VOLUME_ANOMALY",
+            rule_type="volume_anomaly",
             dimension="completeness",
             rule_config={"direction": "drop", "threshold_pct": 0.80, "min_row_count": 1000},
         )
@@ -267,7 +267,7 @@ class TestVolumeAnomaly:
 
         engine = _engine()
         rule = make_rule(
-            rule_type="VOLUME_ANOMALY",
+            rule_type="volume_anomaly",
             dimension="completeness",
             rule_config={"direction": "rise", "threshold_pct": 0.80, "comparison_window": "1d"},
         )

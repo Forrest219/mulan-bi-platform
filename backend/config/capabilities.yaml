@@ -1,0 +1,253 @@
+# Capability Wrapper 声明式策略配置
+# 对应 spec §5.1 — YAML Policy Engine
+# 版本: 1
+
+version: 1
+capabilities:
+  # ---------------------------------------------------------------------------
+  # query_metric — 核心指标查询能力
+  # ---------------------------------------------------------------------------
+  - name: query_metric
+    description: "按业务字段 + 过滤 + 聚合查询指标"
+    roles:
+      - analyst
+      - data_admin
+      - admin
+    params_schema:
+      $schema: "http://json-schema.org/draft-07/schema#"
+      type: "object"
+      required:
+        - datasource_id
+        - metric
+      properties:
+        datasource_id:
+          type: "integer"
+          description: "数据源 ID"
+        metric:
+          type: "string"
+          description: "指标名称"
+        dims:
+          type: "array"
+          items:
+            type: "string"
+          default: []
+          description: "维度字段列表"
+        filters:
+          type: "array"
+          default: []
+          description: "过滤条件列表"
+        aggregation:
+          type: "string"
+          enum:
+            - SUM
+            - AVG
+            - COUNT
+            - MIN
+            - MAX
+          default: SUM
+          description: "聚合方式"
+        limit:
+          type: "integer"
+          minimum: 1
+          maximum: 10000
+          default: 1000
+          description: "返回行数上限"
+    guards:
+      sensitivity_block:
+        - high
+        - confidential
+      max_rows: 10000
+      forbid_raw_pii: true
+    rate_limit: "30/min/user"
+    timeout_seconds: 30
+    cache:
+      ttl_seconds: 300
+      key_fields:
+        - principal_role
+        - datasource_id
+        - metric
+        - dims
+        - filters
+        - aggregation
+    circuit_breaker:
+      failure_threshold: 5
+      recovery_seconds: 60
+    audit: always
+    backend: tableau_mcp
+
+  # ---------------------------------------------------------------------------
+  # search_asset — 资产搜索能力
+  # ---------------------------------------------------------------------------
+  - name: search_asset
+    description: "搜索 Tableau 工作簿/视图/数据源资产"
+    roles:
+      - analyst
+      - data_admin
+      - admin
+      - user
+    params_schema:
+      $schema: "http://json-schema.org/draft-07/schema#"
+      type: "object"
+      required:
+        - query
+      properties:
+        query:
+          type: "string"
+          description: "搜索关键词"
+        asset_type:
+          type: "string"
+          enum:
+            - workbook
+            - view
+            - datasource
+            - metric
+          default: "workbook"
+        limit:
+          type: "integer"
+          minimum: 1
+          maximum: 100
+          default: 20
+    guards:
+      sensitivity_block: []
+      max_rows: 100
+      forbid_raw_pii: false
+    rate_limit: "60/min/user"
+    timeout_seconds: 15
+    cache:
+      ttl_seconds: 120
+      key_fields:
+        - principal_role
+        - query
+        - asset_type
+    circuit_breaker:
+      failure_threshold: 5
+      recovery_seconds: 30
+    audit: always
+    backend: tableau_mcp
+
+  # ---------------------------------------------------------------------------
+  # list_datasources — 数据源列表
+  # ---------------------------------------------------------------------------
+  - name: list_datasources
+    description: "列出用户可访问的数据源"
+    roles:
+      - analyst
+      - data_admin
+      - admin
+    params_schema:
+      $schema: "http://json-schema.org/draft-07/schema#"
+      type: "object"
+      properties:
+        limit:
+          type: "integer"
+          minimum: 1
+          maximum: 500
+          default: 50
+        offset:
+          type: "integer"
+          minimum: 0
+          default: 0
+    guards:
+      sensitivity_block: []
+      max_rows: 500
+      forbid_raw_pii: false
+    rate_limit: "120/min/user"
+    timeout_seconds: 10
+    cache:
+      ttl_seconds: 60
+      key_fields:
+        - principal_role
+        - limit
+        - offset
+    circuit_breaker:
+      failure_threshold: 5
+      recovery_seconds: 30
+    audit: always
+    backend: tableau_mcp
+
+  # ---------------------------------------------------------------------------
+  # describe_datasource — 数据源结构描述
+  # ---------------------------------------------------------------------------
+  - name: describe_datasource
+    description: "获取数据源的字段 schema 描述"
+    roles:
+      - analyst
+      - data_admin
+      - admin
+    params_schema:
+      $schema: "http://json-schema.org/draft-07/schema#"
+      type: "object"
+      required:
+        - datasource_id
+      properties:
+        datasource_id:
+          type: "integer"
+        include_permissions:
+          type: "boolean"
+          default: false
+    guards:
+      sensitivity_block:
+        - confidential
+      max_rows: 10000
+      forbid_raw_pii: false
+    rate_limit: "60/min/user"
+    timeout_seconds: 20
+    cache:
+      ttl_seconds: 300
+      key_fields:
+        - principal_role
+        - datasource_id
+        - include_permissions
+    circuit_breaker:
+      failure_threshold: 5
+      recovery_seconds: 60
+    audit: always
+    backend: tableau_mcp
+
+  # ---------------------------------------------------------------------------
+  # explain_asset — 资产解释/来源追踪
+  # ---------------------------------------------------------------------------
+  - name: explain_asset
+    description: "解释工作簿/视图的血缘和依赖关系"
+    roles:
+      - analyst
+      - data_admin
+      - admin
+    params_schema:
+      $schema: "http://json-schema.org/draft-07/schema#"
+      type: "object"
+      required:
+        - asset_type
+        - asset_id
+      properties:
+        asset_type:
+          type: "string"
+          enum:
+            - workbook
+            - view
+            - datasource
+        asset_id:
+          type: "integer"
+        depth:
+          type: "integer"
+          minimum: 1
+          maximum: 5
+          default: 2
+    guards:
+      sensitivity_block: []
+      max_rows: 200
+      forbid_raw_pii: false
+    rate_limit: "30/min/user"
+    timeout_seconds: 30
+    cache:
+      ttl_seconds: 600
+      key_fields:
+        - principal_role
+        - asset_type
+        - asset_id
+        - depth
+    circuit_breaker:
+      failure_threshold: 5
+      recovery_seconds: 60
+    audit: always
+    backend: tableau_mcp

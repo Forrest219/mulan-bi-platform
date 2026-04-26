@@ -109,6 +109,17 @@ class LoginResponse(BaseModel):
     mfa_required: bool = False  # MFA 已启用，需要输入验证码
 
 
+class ForgotPasswordRequest(BaseModel):
+    """忘记密码请求"""
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    """重置密码请求"""
+    token: str
+    new_password: str
+
+
 class ChangePasswordRequest(BaseModel):
     """修改密码请求"""
     old_password: str
@@ -484,10 +495,27 @@ async def get_me(request: Request):
 
 
 @router.post("/forgot-password", status_code=200)
-async def forgot_password(payload: dict):
-    """Always returns 200 regardless of whether email exists (security)."""
-    # Email lookup intentionally omitted to prevent account enumeration
+async def forgot_password(request: ForgotPasswordRequest):
+    """请求密码重置链接（防枚举：无论邮箱是否存在均返回相同信息）"""
+    token = auth_service.create_password_reset_token_for_email(request.email)
+    if token is None:
+        # 邮箱不存在或请求过于频繁
+        return {"message": "如果该邮箱已注册，我们将发送重置说明。"}
+    # TODO: 实际发送邮件（本期由管理员中转），token 可通过日志输出便于测试
+    import logging
+    logging.getLogger("auth").info(f"[Spec27] Password reset token for {request.email}: {token}")
     return {"message": "如果该邮箱已注册，我们将发送重置说明。"}
+
+
+@router.post("/reset-password")
+async def reset_password(request: ResetPasswordRequest):
+    """使用 token 重置密码"""
+    if len(request.new_password) < 8:
+        raise HTTPException(status_code=400, detail="新密码长度至少为8位")
+    success, message = auth_service.reset_password_with_token(request.token, request.new_password)
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    return {"message": message}
 
 
 @router.put("/change-password")

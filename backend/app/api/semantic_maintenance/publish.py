@@ -1,7 +1,10 @@
 """语义维护 - 发布管理 API
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -12,6 +15,7 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.utils.auth import verify_connection_access
 from services.semantic_maintenance.publish_service import PublishService
+from services.semantic_maintenance.service import SemanticMaintenanceService
 
 # 导入 Tableau 模型和数据库服务
 from services.tableau.models import TableauDatabase
@@ -206,3 +210,122 @@ async def rollback_publish(req: RollbackPublishRequest, request: Request, db: Se
     if err:
         raise HTTPException(status_code=400, detail=err)
     return result
+
+
+# --- Publish Logs API (Spec 19) ---
+
+
+class PublishLogListParams(BaseModel):
+    page: int = 1
+    page_size: int = 20
+    connection_id: Optional[int] = None
+    object_type: Optional[str] = None
+    status: Optional[str] = None
+    operator_id: Optional[int] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    sort_by: str = "created_at"
+    sort_order: str = "desc"
+
+
+@router.get("/publish-logs")
+async def list_publish_logs(
+    request: Request,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    connection_id: Optional[int] = Query(None),
+    object_type: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    operator_id: Optional[int] = Query(None),
+    start_date: Optional[datetime] = Query(None),
+    end_date: Optional[datetime] = Query(None),
+    sort_by: str = Query("created_at"),
+    sort_order: str = Query("desc"),
+    db: Session = Depends(get_db),
+):
+    """
+    获取发布日志列表（分页+过滤）。
+
+    - admin/data_admin: 返回全部日志
+    - analyst: 仅返回自己操作的日志
+    - user: 禁止访问
+    """
+    user = get_current_user(request, db)
+
+    # user 角色禁止访问
+    if user["role"] == "user":
+        raise HTTPException(status_code=403, detail={"error_code": "SM_021"})
+
+    # analyst 强制只能查看自己的操作日志
+    if user["role"] == "analyst":
+        operator_id = user["id"]
+
+    # Validate status
+    valid_statuses = ("pending", "success", "failed", "rolled_back", "not_supported")
+    if status and status not in valid_statuses:
+        raise HTTPException(status_code=400, detail={"error_code": "SM_023"})
+
+    # Validate sort_by
+    valid_sort_fields = ("created_at", "id", "status")
+    if sort_by not in valid_sort_fields:
+        raise HTTPException(status_code=400, detail={"error_code": "SM_024"})
+
+    # Validate sort_order
+    if sort_order not in ("asc", "desc"):
+        sort_order = "desc"
+
+    # Validate date range
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=400, detail={"error_code": "SM_022"})
+
+    sm = SemanticMaintenanceService()
+    items, total = sm.list_publish_logs_with_filters(
+        connection_id=connection_id,
+        object_type=object_type,
+        status=status,
+        operator_id=operator_id,
+        start_date=start_date,
+        end_date=end_date,
+        page=page,
+        page_size=page_size,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    )
+
+    pages = (total + page_size - 1) // page_size if total > 0 else 0
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": pages,
+    }
+
+
+@router.get("/publish-logs/{log_id}")
+async def get_publish_log_detail(
+    log_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    获取发布日志详情（含完整 diff）。
+    """
+    user = get_current_user(request, db)
+
+    # user 角色禁止访问
+    if user["role"] == "user":
+        raise HTTPException(status_code=403, detail={"error_code": "SM_021"})
+
+    sm = SemanticMaintenanceService()
+    detail = sm.get_publish_log_detail(log_id)
+
+    if not detail:
+        raise HTTPException(status_code=404, detail={"error_code": "SM_020"})
+
+    # analyst 只能查看自己操作的日志
+    if user["role"] == "analyst" and detail.get("operator"):
+        if detail["operator"].get("id") != user["id"]:
+            raise HTTPException(status_code=403, detail={"error_code": "SM_021"})
+
+    return detail
