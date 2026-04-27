@@ -96,16 +96,12 @@ test.describe('数据质量', () => {
 
   // ── 操作入口（如有）──────────────────────────────────────────
 
-  test('质量 Tab 可能有新增规则或刷新按钮', async ({ page }) => {
+  test('质量 Tab 展示质量相关内容或空状态', async ({ page }) => {
     await page.goto('/governance/health-center?tab=quality');
     await page.waitForTimeout(2000);
-    const hasAddBtn = await page.locator('button').filter({ hasText: /新增|添加|创建/i }).first().isVisible().catch(() => false);
-    const hasRefreshBtn = await page.locator('button').filter({ hasText: /刷新|重置/i }).first().isVisible().catch(() => false);
-    const hasRunBtn = await page.locator('button').filter({ hasText: /执行|运行|检查/i }).first().isVisible().catch(() => false);
-    // 至少有一个按钮存在即可，不强求
-    const hasAnyAction = hasAddBtn || hasRefreshBtn || hasRunBtn;
-    // 如果都没有，也算通过（因为功能可能还在开发中）
-    expect(true).toBe(true);
+    // 页面应展示：质量内容、或空状态提示、或加载中，不能是空白页
+    const hasContent = await page.locator('body').textContent();
+    expect(hasContent && hasContent.trim().length > 0).toBe(true);
   });
 
   // ── Tab 间切换 ──────────────────────────────────────────────

@@ -1,0 +1,211 @@
+name: External Real Tests
+
+# 外部服务集成测试——真实 LLM、真实 Tableau、真实 MCP
+# 不在 PR CI 中运行，仅通过 workflow_dispatch 手动触发
+# 失败不阻断普通 PR，但可作为发布前检查
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_target:
+        description: '测试目标'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - llm
+          - tableau
+          - mcp
+
+env:
+  DATABASE_URL: postgresql://mulan:mulan@localhost:5432/mulan_bi_test
+  SESSION_SECRET: external-test-secret!!
+  ADMIN_USERNAME: admin
+  ADMIN_PASSWORD: admin123
+  DATASOURCE_ENCRYPTION_KEY: external-datasource-key-32-bytes!!
+  TABLEAU_ENCRYPTION_KEY: external-tableau-key-32-bytes!!
+  LLM_ENCRYPTION_KEY: external-llm-key-32-bytes-ok!!!!
+  SERVICE_JWT_SECRET: external-service-jwt-secret-32-bytes
+  PYTHONPATH: backend
+  BASE_URL: http://localhost:3000
+  TABLEAU_PAT: ${{ secrets.TABLEAU_PAT }}
+  TABLEAU_SERVER_URL: ${{ secrets.TABLEAU_SERVER_URL }}
+  MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+
+jobs:
+  external-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: mulan
+          POSTGRES_PASSWORD: mulan
+          POSTGRES_DB: mulan_bi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── 目标筛选与 Secrets fail-fast ─────────────────────────
+      - name: Select external test target
+        run: |
+          case "${{ github.event.inputs.test_target }}" in
+            all)
+              echo "PLAYWRIGHT_GREP=@external" >> "$GITHUB_ENV"
+              ;;
+            llm)
+              echo "PLAYWRIGHT_GREP=@llm" >> "$GITHUB_ENV"
+              ;;
+            tableau)
+              echo "PLAYWRIGHT_GREP=@tableau" >> "$GITHUB_ENV"
+              ;;
+            mcp)
+              echo "PLAYWRIGHT_GREP=@mcp" >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "ERROR: unsupported test_target '${{ github.event.inputs.test_target }}'"
+              exit 1
+              ;;
+          esac
+
+      - name: Check required external secrets
+        run: |
+          target="${{ github.event.inputs.test_target }}"
+          missing=0
+
+          require_secret() {
+            name="$1"
+            value="$2"
+            if [ -z "$value" ]; then
+              echo "ERROR: required GitHub Secret $name is not configured for test_target=$target"
+              missing=1
+            fi
+          }
+
+          if [ "$target" = "all" ] || [ "$target" = "llm" ]; then
+            require_secret "MINIMAX_API_KEY" "$MINIMAX_API_KEY"
+          fi
+
+          if [ "$target" = "all" ] || [ "$target" = "tableau" ] || [ "$target" = "mcp" ]; then
+            require_secret "TABLEAU_PAT" "$TABLEAU_PAT"
+            require_secret "TABLEAU_SERVER_URL" "$TABLEAU_SERVER_URL"
+          fi
+
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      # ── Python 环境 ───────────────────────────────────────────
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      # ── Node.js 环境 ─────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      # ── 数据库初始化 ─────────────────────────────────────────
+      - name: Run database migrations
+        run: |
+          cd backend
+          alembic upgrade head
+
+      # ── Seed 测试用户 ─────────────────────────────────────────
+      - name: Seed smoke test users
+        run: |
+          cd backend
+          python3 scripts/seed_smoke.py
+
+      # ── 启动后端服务 ──────────────────────────────────────────
+      - name: Start backend
+        run: |
+          cd backend
+          nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/backend.log 2>&1 &
+          echo "Backend PID: $!"
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/api/auth/me > /dev/null 2>&1; then
+              echo "Backend is ready"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "❌ 后端在 60 秒内未就绪"
+              cat /tmp/backend.log
+              exit 1
+            fi
+            echo "Waiting for backend... ($i)"
+            sleep 2
+          done
+
+      # ── 启动前端服务 ─────────────────────────────────────────
+      - name: Start frontend dev server
+        run: |
+          cd frontend
+          nohup npm run dev > /tmp/frontend.log 2>&1 &
+          echo "Frontend PID: $!"
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3000 > /dev/null 2>&1; then
+              echo "Frontend port 3000 is listening"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "ERROR: Frontend did not start in 120s"
+              cat /tmp/frontend.log
+              exit 1
+            fi
+            sleep 2
+          done
+          sleep 5
+
+      # ── 安装 Playwright 浏览器 ─────────────────────────────────
+      - name: Install Playwright browsers
+        run: |
+          cd frontend
+          npx playwright install chromium --with-deps
+
+      # ── 运行 External 测试 ────────────────────────────────────
+      - name: Run external tests
+        run: |
+          cd frontend
+          npx playwright test \
+            -c playwright.external.config.ts \
+            --grep "$PLAYWRIGHT_GREP" \
+            --reporter=line \
+            --timeout=60000 \
+            --retries=1
+
+      # ── 上传测试报告 ─────────────────────────────────────────
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-external-report-${{ github.run_id }}
+          path: frontend/playwright-report/
+          retention-days: 30
