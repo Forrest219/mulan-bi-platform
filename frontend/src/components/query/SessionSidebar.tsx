@@ -39,6 +39,7 @@ interface SessionSidebarProps {
   onToggleCollapse: () => void;
   onNewSession: () => void;
   onSelectSession: (session: QuerySession) => void;
+  onDeleteSession?: (session: QuerySession) => void;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -51,6 +52,7 @@ export default function SessionSidebar({
   onToggleCollapse,
   onNewSession,
   onSelectSession,
+  onDeleteSession,
 }: SessionSidebarProps) {
   const grouped = useMemo(() => {
     const map: Partial<Record<TimeGroup, QuerySession[]>> = {};
@@ -129,6 +131,7 @@ export default function SessionSidebar({
                     session={session}
                     isActive={session.session_id === currentSessionId}
                     onSelectSession={onSelectSession}
+                    onDeleteSession={onDeleteSession}
                   />
                 ))}
               </div>
@@ -147,28 +150,48 @@ interface SessionItemProps {
   isActive: boolean;
   /** P1-3：接收稳定引用的 handler，避免内联箭头让 memo 失效 */
   onSelectSession: (session: QuerySession) => void;
+  onDeleteSession?: (session: QuerySession) => void;
 }
 
 // P1-3：memo 防止 SessionSidebar 重渲染时未变化的列表项重新渲染
-const SessionItem = memo(function SessionItem({ session, isActive, onSelectSession }: SessionItemProps) {
+const SessionItem = memo(function SessionItem({ session, isActive, onSelectSession, onDeleteSession }: SessionItemProps) {
   return (
-    <button
-      onClick={() => onSelectSession(session)}
+    <div
       className={[
-        'w-full text-left flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer',
+        'group w-full text-left flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer',
         'transition-colors text-sm',
         isActive
           ? 'bg-blue-50 text-blue-700'
           : 'text-slate-600 hover:bg-slate-100',
       ].join(' ')}
     >
-      <i className={`ri-chat-3-line text-base shrink-0 ${isActive ? 'text-blue-500' : 'text-slate-400'}`} />
-      <div className="flex-1 min-w-0">
-        <div className="truncate text-sm">{session.title || '未命名对话'}</div>
-        {session.datasource_name && (
-          <div className="truncate text-xs text-slate-400 mt-0.5">{session.datasource_name}</div>
-        )}
-      </div>
-    </button>
+      <button
+        onClick={() => onSelectSession(session)}
+        className="flex-1 flex items-center gap-2 min-w-0 text-left"
+      >
+        <i className={`ri-chat-3-line text-base shrink-0 ${isActive ? 'text-blue-500' : 'text-slate-400'}`} />
+        <div className="flex-1 min-w-0">
+          <div className="truncate text-sm">{session.title || '未命名对话'}</div>
+          {session.datasource_name && (
+            <div className="truncate text-xs text-slate-400 mt-0.5">{session.datasource_name}</div>
+          )}
+        </div>
+      </button>
+      {onDeleteSession && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDeleteSession(session);
+          }}
+          title="删除对话"
+          aria-label="删除对话"
+          className="shrink-0 w-6 h-6 flex items-center justify-center rounded-md
+                     text-slate-400 hover:text-red-500 hover:bg-red-50
+                     opacity-0 group-hover:opacity-100 transition-all duration-150"
+        >
+          <i className="ri-delete-bin-line text-sm" />
+        </button>
+      )}
+    </div>
   );
 });

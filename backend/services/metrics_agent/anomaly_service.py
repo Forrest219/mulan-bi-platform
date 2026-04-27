@@ -12,9 +12,8 @@ import logging
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
-from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.errors import MulanError
@@ -236,7 +235,7 @@ def _call_detection_algorithm(
 async def run_anomaly_detection(
     db: Session,
     tenant_id: uuid.UUID,
-    metric_ids: list[uuid.UUID] | None,
+    metric_ids: Optional[List[uuid.UUID]],
     detection_method: str,
     window_days: int = 30,
     threshold: float = 3.0,
@@ -348,9 +347,11 @@ async def run_anomaly_detection(
         db.commit()
     except Exception:
         db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail={"error_code": "INTERNAL", "message": "异常记录写入失败，请重试"},
+        raise MulanError(
+            "MC_500",
+            "异常记录写入失败，请重试",
+            500,
+            {"error_code": "INTERNAL", "message": "异常记录写入失败，请重试"},
         )
 
     # commit 成功后批量发射事件（失败不阻断）
@@ -385,8 +386,8 @@ def update_anomaly_status(
     anomaly_id: uuid.UUID,
     tenant_id: uuid.UUID,
     new_status: str,
-    resolved_by: int | None = None,
-    resolution_note: str | None = None,
+    resolved_by: Optional[int] = None,
+    resolution_note: Optional[str] = None,
 ) -> BiMetricAnomaly:
     """
     更新异常记录状态，执行状态机校验。

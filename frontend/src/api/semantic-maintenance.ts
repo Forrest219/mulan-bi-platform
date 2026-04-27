@@ -3,7 +3,7 @@ import { API_BASE } from '../config';
 // Types
 export type SemanticStatus = 'draft' | 'ai_generated' | 'pending_review' | 'reviewed' | 'approved' | 'rejected' | 'published';
 export type SensitivityLevel = 'low' | 'medium' | 'high' | 'confidential';
-export type PublishStatus = 'pending' | 'success' | 'failed' | 'rolled_back';
+export type PublishStatus = 'pending' | 'success' | 'failed' | 'rolled_back' | 'not_supported';
 
 export interface SemanticDatasource {
   id: number;
@@ -477,23 +477,91 @@ export async function rollbackPublish(logId: number, connectionId: number): Prom
   return res.json();
 }
 
-// Publish Logs API
+// Publish Logs API (Spec 19)
 
-export async function listPublishLogs(connectionId: number, params?: {
-  object_type?: string;
-  status?: string;
+export interface PublishLogListParams {
   page?: number;
   page_size?: number;
-}): Promise<{ items: PublishLog[]; total: number; page: number; page_size: number }> {
-  const sp = new URLSearchParams({
-    connection_id: String(connectionId),
-    ...(params?.object_type && { object_type: params.object_type }),
-    ...(params?.status && { status: params.status }),
-    ...(params?.page && { page: String(params.page) }),
-    ...(params?.page_size && { page_size: String(params.page_size) }),
-  });
-  const res = await fetch(`${API_BASE}/api/semantic-maintenance/review/publish/logs?${sp}`, { credentials: 'include' });
+  connection_id?: number;
+  object_type?: 'datasource' | 'field';
+  status?: string;
+  operator_id?: number;
+  start_date?: string;
+  end_date?: string;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
+}
+
+export interface PublishLogOperator {
+  id: number;
+  username: string;
+  display_name: string;
+}
+
+export interface PublishLogDiffSummary {
+  changed_fields: string[];
+  total_changes: number;
+  is_rollback?: boolean;
+}
+
+export interface PublishLogListItem {
+  id: number;
+  connection_id: number;
+  connection_name: string | null;
+  object_type: 'datasource' | 'field';
+  object_id: number;
+  object_name: string | null;
+  tableau_object_id: string | null;
+  status: 'pending' | 'success' | 'failed' | 'rolled_back' | 'not_supported';
+  response_summary: string | null;
+  operator: PublishLogOperator | null;
+  diff_summary: PublishLogDiffSummary;
+  created_at: string;
+}
+
+export interface PublishLogDetail extends PublishLogListItem {
+  target_system: string;
+  publish_payload: Record<string, unknown> | null;
+  diff: Record<string, { tableau: string | null; mulan: string | null }> | null;
+  rollback_diff: Record<string, string> | null;
+  can_rollback: boolean;
+  related_logs: Array<{
+    id: number;
+    status: string;
+    created_at: string;
+  }>;
+}
+
+export async function listPublishLogs(params?: PublishLogListParams): Promise<{
+  items: PublishLogListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+}> {
+  const sp = new URLSearchParams();
+  if (params?.page) sp.set('page', String(params.page));
+  if (params?.page_size) sp.set('page_size', String(params.page_size));
+  if (params?.connection_id) sp.set('connection_id', String(params.connection_id));
+  if (params?.object_type) sp.set('object_type', params.object_type);
+  if (params?.status) sp.set('status', params.status);
+  if (params?.operator_id) sp.set('operator_id', String(params.operator_id));
+  if (params?.start_date) sp.set('start_date', params.start_date);
+  if (params?.end_date) sp.set('end_date', params.end_date);
+  if (params?.sort_by) sp.set('sort_by', params.sort_by);
+  if (params?.sort_order) sp.set('sort_order', params.sort_order);
+
+  const res = await fetch(`${API_BASE}/api/semantic-maintenance/publish-logs?${sp}`, { credentials: 'include' });
   if (!res.ok) throw new Error('获取发布日志失败');
+  return res.json();
+}
+
+export async function getPublishLogDetail(logId: number): Promise<PublishLogDetail> {
+  const res = await fetch(`${API_BASE}/api/semantic-maintenance/publish-logs/${logId}`, { credentials: 'include' });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || '获取发布日志详情失败');
+  }
   return res.json();
 }
 

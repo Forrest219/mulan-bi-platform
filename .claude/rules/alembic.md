@@ -45,5 +45,6 @@ cd backend && alembic downgrade -1 && alembic upgrade head
 | `auth_` | 用户认证 | auth_users, auth_user_groups |
 | `bi_` | 核心业务 | bi_data_sources, bi_scan_logs, bi_requirements |
 | `ai_` | LLM/AI | ai_llm_configs |
+| `agent_` | Data Agent | agent_conversations, agent_conversation_messages |
 | `tableau_` | Tableau | tableau_connections, tableau_assets, tableau_field_semantics |
 | `mcp_` | MCP 配置 | mcp_servers, mcp_debug_logs |

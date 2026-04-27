@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { usePlatformSettings } from '../../context/PlatformSettingsContext';
+import { API_BASE } from '../../config';
 
 export default function RegisterPage() {
   const { settings } = usePlatformSettings();

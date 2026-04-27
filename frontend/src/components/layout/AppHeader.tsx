@@ -7,9 +7,9 @@
  * - 用户信息 + 登出
  */
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { LOGO_URL, getAvatarGradient } from '../../config';
+import { getAvatarGradient } from '../../config';
 
 export default function AppHeader() {
   const { user, logout } = useAuth();
@@ -24,14 +24,7 @@ export default function AppHeader() {
   const avatarGradient = getAvatarGradient(user?.display_name ?? 'A');
 
   return (
-    <header className="h-14 bg-white border-b border-slate-200 flex items-center px-4 gap-4 shrink-0 z-30">
-      {/* Logo */}
-      <div className="flex items-center gap-2 shrink-0">
-        <img src={LOGO_URL} alt="Mulan BI" className="h-7 w-auto object-contain" />
-        <span className="text-[13px] font-semibold text-slate-600 tracking-wide hidden sm:block">
-          木兰 BI 平台
-        </span>
-      </div>
+    <header className="h-[58px] bg-white border-b border-slate-200 flex items-center pl-4 pr-4 gap-4 shrink-0 z-30">
 
       {/* 全局搜索（占位，后续迭代） */}
       <div className="flex-1 max-w-md mx-auto">
@@ -75,6 +68,14 @@ export default function AppHeader() {
           <>
             <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
             <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-slate-200 rounded-xl shadow-lg z-50 py-1">
+              <Link
+                to="/account/security"
+                onClick={() => setMenuOpen(false)}
+                className="w-full flex items-center gap-2 px-4 py-2.5 text-[13px] text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                <i className="ri-shield-keyhole-line text-base" />
+                账户安全
+              </Link>
               <button
                 onClick={handleLogout}
                 className="w-full flex items-center gap-2 px-4 py-2.5 text-[13px] text-slate-600 hover:bg-slate-50 hover:text-red-600 transition-colors"

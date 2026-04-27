@@ -5,7 +5,7 @@ import {
   submitDatasourceForReview, approveDatasource, rejectDatasource,
   generateDatasourceAI, getDatasourceVersions, rollbackDatasource,
   getStatusBadge, getSensitivityBadge, publishDatasource, previewDatasourceDiff,
-  listPublishLogs, SemanticDatasource, SemanticVersion, PublishLog, SensitivityLevel,
+  listPublishLogs, SemanticDatasource, SemanticVersion, PublishLogListItem, SensitivityLevel,
 } from '../../../api/semantic-maintenance';
 import { ConfirmModal } from '../../../components/ConfirmModal';
 
@@ -27,7 +27,7 @@ export default function SemanticDatasourceDetailPage() {
   const navigate = useNavigate();
   const [ds, setDs] = useState<SemanticDatasource | null>(null);
   const [versions, setVersions] = useState<SemanticVersion[]>([]);
-  const [publishLogs, setPublishLogs] = useState<PublishLog[]>([]);
+  const [publishLogs, setPublishLogs] = useState<PublishLogListItem[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>('metadata');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -82,7 +82,8 @@ export default function SemanticDatasourceDetailPage() {
   const loadPublishLogs = async (page = 1) => {
     if (!ds) return;
     try {
-      const data = await listPublishLogs(ds.connection_id, {
+      const data = await listPublishLogs({
+        connection_id: ds.connection_id,
         object_type: 'datasource',
         page,
         page_size: 20,
@@ -473,15 +474,15 @@ export default function SemanticDatasourceDetailPage() {
                         </span>
                         <span className="text-xs text-slate-400">{formatDate(log.created_at)}</span>
                       </div>
-                      <span className="text-xs text-slate-400">操作人 ID: {log.operator}</span>
+                      <span className="text-xs text-slate-400">操作人: {log.operator?.display_name ?? log.operator?.username ?? '—'}</span>
                     </div>
-                    {log.diff_json && (
+                    {log.diff_summary && (
                       <pre className="text-xs text-slate-500 bg-slate-50 p-2 rounded overflow-auto">
-                        {JSON.stringify(JSON.parse(log.diff_json), null, 2)}
+                        {JSON.stringify(log.diff_summary, null, 2)}
                       </pre>
                     )}
-                    {log.error_message && (
-                      <p className="text-xs text-red-500 mt-1">错误: {log.error_message}</p>
+                    {log.response_summary && (
+                      <p className="text-xs text-red-500 mt-1">响应: {log.response_summary}</p>
                     )}
                   </div>
                 ))}

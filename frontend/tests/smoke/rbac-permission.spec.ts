@@ -131,32 +131,19 @@ test.describe('RBAC 权限隔离', () => {
 
   // ── 特定权限路由（正向：smoke_analyst 有 database_monitor）─────────
   // smoke_analyst 仅有 database_monitor 权限，可访问：
-  // /governance/health, /governance/quality, /assets/connection-center
+  // /governance/health-center, /assets/connections
 
   test.describe('smoke_analyst 权限正向验证 — database_monitor 权限有效', () => {
 
-    test('smoke_analyst 可访问数据健康页（database_monitor 权限）', async ({ page }) => {
+    test('smoke_analyst 可访问健康中心（database_monitor 权限）', async ({ page }) => {
       await loginAsSmokeUser(page);
       const loginFailed = await page.locator('text=用户名或密码错误').isVisible({ timeout: 1000 }).catch(() => false);
       if (loginFailed) { test.skip(); return; }
 
-      await page.goto('/governance/health');
+      await page.goto('/governance/health-center');
       await page.waitForTimeout(1500);
 
-      expect(page.url()).toContain('/governance/health');
-      const hasContent = await page.locator('h1').first().isVisible().catch(() => false);
-      expect(hasContent).toBe(true);
-    });
-
-    test('smoke_analyst 可访问数据质量页（database_monitor 权限）', async ({ page }) => {
-      await loginAsSmokeUser(page);
-      const loginFailed = await page.locator('text=用户名或密码错误').isVisible({ timeout: 1000 }).catch(() => false);
-      if (loginFailed) { test.skip(); return; }
-
-      await page.goto('/governance/quality');
-      await page.waitForTimeout(1500);
-
-      expect(page.url()).toContain('/governance/quality');
+      expect(page.url()).toContain('/governance/health-center');
       const hasContent = await page.locator('h1').first().isVisible().catch(() => false);
       expect(hasContent).toBe(true);
     });
@@ -166,10 +153,10 @@ test.describe('RBAC 权限隔离', () => {
       const loginFailed = await page.locator('text=用户名或密码错误').isVisible({ timeout: 1000 }).catch(() => false);
       if (loginFailed) { test.skip(); return; }
 
-      await page.goto('/assets/connection-center');
+      await page.goto('/assets/connections');
       await page.waitForTimeout(1500);
 
-      expect(page.url()).toContain('/assets/connection-center');
+      expect(page.url()).toContain('/assets/connections');
     });
   });
 

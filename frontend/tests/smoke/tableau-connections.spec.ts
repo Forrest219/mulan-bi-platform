@@ -3,6 +3,33 @@ import { test, expect } from '@playwright/test';
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? 'admin';
 const ADMIN_PASSWORD=process.env.ADMIN_PASSWORD ?? 'admin123';
 
+const MOCK_CONN = {
+  id: 1,
+  name: 'mcp_test_0419',
+  server_url: 'https://online.tableau.com',
+  site: 'https://online.tableau.com',
+  api_version: '3.21',
+  connection_type: 'mcp',
+  token_name: 'test',
+  is_active: true,
+  last_test_success: true,
+  auto_sync_enabled: false,
+  sync_interval_hours: 24,
+  sync_status: 'idle',
+  last_sync_at: null,
+  last_test_at: null,
+};
+
+function mockConnectionsRoute(page: import('@playwright/test').Page) {
+  return page.route('**/api/tableau/connections?*', route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ connections: [MOCK_CONN], total: 1 }),
+    })
+  );
+}
+
 test.describe('Tableau 连接管理', () => {
 
   test.beforeEach(async ({ page }) => {
@@ -106,5 +133,70 @@ test.describe('Tableau 连接管理', () => {
     await page.waitForTimeout(500);
     const isCheckedAfter = await checkbox.isChecked().catch(() => false);
     expect(isCheckedAfter).toBe(!isChecked);
+  });
+
+  test('同步成功时弹窗显示操作成功和具体消息', async ({ page }) => {
+    await mockConnectionsRoute(page);
+    await page.route('**/api/tableau/connections/1/sync', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, message: '同步任务已提交', status: 'pending', task_id: 'mock' }),
+      })
+    );
+
+    await page.goto('/assets/tableau-connections');
+    await expect(page.locator('text=mcp_test_0419')).toBeVisible({ timeout: 5000 });
+
+    await page.locator('button', { hasText: '同步' }).click();
+    await expect(page.locator('text=操作成功')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=同步任务已提交')).toBeVisible();
+  });
+  test('同步失败时结构化错误正确显示中文消息而非 [object Object]', async ({ page }) => {
+    await mockConnectionsRoute(page);
+    await page.route('**/api/tableau/connections/1/sync', route =>
+      route.fulfill({
+        status: 403,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          detail: { error_code: 'TAB_002', message: '无权访问此连接', detail: {} },
+        }),
+      })
+    );
+
+    await page.goto('/assets/tableau-connections');
+    await expect(page.locator('text=mcp_test_0419')).toBeVisible({ timeout: 5000 });
+
+    await page.locator('button', { hasText: '同步' }).click();
+
+    await expect(page.locator('text=操作失败')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=无权访问此连接')).toBeVisible();
+    await expect(page.locator('text=[object Object]')).toHaveCount(0);
+  });
+
+  test('同步失败后按钮恢复可点击状态', async ({ page }) => {
+    await mockConnectionsRoute(page);
+    await page.route('**/api/tableau/connections/1/sync', route =>
+      route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: '服务器内部错误' }),
+      })
+    );
+
+    await page.goto('/assets/tableau-connections');
+    await expect(page.locator('text=mcp_test_0419')).toBeVisible({ timeout: 5000 });
+
+    const syncBtn = page.locator('button', { hasText: '同步' });
+    await syncBtn.click();
+
+    await expect(page.locator('text=操作失败')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=服务器内部错误')).toBeVisible();
+
+    // 关闭弹窗
+    await page.locator('text=关闭').click();
+
+    // 按钮应恢复可点击
+    await expect(syncBtn).toBeEnabled();
   });
 });

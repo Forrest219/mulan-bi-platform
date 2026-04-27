@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { usePlatformSettings } from '../../context/PlatformSettingsContext';
+import { API_BASE } from '../../config';
 
 type LoginStep = 'credentials' | 'mfa';
 
@@ -198,20 +199,20 @@ export default function LoginPage() {
                       d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                   </svg>
                 </div>
-                <h2 className="text-base font-semibold text-slate-900">MFA 身份验证</h2>
-                <p className="text-sm text-slate-500 mt-1">请输入认证器 App 中的 6 位验证码</p>
+                <h2 className="text-base font-semibold text-slate-900">两步验证</h2>
+                <p className="text-sm text-slate-500 mt-1">请输入验证器应用中的 6 位验证码，或输入恢复代码</p>
               </div>
 
               <div>
                 <label htmlFor="mfaCode" className="block text-sm font-medium text-slate-700 mb-1">
-                  验证码
+                  验证码 / 恢复代码
                 </label>
                 <input
                   type="text"
                   id="mfaCode"
                   value={mfaCode}
-                  onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  maxLength={6}
+                  onChange={(e) => setMfaCode(e.target.value.replace(/[^0-9A-Fa-f]/g, '').slice(0, 8).toUpperCase())}
+                  maxLength={8}
                   required
                   autoFocus
                   className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm
@@ -234,7 +235,7 @@ export default function LoginPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={loading || mfaCode.length !== 6}
+                  disabled={loading || mfaCode.length < 6}
                   className="flex-1 bg-blue-700 hover:bg-blue-800 text-white font-medium
                              text-sm py-2.5 rounded-md transition-colors duration-150
                              disabled:opacity-50 disabled:cursor-not-allowed"

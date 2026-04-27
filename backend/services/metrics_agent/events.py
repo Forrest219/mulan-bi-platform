@@ -10,6 +10,7 @@
 """
 
 import logging
+from typing import Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -33,7 +34,7 @@ def emit_metric_published(
     metric_id: UUID,
     name: str,
     tenant_id: UUID,
-    actor_id: int | None = None,
+    actor_id: Optional[int] = None,
 ) -> None:
     """指标发布成功事件。
 
@@ -70,7 +71,7 @@ def emit_anomaly_detected(
     detection_method: str,
     deviation_score: float,
     tenant_id: UUID,
-    actor_id: int | None = None,
+    actor_id: Optional[int] = None,
 ) -> None:
     """指标异常检测事件。
 
@@ -107,9 +108,9 @@ def emit_consistency_failed(
     check_id: UUID,
     metric_id: UUID,
     metric_name: str,
-    difference_pct: float | None,
+    difference_pct: Optional[float],
     tenant_id: UUID,
-    actor_id: int | None = None,
+    actor_id: Optional[int] = None,
 ) -> None:
     """指标一致性校验失败事件（check_status="fail"）。
 

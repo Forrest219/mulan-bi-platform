@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import {
   listMetrics, createMetric, updateMetric, deleteMetric,
   submitReviewMetric, approveMetric, publishMetric,
@@ -414,7 +415,9 @@ export default function MetricsPage() {
                   <tr key={item.id} className="border-t border-slate-100 hover:bg-slate-50">
                     {/* 指标名 */}
                     <td className="px-4 py-3">
-                      <div className="font-semibold text-slate-700 text-[13px]">{item.name}</div>
+                      <Link to={`/governance/metrics/${item.id}`} className="font-semibold text-blue-600 hover:text-blue-800 text-[13px] hover:underline">
+                        {item.name}
+                      </Link>
                       {item.name_zh && <div className="text-[11px] text-slate-500">{item.name_zh}</div>}
                     </td>
                     {/* 类型 */}

@@ -609,6 +609,268 @@ class SemanticMaintenanceDatabase:
         finally:
             s.remove()
 
+    def list_publish_logs_with_filters(
+        self,
+        connection_id: Optional[int] = None,
+        object_type: Optional[str] = None,
+        status: Optional[str] = None,
+        operator_id: Optional[int] = None,
+        start_date=None,
+        end_date=None,
+        page: int = 1,
+        page_size: int = 20,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+    ) -> tuple:
+        """
+        带多条件过滤的发布日志列表查询，支持 JOIN 获取连接名、对象名、操作人信息。
+        返回 (list of dicts, total_count)
+        """
+        from services.tableau.models import TableauConnection
+        from app.core.database import SessionLocal as AppSessionLocal
+
+        s = self.session
+        app_session = AppSessionLocal()
+        try:
+            # Base query with joins
+            query = s.query(TableauPublishLog).outerjoin(
+                TableauConnection,
+                TableauPublishLog.connection_id == TableauConnection.id
+            )
+
+            # Apply filters
+            if connection_id is not None:
+                query = query.filter(TableauPublishLog.connection_id == connection_id)
+            if object_type:
+                query = query.filter(TableauPublishLog.object_type == object_type)
+            if status:
+                query = query.filter(TableauPublishLog.status == status)
+            if operator_id is not None:
+                query = query.filter(TableauPublishLog.operator == operator_id)
+            if start_date:
+                query = query.filter(TableauPublishLog.created_at >= start_date)
+            if end_date:
+                query = query.filter(TableauPublishLog.created_at <= end_date)
+
+            # Sorting
+            sort_column = getattr(TableauPublishLog, sort_by, TableauPublishLog.created_at)
+            if sort_order == "asc":
+                query = query.order_by(sort_column.asc())
+            else:
+                query = query.order_by(sort_column.desc())
+
+            # Total count before pagination
+            total = query.count()
+
+            # Pagination
+            items = query.offset((page - 1) * page_size).limit(page_size).all()
+
+            # Build result with joined data
+            results = []
+            for log in items:
+                # Get connection name
+                connection_name = None
+                if log.connection_id:
+                    try:
+                        conn = app_session.query(TableauConnection).filter(
+                            TableauConnection.id == log.connection_id
+                        ).first()
+                        if conn:
+                            connection_name = conn.name
+                    except Exception:
+                        connection_name = f"连接 {log.connection_id}"
+
+                # Get object name from semantics tables
+                object_name = None
+                if log.object_type == "datasource":
+                    try:
+                        from .models import TableauDatasourceSemantics
+                        ds = app_session.query(TableauDatasourceSemantics).filter(
+                            TableauDatasourceSemantics.id == log.object_id
+                        ).first()
+                        if ds:
+                            object_name = ds.semantic_name_zh or ds.semantic_name
+                    except Exception:
+                        object_name = f"数据源 {log.object_id}"
+                elif log.object_type == "field":
+                    try:
+                        from .models import TableauFieldSemantics
+                        field = app_session.query(TableauFieldSemantics).filter(
+                            TableauFieldSemantics.id == log.object_id
+                        ).first()
+                        if field:
+                            object_name = field.semantic_name_zh or field.semantic_name
+                    except Exception:
+                        object_name = f"字段 {log.object_id}"
+
+                # Get operator info
+                operator_info = None
+                if log.operator:
+                    try:
+                        from services.auth.models import User
+                        user = app_session.query(User).filter(User.id == log.operator).first()
+                        if user:
+                            operator_info = {
+                                "id": user.id,
+                                "username": user.username,
+                                "display_name": getattr(user, "display_name", None) or user.username,
+                            }
+                    except Exception:
+                        operator_info = {"id": log.operator, "username": str(log.operator), "display_name": str(log.operator)}
+
+                # Build diff_summary from diff_json
+                diff_summary = {"changed_fields": [], "total_changes": 0}
+                if log.diff_json and isinstance(log.diff_json, dict):
+                    # Check if it's a rollback diff
+                    if "rollback" in log.diff_json:
+                        diff_summary["changed_fields"] = list(log.diff_json.get("rollback", {}).keys())
+                        diff_summary["total_changes"] = len(diff_summary["changed_fields"])
+                        diff_summary["is_rollback"] = True
+                    else:
+                        diff_summary["changed_fields"] = list(log.diff_json.keys())
+                        diff_summary["total_changes"] = len(diff_summary["changed_fields"])
+
+                results.append({
+                    "id": log.id,
+                    "connection_id": log.connection_id,
+                    "connection_name": connection_name,
+                    "object_type": log.object_type,
+                    "object_id": log.object_id,
+                    "object_name": object_name,
+                    "tableau_object_id": log.tableau_object_id,
+                    "status": log.status,
+                    "response_summary": log.response_summary,
+                    "operator": operator_info,
+                    "diff_summary": diff_summary,
+                    "created_at": log.created_at.strftime("%Y-%m-%dT%H:%M:%SZ") if log.created_at else None,
+                })
+
+            return results, total
+        finally:
+            s.remove()
+            app_session.close()
+
+    def get_publish_log_detail(self, log_id: int) -> Optional[dict]:
+        """
+        获取发布日志详情，JOIN 连接名、对象名、操作人信息、完整 diff、related_logs。
+        """
+        from services.tableau.models import TableauConnection
+        from app.core.database import SessionLocal as AppSessionLocal
+
+        s = self.session
+        app_session = AppSessionLocal()
+        try:
+            log = s.query(TableauPublishLog).filter(TableauPublishLog.id == log_id).first()
+            if not log:
+                return None
+
+            # Get connection name
+            connection_name = None
+            if log.connection_id:
+                try:
+                    conn = app_session.query(TableauConnection).filter(
+                        TableauConnection.id == log.connection_id
+                    ).first()
+                    if conn:
+                        connection_name = conn.name
+                except Exception:
+                    connection_name = f"连接 {log.connection_id}"
+
+            # Get object name
+            object_name = None
+            if log.object_type == "datasource":
+                try:
+                    from .models import TableauDatasourceSemantics
+                    ds = app_session.query(TableauDatasourceSemantics).filter(
+                        TableauDatasourceSemantics.id == log.object_id
+                    ).first()
+                    if ds:
+                        object_name = ds.semantic_name_zh or ds.semantic_name
+                except Exception:
+                    object_name = f"数据源 {log.object_id}"
+            elif log.object_type == "field":
+                try:
+                    from .models import TableauFieldSemantics
+                    field = app_session.query(TableauFieldSemantics).filter(
+                        TableauFieldSemantics.id == log.object_id
+                    ).first()
+                    if field:
+                        object_name = field.semantic_name_zh or field.semantic_name
+                except Exception:
+                    object_name = f"字段 {log.object_id}"
+
+            # Get operator info
+            operator_info = None
+            if log.operator:
+                try:
+                    from services.auth.models import User
+                    user = app_session.query(User).filter(User.id == log.operator).first()
+                    if user:
+                        operator_info = {
+                            "id": user.id,
+                            "username": user.username,
+                            "display_name": getattr(user, "display_name", None) or user.username,
+                        }
+                except Exception:
+                    operator_info = {"id": log.operator, "username": str(log.operator), "display_name": str(log.operator)}
+
+            # Get related logs (same object_type + object_id)
+            related_logs = []
+            try:
+                related = s.query(TableauPublishLog).filter(
+                    TableauPublishLog.object_type == log.object_type,
+                    TableauPublishLog.object_id == log.object_id,
+                    TableauPublishLog.id != log.id,
+                ).order_by(TableauPublishLog.created_at.desc()).limit(5).all()
+                related_logs = [
+                    {
+                        "id": r.id,
+                        "status": r.status,
+                        "created_at": r.created_at.strftime("%Y-%m-%dT%H:%M:%SZ") if r.created_at else None,
+                    }
+                    for r in related
+                ]
+            except Exception:
+                pass
+
+            # Determine if rollback diff
+            is_rollback = log.diff_json and isinstance(log.diff_json, dict) and "rollback" in log.diff_json
+
+            # Build diff_summary (same logic as list endpoint)
+            diff_summary = {"changed_fields": [], "total_changes": 0}
+            if log.diff_json and isinstance(log.diff_json, dict):
+                if "rollback" in log.diff_json:
+                    diff_summary["changed_fields"] = list(log.diff_json.get("rollback", {}).keys())
+                    diff_summary["total_changes"] = len(diff_summary["changed_fields"])
+                    diff_summary["is_rollback"] = True
+                else:
+                    diff_summary["changed_fields"] = list(log.diff_json.keys())
+                    diff_summary["total_changes"] = len(diff_summary["changed_fields"])
+
+            return {
+                "id": log.id,
+                "connection_id": log.connection_id,
+                "connection_name": connection_name,
+                "object_type": log.object_type,
+                "object_id": log.object_id,
+                "object_name": object_name,
+                "tableau_object_id": log.tableau_object_id,
+                "target_system": log.target_system,
+                "status": log.status,
+                "response_summary": log.response_summary,
+                "operator": operator_info,
+                "diff_summary": diff_summary,
+                "publish_payload": log.publish_payload_json,
+                "diff": log.diff_json if not is_rollback else None,
+                "rollback_diff": log.diff_json.get("rollback") if is_rollback else None,
+                "created_at": log.created_at.strftime("%Y-%m-%dT%H:%M:%SZ") if log.created_at else None,
+                "can_rollback": log.status == "success",
+                "related_logs": related_logs,
+            }
+        finally:
+            s.remove()
+            app_session.close()
+
     # ============================================================
     # 字段向量 Embedding（HNSW — 复用 kb_embeddings 表）
     # ============================================================

@@ -37,6 +37,27 @@ services:
       timeout: 5s
       retries: 5
 
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mulan-bi-celery
+    restart: unless-stopped
+    command: celery -A services.tasks worker --beat --loglevel=info
+    environment:
+      DATABASE_URL: postgresql://mulan:mulan@postgres:5432/mulan_bi
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      TABLEAU_ENCRYPTION_KEY: ${TABLEAU_ENCRYPTION_KEY:-}
+      DATASOURCE_ENCRYPTION_KEY: ${DATASOURCE_ENCRYPTION_KEY:-}
+      LLM_ENCRYPTION_KEY: ${LLM_ENCRYPTION_KEY:-}
+      TZ: Asia/Shanghai
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   pgdata:
     driver: local

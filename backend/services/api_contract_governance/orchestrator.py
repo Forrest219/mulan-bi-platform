@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from .comparator import Comparator
 from .dao import ApiContractAssetDao, ApiFieldChangeEventDao, ApiFieldSnapshotDao
-from .models import ApiContractAsset, ApiFieldChangeEvent
+from .models import ApiContractAsset, ApiFieldChangeEvent, ApiFieldSnapshot
 from .sampler import GraphQLSampler, HttpRequestError, Sampler
 from .types import ApiResponse, ComparisonResult, FieldSchema
 

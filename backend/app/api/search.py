@@ -37,6 +37,11 @@ from services.llm.nlq_service import (
 )
 from services.tableau.mcp_client import get_tableau_mcp_client
 
+# Spec 22 P0: Multi-Site MCP imports
+from services.mcp.site_selector import site_selector
+from services.mcp.concurrent_dispatcher import ConcurrentMCPDispatcher
+from services.mcp.models import SiteInfo
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -45,8 +50,60 @@ import os as _os
 _MCP_PROXY_URL = _os.environ.get("INTERNAL_API_BASE", "http://localhost:8000") + "/tableau-mcp"
 
 
+# Spec 22 P0: Multi-Site MCP Query Helper
+async def _query_multiple_sites_concurrent(
+    sites: list[SiteInfo],
+    question: str,
+    datasource_luid: str,
+    timeout: float = 10.0,
+) -> list:
+    """
+    Execute a query across multiple sites concurrently.
+    
+    Spec 22 P0: Multi-site MCP concurrent dispatch
+    
+    Args:
+        sites: List of SiteInfo to query
+        question: The user's question
+        datasource_luid: The datasource to query
+        timeout: Timeout per site in seconds
+        
+    Returns:
+        List of results sorted by elapsed time (fastest first)
+    """
+    if not sites:
+        return []
+    
+    dispatcher = ConcurrentMCPDispatcher(default_timeout=timeout)
+    results = await dispatcher.query_multiple_sites(sites, question)
+    
+    # Deduplicate by content hash
+    deduped = dispatcher.deduplicate_results(results)
+    
+    logger.info(
+        "Multi-site query completed: %d sites, %d results after dedup",
+        len(sites), len(deduped)
+    )
+    
+    return [
+        {
+            "site_id": r.site_id,
+            "site_name": r.site_name,
+            "success": r.success,
+            "data": r.data,
+            "error": r.error,
+            "elapsed_ms": r.elapsed_ms,
+        }
+        for r in deduped
+    ]
+
+
 class QueryRequest(BaseModel):
-    """POST /api/search/query 请求体（PRD §6.2）"""
+    """POST /api/search/query 请求体（PRD §6.2）
+
+    Spec 22 P0: 多站点 MCP 并发调度
+    - target_sites: Optional list of site_ids to query concurrently
+    """
 
     question: str
     datasource_luid: Optional[str] = None
@@ -55,6 +112,7 @@ class QueryRequest(BaseModel):
     options: Optional[dict] = None
     use_conversation_context: bool = False  # P2：追问时携带上轮上下文
     task_run_id: Optional[str] = None  # Spec 24 P0：关联 TaskRun（可选）
+    target_sites: Optional[list[str]] = None  # Spec 22 P0: 多站点并发查询目标
 
 
 def _require_role(user, min_role: str) -> None:
@@ -1333,6 +1391,7 @@ async def query(
     datasource_luid = body.datasource_luid
     # connection_id >= 10000 是 MCP 虚拟连接 ID，后端不存在对应 tableau_connections 记录，视为全局路由
     connection_id = body.connection_id if (body.connection_id is None or body.connection_id < 10000) else None
+    target_sites = body.target_sites  # Spec 22 P0: 多站点并发查询目标
     options = body.options or {}
 
     # P2-1：追问上下文继承 — 从上轮 query_context 中补填 connection_id / datasource_luid

@@ -23,7 +23,7 @@
 | 层级 | 技术 |
 |------|------|
 | 前端 | React 19 + TypeScript + Vite + Tailwind CSS + React Router v7 |
-| 后端 | FastAPI + SQLAlchemy 2.x + PostgreSQL 16 |
+| 后端 | Python ≥ 3.10 + FastAPI + SQLAlchemy 2.x + PostgreSQL 16 |
 | 数据库 | PostgreSQL 16（JSONB、连接池、Alembic 迁移） |
 | 认证 | Session/Cookie (HTTP Only) + PBKDF2-SHA256 密码哈希 |
 | 测试 | pytest + Vitest + Playwright |
@@ -82,6 +82,7 @@ cd frontend && npm test -- --run                               # 前端测试
 |------|------|
 | `product-positioning.md` | 用户画像、Workflow、成功指标、Non-Goals |
 | `project-structure.md` | 目录结构与各层约束 |
+| `dev-constraints.md` | 开发交付通用约束（9 条架构红线 + 验证命令） |
 | `alembic.md` | Alembic 硬性规范 + 表前缀约定 + 迁移验证命令 |
 | `gotchas.md` | 技术陷阱 1-6（AuthContext、React.lazy、router、server_default、LLM 降级、中文文案） |
 | `no-shortcut-principle.md` | 禁止救急方案 + 核心链路避免 mock |

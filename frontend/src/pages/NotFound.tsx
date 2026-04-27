@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { usePlatformSettings } from './context/PlatformSettingsContext';
+import { usePlatformSettings } from '../context/PlatformSettingsContext';
 
 export default function NotFound() {
   const { settings } = usePlatformSettings();

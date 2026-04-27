@@ -11,7 +11,7 @@
  *   内部计时/幂等值用 useRef，不用 useState，避免无限重渲染
  */
 import { useState, useCallback, useRef } from 'react';
-import { askQueryStream, listQueryMessages, type AskQueryRequest, type QueryApiError } from '../api/query';
+import { askQueryStream, listQueryMessages, type AskQueryRequest } from '../api/query';
 
 export interface QuerySessionMessage {
   id: string;

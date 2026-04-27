@@ -1,7 +1,7 @@
 """add_agent_conversations_and_messages
 
 Revision ID: 20260424_010000
-Revises: 20260421_060000
+Revises: 04e780a305b9
 Create Date: 2026-04-24
 
 Spec 36 §4.1 — Data Agent 会话表（Phase 1）：
@@ -27,7 +27,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "20260424_010000"
-down_revision: Union[str, None] = "20260421_060000"
+down_revision: Union[str, None] = "04e780a305b9"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

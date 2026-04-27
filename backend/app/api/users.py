@@ -39,6 +39,15 @@ class UpdateUserRequest(BaseModel):
 
     display_name: Optional[str] = None
     email: Optional[str] = None
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+    group_ids: Optional[list[int]] = None
+
+
+class AdminResetPasswordRequest(BaseModel):
+    """管理员重置用户密码请求"""
+
+    new_password: str
 
 
 @router.get("/", dependencies=[Depends(get_current_admin)])
@@ -68,17 +77,60 @@ async def create_user(request: CreateUserRequest):
     return {"user": user, "message": "用户创建成功"}
 
 
-@router.put("/{user_id}", dependencies=[Depends(get_current_admin)])
-async def update_user(user_id: int, request: UpdateUserRequest):
-    """更新用户基础信息（管理员）"""
-    updated = auth_service.update_user_info(
-        user_id,
-        display_name=request.display_name,
-        email=request.email,
-    )
-    if not updated:
+@router.get("/{user_id}", dependencies=[Depends(get_current_admin)])
+async def get_user(user_id: int):
+    """获取指定用户详情（管理员）"""
+    user = auth_service.get_user(user_id)
+    if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
-    return {"user": updated, "message": "用户信息已更新"}
+    return user
+
+
+@router.put("/{user_id}", dependencies=[Depends(get_current_admin)])
+async def update_user(user_id: int, request: UpdateUserRequest, http_request: Request):
+    """更新用户基础信息（管理员）"""
+    # 处理 role 变更
+    if request.role is not None:
+        if request.role not in VALID_ROLES:
+            raise HTTPException(status_code=400, detail="无效的角色")
+        # 防止把自己降级
+        current_user = get_current_user(http_request)
+        if current_user["id"] == user_id and request.role != "admin":
+            raise HTTPException(status_code=400, detail="不能将自己的角色降级")
+        auth_service.update_user_role(user_id, request.role)
+
+    # 处理 is_active 变更
+    if request.is_active is not None:
+        auth_service.toggle_user_active(user_id)
+
+    # 处理 group_ids 变更
+    if request.group_ids is not None:
+        user = auth_service.get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        # 替换组成员
+        current_groups = set(auth_service.get_user_groups(user_id))
+        desired_groups = set(request.group_ids)
+        # 移除不在desired中的
+        for g in current_groups:
+            if g["id"] not in desired_groups:
+                auth_service.remove_user_from_group(user_id, g["id"])
+        # 添加在desired中的
+        for gid in desired_groups:
+            if gid not in [g["id"] for g in current_groups]:
+                auth_service.add_user_to_group(user_id, gid)
+
+    # 处理 display_name / email 变更
+    if request.display_name is not None or request.email is not None:
+        updated = auth_service.update_user_info(
+            user_id,
+            display_name=request.display_name,
+            email=request.email,
+        )
+        if not updated:
+            raise HTTPException(status_code=404, detail="用户不存在或邮箱已被使用")
+
+    return {"user": auth_service.get_user(user_id), "message": "用户信息已更新"}
 
 
 @router.put("/{user_id}/role", dependencies=[Depends(get_current_admin)])
@@ -157,3 +209,12 @@ async def delete_user(user_id: int, http_request: Request):
         raise HTTPException(status_code=404, detail="用户不存在")
 
     return {"message": "用户已删除"}
+
+
+@router.post("/{user_id}/reset-password", dependencies=[Depends(get_current_admin)])
+async def admin_reset_password(user_id: int, request: AdminResetPasswordRequest, http_request: Request):
+    """管理员重置用户密码"""
+    success, message = auth_service.admin_reset_password(user_id, request.new_password)
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    return {"message": message}

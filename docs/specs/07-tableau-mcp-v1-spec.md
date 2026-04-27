@@ -1333,4 +1333,48 @@ Celery Beat (每60s)          scheduled_sync_all          PostgreSQL         syn
 
 ---
 
+## 11. 开发交付约束
+
+> 通用约束见 `.claude/rules/dev-constraints.md`（自动加载），以下为本模块特有约束。
+
+### 11.1 强制检查清单
+
+- [ ] **import 路径**：所有 `from src.tableau` → `from services.tableau`
+- [ ] **IDOR 防护**：`/tableau/assets/:id` 详情接口必须加 `connection_id` 过滤
+- [ ] **Session 隔离**：API 层用 `Depends(get_db)`，Celery 层用 `get_db_context()`
+- [ ] **Field Metadata 同步**：sync_pipeline 必须包含 Step 4（field_metadata sync）
+- [ ] **重试退避**：连接失败使用指数退避 + jitter（非固定间隔）
+- [ ] **Token 上限**：单次 LLM 调用 ≤ 8192 tokens（tiktoken cl100k_base）
+
+### 11.2 正确/错误示范
+
+```python
+# ✗ 错误 — src.tableau 不存在
+from src.tableau.models import TableauConnection
+
+# ✓ 正确
+from services.tableau.models import TableauConnection
+```
+
+```python
+# ✓ 正确 — services/ 层无 FastAPI 依赖
+# services/tableau/sync_service.py
+from services.tableau.models import TableauConnection
+from app.core.database import get_db_context
+import httpx
+
+class TableauSyncService:
+    def sync_workbooks(self, connection_id: str):
+        db = get_db_context()  # Celery 兼容
+```
+
+### 11.3 验证命令
+
+```bash
+ruff check backend/services/tableau/ --output-format=github
+# F821（undefined name）或 F401（unused import）必须修复
+```
+
+---
+
 *文档结束*

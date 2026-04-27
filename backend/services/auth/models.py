@@ -156,6 +156,8 @@ class RefreshToken(Base):
     user_id = Column(Integer, ForeignKey('auth_users.id', ondelete='CASCADE'), nullable=False, index=True)
     token_hash = Column(String(64), nullable=False, unique=True)  # SHA-256 hash of the raw token
     device_fingerprint = Column(String(256), nullable=True)  # 浏览器 UA/IP 指纹（可选）
+    ip_address = Column(String(45), nullable=True)  # 支持 IPv6
+    user_agent = Column(String(512), nullable=True)  # 浏览器 UA
     expires_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
     revoked_at = Column(DateTime, nullable=True)  # 撤销时间，非空表示已撤销
@@ -163,6 +165,50 @@ class RefreshToken(Base):
     __table_args__ = (
         Index("ix_refresh_tokens_user_id", "user_id"),
         Index("ix_refresh_tokens_token_hash", "token_hash"),
+    )
+
+
+class PasswordResetToken(Base):
+    """密码重置 Token 表"""
+    __tablename__ = "auth_password_reset_tokens"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('auth_users.id', ondelete='CASCADE'), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True)  # SHA-256 hash of the raw token
+    expires_at = Column(DateTime, nullable=False)
+    is_used = Column(Boolean, default=False, server_default=sa_text('false'))
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
+
+    __table_args__ = (
+        Index("ix_password_reset_tokens_user_id", "user_id"),
+        Index("ix_password_reset_tokens_token_hash", "token_hash"),
+    )
+
+
+class ApiToken(Base):
+    """API Token 表 — 用于程序化/API 访问认证（Spec 27）
+
+    token_hash: SHA-256 hash，不存原始 token
+    prefix: token 前缀（如 'mlbi_xxxx'），便于用户识别
+    """
+    __tablename__ = "auth_api_tokens"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('auth_users.id', ondelete='CASCADE'), nullable=False)
+    name = Column(String(128), nullable=False)  # token 用途描述（如 "CI Pipeline"）
+    token_hash = Column(String(64), nullable=False, unique=True)  # SHA-256 hash
+    prefix = Column(String(16), nullable=False)  # 前缀用于识别（如 mlbi_a1b2）
+    scopes = Column(JSONB, nullable=True)  # 权限范围（JSON 数组），null 表示继承用户全部权限
+    expires_at = Column(DateTime, nullable=True)  # null 表示永不过期
+    last_used_at = Column(DateTime, nullable=True)
+    is_active = Column(Boolean, default=True, server_default=sa_text('true'), nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
+    revoked_at = Column(DateTime, nullable=True)  # 撤销时间
+
+    __table_args__ = (
+        Index("ix_api_tokens_user_id", "user_id"),
+        Index("ix_api_tokens_token_hash", "token_hash"),
+        Index("ix_api_tokens_prefix", "prefix"),
     )
 
 
@@ -393,6 +439,8 @@ class UserDatabase:
         token_hash: str,
         expires_at: datetime,
         device_fingerprint: str = None,
+        ip_address: str = None,
+        user_agent: str = None,
     ) -> "RefreshToken":
         """创建 refresh token 记录"""
         token = RefreshToken(
@@ -400,6 +448,8 @@ class UserDatabase:
             token_hash=token_hash,
             expires_at=expires_at,
             device_fingerprint=device_fingerprint,
+            ip_address=ip_address,
+            user_agent=user_agent,
         )
         self.session.add(token)
         self.session.commit()
@@ -493,6 +543,69 @@ class UserDatabase:
         """获取用户加密存储的备用码"""
         user = self.get_user(user_id)
         return user.mfa_backup_codes_encrypted if user else None
+
+    # ========== 密码重置 Token 管理 ==========
+
+    def create_password_reset_token(self, user_id: int, token_hash: str, expires_at: datetime) -> "PasswordResetToken":
+        """创建密码重置 token（先使该用户旧 token 失效）"""
+        # 使该用户所有未使用的 token 失效
+        self.session.query(PasswordResetToken).filter(
+            PasswordResetToken.user_id == user_id,
+            PasswordResetToken.is_used == False,
+        ).update({"is_used": True})
+        token = PasswordResetToken(
+            user_id=user_id,
+            token_hash=token_hash,
+            expires_at=expires_at,
+        )
+        self.session.add(token)
+        self.session.commit()
+        return token
+
+    def verify_password_reset_token(self, token_hash: str) -> Optional["PasswordResetToken"]:
+        """验证密码重置 token"""
+        now = datetime.utcnow()
+        return (
+            self.session.query(PasswordResetToken)
+            .filter(
+                PasswordResetToken.token_hash == token_hash,
+                PasswordResetToken.is_used == False,
+                PasswordResetToken.expires_at > now,
+            )
+            .first()
+        )
+
+    def mark_password_reset_token_used(self, token_hash: str) -> bool:
+        """标记 token 为已使用"""
+        token = (
+            self.session.query(PasswordResetToken)
+            .filter(PasswordResetToken.token_hash == token_hash)
+            .first()
+        )
+        if not token:
+            return False
+        token.is_used = True
+        self.session.commit()
+        return True
+
+    def get_password_reset_request_count(self, email: str, window_seconds: int = 3600) -> int:
+        """获取某邮箱在过去 window_seconds 内的密码重置请求次数"""
+        from datetime import datetime as dt
+        cutoff = dt.utcnow() - dt.fromtimestamp(0).replace(hour=0, minute=0, second=0)
+        cutoff = datetime.utcnow().replace(second=0, microsecond=0)
+        import time
+        cutoff = datetime.utcfromtimestamp(time.time() - window_seconds)
+        user = self.get_user_by_email(email)
+        if not user:
+            return 0
+        return (
+            self.session.query(PasswordResetToken)
+            .filter(
+                PasswordResetToken.user_id == user.id,
+                PasswordResetToken.created_at >= cutoff,
+            )
+            .count()
+        )
 
     # close 方法不再需要，因为 session 由 SessionLocal 管理
     # def close(self):

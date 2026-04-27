@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext
+from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
 from models.metrics import BiMetricDefinition
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,12 @@ class MetricsTool(BaseTool):
 
     name = "metrics"
     description = "查询指标定义和维度信息。当用户询问「有哪些指标」「指标的计算方式」「某指标的维度」时使用。"
+    metadata = ToolMetadata(
+        category="query",
+        version="1.0.0",
+        dependencies=["requires_database"],
+        tags=["metrics", "dimensions", "kpi"],
+    )
     parameters_schema = {
         "type": "object",
         "properties": {

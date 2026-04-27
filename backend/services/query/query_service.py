@@ -2,7 +2,7 @@
 Spec 14 T-02 — 问数业务服务层
 
 职责边界（严格遵守）：
-- QueryService  : 问数核心业务逻辑（不 import FastAPI / Request）
+- QueryService  : 问数核心业务逻辑（不 import web framework / Request）
   - list_datasources()  : 签发用户 JWT → 调用 MCP 获取该用户有权限的数据源列表
   - ask()               : 签发 JWT → MCP 查询（以用户身份）→ LLM 摘要 → 持久化消息记录
 - QueryMessageDatabase : query_sessions / query_messages 表 CRUD
@@ -301,7 +301,7 @@ class QueryService:
 
     设计原则：
     - 不持有 DB Session（db 由调用方每次传入）
-    - 不 import FastAPI / Request（services/ 层隔离规范）
+    - 不 import web framework / Request（services/ 层隔离规范）
     - 每次请求实例化 JWTService（不缓存 JWT token，防重放）
     - MCP 调用以用户身份发起（jwt_token 注入 Authorization header）
     - LLM 摘要失败时降级：返回数据表 + 空摘要，不抛异常

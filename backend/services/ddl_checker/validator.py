@@ -88,6 +88,9 @@ class DatabaseRulesAdapter:
 
         # 按 rule_id 建立索引，仅保留启用的规则
         enabled_rules = [r for r in all_rules if r.enabled]
+        # 按 db_type 过滤：仅加载当前数据库类型和通用规则
+        enabled_rules = [r for r in enabled_rules
+                         if r.db_type.lower() in (self.db_type.lower(), "all")]
 
         # 转换为 dict 列表（避免 ORM 对象序列化问题）
         rules_list = []
@@ -163,6 +166,11 @@ class DatabaseRulesAdapter:
                 return scene_weights[self.scene_type]
         return DEFAULT_WEIGHTS
 
+    def _find_sr_rules_by_category(self, category: str) -> List[Dict[str, Any]]:
+        """查找指定 category 的所有 StarRocks 规则"""
+        rules = self._load_rules()
+        return [r for r in rules if r["category"] == category]
+
 
 class RulesConfig:
     """
@@ -212,6 +220,18 @@ class TableValidator:
         violations.extend(self._check_timestamp_fields(table))
         violations.extend(self._check_soft_delete(table))
         violations.extend(self._check_indexes(table))
+
+        # StarRocks 专属检查（仅当存在 sr_* 类型规则时执行）
+        if self.rules._find_sr_rules_by_category("sr_layer_naming"):
+            violations.extend(self._check_sr_layer_naming(table))
+        if self.rules._find_sr_rules_by_category("sr_public_fields"):
+            violations.extend(self._check_sr_public_fields(table))
+        if self.rules._find_sr_rules_by_category("sr_table_naming"):
+            violations.extend(self._check_sr_table_naming(table))
+        if self.rules._find_sr_rules_by_category("sr_comment"):
+            violations.extend(self._check_sr_comment(table))
+        if self.rules._find_sr_rules_by_category("sr_field_naming"):
+            violations.extend(self._check_sr_field_naming(table))
 
         return violations
 
@@ -372,6 +392,241 @@ class TableValidator:
 
         return violations
 
+    def _check_sr_layer_naming(self, table: TableInfo) -> List[Violation]:
+        """SR-001~005, 016~018, 024: 分层命名合规检查"""
+        violations = []
+        db_name = table.database.lower()
+        table_name = table.name
+
+        sr_rules = self.rules._find_sr_rules_by_category("sr_layer_naming")
+        for rule in sr_rules:
+            cfg = rule.get("config_json", {})
+            databases = cfg.get("databases", [])
+
+            # 检查当前数据库是否在规则适用范围内
+            if databases and db_name not in [d.lower() for d in databases]:
+                continue
+
+            pattern = cfg.get("pattern")
+            forbidden_prefixes = cfg.get("forbidden_prefixes", [])
+
+            level = ViolationLevel.ERROR if rule["level"] == "HIGH" else ViolationLevel.WARNING
+
+            if pattern and not re.match(pattern, table_name):
+                violations.append(Violation(
+                    level=level,
+                    rule_name=rule["rule_id"],
+                    message=f"表 '{table_name}' (库: {db_name}) 不符合命名规范: {rule['name']}",
+                    table_name=table_name,
+                    suggestion=rule.get("suggestion", f"表名应匹配模式: {pattern}"),
+                ))
+
+            if forbidden_prefixes:
+                for prefix in forbidden_prefixes:
+                    if table_name.startswith(prefix):
+                        violations.append(Violation(
+                            level=level,
+                            rule_name=rule["rule_id"],
+                            message=f"表 '{table_name}' (库: {db_name}) 使用了禁止的前缀 '{prefix}': {rule['name']}",
+                            table_name=table_name,
+                            suggestion=rule.get("suggestion", f"DIM 表不应使用业务域前缀"),
+                        ))
+
+        return violations
+
+    def _check_sr_public_fields(self, table: TableInfo) -> List[Violation]:
+        """SR-008~011: 公共字段检查"""
+        violations = []
+        db_name = table.database.lower()
+        column_names = [c.name.lower() for c in table.columns]
+        column_types = {c.name.lower(): c.data_type.upper() for c in table.columns}
+
+        sr_rules = self.rules._find_sr_rules_by_category("sr_public_fields")
+        for rule in sr_rules:
+            cfg = rule.get("config_json", {})
+            databases = cfg.get("databases", "__all__")
+            required_fields = cfg.get("required_fields", [])
+
+            # 检查当前数据库是否在规则适用范围内
+            if databases != "__all__":
+                if db_name not in [d.lower() for d in databases]:
+                    continue
+
+            level = ViolationLevel.ERROR if rule["level"] == "HIGH" else ViolationLevel.WARNING
+
+            for field in required_fields:
+                field_name = field["name"].lower()
+                field_type = field.get("type", "").upper()
+
+                if field_name not in column_names:
+                    violations.append(Violation(
+                        level=level,
+                        rule_name=rule["rule_id"],
+                        message=f"表 '{table.name}' (库: {db_name}) 缺少公共字段 '{field['name']}'",
+                        table_name=table.name,
+                        suggestion=rule.get("suggestion", f"添加 {field['name']} {field_type} 字段"),
+                    ))
+                elif field_type and field_type not in column_types.get(field_name, ""):
+                    violations.append(Violation(
+                        level=ViolationLevel.WARNING,
+                        rule_name=rule["rule_id"],
+                        message=f"表 '{table.name}' 公共字段 '{field['name']}' 类型不匹配，期望含 {field_type}，实际为 {column_types.get(field_name)}",
+                        table_name=table.name,
+                        column_name=field["name"],
+                        suggestion=f"将 {field['name']} 类型改为 {field_type}",
+                    ))
+
+        return violations
+
+    def _check_sr_table_naming(self, table: TableInfo) -> List[Violation]:
+        """SR-022, 023: 表名通用检查（中文、版本号）"""
+        violations = []
+        table_name = table.name
+
+        sr_rules = self.rules._find_sr_rules_by_category("sr_table_naming")
+        for rule in sr_rules:
+            cfg = rule.get("config_json", {})
+            pattern_forbidden = cfg.get("pattern_forbidden")
+
+            if not pattern_forbidden:
+                continue
+
+            level = ViolationLevel.ERROR if rule["level"] == "HIGH" else ViolationLevel.WARNING
+
+            if re.search(pattern_forbidden, table_name):
+                violations.append(Violation(
+                    level=level,
+                    rule_name=rule["rule_id"],
+                    message=f"表 '{table_name}' 命名不合规: {rule['name']}",
+                    table_name=table_name,
+                    suggestion=rule.get("suggestion", ""),
+                ))
+
+        return violations
+
+    def _check_sr_comment(self, table: TableInfo) -> List[Violation]:
+        """SR-013, 014: 注释检查"""
+        violations = []
+
+        # SR-014: 表注释存在
+        sr_rules_comment = self.rules._find_sr_rules_by_category("sr_comment")
+        for rule in sr_rules_comment:
+            cfg = rule.get("config_json", {})
+            level = ViolationLevel.ERROR if rule["level"] == "HIGH" else ViolationLevel.WARNING
+
+            if rule["rule_id"] == "RULE_SR_014":
+                if not table.comment:
+                    violations.append(Violation(
+                        level=level,
+                        rule_name=rule["rule_id"],
+                        message=f"表 '{table.name}' 缺少表注释",
+                        table_name=table.name,
+                        suggestion=rule.get("suggestion", "为表添加 COMMENT"),
+                    ))
+
+            elif rule["rule_id"] == "RULE_SR_013":
+                min_coverage = cfg.get("min_coverage", 1.0)
+                total_cols = len(table.columns)
+                if total_cols == 0:
+                    continue
+                commented_cols = sum(1 for c in table.columns if c.comment)
+                coverage = commented_cols / total_cols
+
+                if coverage < min_coverage:
+                    violations.append(Violation(
+                        level=level,
+                        rule_name=rule["rule_id"],
+                        message=f"表 '{table.name}' 字段注释覆盖率 {coverage:.0%}，要求 {min_coverage:.0%}",
+                        table_name=table.name,
+                        suggestion=rule.get("suggestion", "为所有字段添加注释"),
+                    ))
+
+        return violations
+
+    def _check_sr_field_naming(self, table: TableInfo) -> List[Violation]:
+        """SR-012: 字段 snake_case 检查"""
+        violations = []
+
+        sr_rules = self.rules._find_sr_rules_by_category("sr_field_naming")
+        for rule in sr_rules:
+            cfg = rule.get("config_json", {})
+            pattern = cfg.get("pattern", r"^[a-z][a-z0-9_]*$")
+            max_length = cfg.get("max_length", 40)
+            level = ViolationLevel.ERROR if rule["level"] == "HIGH" else ViolationLevel.WARNING
+
+            for col in table.columns:
+                if not re.match(pattern, col.name):
+                    violations.append(Violation(
+                        level=level,
+                        rule_name=rule["rule_id"],
+                        message=f"字段 '{col.name}' 不符合 snake_case 命名规范",
+                        table_name=table.name,
+                        column_name=col.name,
+                        suggestion=rule.get("suggestion", "字段名使用小写字母+下划线"),
+                    ))
+                if len(col.name) > max_length:
+                    violations.append(Violation(
+                        level=ViolationLevel.WARNING,
+                        rule_name=rule["rule_id"],
+                        message=f"字段 '{col.name}' 长度 {len(col.name)} 超过限制 {max_length}",
+                        table_name=table.name,
+                        column_name=col.name,
+                        suggestion=f"字段名长度不超过 {max_length} 字符",
+                    ))
+
+        return violations
+
+    def _check_sr_database_whitelist(self, databases: list) -> List[Violation]:
+        """SR-015, 021: 数据库白名单检查（scan 级别，非逐表）"""
+        violations = []
+
+        sr_rules = self.rules._find_sr_rules_by_category("sr_database_whitelist")
+        for rule in sr_rules:
+            cfg = rule.get("config_json", {})
+            allowed = cfg.get("allowed", [])
+            forbidden = cfg.get("forbidden", [])
+            level = ViolationLevel.ERROR if rule["level"] == "HIGH" else ViolationLevel.WARNING
+
+            for db_name in databases:
+                if forbidden and db_name.lower() in [f.lower() for f in forbidden]:
+                    violations.append(Violation(
+                        level=level,
+                        rule_name=rule["rule_id"],
+                        message=f"检测到禁止的数据库 '{db_name}': {rule['name']}",
+                        suggestion=rule.get("suggestion", f"删除或迁移数据库 '{db_name}'"),
+                    ))
+
+                if allowed and db_name.lower() not in [a.lower() for a in allowed]:
+                    violations.append(Violation(
+                        level=level,
+                        rule_name=rule["rule_id"],
+                        message=f"数据库 '{db_name}' 不在允许列表中: {rule['name']}",
+                        suggestion=rule.get("suggestion", "联系管理员确认此数据库是否合规"),
+                    ))
+
+        return violations
+
+    def _check_sr_view_naming(self, table: TableInfo) -> List[Violation]:
+        """SR-025: 视图命名 _vw 后缀检查"""
+        violations = []
+
+        sr_rules = self.rules._find_sr_rules_by_category("sr_view_naming")
+        for rule in sr_rules:
+            cfg = rule.get("config_json", {})
+            pattern = cfg.get("pattern")
+            level = ViolationLevel.ERROR if rule["level"] == "HIGH" else ViolationLevel.WARNING
+
+            if pattern and not re.search(pattern, table.name):
+                violations.append(Violation(
+                    level=level,
+                    rule_name=rule["rule_id"],
+                    message=f"视图 '{table.name}' 缺少 _vw 后缀",
+                    table_name=table.name,
+                    suggestion=rule.get("suggestion", "视图命名应以 _vw 结尾"),
+                ))
+
+        return violations
+
 
 class ColumnValidator:
     """列级验证器"""
@@ -395,6 +650,10 @@ class ColumnValidator:
         violations.extend(self._check_naming(table, column))
         violations.extend(self._check_data_type(table, column))
         violations.extend(self._check_comment(table, column))
+
+        # StarRocks 专属检查
+        if self.rules._find_sr_rules_by_category("sr_type_alignment"):
+            violations.extend(self._check_sr_type_alignment(table, column))
 
         return violations
 
@@ -494,6 +753,56 @@ class ColumnValidator:
                 column_name=column.name,
                 suggestion=config.get("suggestion", "为列添加注释说明其含义")
             ))
+
+        return violations
+
+    def _check_sr_type_alignment(self, table: TableInfo, column: ColumnInfo) -> List[Violation]:
+        """SR-006, 007, 019, 020: 字段后缀与类型对齐检查"""
+        violations = []
+
+        sr_rules = self.rules._find_sr_rules_by_category("sr_type_alignment")
+        for rule in sr_rules:
+            cfg = rule.get("config_json", {})
+            suffixes = cfg.get("suffixes", [])
+            required_type = cfg.get("required_type")
+            required_types = cfg.get("required_types", [])
+            forbidden_types = cfg.get("forbidden_types", [])
+            level = ViolationLevel.ERROR if rule["level"] == "HIGH" else ViolationLevel.WARNING
+
+            if required_type:
+                required_types = [required_type]
+
+            col_name = column.name.lower()
+            col_type = column.data_type.upper()
+
+            # 检查列名是否匹配后缀
+            matched = any(col_name.endswith(s) for s in suffixes)
+            if not matched:
+                continue
+
+            # 检查禁止的类型
+            for ft in forbidden_types:
+                if ft.upper() in col_type:
+                    violations.append(Violation(
+                        level=level,
+                        rule_name=rule["rule_id"],
+                        message=f"字段 '{column.name}' 使用了禁止的类型 {col_type}，{rule['name']}",
+                        table_name=table.name,
+                        column_name=column.name,
+                        suggestion=rule.get("suggestion", f"应使用 {', '.join(required_types)} 类型"),
+                    ))
+                    break
+
+            # 检查是否使用了要求的类型
+            if required_types and not any(rt.upper() in col_type for rt in required_types):
+                violations.append(Violation(
+                    level=level,
+                    rule_name=rule["rule_id"],
+                    message=f"字段 '{column.name}' 类型 {col_type} 不符合要求，{rule['name']}",
+                    table_name=table.name,
+                    column_name=column.name,
+                    suggestion=rule.get("suggestion", f"应使用 {', '.join(required_types)} 类型"),
+                ))
 
         return violations
 

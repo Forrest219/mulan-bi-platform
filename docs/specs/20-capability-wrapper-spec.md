@@ -368,4 +368,4 @@ sequenceDiagram
 - [[tech-embedding-retrieval]] — 召回层(与本 spec 平行)
 - [[tech-homepage-askbar]] — 前端入口
 - SPEC 14 NL-to-Query Pipeline — LLM 输出 schema 变更的上游
-- `SPEC_DEVELOPER_PROMPT_TEMPLATE.md` §通用约束 + 交付纪律
+- `.claude/rules/dev-constraints.md` 通用约束（自动加载）

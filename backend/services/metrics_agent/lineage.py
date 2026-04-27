@@ -13,7 +13,7 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -146,7 +146,7 @@ async def resolve_lineage(
     metric_id: uuid.UUID,
     tenant_id: uuid.UUID,
     manual_override: bool = False,
-    manual_records: list[dict] | None = None,
+    manual_records: Optional[List[dict]] = None,
 ) -> dict:
     """
     解析指标血缘。

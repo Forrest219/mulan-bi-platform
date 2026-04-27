@@ -61,19 +61,16 @@ export default function TableauConnectionsPage() {
   const handleUpdate = async () => {
     if (!editingConn) return;
     try {
-      const updateData: any = {
+      const updateData: Parameters<typeof updateConnection>[1] = {
         name: formData.name,
         server_url: formData.server_url,
         site: formData.site,
         api_version: formData.api_version,
         connection_type: formData.connection_type,
         auto_sync_enabled: formData.auto_sync_enabled,
-        sync_interval_hours: formData.sync_interval_hours
+        sync_interval_hours: formData.sync_interval_hours,
+        ...(formData.token_value ? { token_name: formData.token_name, token_value: formData.token_value } : {}),
       };
-      if (formData.token_value) {
-        updateData.token_name = formData.token_name;
-        updateData.token_value = formData.token_value;
-      }
       await updateConnection(editingConn.id, updateData);
       setShowModal(false);
       resetForm();
@@ -96,18 +93,28 @@ export default function TableauConnectionsPage() {
   const handleTest = async (id: number) => {
     setTestingId(id);
     setModalNotify(null);
-    const result = await testConnection(id);
-    setModalNotify(result);
-    setTestingId(null);
-    fetchConnections(); // 刷新以更新健康状态
+    try {
+      const result = await testConnection(id);
+      setModalNotify(result);
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: e instanceof Error ? e.message : '测试连接失败' });
+    } finally {
+      setTestingId(null);
+      fetchConnections();
+    }
   };
 
   const handleSync = async (id: number) => {
     setSyncingId(id);
-    const result = await syncConnection(id);
-    setModalNotify({ success: result.success, message: result.message });
-    setSyncingId(null);
-    fetchConnections();
+    try {
+      const result = await syncConnection(id);
+      setModalNotify({ success: result.success, message: result.message });
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: e instanceof Error ? e.message : '同步失败' });
+    } finally {
+      setSyncingId(null);
+      fetchConnections();
+    }
   };
 
   const openEditModal = (conn: TableauConnection) => {
@@ -200,28 +207,28 @@ export default function TableauConnectionsPage() {
                 </div>
               </div>
               <div className="space-y-1.5 text-xs text-slate-500 mb-4">
-                <div><span className="text-slate-400">站点:</span> {conn.site}</div>
-                <div><span className="text-slate-400">API版本:</span> {conn.api_version}</div>
-                <div><span className="text-slate-400">上次同步:</span> {formatDate(conn.last_sync_at)}</div>
+                <div><span className="text-slate-400">站点：</span> {conn.site}</div>
+                <div><span className="text-slate-400">API 版本：</span> {conn.api_version}</div>
+                <div><span className="text-slate-400">上次同步：</span> {formatDate(conn.last_sync_at)}</div>
                 {conn.last_sync_duration_sec != null && (
-                  <div><span className="text-slate-400">同步耗时:</span> {conn.last_sync_duration_sec}s</div>
+                  <div><span className="text-slate-400">同步耗时：</span> {conn.last_sync_duration_sec}s</div>
                 )}
                 {conn.sync_status && conn.sync_status !== 'idle' && (
                   <div>
-                    <span className="text-slate-400">同步状态:</span>{' '}
+                    <span className="text-slate-400">同步状态：</span>{' '}
                     <span className={conn.sync_status === 'running' ? 'text-blue-600' : 'text-red-600'}>
                       {conn.sync_status === 'running' ? '同步中...' : '同步失败'}
                     </span>
                   </div>
                 )}
                 {conn.auto_sync_enabled && (
-                  <div><span className="text-slate-400">自动同步:</span> 每{conn.sync_interval_hours || 24}小时</div>
+                  <div><span className="text-slate-400">自动同步：</span> 每{conn.sync_interval_hours || 24}小时</div>
                 )}
                 {conn.auto_sync_enabled && conn.next_sync_at && (
-                  <div><span className="text-slate-400">下次同步:</span> {conn.next_sync_at}</div>
+                  <div><span className="text-slate-400">下次同步：</span> {conn.next_sync_at}</div>
                 )}
                 {conn.last_test_at && (
-                  <div><span className="text-slate-400">连接测试:</span> {formatDate(conn.last_test_at)}</div>
+                  <div><span className="text-slate-400">连接测试：</span> {formatDate(conn.last_test_at)}</div>
                 )}
               </div>
               <div className="flex items-center gap-2">

@@ -188,6 +188,31 @@ sequenceDiagram
 - [ ] {标准1}
 - [ ] {标准2}
 
+### 9.3 Mock 与测试约束
+
+{列出本模块测试时 coder 必须知道的非显而易见的约束。architect 填写，coder 遵循。
+ 如果模块没有特殊约束，写"无特殊约束"。}
+
+常见需标注的情形：
+- 异常兜底设计：某函数内部 catch 所有异常不向外传播，测试时需绕过
+- async generator / SSE 流：mock 策略（patch 层级、返回值类型）
+- 同步/异步边界：SQLAlchemy sync Session vs async def 的不匹配
+- 内部 HTTP 转发：httpx.AsyncClient mock 需区分 `.stream()` 和 `.post()` 路径
+- 依赖注入覆盖：FastAPI `dependency_overrides` 的生命周期与 TestClient 的关系
+
+条目格式：
+```
+- **{函数/类名}**：{行为描述} → {正确的 mock/测试策略}
+```
+
+示例：
+```
+- **`_stream_via_agent`**：内部 catch 所有异常并 yield error event，不向外传播异常
+  → 测试 fallback 路径需在模块层面替换为首次迭代即抛异常的 async generator
+- **`SessionManager`**：使用同步 SQLAlchemy Session，所有方法为 def 非 async def
+  → 测试中 mock db.query 链不需要 AsyncMock
+```
+
 ---
 
 ## 10. 开放问题
@@ -195,3 +220,38 @@ sequenceDiagram
 | # | 问题 | 负责人 | 状态 |
 |---|------|--------|------|
 | 1 | ... | ... | 待定 |
+
+---
+
+## 11. 开发交付约束
+
+> architect 必填。此节内容嵌入 SPEC 后，coder（人类或 AI）开发时强制遵循。
+> 通用约束见 [`SPEC_DEVELOPER_PROMPT_TEMPLATE.md`](../SPEC_DEVELOPER_PROMPT_TEMPLATE.md) §通用约束，此处只写**本模块特有的**约束。
+
+### 11.1 架构约束
+{本模块特有的架构红线、禁止操作、import 限制等}
+
+示例：
+```
+- services/data_agent/ 不得 import app.api 层任何模块
+- engine.py 的 ReAct 循环最大步数由 max_steps 参数控制，禁止硬编码
+```
+
+### 11.2 强制检查清单
+- [ ] {检查项1 — 违反即 PR 拒绝}
+- [ ] {检查项2}
+
+### 11.3 验证命令
+```bash
+# coder 提交前必须执行的命令
+{ruff / grep / pytest 等}
+```
+
+### 11.4 正确/错误示范
+```python
+# ✗ 错误 — {说明}
+...
+
+# ✓ 正确 — {说明}
+...
+```

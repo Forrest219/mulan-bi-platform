@@ -67,7 +67,7 @@ test.describe('数据源管理', () => {
     await expect(page.locator('text=数据库类型')).toBeVisible();
     // 必填字段标签
     await expect(page.locator('text=名称')).toBeVisible();
-    await expect(page.locator('text=Host')).toBeVisible();
+    await expect(page.locator('text=主机地址')).toBeVisible();
     await expect(page.locator('text=端口')).toBeVisible();
     await expect(page.locator('text=数据库名')).toBeVisible();
     await expect(page.locator('text=用户名')).toBeVisible();

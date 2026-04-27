@@ -10,11 +10,19 @@
  *   GET /api/admin/agent/runs/{run_id}/steps
  */
 import { useState, useEffect, useCallback } from 'react';
-import { agentAdminApi, type AgentStats, type AgentRun, type AgentRunsResponse, type AgentStep } from '../../../api/agent';
+import {
+  agentAdminApi,
+  type AgentStats,
+  type AgentRun,
+  type AgentStep,
+  type AgentToolMetadata,
+  type AgentSessionItem,
+} from '../../../api/agent';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type StatusFilter = 'all' | 'running' | 'completed' | 'failed';
+type ActiveTab = 'overview' | 'tools' | 'sessions';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -68,6 +76,7 @@ function stepTypeBadge(stepType: string) {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function AgentMonitorPage() {
+  const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
   const [stats, setStats] = useState<AgentStats | null>(null);
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [runsTotal, setRunsTotal] = useState(0);
@@ -77,6 +86,16 @@ export default function AgentMonitorPage() {
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [steps, setSteps] = useState<AgentStep[]>([]);
   const [stepsLoading, setStepsLoading] = useState(false);
+
+  // Tool discovery state
+  const [tools, setTools] = useState<AgentToolMetadata[]>([]);
+  const [toolsLoading, setToolsLoading] = useState(false);
+
+  // Sessions state
+  const [sessions, setSessions] = useState<AgentSessionItem[]>([]);
+  const [sessionsTotal, setSessionsTotal] = useState(0);
+  const [sessionsOffset, setSessionsOffset] = useState(0);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
 
   const LIMIT = 20;
 
@@ -115,9 +134,51 @@ export default function AgentMonitorPage() {
     }
   }, []);
 
+  const fetchTools = useCallback(async () => {
+    setToolsLoading(true);
+    try {
+      const data = await agentAdminApi.getTools();
+      setTools(data);
+    } catch (err) {
+      console.error('获取工具列表失败', err);
+    } finally {
+      setToolsLoading(false);
+    }
+  }, []);
+
+  const fetchSessions = useCallback(async () => {
+    setSessionsLoading(true);
+    try {
+      const data = await agentAdminApi.getSessions({
+        limit: LIMIT,
+        offset: sessionsOffset,
+      });
+      setSessions(data.items);
+      setSessionsTotal(data.total);
+    } catch (err) {
+      console.error('获取会话列表失败', err);
+    } finally {
+      setSessionsLoading(false);
+    }
+  }, [sessionsOffset]);
+
   useEffect(() => {
     Promise.all([fetchStats(), fetchRuns()]).finally(() => setLoading(false));
   }, [fetchStats, fetchRuns]);
+
+  // 切换到工具 tab 时加载
+  useEffect(() => {
+    if (activeTab === 'tools' && tools.length === 0) {
+      fetchTools();
+    }
+  }, [activeTab, tools.length, fetchTools]);
+
+  // 切换到会话 tab 时加载
+  useEffect(() => {
+    if (activeTab === 'sessions') {
+      fetchSessions();
+    }
+  }, [activeTab, fetchSessions]);
 
   // 点击行展开/折叠步骤
   const toggleExpand = (runId: string) => {
@@ -155,6 +216,32 @@ export default function AgentMonitorPage() {
         </p>
       </div>
 
+      {/* Tab 导航 */}
+      <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit mb-6">
+        {(
+          [
+            ['overview', '总览'],
+            ['tools', '工具列表'],
+            ['sessions', '会话管理'],
+          ] as [ActiveTab, string][]
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            onClick={() => setActiveTab(value)}
+            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+              activeTab === value
+                ? 'bg-white text-slate-700 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab: 总览 */}
+      {activeTab === 'overview' && (
+        <>
       {/* 统计卡片 */}
       {stats && (
         <div className="grid grid-cols-5 gap-4 mb-6">
@@ -497,6 +584,145 @@ export default function AgentMonitorPage() {
           </div>
         )}
       </div>
+        </>
+      )}
+
+      {/* Tab: 工具列表 */}
+      {activeTab === 'tools' && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-700">可用工具</h3>
+            <span className="text-xs text-slate-400">共 {tools.length} 个工具</span>
+          </div>
+          {toolsLoading ? (
+            <div className="p-8 text-center text-slate-400">加载中...</div>
+          ) : tools.length === 0 ? (
+            <div className="p-8 text-center text-slate-400">暂无已注册的工具</div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {tools.map((tool) => (
+                <div key={tool.name} className="px-4 py-4 hover:bg-slate-50/50 transition-colors">
+                  <div className="flex items-center gap-3 mb-2">
+                    <span className="text-sm font-medium text-slate-800">{tool.name}</span>
+                    <span className="text-xs bg-cyan-50 text-cyan-700 px-2 py-0.5 rounded-full">
+                      {tool.category}
+                    </span>
+                    <span className="text-xs text-slate-400">v{tool.version}</span>
+                  </div>
+                  <p className="text-xs text-slate-600 mb-2">{tool.description}</p>
+                  <div className="flex items-center gap-4">
+                    {tool.dependencies.length > 0 && (
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-slate-400">依赖:</span>
+                        {tool.dependencies.map((dep) => (
+                          <span
+                            key={dep}
+                            className="text-xs bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded"
+                          >
+                            {dep}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {tool.tags.length > 0 && (
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-slate-400">标签:</span>
+                        {tool.tags.map((tag) => (
+                          <span
+                            key={tag}
+                            className="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab: 会话管理 */}
+      {activeTab === 'sessions' && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-700">Agent 会话</h3>
+            <span className="text-xs text-slate-400">共 {sessionsTotal} 个会话</span>
+          </div>
+          {sessionsLoading ? (
+            <div className="p-8 text-center text-slate-400">加载中...</div>
+          ) : sessions.length === 0 ? (
+            <div className="p-8 text-center text-slate-400">
+              <i className="ri-chat-3-line text-3xl mb-2 block" />
+              暂无会话记录
+            </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-500 text-xs">
+                      <th className="text-left px-4 py-2.5 font-medium">更新时间</th>
+                      <th className="text-left px-4 py-2.5 font-medium">用户</th>
+                      <th className="text-left px-4 py-2.5 font-medium">标题</th>
+                      <th className="text-left px-4 py-2.5 font-medium">状态</th>
+                      <th className="text-left px-4 py-2.5 font-medium">消息数</th>
+                      <th className="text-left px-4 py-2.5 font-medium">数据源</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {sessions.map((s) => (
+                      <tr key={s.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
+                          {formatDate(s.updated_at)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700 whitespace-nowrap">
+                          #{s.user_id}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700 max-w-xs truncate" title={s.title ?? ''}>
+                          {s.title || <span className="text-slate-400">无标题</span>}
+                        </td>
+                        <td className="px-4 py-3">{statusBadge(s.status)}</td>
+                        <td className="px-4 py-3 text-slate-600">{s.message_count}</td>
+                        <td className="px-4 py-3 text-slate-500">
+                          {s.connection_id ? `#${s.connection_id}` : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {/* 会话分页 */}
+              {Math.ceil(sessionsTotal / LIMIT) > 1 && (
+                <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between">
+                  <span className="text-xs text-slate-400">
+                    第 {Math.floor(sessionsOffset / LIMIT) + 1} / {Math.ceil(sessionsTotal / LIMIT)} 页
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      disabled={sessionsOffset === 0}
+                      onClick={() => setSessionsOffset(Math.max(0, sessionsOffset - LIMIT))}
+                      className="px-3 py-1.5 text-xs rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      上一页
+                    </button>
+                    <button
+                      disabled={sessionsOffset + LIMIT >= sessionsTotal}
+                      onClick={() => setSessionsOffset(sessionsOffset + LIMIT)}
+                      className="px-3 py-1.5 text-xs rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      下一页
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

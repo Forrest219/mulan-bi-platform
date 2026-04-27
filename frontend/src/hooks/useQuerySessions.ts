@@ -8,13 +8,15 @@
  *   refresh()   — 手动刷新
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { listQuerySessions, type QuerySession } from '../api/query';
+import { listQuerySessions, deleteQuerySession, type QuerySession } from '../api/query';
 
 export interface UseQuerySessionsReturn {
   sessions: QuerySession[];
   loading: boolean;
   error: string | null;
   refresh: () => void;
+  /** 软删除指定会话，成功后自动刷新列表 */
+  removeSession: (sessionId: string) => Promise<void>;
 }
 
 export function useQuerySessions(): UseQuerySessionsReturn {
@@ -57,5 +59,15 @@ export function useQuerySessions(): UseQuerySessionsReturn {
     void fetchSessions();
   }, [fetchSessions]);
 
-  return { sessions, loading, error, refresh };
+  const removeSession = useCallback(async (sessionId: string) => {
+    try {
+      await deleteQuerySession(sessionId);
+      // 乐观删除：立即从列表移除，避免等待网络刷新
+      setSessions((prev) => prev.filter((s) => s.session_id !== sessionId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除会话失败');
+    }
+  }, []);
+
+  return { sessions, loading, error, refresh, removeSession };
 }

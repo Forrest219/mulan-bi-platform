@@ -1,4 +1,6 @@
 """LLM 配置数据模型"""
+from __future__ import annotations
+
 from typing import Optional
 
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, JSON, Index
@@ -138,7 +140,7 @@ class LLMConfigDatabase:
         max_tokens,
         is_active,
         purpose: str = "default",
-        display_name: str | None = None,
+        display_name: Optional[str] = None,
         priority: int = 0,
     ):
         session = self.get_session()

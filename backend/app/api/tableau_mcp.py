@@ -10,6 +10,7 @@ import logging
 import os
 import urllib.parse
 from datetime import datetime
+from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Request
@@ -42,7 +43,7 @@ def _make_result(req_id, result: dict) -> dict:
     return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
 
-def _get_tableau_config(server_id: int | None = None) -> dict:
+def _get_tableau_config(server_id: Optional[int] = None) -> dict:
     """
     读取 Tableau 连接配置，优先级：
     1. 指定 server_id → 直接取该记录
@@ -1155,8 +1156,8 @@ async def _create_custom_view(credentials: dict, view_id: str, custom_view_name:
 async def _update_custom_view(
     credentials: dict,
     custom_view_id: str,
-    custom_view_name: str | None,
-    shared: bool | None,
+    custom_view_name: Optional[str],
+    shared: Optional[bool],
 ) -> dict:
     """更新已有 Custom View 的名称或共享状态。"""
     tableau_server = credentials["tableau_server"]
@@ -1255,7 +1256,7 @@ async def _update_field_semantic_attr(
     field_name: str,
     attr_name: str,
     new_value: str,
-    change_reason: str | None,
+    change_reason: Optional[str],
     tool_name_for_audit: str,
 ) -> dict:
     """
@@ -1383,7 +1384,7 @@ async def _update_field_caption(
     datasource_luid: str,
     field_name: str,
     new_caption: str,
-    change_reason: str | None,
+    change_reason: Optional[str],
 ) -> dict:
     """修改字段显示名称（Caption），同步更新 Mulan 语义层。"""
     result = await _update_field_semantic_attr(
@@ -1414,7 +1415,7 @@ async def _update_field_description(
     datasource_luid: str,
     field_name: str,
     new_description: str,
-    change_reason: str | None,
+    change_reason: Optional[str],
 ) -> dict:
     """修改字段描述，同步更新 Mulan 语义层 semantic_definition 字段。"""
     result = await _update_field_semantic_attr(
@@ -1774,7 +1775,7 @@ async def _publish_field_semantic(
 
 # ── MCP JSON-RPC 核心处理（返回 dict，不含 HTTP 包装）────────────────────────
 
-async def _process_mcp_body(body: dict, server_id: int | None = None) -> dict:
+async def _process_mcp_body(body: dict, server_id: Optional[int] = None) -> dict:
     """处理 MCP JSON-RPC 2.0 消息体，返回响应 dict（不含 JSONResponse 包装）。"""
     req_id = body.get("id")
     method = body.get("method", "")

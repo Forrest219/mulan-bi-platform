@@ -27,6 +27,7 @@ os.environ.setdefault("LLM_ENCRYPTION_KEY", "test-llm-key-32-bytes-ok!!!!")
 
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -77,7 +78,7 @@ def _ensure_deps(db_session):
     db_session.flush()
 
 
-def _make_active_metric(db_session, name: str | None = None) -> BiMetricDefinition:
+def _make_active_metric(db_session, name: Optional[str] = None) -> BiMetricDefinition:
     """创建一个 is_active=True 的已发布指标（直接写 DB，跳过审核流）。"""
     _ensure_deps(db_session)
     metric = BiMetricDefinition(
