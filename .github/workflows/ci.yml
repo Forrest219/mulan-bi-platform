@@ -174,7 +174,7 @@ jobs:
 
       - name: Verify backend app imports
         env:
-          DATABASE_URL: postgresql://mulan:***@localhost:5432/mulan_bi_test
+          DATABASE_URL: postgresql://mulan:mulan@localhost:5432/mulan_bi_test
           SESSION_SECRET: test-secret
           ADMIN_USERNAME: admin
           ADMIN_PASSWORD: admin123
@@ -186,7 +186,7 @@ jobs:
 
       - name: Run tests with coverage
         env:
-          DATABASE_URL: postgresql://mulan:***@localhost:5432/mulan_bi_test
+          DATABASE_URL: postgresql://mulan:mulan@localhost:5432/mulan_bi_test
           SESSION_SECRET: test-secret
           ADMIN_USERNAME: admin
           ADMIN_PASSWORD: admin123
@@ -288,7 +288,7 @@ jobs:
       # ── 数据库初始化 ──────────────────────────────────────────
       - name: Run database migrations
         env:
-          DATABASE_URL: postgresql://mulan:***@localhost:5432/mulan_bi_test
+          DATABASE_URL: postgresql://mulan:mulan@localhost:5432/mulan_bi_test
           SESSION_SECRET: smoke-test-secret!!
           ADMIN_USERNAME: admin
           ADMIN_PASSWORD: admin123
@@ -303,7 +303,7 @@ jobs:
       # ── Seed 测试用户 ─────────────────────────────────────────
       - name: Seed smoke test users
         env:
-          DATABASE_URL: postgresql://mulan:***@localhost:5432/mulan_bi_test
+          DATABASE_URL: postgresql://mulan:mulan@localhost:5432/mulan_bi_test
           SESSION_SECRET: smoke-test-secret!!
           ADMIN_USERNAME: admin
           ADMIN_PASSWORD: admin123
@@ -362,7 +362,7 @@ jobs:
       # ── 启动后端服务 ───────────────────────────────────────────
       - name: Start backend
         env:
-          DATABASE_URL: postgresql://mulan:***@localhost:5432/mulan_bi_test
+          DATABASE_URL: postgresql://mulan:mulan@localhost:5432/mulan_bi_test
           SESSION_SECRET: smoke-test-secret!!
           ADMIN_USERNAME: admin
           ADMIN_PASSWORD: admin123
@@ -421,7 +421,7 @@ jobs:
       - name: Run smoke tests
         env:
           BASE_URL: http://localhost:3000
-          DATABASE_URL: postgresql://mulan:***@localhost:5432/mulan_bi_test
+          DATABASE_URL: postgresql://mulan:mulan@localhost:5432/mulan_bi_test
           SESSION_SECRET: smoke-test-secret!!
           ADMIN_USERNAME: admin
           ADMIN_PASSWORD: admin123
