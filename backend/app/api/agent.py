@@ -33,6 +33,7 @@ from services.data_agent.models import (
 from services.data_agent.runner import run_agent
 from services.data_agent.session import SessionManager, AgentSession
 from services.data_agent.tool_base import ToolContext, ToolRegistry
+from services.data_agent.context import build_session_context
 from services.datasources.models import DataSource
 
 logger = logging.getLogger(__name__)
@@ -168,6 +169,15 @@ async def agent_stream(
         user_id=current_user["id"],
         connection_id=req.connection_id,
         trace_id=trace_id,
+    )
+
+    # 构建丰富的会话上下文（工具可通过此获取用户信息、数据源列表等）
+    session_context = build_session_context(
+        session_id=conversation_id_str,
+        trace_id=trace_id,
+        current_user=current_user,
+        connection_id=req.connection_id,
+        db=db,
     )
 
     # 构建引擎
@@ -318,6 +328,33 @@ def archive_conversation(
 
     session_mgr.archive_session(conv_uuid)
     return {"status": "archived", "conversation_id": conversation_id}
+
+
+# ============================================================================
+# 工具动态发现
+# ============================================================================
+
+
+@router.get("/tools")
+def list_available_tools(
+    category: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    GET /api/agent/tools — 列出所有可用工具及其元数据
+
+    返回每个工具的 name、description、parameters_schema、category、version、
+    dependencies、tags。可选 ?category= 筛选。
+    """
+    _require_agent_role(current_user.get("role", "user"))
+
+    _engine, registry = create_engine()
+
+    if category:
+        tools = registry.get_tools_by_category(category)
+        return [t.get_full_metadata() for t in tools]
+
+    return registry.get_tools_metadata()
 
 
 # ============================================================================

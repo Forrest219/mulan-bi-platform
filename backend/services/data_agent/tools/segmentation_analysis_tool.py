@@ -11,7 +11,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext
+from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,12 @@ class SegmentationAnalysisTool(BaseTool):
 
     name = "segmentation_analysis"
     description = "用户/实体分群分析。基于行为、属性等维度对用户或其他实体进行分群，识别不同群体特征和差异。"
+    metadata = ToolMetadata(
+        category="analysis",
+        version="1.0.0",
+        dependencies=["requires_database"],
+        tags=["segmentation", "clustering", "user-analysis"],
+    )
     parameters_schema = {
         "type": "object",
         "properties": {

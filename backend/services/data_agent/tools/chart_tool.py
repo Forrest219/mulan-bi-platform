@@ -15,7 +15,7 @@ import logging
 import time
 from typing import Any, Dict, Optional
 
-from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext
+from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,12 @@ class ChartTool(BaseTool):
         "图表 spec 生成 + 发布。当用户要求可视化数据（如「做个图展示销售趋势」）时使用，"
         "生成 Tableau 可发布的图表规格（支持 bar/line/pie/scatter/area/heatmap/geo/gantt 等类型）。"
         "输入查询结果 schema + 意图，返回推荐图表类型、字段映射及发布路径（card/twb/mcp）。"
+    )
+    metadata = ToolMetadata(
+        category="visualization",
+        version="1.0.0",
+        dependencies=["requires_tableau"],
+        tags=["chart", "visualization", "tableau"],
     )
     parameters_schema = {
         "type": "object",

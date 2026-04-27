@@ -73,7 +73,7 @@ function ExpandedRow({ field }: { field: SchemaField }) {
 }
 
 export default function FieldSchemaRenderer({ payload }: Props) {
-  const schema = (payload as FieldSchema) ?? {};
+  const schema = useMemo<FieldSchema>(() => (payload as FieldSchema) ?? {}, [payload]);
   const [search, setSearch] = useState('');
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
 
@@ -92,16 +92,16 @@ export default function FieldSchemaRenderer({ payload }: Props) {
       }
     } else if (Array.isArray(schema.fields)) {
       // 扁平字段列表，按 role 分组
-      const groups: Record<string, SchemaField[]> = { DIMENSION: [], MEASURE: [], OTHER: [] };
+      const grouped: Record<string, SchemaField[]> = { dimensions: [], measures: [], other: [] };
       for (const f of schema.fields) {
         const role = f.role ?? 'OTHER';
         const gKey = role === 'DIMENSION' ? 'dimensions' : role === 'MEASURE' ? 'measures' : 'other';
-        groups[gKey].push(f);
+        grouped[gKey].push(f);
       }
       for (const key of ['dimensions', 'measures', 'other'] as GroupKey[]) {
-        if (groups[key].length > 0) {
+        if (grouped[key].length > 0) {
           const { label, color, bg } = GROUP_LABELS[key];
-          result.push({ key, label, color, bg, fields: groups[key] });
+          result.push({ key, label, color, bg, fields: grouped[key] });
         }
       }
     }

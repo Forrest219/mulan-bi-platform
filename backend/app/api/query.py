@@ -301,3 +301,40 @@ def list_session_messages(
         for m in messages
     ]
     return {"session_id": session_id, "messages": serialized, "total": len(serialized)}
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+def delete_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    DELETE /api/query/sessions/{session_id}
+
+    软删除指定对话（设置 is_active=False）。
+    仅允许删除属于当前用户的 session，否则返回 404。
+    """
+    import uuid as _uuid
+    from services.query.query_service import QuerySession
+
+    try:
+        uid = _uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="session 不存在")
+
+    sess = (
+        db.query(QuerySession)
+        .filter(
+            QuerySession.id == uid,
+            QuerySession.user_id == current_user["id"],
+            QuerySession.is_active == True,  # noqa: E712
+        )
+        .first()
+    )
+    if sess is None:
+        raise HTTPException(status_code=404, detail="session 不存在或无权访问")
+
+    sess.is_active = False
+    db.commit()
+    return None

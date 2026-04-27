@@ -13,7 +13,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext
+from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,12 @@ class RootCauseAnalysisTool(BaseTool):
 
     name = "root_cause_analysis"
     description = "增强根因分析。采用5-Why分析法和鱼骨图框架，深入挖掘问题的根本原因，量化各影响因子。"
+    metadata = ToolMetadata(
+        category="analysis",
+        version="1.0.0",
+        dependencies=["requires_database"],
+        tags=["root-cause", "5-why", "fishbone"],
+    )
     parameters_schema = {
         "type": "object",
         "properties": {

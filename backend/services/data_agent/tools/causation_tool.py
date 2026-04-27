@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
 
-from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext
+from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -513,6 +513,12 @@ class CausationTool(BaseTool):
 
     name = "causation"
     description = "归因分析。当用户询问指标变动原因（如「为什么销售额下降了」「哪些因素导致增长」）时使用，分析哪些维度贡献最大，实现六步因果推理。"
+    metadata = ToolMetadata(
+        category="analysis",
+        version="1.0.0",
+        dependencies=["requires_database"],
+        tags=["causation", "attribution", "root-cause"],
+    )
     parameters_schema = {
         "type": "object",
         "properties": {

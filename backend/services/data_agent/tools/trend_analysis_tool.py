@@ -11,7 +11,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext
+from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,12 @@ class TrendAnalysisTool(BaseTool):
 
     name = "trend_analysis"
     description = "趋势分析。分析指标的时间序列趋势，识别上升/下降/平稳模式，计算移动平均、趋势斜率、季节性分解等。"
+    metadata = ToolMetadata(
+        category="analysis",
+        version="1.0.0",
+        dependencies=["requires_database"],
+        tags=["trend", "time-series", "seasonality"],
+    )
     parameters_schema = {
         "type": "object",
         "properties": {

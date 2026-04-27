@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 const DataHealthPage = lazy(() => import('../health/page'));
 const TableauHealthPage = lazy(() => import('../../tableau/health/page'));
 const DataQualityPage = lazy(() => import('../quality/page'));
+const CompliancePage = lazy(() => import('../compliance/page'));
 
 type Tab = 'warehouse' | 'tableau' | 'quality' | 'compliance';
 
@@ -62,7 +63,7 @@ export default function HealthCenterPage() {
         {activeTab === 'warehouse' && <DataHealthPage />}
         {activeTab === 'tableau' && <TableauHealthPage />}
         {activeTab === 'quality' && <DataQualityPage />}
-        {activeTab === 'compliance' && <DataHealthPage />}
+        {activeTab === 'compliance' && <CompliancePage />}
       </Suspense>
     </div>
   );

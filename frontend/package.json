@@ -21,6 +21,7 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "dompurify": "^3.4.0",
     "lucide-react": "^0.469.0",
+    "qrcode.react": "^4.2.0",
     "react": "^19.1.2",
     "react-dom": "^19.1.2",
     "react-markdown": "^10.1.0",

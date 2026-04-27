@@ -836,6 +836,17 @@ class SemanticMaintenanceDatabase:
             # Determine if rollback diff
             is_rollback = log.diff_json and isinstance(log.diff_json, dict) and "rollback" in log.diff_json
 
+            # Build diff_summary (same logic as list endpoint)
+            diff_summary = {"changed_fields": [], "total_changes": 0}
+            if log.diff_json and isinstance(log.diff_json, dict):
+                if "rollback" in log.diff_json:
+                    diff_summary["changed_fields"] = list(log.diff_json.get("rollback", {}).keys())
+                    diff_summary["total_changes"] = len(diff_summary["changed_fields"])
+                    diff_summary["is_rollback"] = True
+                else:
+                    diff_summary["changed_fields"] = list(log.diff_json.keys())
+                    diff_summary["total_changes"] = len(diff_summary["changed_fields"])
+
             return {
                 "id": log.id,
                 "connection_id": log.connection_id,
@@ -848,6 +859,7 @@ class SemanticMaintenanceDatabase:
                 "status": log.status,
                 "response_summary": log.response_summary,
                 "operator": operator_info,
+                "diff_summary": diff_summary,
                 "publish_payload": log.publish_payload_json,
                 "diff": log.diff_json if not is_rollback else None,
                 "rollback_diff": log.diff_json.get("rollback") if is_rollback else None,

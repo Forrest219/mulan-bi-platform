@@ -15,7 +15,7 @@ Spec 31 DQC Pipeline — 7 张核心表：
 """
 from typing import Sequence, Union
 
-from alembic import op
+from alembic import op, context
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
@@ -27,6 +27,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def _is_postgres() -> bool:
+    if context.is_offline_mode():
+        return True  # assume PostgreSQL in offline/SQL mode
     bind = op.get_bind()
     return bind.dialect.name == "postgresql"
 

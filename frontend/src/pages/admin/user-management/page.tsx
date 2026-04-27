@@ -54,6 +54,7 @@ export default function UserManagementPage() {
   const [showModal, setShowModal] = useState(false);
   const [showPermModal, setShowPermModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showResetPwdModal, setShowResetPwdModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [newUser, setNewUser] = useState<{
     username: string;
@@ -71,6 +72,8 @@ export default function UserManagementPage() {
     role: 'user'
   });
   const [editUserData, setEditUserData] = useState({ display_name: '', email: '' });
+  const [resetPwdData, setResetPwdData] = useState({ new_password: '', confirm_password: '' });
+  const [resetPwdError, setResetPwdError] = useState('');
   const [formError, setFormError] = useState('');
   const [message, setMessage] = useState('');
   const [confirmModal, setConfirmModal] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void } | null>(null);
@@ -234,6 +237,36 @@ export default function UserManagementPage() {
     }
   };
 
+  // 打开重置密码弹窗
+  const openResetPwdModal = (user: User) => {
+    setEditingUser(user);
+    setResetPwdData({ new_password: '', confirm_password: '' });
+    setResetPwdError('');
+    setShowResetPwdModal(true);
+  };
+
+  // 管理员重置密码
+  const handleResetPassword = async () => {
+    if (!editingUser) return;
+    if (!resetPwdData.new_password) { setResetPwdError('请输入新密码'); return; }
+    if (resetPwdData.new_password.length < 8) { setResetPwdError('密码长度至少为8位'); return; }
+    if (resetPwdData.new_password !== resetPwdData.confirm_password) { setResetPwdError('两次输入的密码不一致'); return; }
+    const response = await fetch(`${API_BASE}/api/users/${editingUser.id}/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ new_password: resetPwdData.new_password }),
+    });
+    if (response.ok) {
+      setShowResetPwdModal(false);
+      setEditingUser(null);
+      setMessage('密码已重置');
+    } else {
+      const error = await response.json();
+      setResetPwdError(error.detail || '重置失败');
+    }
+  };
+
   const openPermissionModal = (user: User) => {
     if (user.role === 'admin') { setMessage('管理员拥有所有权限，无需编辑'); return; }
     setEditingUser(user);
@@ -392,6 +425,9 @@ export default function UserManagementPage() {
                   <button onClick={() => openEditModal(user)} className="text-xs text-blue-600 hover:text-blue-800 mr-2">
                     编辑
                   </button>
+                  <button onClick={() => openResetPwdModal(user)} className="text-xs text-violet-600 hover:text-violet-800 mr-2">
+                    重置密码
+                  </button>
                   <button onClick={() => handleToggleActive(user.id)} className="text-xs text-orange-600 hover:text-orange-800 mr-2">
                     {user.is_active ? '禁用' : '启用'}
                   </button>
@@ -501,6 +537,38 @@ export default function UserManagementPage() {
                 className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700">取消</button>
               <button onClick={handleSaveEdit}
                 className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800">保存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 重置密码弹窗 */}
+      {showResetPwdModal && editingUser && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">
+            <h2 className="text-lg font-semibold text-slate-800 mb-1">重置密码</h2>
+            <p className="text-sm text-slate-500 mb-4">{editingUser.display_name} (@{editingUser.username})</p>
+            <div className="space-y-4">
+              {resetPwdError && <div className="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-lg">{resetPwdError}</div>}
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1.5">新密码 <span className="text-red-500">*</span></label>
+                <input type="password" value={resetPwdData.new_password}
+                  onChange={(e) => setResetPwdData({ ...resetPwdData, new_password: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500" placeholder="至少8位" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1.5">确认新密码 <span className="text-red-500">*</span></label>
+                <input type="password" value={resetPwdData.confirm_password}
+                  onChange={(e) => setResetPwdData({ ...resetPwdData, confirm_password: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500" placeholder="再次输入新密码" />
+              </div>
+              <p className="text-xs text-slate-400">重置后该用户所有设备将被强制登出，需使用新密码重新登录。</p>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => { setShowResetPwdModal(false); setEditingUser(null); }}
+                className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700">取消</button>
+              <button onClick={handleResetPassword}
+                className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">重置密码</button>
             </div>
           </div>
         </div>

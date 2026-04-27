@@ -300,6 +300,22 @@ class AuthService:
         self._db.revoke_all_user_refresh_tokens(user_id)
         return True
 
+    def admin_reset_password(self, user_id: int, new_password: str) -> tuple:
+        """管理员重置用户密码（不需要旧密码）
+
+        返回 (success, message)
+        """
+        user = self._db.get_user(user_id)
+        if not user:
+            return False, "用户不存在"
+        if len(new_password) < 8:
+            return False, "密码长度至少为8位"
+        user.password_hash = self.hash_password(new_password)
+        self._db.update_user(user)
+        # 重置密码后撤销所有 Refresh Token，强制重新登录
+        self._db.revoke_all_user_refresh_tokens(user_id)
+        return True, "密码已重置"
+
     # ========== 用户组管理 ==========
 
     def create_group(self, name: str, description: str = None, permissions: list = None) -> Optional[Dict[str, Any]]:

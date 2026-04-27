@@ -56,7 +56,10 @@ export default function DatasourceMetaRenderer({ payload }: Props) {
   // Unwrap: payload may be { datasource: { ... } } or flat { name, fields, ... }
   const raw = (payload ?? {}) as Record<string, unknown>;
   const meta: DatasourceMeta = (raw.datasource as DatasourceMeta) ?? (raw as DatasourceMeta);
-  const fields: Field[] = Array.isArray(meta.fields) ? meta.fields : [];
+  const fields: Field[] = useMemo(
+    () => (Array.isArray(meta.fields) ? meta.fields : []),
+    [meta.fields],
+  );
 
   const filtered = useMemo(() => {
     const q = fieldSearch.toLowerCase();

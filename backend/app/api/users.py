@@ -44,6 +44,12 @@ class UpdateUserRequest(BaseModel):
     group_ids: Optional[list[int]] = None
 
 
+class AdminResetPasswordRequest(BaseModel):
+    """管理员重置用户密码请求"""
+
+    new_password: str
+
+
 @router.get("/", dependencies=[Depends(get_current_admin)])
 async def get_users(role: Optional[str] = None):
     """获取用户列表（管理员）"""
@@ -203,3 +209,12 @@ async def delete_user(user_id: int, http_request: Request):
         raise HTTPException(status_code=404, detail="用户不存在")
 
     return {"message": "用户已删除"}
+
+
+@router.post("/{user_id}/reset-password", dependencies=[Depends(get_current_admin)])
+async def admin_reset_password(user_id: int, request: AdminResetPasswordRequest, http_request: Request):
+    """管理员重置用户密码"""
+    success, message = auth_service.admin_reset_password(user_id, request.new_password)
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    return {"message": message}

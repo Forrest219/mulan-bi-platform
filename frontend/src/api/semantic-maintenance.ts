@@ -3,7 +3,7 @@ import { API_BASE } from '../config';
 // Types
 export type SemanticStatus = 'draft' | 'ai_generated' | 'pending_review' | 'reviewed' | 'approved' | 'rejected' | 'published';
 export type SensitivityLevel = 'low' | 'medium' | 'high' | 'confidential';
-export type PublishStatus = 'pending' | 'success' | 'failed' | 'rolled_back';
+export type PublishStatus = 'pending' | 'success' | 'failed' | 'rolled_back' | 'not_supported';
 
 export interface SemanticDatasource {
   id: number;

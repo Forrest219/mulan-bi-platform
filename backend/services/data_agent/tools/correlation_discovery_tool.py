@@ -11,7 +11,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext
+from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,12 @@ class CorrelationDiscoveryTool(BaseTool):
 
     name = "correlation_discovery"
     description = "相关性发现。计算两个或多个指标序列之间的相关性（皮尔逊/斯皮尔曼），识别强相关、弱相关、正负相关。"
+    metadata = ToolMetadata(
+        category="analysis",
+        version="1.0.0",
+        dependencies=["requires_database"],
+        tags=["correlation", "statistical", "pearson", "spearman"],
+    )
     parameters_schema = {
         "type": "object",
         "properties": {

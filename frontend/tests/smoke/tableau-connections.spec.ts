@@ -198,6 +198,5 @@ test.describe('Tableau 连接管理', () => {
 
     // 按钮应恢复可点击
     await expect(syncBtn).toBeEnabled();
->>>>>>> Stashed changes
   });
 });

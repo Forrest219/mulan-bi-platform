@@ -135,9 +135,9 @@ export default function DatasourcesPage() {
               </span>
             </div>
             <div className="space-y-1.5 text-xs text-slate-500 mb-4">
-              <div><span className="text-slate-400">地址:</span> {ds.host}:{ds.port}/{ds.database_name}</div>
-              <div><span className="text-slate-400">用户:</span> {ds.username}</div>
-              <div><span className="text-slate-400">更新时间:</span> {formatDate(ds.updated_at)}</div>
+              <div><span className="text-slate-400">地址：</span> {ds.host}:{ds.port}/{ds.database_name}</div>
+              <div><span className="text-slate-400">用户：</span> {ds.username}</div>
+              <div><span className="text-slate-400">更新时间：</span> {formatDate(ds.updated_at)}</div>
             </div>
             <div className="flex items-center gap-2">
               <button onClick={() => handleTest(ds.id)}
@@ -218,7 +218,7 @@ export default function DatasourcesPage() {
               </div>
               <div className="grid grid-cols-3 gap-4">
                 <div className="col-span-2">
-                  <label className="block text-sm font-medium text-slate-600 mb-1.5">Host <span className="text-red-500">*</span></label>
+                  <label className="block text-sm font-medium text-slate-600 mb-1.5">主机地址 <span className="text-red-500">*</span></label>
                   <input type="text" value={formData.host}
                     onChange={e => setFormData({ ...formData, host: e.target.value })}
                     className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"

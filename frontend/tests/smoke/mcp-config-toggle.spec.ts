@@ -26,11 +26,16 @@ test.describe('MCP 配置管理 - 启用/禁用', () => {
     // 获取第一个配置的行
     const firstRow = page.locator('tbody tr').first();
 
-    // 找到启用/禁用开关并点击
+    // 找到启用/禁用开关并记录原始文案
     const toggleBtn = firstRow.locator('button').first();
+    const originalText = await toggleBtn.textContent();
     await toggleBtn.click();
 
     // 等待状态更新
     await page.waitForTimeout(500);
+
+    // 必须断言：按钮文案或状态发生了变化
+    const newText = await toggleBtn.textContent();
+    expect(newText).not.toBe(originalText);
   });
 });

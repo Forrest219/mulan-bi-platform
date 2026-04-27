@@ -12,7 +12,7 @@ Spec 14 T-10 — 为 query_error_events 表追加 resolved_at 列，
 - 无数据回填（历史告警 resolved_at=NULL 表示解决时间未知）
 - 零破坏性：现有列/索引不受影响
 """
-from alembic import op
+from alembic import op, context
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
@@ -23,16 +23,18 @@ depends_on = None
 
 
 def upgrade() -> None:
-    conn = op.get_bind()
-    result = conn.execute(sa.text(
-        "SELECT 1 FROM information_schema.columns "
-        "WHERE table_name='query_error_events' AND column_name='resolved_at'"
-    ))
-    if not result.fetchone():
-        op.add_column(
-            "query_error_events",
-            sa.Column("resolved_at", sa.DateTime(), nullable=True),
-        )
+    if not context.is_offline_mode():
+        conn = op.get_bind()
+        result = conn.execute(sa.text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name='query_error_events' AND column_name='resolved_at'"
+        ))
+        if result.fetchone():
+            return  # column already exists
+    op.add_column(
+        "query_error_events",
+        sa.Column("resolved_at", sa.DateTime(), nullable=True),
+    )
 
 
 def downgrade() -> None:

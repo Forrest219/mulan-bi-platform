@@ -64,6 +64,25 @@ export interface MenuDomain {
 // ============================================================
 export const menuConfig: MenuDomain[] = [
   // ──────────────────────────────────────────────────
+  // 运维工作台（Spec 20，独立入口）
+  // ──────────────────────────────────────────────────
+  {
+    key: 'ops',
+    label: '运维',
+    icon: 'ri-dashboard-3-line',
+    description: '运维工作台：问数、资产、健康一站式',
+    defaultOpen: true,
+    items: [
+      {
+        key: 'workbench',
+        label: '运维工作台',
+        icon: 'ri-dashboard-3-line',
+        path: '/ops/workbench',
+      },
+    ],
+  },
+
+  // ──────────────────────────────────────────────────
   // 域 1：资产 /assets
   // ──────────────────────────────────────────────────
   {
@@ -92,6 +111,13 @@ export const menuConfig: MenuDomain[] = [
         icon: 'ri-database-2-line',
         path: '/assets/datasources',
         permission: { requiredRole: 'data_admin' },
+      },
+      {
+        key: 'tableau-connections',
+        label: 'Tableau 连接',
+        icon: 'ri-plug-line',
+        path: '/assets/tableau-connections',
+        permission: { requiredPermission: 'tableau' },
       },
     ],
   },
@@ -129,7 +155,7 @@ export const menuConfig: MenuDomain[] = [
         key: 'publish-logs',
         label: '发布日志',
         icon: 'ri-file-list-3-line',
-        path: '/empty/publish-logs',
+        path: '/governance/semantic/publish-logs',
       },
     ],
   },

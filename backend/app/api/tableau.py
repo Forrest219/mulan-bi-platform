@@ -102,7 +102,7 @@ def _test_connection_rest(server_url: str, site: str, token_name: str,
                     headers={"X-Tableau-Auth": token},
                     timeout=5
                 )
-            except Exception:
+            except Exception as e:
                 logger.debug("Tableau signout failed (non-critical): %s", e)
             return {"success": True, "message": f"REST API 连接成功 (site_id={site_id})"}
         else:

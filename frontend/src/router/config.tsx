@@ -41,7 +41,9 @@ const TableauConnectionsPage = lazy(() => import('../pages/tableau/connections/p
 const SemanticDatasourceListPage  = lazy(() => import('../pages/semantic-maintenance/datasource-list/page'));
 const SemanticDatasourceDetailPage = lazy(() => import('../pages/semantic-maintenance/datasource-detail/page'));
 const SemanticFieldListPage = lazy(() => import('../pages/semantic-maintenance/field-list/page'));
+const SemanticPublishLogsPage = lazy(() => import('../pages/semantic-maintenance/publish-logs/page'));
 const MetricsPage = lazy(() => import('../pages/data-governance/metrics/page'));
+const MetricDetailPage = lazy(() => import('../pages/data-governance/metrics/detail'));
 const KnowledgePage        = lazy(() => import('../pages/knowledge/page'));
 const UsersAdminPage       = lazy(() => import('../pages/admin/user-management/page'));
 const GroupsAdminPage      = lazy(() => import('../pages/admin/groups/page'));
@@ -54,6 +56,8 @@ const ForgotPasswordPage    = lazy(() => import('../pages/forgot-password/page')
 const EmptyStatePage        = lazy(() => import('../pages/empty/EmptyStatePage'));
 const AgentMonitorPage      = lazy(() => import('../pages/admin/agent-monitor/page'));
 const QueryPage             = lazy(() => import('../pages/query/page'));
+const OpsWorkbenchPage      = lazy(() => import('../pages/ops/workbench/page'));
+const AccountSecurityPage   = lazy(() => import('../pages/account/security/page'));
 
 // ──────────────────────────────────────────────────────────────
 // 路由定义
@@ -86,6 +90,18 @@ const routes: RouteObject[] = [
     element: (
       <ProtectedRoute>
         <QueryPage />
+      </ProtectedRoute>
+    ),
+  },
+
+  // =====================
+  // 运维工作台（独立布局，Split-Pane，Spec 20）
+  // =====================
+  {
+    path: '/ops/workbench',
+    element: (
+      <ProtectedRoute>
+        <OpsWorkbenchPage />
       </ProtectedRoute>
     ),
   },
@@ -175,10 +191,9 @@ const routes: RouteObject[] = [
           },
           {
             path: 'semantic/publish-logs',
-            // disabled: true，路由保留但菜单不可点击（Spec 18 §5.2）
             element: (
-              <ProtectedRoute requiredPermission="database_monitor">
-                <DataHealthPage /> {/* 临时复用占位，待功能开发后替换 */}
+              <ProtectedRoute requiredPermission="tableau">
+                <SemanticPublishLogsPage />
               </ProtectedRoute>
             ),
           },
@@ -187,6 +202,14 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute>
                 <MetricsPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'metrics/:id',
+            element: (
+              <ProtectedRoute>
+                <MetricDetailPage />
               </ProtectedRoute>
             ),
           },
@@ -274,6 +297,21 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute>
                 <KnowledgePage />
+              </ProtectedRoute>
+            ),
+          },
+        ],
+      },
+
+      // ── 账户设置 /account ──
+      {
+        path: '/account',
+        children: [
+          {
+            path: 'security',
+            element: (
+              <ProtectedRoute>
+                <AccountSecurityPage />
               </ProtectedRoute>
             ),
           },
@@ -423,7 +461,7 @@ const routes: RouteObject[] = [
   { path: '/database-monitor', element: <Navigate to="/governance/health-center?tab=warehouse" replace /> },
 
   // /ops → 运维工作台首页（别名）
-  { path: '/ops', element: <Navigate to="/" replace /> },
+  { path: '/ops', element: <Navigate to="/ops/workbench" replace /> },
 
   // =====================
   // 403 / 404
