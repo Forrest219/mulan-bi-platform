@@ -2,8 +2,8 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | v1.1 |
-| 日期 | 2026-04-16 |
+| 版本 | v1.2 |
+| 日期 | 2026-04-27 |
 | 状态 | 草稿 |
 | 作者 | Mulan BI Platform Team |
 | 模块路径 | `backend/services/llm/` |
@@ -24,6 +24,7 @@
 9. [时序图](#9-时序图)
 10. [测试策略](#10-测试策略)
 11. [开放问题](#11-开放问题)
+12. [开发交付约束](#12-开发交付约束)
 
 ---
 
@@ -55,6 +56,16 @@ LLM 能力层为 Mulan BI Platform 提供大语言模型调用基础设施，支
 └─────────────────────────────────────────────┘
 ```
 
+### 1.3 关联文档
+
+| 文档 | 路径 | 关系 |
+|------|------|------|
+| 统一错误码标准 | docs/specs/01-error-codes-standard.md | 上游：LLM_001~005 错误码定义 |
+| 数据源管理 | docs/specs/05-datasource-management-spec.md | 上游：加密基础设施（CryptoHelper） |
+| 语义 LLM 集成 | docs/specs/12-semantic-llm-spec.md | 下游：`complete_for_semantic()` 消费者 |
+| 自然语言查询 | docs/specs/14-nl-to-query-spec.md | 下游：`one_pass_llm()` + `purpose="nlq"` |
+| 知识库 & RAG | docs/specs/17-knowledge-base-spec.md | 下游：`generate_embedding()` 消费者 |
+
 ---
 
 ## 2. 数据模型
@@ -73,6 +84,7 @@ LLM 能力层为 Mulan BI Platform 提供大语言模型调用基础设施，支
 | `is_active` | `BOOLEAN` | — | `false` | 是否启用 |
 | `created_at` | `DATETIME` | — | `now()` | 创建时间 |
 | `updated_at` | `DATETIME` | — | `now()` (onupdate) | 更新时间 |
+| `api_key_updated_at` | `DATETIME` | NULL | — | API Key 最近更新时间（仅 key 变更时更新） |
 | `purpose` | `VARCHAR(50)` | NOT NULL | `'default'` | **[P1 新增]** 用途标识，见下方 Purpose 枚举 |
 | `display_name` | `VARCHAR(100)` | NULL | — | **[P1 新增]** 配置的展示名称（管理页面用） |
 | `priority` | `INTEGER` | NOT NULL | `0` | **[P1 新增]** 同一 purpose 内的优先级，越大越优先 |
@@ -91,7 +103,8 @@ LLM 能力层为 Mulan BI Platform 提供大语言模型调用基础设施，支
 - **[P1 改造] 多配置模式**：表中可存放多条记录，每条有独立的 `purpose`。原"单配置全局"模式（`get_config()` 取第一条、`save_config()` 做 upsert）已被下方 Purpose 路由机制替代，旧接口仅用于向后兼容。
 - **Purpose 路由规则**：`get_config(purpose)` 先查 `purpose=<purpose> AND is_active=True`，按 `priority DESC` 取第一条；找不到则 fallback 到 `purpose='default' AND is_active=True`；仍找不到返回 `None`。
 - `api_key_encrypted` 存储格式为 `base64(salt[16B] + fernet_ciphertext)`，解密需要环境变量中的主密钥
-- `to_dict()` 方法**不返回** `api_key_encrypted`，仅返回 `has_api_key: bool` 标识；同时返回 `purpose`、`display_name`、`priority` 字段
+- `to_dict()` 方法**不返回** `api_key_encrypted`，仅返回 `has_api_key: bool` 标识；同时返回 `purpose`、`display_name`、`priority`、`api_key_preview`（脱敏后的 key 片段，如 `sk-*******3f2a`）、`api_key_updated_at` 字段
+- `display_name` 唯一性在应用层强制（创建/更新时查重，409 冲突），非数据库约束
 
 ### 2.3 ORM 模型
 
@@ -101,7 +114,28 @@ class LLMConfig(Base):
     # ... 见 backend/services/llm/models.py
 ```
 
-### 2.4 数据库访问层
+### 2.4 表定义：`nlq_query_logs`
+
+NL-to-Query 查询审计日志表，fire-and-forget 写入（失败不阻塞主流程）。
+
+| 列名 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| `id` | `INTEGER` | PK, 自增 | 主键 |
+| `user_id` | `INTEGER` | NOT NULL | 发起查询的用户 ID |
+| `question` | `TEXT` | NOT NULL | 用户自然语言问题 |
+| `intent` | `VARCHAR(50)` | NULL | 识别的意图类型 |
+| `datasource_luid` | `VARCHAR(100)` | NULL | 目标数据源 LUID |
+| `vizql_json` | `JSONB` | NULL | 生成的 VizQL 查询 JSON |
+| `response_type` | `VARCHAR(50)` | NULL | 响应类型 |
+| `execution_time_ms` | `INTEGER` | NULL | 执行耗时（毫秒） |
+| `error_code` | `VARCHAR(50)` | NULL | 错误码（成功时为空） |
+| `created_at` | `DATETIME` | NOT NULL | 创建时间 |
+
+**索引**：`(user_id, created_at)` 复合索引、`datasource_luid` 单列索引。
+
+**辅助函数**：`log_nlq_query()` 封装 fire-and-forget 写入逻辑。
+
+### 2.5 数据库访问层
 
 `LLMConfigDatabase` 类封装所有数据库操作，使用中央 `SessionLocal` 获取连接：
 
@@ -121,13 +155,15 @@ class LLMConfig(Base):
 |------|------|------|------|
 | `GET` | `/api/llm/config` | admin | 获取 LLM 配置（兼容旧接口，取第一条 default） |
 | `POST` | `/api/llm/config` | admin | 创建/更新 LLM 配置（兼容旧接口，upsert default） |
-| `DELETE` | `/api/llm/config` | admin | 删除全部 LLM 配置 |
-| `POST` | `/api/llm/config/test` | admin | 测试 LLM 连接 |
+| `DELETE` | `/api/llm/config` | admin | ~~删除全部 LLM 配置~~ **已废弃，返回 410 Gone** |
+| `POST` | `/api/llm/config/test` | admin | 测试 LLM 连接（支持 ad-hoc 和已保存配置两种模式） |
 | `GET` | `/api/llm/assets/{asset_id}/summary` | user+ | 获取资产 AI 摘要 |
+| `GET` | `/api/llm/assets/{asset_id}/explain` | user+ | 获取资产深度解读（5 维分析） |
 | `GET` | `/api/llm/configs` | admin | **[P1 新增]** 列出所有 LLM 配置 |
 | `POST` | `/api/llm/configs` | admin | **[P1 新增]** 创建新 LLM 配置（含 purpose/display_name/priority） |
 | `PUT` | `/api/llm/configs/{id}` | admin | **[P1 新增]** 更新指定 LLM 配置 |
-| `DELETE` | `/api/llm/configs/{id}` | admin | **[P1 新增]** 删除指定 LLM 配置（不可删最后一条 default 活跃配置） |
+| `DELETE` | `/api/llm/configs/{id}` | admin | **[P1 新增]** 删除指定 LLM 配置（HTTP 204） |
+| `PATCH` | `/api/llm/configs/{id}/active` | admin | **[P1 新增]** 切换指定配置启用状态（保护最后一条 default 活跃配置） |
 
 ### 3.2 GET /api/llm/config
 
@@ -186,32 +222,44 @@ class LLMConfig(Base):
 
 **副作用**：记录操作日志（`llm_config_update`），包含操作人、provider、model。
 
-### 3.4 DELETE /api/llm/config
+### 3.4 DELETE /api/llm/config（已废弃）
 
-删除全部 LLM 配置。
+此端点已废弃，调用返回 HTTP 410 Gone。功能性删除请使用 `DELETE /api/llm/configs/{id}`。
 
-**响应 200**：
+**响应 410**：
 ```json
 {
-  "message": "LLM 配置已删除"
+  "error_code": "LLM_001",
+  "message": "此接口已废弃，请使用 DELETE /api/llm/configs/{id}"
 }
 ```
 
 ### 3.5 POST /api/llm/config/test
 
-使用当前已保存的配置测试 LLM 连接。
+测试 LLM 连接。支持两种模式：
+
+- **Ad-hoc 模式**：请求体中同时提供 `base_url`、`api_key`、`model`，直接使用内联参数测试，不读取数据库
+- **已保存配置模式**：请求体仅含 `prompt`（或 `config_id`），从数据库加载配置后测试
 
 **请求体** `LLMTestRequest`：
 
-| 字段 | 类型 | 必填 | 默认值 |
-|------|------|------|--------|
-| `prompt` | `string` | 否 | `"Hello, respond with 'OK'"` |
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `prompt` | `string` | 否 | `"Hello, respond with 'OK'"` | 测试 prompt |
+| `base_url` | `string` | 否 | — | Ad-hoc 模式：API 端点 |
+| `api_key` | `string` | 否 | — | Ad-hoc 模式：API Key 明文 |
+| `model` | `string` | 否 | — | Ad-hoc 模式：模型名称 |
+| `provider` | `string` | 否 | `"openai"` | Ad-hoc 模式：供应商 |
+| `config_id` | `int` | 否 | — | 指定配置 ID（已保存配置模式） |
 
 **响应 200**（成功）：
 ```json
 {
   "success": true,
-  "message": "OK"
+  "message": "OK",
+  "response_model": "gpt-4o-mini",
+  "latency_ms": 850,
+  "tokens_used": 12
 }
 ```
 
@@ -219,7 +267,8 @@ class LLMConfig(Base):
 ```json
 {
   "success": false,
-  "message": "LLM 未配置，请联系管理员"
+  "message": "LLM 未配置，请联系管理员",
+  "error_code": "HTTP_401"
 }
 ```
 
@@ -276,6 +325,20 @@ class LLMConfig(Base):
 
 **保护规则**：若目标配置是 `purpose=default` 且 `is_active=True`，且已无其他同 purpose 活跃配置，则拒绝删除（400）。
 
+#### PATCH /api/llm/configs/{id}/active（启停切换）
+
+切换指定配置的 `is_active` 状态。
+
+**请求体** `ActiveToggleRequest`：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `is_active` | `bool` | 是 | 目标状态 |
+
+**保护规则**：不可禁用最后一条 `purpose=default` 的活跃配置。
+
+**响应 200**：`{"config": {...}}`
+
 ### 3.7 GET /api/llm/assets/{asset_id}/summary
 
 获取指定 Tableau 资产的 AI 摘要。支持缓存（1 小时），可强制刷新。
@@ -324,6 +387,26 @@ class LLMConfig(Base):
 
 **响应 403**：无权访问该资产
 
+### 3.8 GET /api/llm/assets/{asset_id}/explain
+
+获取指定 Tableau 资产的深度解读（5 维分析）。支持缓存（1 小时），可强制刷新。
+
+**路径参数**：同 3.7
+
+**查询参数**：同 3.7（`refresh` 参数）
+
+**权限校验**：同 3.7（IDOR 防护）
+
+**响应 200**：
+```json
+{
+  "explanation": "## 报表概述\n该报表展示了...\n\n## 关键指标\n...",
+  "cached": true
+}
+```
+
+**Prompt**：使用 `ASSET_EXPLAIN_TEMPLATE`（见 Section 5.2），输出 5 维结构化分析。
+
 ---
 
 ## 4. 业务逻辑
@@ -341,12 +424,17 @@ class LLMService:
 
 ### 4.2 客户端缓存策略
 
-客户端按 `{provider}:{base_url}` 为 key 进行缓存，避免重复创建连接：
+客户端通过 `_TimedClientCache` 类管理，TTL 为 5 分钟（300 秒），按复合 key 缓存，避免重复创建连接：
 
-| Provider | 缓存 Key 格式 | SDK 类 |
+**缓存 Key 格式**：`{provider}:{base_url}:{model}:{hash(api_key)}`
+
+| Provider | 缓存 Key 示例 | SDK 类 |
 |----------|---------------|--------|
-| `openai` | `openai:{base_url}` | `openai.AsyncOpenAI` |
-| `anthropic` | `anthropic:{base_url}` | `anthropic.AsyncAnthropic` |
+| `openai` | `openai:https://api.openai.com/v1:gpt-4o-mini:hash` | `openai.AsyncOpenAI` |
+| `anthropic` | `anthropic:https://api.minimaxi.com/anthropic:claude-3:hash` | `anthropic.AsyncAnthropic` |
+
+- TTL 过期后自动驱逐，下次调用重建客户端
+- 配置变更（api_key/model 等）会产生新 key，旧客户端在 TTL 后自动清理
 
 SDK 采用延迟导入（`from openai import AsyncOpenAI`），仅在首次调用对应供应商时加载。
 
@@ -411,6 +499,18 @@ generate_asset_summary(asset)
 - 缓存有效期：**1 小时**（3600 秒）
 - `refresh=true` 查询参数可强制跳过缓存
 - 生成失败时将错误信息写入 `ai_summary_error` 字段
+
+### 4.8 Embedding 生成
+
+`LLMService` 提供文本向量化能力，通过 MiniMax `embo-01` 模型实现：
+
+| 方法 | 说明 |
+|------|------|
+| `generate_embedding_minimax(texts: List[str])` | 批量 embedding，调用 `https://api.minimaxi.com/v1/embeddings`，返回 `List[List[float]]` |
+| `generate_embedding(text: str)` | 单文本便捷封装，内部调用 `generate_embedding_minimax([text])`，返回 `{"embedding": List[float]}` |
+
+- 需要 `purpose="embedding"` 的 LLM 配置（从中获取 API Key）
+- 未配置时返回 `{"error": "..."}` 而非抛异常
 
 ---
 
@@ -576,6 +676,7 @@ generate_asset_summary(asset)
 | 报表解读 | `llm_service.generate_asset_explanation(asset)` | `"default"` | 5 维深度解读 |
 | 自然语言查询（One-Pass） | `llm_service.complete_for_semantic(..., purpose="nlq")` | `"nlq"` | NL-to-VizQL，使用 nlq 专用配置 |
 | 语义 AI 生成 | `llm_service.complete_for_semantic(...)` | `"default"` | 字段语义批量生成 |
+| 知识库 Embedding | `llm_service.generate_embedding(text)` | `"embedding"` | 文本向量化（MiniMax embo-01） |
 | LLM 配置管理前端 | 通过 `/api/llm/configs` 系列 API | — | 管理员多配置管理页面 |
 
 ### 8.3 操作日志
@@ -670,6 +771,28 @@ generate_asset_summary(asset)
 | 环境变量缺失 | 两个加密密钥均未设置时，服务启动失败（RuntimeError） |
 | XSS 注入 | LLM 返回含 HTML/JS 的内容时，前端正确转义 |
 
+### 10.4 验收标准
+
+- [ ] `LLMService` 单例模式正常工作，`_TimedClientCache` TTL 5 分钟
+- [ ] `get_config(purpose)` 实现两级路由（目标 purpose → default fallback）
+- [ ] `complete()` / `complete_for_semantic()` / `complete_with_temp()` 三个入口均支持 `purpose` 参数
+- [ ] `generate_embedding()` / `generate_embedding_minimax()` 调用 MiniMax embedding API
+- [ ] `DELETE /api/llm/config` 返回 410 Gone
+- [ ] `PATCH /configs/{id}/active` 保护最后一条 default 活跃配置
+- [ ] `GET /assets/{id}/explain` 返回 5 维深度解读
+- [ ] `to_dict()` 包含 `api_key_preview`、`api_key_updated_at`，不包含 `api_key_encrypted`
+- [ ] `display_name` 重复时返回 409
+- [ ] `nlq_query_logs` 表 fire-and-forget 写入，失败不阻塞主流程
+- [ ] `cd backend && pytest tests/ -x -q` 全通过
+
+### 10.5 Mock 与测试约束
+
+- **`LLMService` 单例**：测试中需要 `patch('services.llm.service.LLMService._instance', None)` 重置单例，否则跨测试污染。或用 `patch.object(llm_service, '_load_config')` 绕过单例直接 mock 配置加载
+- **`_TimedClientCache`**：测试客户端缓存过期时，mock `time.time()` 推进 300+ 秒，不要用 `sleep()`
+- **Async SDK Mock**：`AsyncOpenAI` / `AsyncAnthropic` 的 mock 必须返回 `asyncio.coroutine` 或使用 `AsyncMock`；直接 `MagicMock` 会导致 `await` 失败
+- **Fire-and-forget 审计**：`log_nlq_query()` 在独立 session 中写入；测试时 mock `SessionLocal` 避免写入测试数据库，或验证 `warning` 级别日志在写入失败时触发
+- **CryptoHelper**：加密/解密测试需设置 `LLM_ENCRYPTION_KEY` 环境变量；测试用固定值 `test-key-32-chars-long-enough!!!` 即可
+
 ---
 
 ## 11. 开放问题
@@ -677,8 +800,8 @@ generate_asset_summary(asset)
 | 编号 | 问题 | 优先级 | 状态 |
 |------|------|--------|------|
 | OI-01 | ~~当前为单配置模式，未来是否需要支持多供应商同时启用并按场景路由？~~ | P2 | **已解决（P1 改造：多配置 purpose 路由）** |
-| OI-02 | 客户端缓存（`_clients` 字典）无过期机制，配置变更后旧客户端不会失效，需考虑缓存刷新策略 | P1 | 待解决 |
-| OI-03 | `ASSET_EXPLAIN_TEMPLATE` 和 `NL_TO_QUERY_TEMPLATE` 已定义但尚无对应 API 端点，需规划接入时机 | P2 | 待规划 |
+| OI-02 | ~~客户端缓存（`_clients` 字典）无过期机制，配置变更后旧客户端不会失效~~ | P1 | **已解决（`_TimedClientCache` 5 分钟 TTL，key 含 model+hash(api_key)）** |
+| OI-03 | ~~`ASSET_EXPLAIN_TEMPLATE` 和 `NL_TO_QUERY_TEMPLATE` 已定义但尚无对应 API 端点~~ | P2 | **已解决（`GET /assets/{id}/explain` 已实现；NL-to-Query 在 `nlq_service.py` 中消费）** |
 | OI-04 | Anthropic system prompt 通过 `<system>` 标签嵌入 user message，非官方推荐方式，后续应改用 SDK 原生 system 参数 | P2 | 待优化 |
 | OI-05 | `complete()` 返回错误时使用 `{"error": str}` 而非抛 HTTP 异常，上层需逐个判断，考虑统一为异常机制 | P2 | 待讨论 |
 | OI-06 | 资产摘要缓存有效期硬编码为 3600 秒，是否需要可配置化？ | P3 | 待讨论 |
@@ -687,9 +810,79 @@ generate_asset_summary(asset)
 
 ---
 
+## 12. 开发交付约束
+
+### 架构红线（违反 = PR 拒绝）
+
+1. **services/ 层无 Web 框架依赖** — `services/llm/service.py` 不得 import FastAPI/Request
+2. **SQL 安全性** — 所有数据库查询使用 SQLAlchemy ORM 或 `text()` + 参数绑定
+3. **禁止 `os.environ`** — 配置通过 `get_settings` 或 `CryptoHelper` 获取
+4. **API Key 不可泄露** — `to_dict()` 禁止返回 `api_key_encrypted`，日志禁止打印明文 key
+5. **单例线程安全** — `LLMService.__new__` 的单例模式不得被破坏，`_TimedClientCache` 必须模块级实例化
+
+### SPEC 08 强制检查清单
+
+- [ ] `_TimedClientCache` key 格式为 `{provider}:{base_url}:{model}:{hash(api_key)}`，不是旧的 `{provider}:{base_url}`
+- [ ] `DELETE /api/llm/config` 返回 410 Gone，不是 200/204
+- [ ] `PATCH /configs/{id}/active` 存在且保护最后一条 default 配置
+- [ ] `GET /assets/{id}/explain` 存在且使用 `ASSET_EXPLAIN_TEMPLATE`
+- [ ] `generate_embedding_minimax()` 调用 MiniMax `embo-01`，使用 `purpose="embedding"` 配置
+- [ ] `NlqQueryLog` 表存在，`log_nlq_query()` fire-and-forget
+- [ ] `to_dict()` 返回 `api_key_preview` 和 `api_key_updated_at`
+- [ ] `display_name` 查重在 API 层实现（409 冲突），非数据库 UNIQUE 约束
+
+### 验证命令
+
+```bash
+# 后端
+cd backend && python3 -m py_compile services/llm/service.py
+cd backend && python3 -m py_compile services/llm/models.py
+cd backend && python3 -m py_compile app/api/llm.py
+cd backend && pytest tests/ -x -q
+
+# 检查 services 层无 Web 框架依赖
+grep -r "from fastapi\|from starlette" backend/services/llm/ && echo "FAIL" || echo "PASS"
+
+# 检查 API Key 不泄露
+grep -r "api_key_encrypted" backend/services/llm/service.py | grep -v "_decrypt\|_encrypt\|encrypted" && echo "FAIL: key leakage" || echo "PASS"
+```
+
+### 正确 / 错误示范
+
+```python
+# ❌ 错误：旧的缓存 key 格式
+cache_key = f"{provider}:{base_url}"
+
+# ✅ 正确：包含 model 和 api_key hash
+cache_key = f"{provider}:{base_url}:{model}:{hash(api_key)}"
+
+# ❌ 错误：to_dict() 返回加密密钥
+def to_dict(self):
+    return {"api_key_encrypted": self.api_key_encrypted, ...}
+
+# ✅ 正确：返回脱敏预览
+def to_dict(self):
+    return {"has_api_key": bool(self.api_key_encrypted),
+            "api_key_preview": self._build_api_key_preview(), ...}
+
+# ❌ 错误：DELETE /config 返回 200
+@router.delete("/config")
+async def delete_config():
+    db.delete_config()
+    return {"message": "已删除"}
+
+# ✅ 正确：返回 410 Gone 表示废弃
+@router.delete("/config")
+async def delete_config():
+    raise HTTPException(status_code=410, detail="此接口已废弃")
+```
+
+---
+
 ## 变更记录
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-04-27 | v1.2 | Spec 合规补齐：新增 Section 1.3 关联文档、Section 12 开发交付约束；补入 `PATCH /configs/{id}/active`、`GET /assets/{id}/explain`、`generate_embedding()`/`generate_embedding_minimax()` 接口；新增 `NlqQueryLog` 表定义、`api_key_updated_at`/`api_key_preview` 字段；`DELETE /config` 标记为 410 Gone 废弃；更新客户端缓存为 `_TimedClientCache`（5 分钟 TTL + 复合 key）；新增 10.4 验收标准、10.5 Mock 约束；关闭 OI-02/OI-03。 |
 | 2026-04-16 | v1.1 | P1 改造：支持多配置 purpose 路由。`ai_llm_configs` 表新增 `purpose`、`display_name`、`priority` 字段；`get_config(purpose)` 实现 purpose → default 两级路由；新增 `GET/POST /api/llm/configs`、`PUT/DELETE /api/llm/configs/{id}` 四个 admin-only CRUD 端点；`complete_for_semantic()` NLQ 调用传 `purpose="nlq"`；客户端缓存改为带 TTL 的 `_TimedClientCache`（5 分钟过期）。 |
 | 2026-04-03 | v1.0 | 初始版本，单配置全局模式 |

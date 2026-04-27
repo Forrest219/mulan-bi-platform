@@ -1,6 +1,6 @@
 # Spec 20: 运维工作台（Ops Workbench，Split-Pane）
 
-> 版本：v0.1 | 状态：草稿 | 日期：2026-04-18 | 作者：Forrest
+> 版本：v0.2 | 状态：草稿 | 日期：2026-04-27 | 作者：Forrest
 > 依赖：Spec 07（Tableau MCP V1）、Spec 10（Tableau 健康评分）、Spec 14（NL-to-Query）、Spec 18（菜单重构）、Spec 21（首页重构）、Spec 22（首页问数架构）
 
 ---
@@ -26,6 +26,19 @@
   - 不做资产图谱识别（lineage 推断）
   - 不合并 `/tableau/connections` 连接管理页
   - 不做移动端适配
+
+### 1.4 现有原型代码（需替换）
+
+> ⚠️ **决议：代码适配 Spec**（2026-04-27）。以下文件为早期原型，架构与本 Spec 不一致（原型使用 `/ops/workbench` 三面板模式，Spec 要求根路由 `/` Split-Pane 模式）。实施时须按 Spec 重写，不可在原型基础上迭代。
+
+| 文件 | 说明 | 处置 |
+|------|------|------|
+| `frontend/src/pages/ops/workbench/page.tsx` | 原型主页 | Phase 2 完成后删除 |
+| `frontend/src/pages/ops/workbench/QueryPanel.tsx` | 原型查询面板 | 功能迁入 `features/ops-workbench/` |
+| `frontend/src/pages/ops/workbench/AssetPanel.tsx` | 原型资产面板 | 功能迁入 `features/tableau-inspector/` |
+| `frontend/src/pages/ops/workbench/HealthPanel.tsx` | 原型健康面板 | 功能迁入 OpsSnapshotPanel |
+| `frontend/src/router/config.tsx` | `/ops/workbench` 路由注册 | Phase 2 删除该路由 |
+| `frontend/src/config/menu.ts` | 工作台菜单项 (`/ops/workbench`) | Phase 2 改为指向 `/` |
 
 ### 1.3 关联文档
 
@@ -175,9 +188,84 @@ export const ENABLE_OPS_WORKBENCH: boolean =
 
 ---
 
+## 5.4 错误码
+
+本 Spec 不新增后端错误码。前端复用以下现有错误码处理：
+
+| 错误码 | 来源 | 前端处理 |
+|--------|------|---------|
+| `AUTH_003` | 无 `tableau` 权限访问资产 | 抽屉不打开，Toast "无权限查看该资产" |
+| `TAB_006` | `asset` LUID 对应的资产不存在 | 抽屉显示空态 "资产不存在或已删除" |
+| `HS_003` | 健康扫描时数据源连接失败 | HealthTab 显示 ErrorBoundary |
+| `LLM_001` | AI 解读时无 LLM 配置 | AiExplainTab 显示 "AI 服务未配置" |
+
+前端错误处理统一通过全局拦截器（Spec 01 Section 6），本模块仅需处理上述业务特定场景。
+
+---
+
+## 5.5 安全与权限
+
+### 角色权限矩阵
+
+| 操作 | admin | data_admin | analyst | user |
+|------|-------|-----------|---------|------|
+| 查看 idle 态首页 | Y | Y | Y | Y |
+| 使用问数功能 | Y | Y | Y | Y |
+| 打开资产抽屉 | Y | Y | Y（需 `tableau` 权限） | N |
+| 查看 OpsSnapshotPanel | Y | Y | N | N |
+| 使用 ScopePicker 切换连接 | Y | Y | Y（需 `tableau` 权限） | N |
+| AskAboutThis 跳转提问 | Y | Y | Y（需 `tableau` 权限） | N |
+
+### 安全约束
+
+- 前端权限校验通过 `useAuth()` 判断 `tableau` permission，在请求前拦截
+- API 层仍有 403 兜底，防止前端旁路
+- URL 中 `?asset=` 参数不暴露敏感信息（仅 Tableau LUID，非内部 ID）
+- `ENABLE_OPS_WORKBENCH` feature flag 关闭时，所有新功能入口不可访问
+
+---
+
+## 5.6 时序图
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant F as 前端 (HomePage)
+    participant D as AssetInspectorDrawer
+    participant API as 后端 API
+
+    U->>F: 访问 / (idle 态)
+    F->>API: GET /tableau/health?sort=score_asc&limit=5
+    F->>API: GET /tableau/sync-logs?status=failed&limit=5
+    API-->>F: 低健康资产 + 失败同步列表
+    F-->>U: 渲染 OpsSnapshotPanel
+
+    U->>F: 点击低健康资产
+    F->>F: pushState /?asset=<luid>&tab=health
+    F->>D: 打开抽屉
+    D->>API: GET /tableau/assets/<luid>
+    D->>API: GET /tableau/health/<luid>
+    API-->>D: 资产详情 + 健康分
+    D-->>U: 渲染 HealthTab (7 因子)
+
+    U->>D: 点击「就此资产提问」
+    D->>F: navigate /?prefill=<question>&asset=<luid>&tab=health
+    F->>F: AskBar 自动填充问题
+    U->>F: 确认提交
+    F->>API: POST /api/search/query
+    API-->>F: 问答结果
+    F-->>U: 渲染 SearchResult（抽屉保持打开）
+
+    U->>U: 按浏览器返回键
+    F->>F: popstate → 移除 ?asset=
+    D-->>F: 抽屉关闭
+```
+
+---
+
 ## 6. 文件级改动计划
 
-> 约定：路径均以 `/Users/forrest/Projects/mulan-bi-platform/` 为根。
+> 约定：路径均以 `frontend/` 为根。
 
 ### Phase 1 — `AssetInspector` 抽取到 feature 模块
 
@@ -357,6 +445,14 @@ export const ENABLE_OPS_WORKBENCH: boolean =
 - `/chat/:id` 对话流不受影响（Spec 21/22 无回归）
 - `/tableau/health` 独立页面仍可访问（作为冗余入口）
 
+### 9.4 Mock 与测试约束
+
+- **URL 状态**：`useDrawerUrlState` / `useScopeUrlState` 测试需 mock `window.history.pushState` / `replaceState`，断言调用参数而非真实导航。RTL 中使用 `MemoryRouter` 并传入初始 URL 参数
+- **ScopeContext**：测试组件需用 `<ScopeContext.Provider value={mockScope}>` 包裹，不可依赖真实 URL 解析
+- **Tableau API Mock**：Playwright 集成测试中 `page.route('**/api/tableau/**', ...)` 必须返回完整响应体（含 `fields`、`health_score` 等），mock 数据中的唯一值须出现在 DOM 断言中（遵守 `docs/TESTING.md` 闭环要求）
+- **Feature Flag**：测试 `ENABLE_OPS_WORKBENCH=false` 降级路径时，mock `import.meta.env.VITE_ENABLE_OPS_WORKBENCH` 为 `'false'`
+- **权限 Mock**：`useAuth()` 返回 `{ permissions: [] }`（无 `tableau`）时，断言抽屉不渲染且无 API 请求发出
+
 ---
 
 ## 10. 风险与回滚
@@ -390,3 +486,75 @@ export const ENABLE_OPS_WORKBENCH: boolean =
 | 2 | `AskAboutThis` 预生成问题模板由前端硬编码还是 LLM 生成 | llm-owner | 待定 |
 | 3 | 窄屏 Sheet 是否保留 ConversationBar | ux-owner | 待定 |
 | 4 | `OpsSnapshotPanel` 是否允许用户自定义展示卡片 | pm | 暂不做（v0.2 考虑） |
+
+---
+
+## 12. 开发交付约束
+
+### 架构红线（违反 = PR 拒绝）
+
+1. **`features/` 模块封装** — `features/ops-workbench/` 和 `features/tableau-inspector/` 不得 import `pages/` 下的任何组件（单向依赖：pages → features → components）
+2. **URL 是唯一事实来源** — 抽屉开合、Tab 选择、Scope 筛选状态只存 URL query string，`ScopeContext` 只做派生广播
+3. **Feature Flag 守门** — Phase 2/3/4 所有新入口必须检查 `ENABLE_OPS_WORKBENCH`；遗漏即拒绝
+4. **lazy 加载** — `AssetInspectorDrawer`、各 Tab 组件必须 `React.lazy` 加载
+5. **无后端改动** — 本 Spec 不改任何后端文件。若需新增 API（如 `low-score`），须开独立 PR
+6. **原型代码清理** — Phase 2 完成后，`pages/ops/workbench/` 目录须整体删除，不得保留
+
+### SPEC 20 强制检查清单
+
+- [ ] `features/tableau-inspector/` 只通过 `index.ts` 导出，无内部模块直接 import
+- [ ] `features/ops-workbench/` 不 import `pages/` 或 `features/tableau-inspector/` 内部模块
+- [ ] `useDrawerUrlState` 使用 `pushState`（开/关抽屉）和 `replaceState`（切 Tab）
+- [ ] `ENABLE_OPS_WORKBENCH=false` 时 `/` 完全回退到旧版首页
+- [ ] `pages/ops/workbench/` 原型代码在 Phase 2 PR 中删除
+- [ ] `/ops/workbench` 路由在 `router/config.tsx` 中移除
+- [ ] 无 `tableau` 权限用户访问 `/?asset=xxx` 不触发 Tableau API 请求
+- [ ] 所有用户可见文案为中文
+
+### 验证命令
+
+```bash
+# 前端编译
+cd frontend && npm run type-check
+cd frontend && npm run lint
+cd frontend && npm test -- --run
+cd frontend && npm run build
+
+# 检查 features/ 不 import pages/
+grep -r "from.*pages/" frontend/src/features/ && echo "FAIL: features imports pages" || echo "PASS"
+
+# 检查原型代码清理（Phase 2+ 后执行）
+test -d frontend/src/pages/ops/workbench && echo "FAIL: prototype dir still exists" || echo "PASS"
+
+# 检查 feature flag 覆盖
+grep -r "ENABLE_OPS_WORKBENCH" frontend/src/features/ops-workbench/ | wc -l
+```
+
+### 正确 / 错误示范
+
+```tsx
+// ❌ 错误：features/ 直接 import pages/
+import { SomeComponent } from '../../../pages/home/components/WelcomeHero';
+
+// ✅ 正确：features/ 只 import components/ 或自身模块
+import { Card } from '../../../components/ui/Card';
+
+// ❌ 错误：抽屉状态存 React state
+const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+
+// ✅ 正确：URL 是唯一事实来源
+const { assetLuid } = useDrawerUrlState();
+const isDrawerOpen = !!assetLuid;
+
+// ❌ 错误：Phase 3 新入口未检查 feature flag
+<OpsSnapshotPanel />
+
+// ✅ 正确：feature flag 守门
+{ENABLE_OPS_WORKBENCH && <OpsSnapshotPanel />}
+
+// ❌ 错误：在原型上迭代
+// pages/ops/workbench/page.tsx — 添加新功能...
+
+// ✅ 正确：按 Spec 在 features/ 下重写
+// features/ops-workbench/OpsWorkbench.tsx — 新实现
+```

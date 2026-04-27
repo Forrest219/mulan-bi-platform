@@ -60,8 +60,8 @@ DDL 合规检查模块为 Mulan BI 平台的核心数据治理能力之一。该
 | DDLValidator | `backend/services/ddl_checker/validator.py` | 规则匹配与违规检测 |
 | RuleCache | `backend/services/ddl_checker/cache.py` | 规则运行时缓存（Redis） |
 | DDLScanner | `backend/services/ddl_checker/scanner.py` | 全库扫描编排器 |
-| TaskSplitter | `backend/services/ddl_checker/task_splitter.py` | 扫描任务拆分（Celery） |
-| RulesSeedService | `backend/services/rules/seed_service.py` | 种子文件同步（幂等 UPSERT） |
+| TaskSplitter | `backend/services/ddl_checker/task_splitter.py` | 扫描任务拆分（Celery）— **未实现，scanner.py 当前为同步迭代** |
+| RulesSeedService | `backend/app/api/rules.py` (模块级 `seed_defaults`) | 种子文件同步（幂等 UPSERT） |
 | RuleConfig Model | `backend/services/rules/models.py` | 规则持久化 ORM |
 | DDL Check Engine | `modules/ddl_check_engine/` | 独立可分发的检查引擎模块 |
 | 规则配置文件 | `config/rules.yaml` | 静态规则定义（Seed） |
@@ -136,7 +136,23 @@ bi_scan_logs
   (独立，存储扫描结果快照)
 ```
 
-### 2.3 内存数据模型
+### 2.3 索引策略
+
+| 表 | 索引 | 类型 | 用途 |
+|------|------|------|------|
+| `bi_rule_configs` | `rule_id` | UNIQUE | 按规则 ID 精确查找 + Seed 幂等 UPSERT |
+| `bi_rule_configs` | `(db_type, enabled)` | 普通 | 按数据库类型过滤活跃规则（RuleCache 加载） |
+| `bi_scan_logs` | `trace_id` | 普通 | 日志系统关联追踪 |
+| `bi_scan_logs` | `created_at` | 普通 | 按时间范围查询扫描历史 |
+| `bi_rule_change_logs` | `rule_id` | 普通 | 按规则查看变更历史 |
+
+### 2.4 迁移说明
+
+- `bi_rule_configs` 和 `bi_scan_logs` 已通过 Alembic 迁移建表
+- `is_modified_by_user` 和 `scene_type` 为 v1.1 新增列，需 Alembic 增量迁移
+- `results_masked` 列已在 spec 中定义，代码中尚未实现脱敏写入逻辑
+
+### 2.5 内存数据模型
 
 #### TableInfo
 
@@ -1028,6 +1044,27 @@ CREATE TABLE UserInfo (
 
 预期违规：表名大写（High）、列名大写（High）、使用 FLOAT（Medium）、缺少主键（High）、缺少注释（Medium）、缺少 create_time/update_time（Medium）、缺少 is_deleted（Medium）。
 
+### 9.4 验收标准
+
+- [ ] POST /api/ddl/check 对合规 DDL 返回 score=100, passed=true
+- [ ] POST /api/ddl/check 对不合规 DDL 返回正确 violations 列表和评分
+- [ ] scene_type=ODS/DWD/ADS 使用不同扣分权重
+- [ ] ddl_text 超 64KB 返回 DDL_004
+- [ ] 正则解析超时 200ms 降级 AST 并返回 DDL_005
+- [ ] 规则 CRUD API 权限校验（普通用户 403）
+- [ ] 规则 toggle/delete 审计日志同步写入
+- [ ] Seed 幂等性：`is_modified_by_user=TRUE` 的规则不被覆盖
+- [ ] RuleCache 在规则变更后正确失效
+- [ ] `cd backend && pytest tests/ -x -q` 全通过
+
+### 9.5 Mock 与测试约束
+
+- **`RuleCache`（Redis）**：单元测试中 mock `redis.StrictRedis` 返回预设规则 JSON；集成测试可使用 `fakeredis`。禁止在单元测试中依赖真实 Redis 实例
+- **`RuleConfigDatabase._get_db()`**：mock 返回 SQLAlchemy `Session`，避免在 parser/validator 单元测试中触发真实 DB 连接
+- **`DDLParser` 双引擎**：分别测试正则路径和 AST 路径。mock `sqlglot.parse()` 验证降级触发条件，不要依赖 sqlglot 版本行为
+- **`RulesConfig`（已废弃）**：此类为 v1.0 遗留的 YAML 静态加载器，已被 `DatabaseRulesAdapter` 替代。测试中**不得引用 `RulesConfig`**
+- **审计日志**：`delete`/`disable` 操作的审计日志在同一事务内写入，测试需断言 `bi_rule_change_logs` INSERT 与规则变更在同一 `session.commit()` 中
+
 ---
 
 ## 10. 开放问题
@@ -1045,3 +1082,70 @@ CREATE TABLE UserInfo (
 | **OI-009** | **【新增】Seed 幂等性问题：重复部署会覆盖用户已修改的规则。修复方案：添加 `is_modified_by_user` 标记 + UPSERT 逻辑。** | Seed 管理 | **P2** | ✅ 已修复 |
 | **OI-010** | **【新增】全库扫描万级表同步阻塞 Worker。修复方案：任务拆分策略，Celery 分布式并发执行单表扫描任务。** | 扫描性能 | **P1** | ✅ 已修复 |
 | OI-011 | 前端 DDL 暂存区与 Diff 功能未实现 | 开发体验 | P3 | 待办 |
+
+---
+
+## 11. 开发交付约束
+
+### 11.1 架构约束
+
+- `services/ddl_checker/` 不得 import FastAPI、Request、Response（纯业务层）
+- `services/ddl_checker/` 不得 import `app.api.*`（禁止反向依赖）
+- `services/rules/models.py` 通过 SQLAlchemy Core 操作 DB，不得使用 raw SQL 字符串插值
+- `modules/ddl_check_engine/` 为独立模块，不得 import `backend/` 内部模块
+- 规则运行时**必须**从 `bi_rule_configs` 表加载，`rules.yaml` 仅作 Seed 使用
+- `functools.lru_cache` 不适用于请求级 DDLValidator 实例，**禁止使用**
+
+### 11.2 强制检查清单
+
+- [ ] 新增/修改的规则检查方法有对应的单元测试
+- [ ] 规则 CRUD 操作写入 `bi_rule_change_logs` 审计日志（delete/disable 同步写入）
+- [ ] `ddl_text` 入口处校验长度 ≤ 64KB
+- [ ] 正则匹配设置 200ms 超时
+- [ ] 不使用 `RulesConfig`（已废弃的静态 YAML 加载器）
+- [ ] Seed 数据通过 `is_modified_by_user` 保护用户修改
+
+### 11.3 验证命令
+
+```bash
+# 后端编译检查
+cd backend && python3 -m py_compile services/ddl_checker/parser.py
+cd backend && python3 -m py_compile services/ddl_checker/validator.py
+cd backend && python3 -m py_compile services/ddl_checker/scanner.py
+
+# 禁止 services/ 依赖 Web 框架
+grep -rn "from fastapi\|from starlette" backend/services/ddl_checker/ && echo "FAIL" || echo "PASS"
+
+# 禁止废弃的 RulesConfig 引用
+grep -rn "RulesConfig" backend/services/ backend/app/ | grep -v "# DEPRECATED" && echo "FAIL" || echo "PASS"
+
+# 后端测试
+cd backend && pytest tests/ -x -q
+```
+
+### 11.4 正确 / 错误示范
+
+```python
+# ❌ 错误：运行时从 YAML 加载规则
+from services.rules.config import RulesConfig
+rules = RulesConfig.load()
+
+# ✅ 正确：运行时从数据库加载规则
+from services.ddl_checker.cache import RuleCache
+rules = RuleCache.get_active_rules(scene_type="ALL", db_type="MySQL")
+
+# ❌ 错误：使用 lru_cache 缓存规则（请求级实例，不生效）
+@functools.lru_cache()
+def get_rules(): ...
+
+# ✅ 正确：使用 Redis 缓存，TTL=300s
+RuleCache.get_or_set(key, loader_fn, ttl=300)
+
+# ❌ 错误：审计日志用 BackgroundTasks（进程崩溃会丢失）
+background_tasks.add_task(write_audit_log, ...)
+
+# ✅ 正确：delete/disable 审计在同一事务内同步写入
+with db.session.begin():
+    db.delete(rule)
+    db.create_change_log(rule_id, "delete", old_value, None, operator)
+```

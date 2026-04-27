@@ -17,7 +17,7 @@
 | DatabaseConnector 支持 StarRocks 连接 | StarRocks DDL 语法解析（PARTITION BY / DISTRIBUTED BY） |
 | 25 条 StarRocks 专属合规规则（种子数据） | 元数据 CRUD / 审批流 |
 | DatabaseRulesAdapter 按 db_type 过滤规则 | 旧数仓（MySQL/SQL Server）治理 |
-| TableInfo 注入 database_name 上下文 | 迁移进度追踪 |
+| TableInfo 注入 database 上下文 | 迁移进度追踪 |
 | 健康中心增加「数仓合规」Tab | 新建独立巡检模块 |
 | 基于 INFORMATION_SCHEMA 的只读检查 | ALTER TABLE 自动修复建议生成 |
 
@@ -91,7 +91,7 @@
 @dataclass
 class TableInfo:
     # ... 现有字段不变
-    database_name: str = ""  # 新增：所属数据库名，巡检时由 DDLScanner 填入
+    database: str = ""  # 新增：所属数据库名，巡检时由 DDLScanner 填入
 ```
 
 ---
@@ -152,18 +152,18 @@ rules_list = [r for r in rules_list
 **问题**：现有 `TableValidator.validate(table)` 不知道表属于哪个数据库，无法按分层选择命名 regex。
 
 **方案**：
-1. `DDLScanner.scan_all_tables()` 从 `self.connector.config["database"]` 获取 `database_name`
-2. `DDLScanner._read_table_info()` 将 `database_name` 赋值给 `TableInfo.database_name`
-3. StarRocks 检查方法通过 `table.database_name` 判断当前分层
+1. `DDLScanner.scan_all_tables()` 从 `self.connector.config["database"]` 获取数据库名
+2. `DDLScanner._read_table_info()` 将其赋值给 `TableInfo.database`
+3. StarRocks 检查方法通过 `table.database` 判断当前分层
 
 ### 4.4 StarRocks 检查方法设计
 
-在 `TableValidator` 中新增 4 个方法，仅当 `db_type='StarRocks'` 时启用：
+在 `TableValidator` 中新增 8 个方法，仅当 `db_type='StarRocks'` 时启用：
 
 #### `_check_sr_layer_naming(table: TableInfo) -> List[Violation]`
 
 ```
-输入：table.name, table.database_name
+输入：table.name, table.database
 逻辑：
   1. 从 config_json 中获取当前 database 对应的 regex pattern
   2. 匹配 SR-001~005, SR-016~018, SR-024 中适用的规则
@@ -174,11 +174,40 @@ rules_list = [r for r in rules_list
 #### `_check_sr_public_fields(table: TableInfo) -> List[Violation]`
 
 ```
-输入：table.columns (名称列表), table.database_name
+输入：table.columns (名称列表), table.database
 逻辑：
-  1. 根据 database_name 确定必需公共字段集合（SR-008~011）
+  1. 根据 database 确定必需公共字段集合（SR-008~011）
   2. 对比 table.columns 检查是否存在
   3. 缺失 → Violation(HIGH, "缺少公共字段 {field}")
+输出：violations 列表
+```
+
+#### `_check_sr_table_naming(table: TableInfo) -> List[Violation]`
+
+```
+输入：table.name
+逻辑：
+  1. 匹配 SR-022：表名含中文 → Violation(HIGH)
+  2. 匹配 SR-023：表名含版本号 _v\d+ → Violation(MEDIUM)
+输出：violations 列表
+```
+
+#### `_check_sr_comment(table: TableInfo) -> List[Violation]`
+
+```
+输入：table.comment, table.columns[*].comment
+逻辑：
+  1. 匹配 SR-014：表注释为空 → Violation(HIGH)
+  2. 匹配 SR-013：字段注释覆盖率 < min_coverage → Violation(HIGH)
+输出：violations 列表
+```
+
+#### `_check_sr_field_naming(table: TableInfo) -> List[Violation]`
+
+```
+输入：table.columns[*].name
+逻辑：
+  1. 匹配 SR-012：字段名不符合 ^[a-z][a-z0-9_]*$，或长度 > 40 → Violation(HIGH)
 输出：violations 列表
 ```
 
@@ -204,6 +233,16 @@ rules_list = [r for r in rules_list
   3. _time/_at → 必须 DATETIME/DATE，禁止 VARCHAR
   4. _qty/_cnt → 必须 BIGINT/DECIMAL，禁止 FLOAT
   5. _rate → 必须 DECIMAL，禁止 FLOAT
+输出：violations 列表
+```
+
+#### `_check_sr_view_naming(table: TableInfo) -> List[Violation]`
+
+```
+输入：table.name, table.table_type
+逻辑：
+  1. 仅对 table_type='VIEW' 的对象执行
+  2. 匹配 SR-025：视图名不以 _vw 结尾 → Violation(MEDIUM)
 输出：violations 列表
 ```
 
@@ -379,15 +418,22 @@ sequenceDiagram
 
 - [ ] `DatabaseConnector` 支持 `db_type='starrocks'`，使用 `mysql+pymysql://` 协议连接
 - [ ] `DatabaseRulesAdapter._load_rules()` 按 `db_type` 过滤规则，MySQL 扫描不加载 StarRocks 规则
-- [ ] `TableInfo` 含 `database_name` 字段，`DDLScanner` 在扫描时正确填入
+- [ ] `TableInfo` 含 `database` 字段，`DDLScanner` 在扫描时正确填入
 - [ ] 25 条 StarRocks 规则种子数据通过 `seed_defaults()` 幂等写入
-- [ ] `_check_sr_layer_naming` 能根据 database_name 选择正确的命名 regex
-- [ ] `_check_sr_public_fields` 能根据 database_name 确定必需字段集合
+- [ ] `_check_sr_layer_naming` 能根据 database 选择正确的命名 regex
+- [ ] `_check_sr_public_fields` 能根据 database 确定必需字段集合
 - [ ] `_check_sr_type_alignment` 检测 `_amt` 用 FLOAT 和 `_time` 用 VARCHAR 的违规
 - [ ] `_check_sr_database_whitelist` 检测非法数据库
 - [ ] 健康中心第 4 Tab「数仓合规」可见，预选 StarRocks 数据源
 - [ ] `cd backend && pytest tests/ -x -q` 全通过
 - [ ] `cd frontend && npm run type-check && npm run lint && npm test -- --run` 全通过
+
+### 9.3 Mock 与测试约束
+
+- **`DatabaseConnector.connect()`**：单元测试中 `patch('services.ddl_checker.connector.create_engine')` 返回 mock engine，避免真实 StarRocks 连接。集成测试可用 MySQL 容器替代（StarRocks 兼容 MySQL 协议）
+- **`DatabaseRulesAdapter._load_rules()`**：mock `RuleCache.get_all()` 返回预构造的 StarRocks 规则列表，测试 db_type 过滤逻辑时必须同时包含 MySQL 和 StarRocks 规则
+- **`TableInfo.database`**：测试用例中显式构造 `TableInfo(database="ods_db", ...)` 而非依赖 scanner 填入，确保 check 方法可独立测试
+- **`_check_sr_database_whitelist`**：此方法为 scan 级别（非逐表），测试时直接传入 `["ods_db", "ods_hive"]` 等数据库名列表
 
 ---
 
@@ -396,7 +442,7 @@ sequenceDiagram
 | # | 问题 | 负责人 | 状态 |
 |---|------|--------|------|
 | 1 | StarRocks INFORMATION_SCHEMA 是否完全兼容 MySQL（特别是 COLUMN_COMMENT） | 待验证 | 待定 |
-| 2 | 连接 StarRocks 多个数据库时是否需要逐库扫描（一个数据源=一个库） | architect | 待定 |
+| 2 | 连接 StarRocks 多个数据库时是否需要逐库扫描（一个数据源=一个库） | architect | **已决议：一个数据源=一个库。** 遵循 Spec 05 数据源模型，每条 `bi_data_sources` 记录对应一个 `database` 字段。如需扫描多库，用户须注册多个数据源。`_check_sr_database_whitelist` 仅在首次 SHOW DATABASES 时对整个实例做一次校验。 |
 | 3 | 视图/MV 巡检（SR-025）是否通过 `get_view_names()` 实现 | architect | 待定 |
 
 ---
@@ -408,7 +454,7 @@ sequenceDiagram
 | 文件 | 允许改动 |
 |------|---------|
 | `backend/services/ddl_checker/connector.py` | 新增 starrocks 连接分支 |
-| `backend/services/ddl_checker/validator.py` | 修复 db_type 过滤 + 新增 4 个 sr_* 检查方法 |
+| `backend/services/ddl_checker/validator.py` | 修复 db_type 过滤 + 新增 8 个 sr_* 检查方法 |
 | `backend/services/ddl_checker/parser.py` | TableInfo 加 database_name 字段 |
 | `backend/services/ddl_checker/scanner.py` | _read_table_info 填入 database_name |
 | `backend/app/api/rules.py` | DEFAULT_RULES_SEED 追加 25 条 |
@@ -444,6 +490,29 @@ sequenceDiagram
 - [ ] 种子数据 rule_id 使用 `RULE_SR_*` 前缀
 - [ ] `config_json` 中的 regex 用架构设计文档正例/反例验证
 - [ ] 前端文案全中文（"数仓合规"不是"Compliance"）
+
+### 正确 / 错误示范
+
+```python
+# ❌ 错误：db_type 过滤忘记 lower()，导致 "StarRocks" != "starrocks"
+rules_list = [r for r in rules_list if r.db_type == self.db_type]
+
+# ✅ 正确：大小写不敏感匹配 + 支持 "all" 通配
+rules_list = [r for r in rules_list
+              if r.db_type.lower() in (self.db_type.lower(), "all")]
+
+# ❌ 错误：使用 spec 旧字段名 database_name
+table.database_name
+
+# ✅ 正确：使用代码实际字段名 database
+table.database
+
+# ❌ 错误：在 validator.py 中 import FastAPI
+from fastapi import Request
+
+# ✅ 正确：services/ 层纯 Python，无 Web 框架依赖
+from services.ddl_checker.parser import TableInfo
+```
 
 ### 验证命令
 

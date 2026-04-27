@@ -103,6 +103,7 @@
 | `SEARCH` | 自然语言查询 | SEARCH_001 - SEARCH_099 | NL-to-Query 搜索 |
 | `KB` | 知识库 | KB_001 - KB_099 | 知识库管理 |
 | `EVT` | 事件/通知 | EVT_001 - EVT_099 | 事件推送、通知管理 |
+| `DQC` | 数据质量流水线 | DQC_001 - DQC_099 | 质量规则、检测执行、信号灯评分 |
 
 > **新模块接入**：在本表追加新行，提交 PR 审批后即可使用。前缀长度不超过 6 个大写字母。
 
@@ -224,6 +225,47 @@
 | `MCP_008` | 429 | MCP 请求频率超限 | 短时间内请求过多，稍后重试 |
 | `MCP_009` | 500 | MCP 响应解析失败 | MCP Server 版本不兼容或响应格式异常 |
 | `MCP_010` | 400 | 目标资产不是 datasource 类型 | metadata/preview 接口仅支持 datasource |
+
+### 5.11 GOV - 数据治理质量
+
+| 错误码 | HTTP | 描述 | 触发场景 |
+|---|---|---|---|
+| `GOV_001` | 404 | 质量规则不存在 | 按 ID 查询质量规则未找到 |
+| `GOV_002` | 404 | 质量检测结果不存在 | 按 ID 查询检测结果未找到 |
+| `GOV_003` | 409 | 质量扫描任务进行中 | 对同一数据源重复触发质量扫描 |
+| `GOV_004` | 400 | 数据源连接失败 | 质量扫描时无法连接目标数据库 |
+
+### 5.12 DQC - 数据质量流水线
+
+| 错误码 | HTTP | 描述 | 触发场景 |
+|---|---|---|---|
+| `DQC_001` | 404 | 监控资产不存在 | 按 ID 查询监控资产未找到 |
+| `DQC_002` | 409 | 监控资产已存在 | 重复注册同一监控资产 |
+| `DQC_003` | 400 | 数据源不存在或未激活 | 关联的数据源被删除或禁用 |
+| `DQC_004` | 403 | 非资产所有者 | 非所有者尝试编辑/删除监控资产 |
+| `DQC_010` | 400 | 维度权重非法 | 权重之和不为 1 或包含负值 |
+| `DQC_011` | 400 | 信号阈值非法 | 阈值不在 [0, 100] 区间或 green > yellow > red 不成立 |
+| `DQC_020` | 400 | 规则类型不支持 | 提供了平台未支持的规则类型 |
+| `DQC_021` | 400 | 规则配置参数无效 | 规则 JSON 参数校验不通过 |
+| `DQC_022` | 400 | 维度与规则类型不兼容 | 将不适用的规则类型绑定到特定维度 |
+| `DQC_023` | 409 | 规则已存在 | 同一资产下同类规则重复创建 |
+| `DQC_024` | 404 | 规则不存在 | 按 ID 查询质量规则未找到 |
+| `DQC_025` | 400 | custom_sql 非只读 | 自定义 SQL 包含 INSERT/UPDATE/DELETE 等写操作 |
+| `DQC_030` | 409 | DQC cycle 正在运行 | 对同一资产重复触发检测周期 |
+| `DQC_031` | 404 | cycle 不存在 | 按 ID 查询检测周期未找到 |
+| `DQC_040` | 502 | 目标数据库连接失败 | 执行规则时无法连接目标数据库 |
+| `DQC_041` | 504 | 目标数据库查询超时 | 规则 SQL 执行超时 |
+| `DQC_042` | 422 | 扫描行数超限 | 单次扫描结果行数超过安全上限 |
+| `DQC_050` | 502 | LLM 调用失败 | 质量分析中 LLM 调用返回错误 |
+| `DQC_051` | 502 | LLM 响应解析失败 | LLM 返回内容无法按预期格式解析 |
+
+### 5.13 KB - 知识库（TBD）
+
+> 待 Spec 17 (Knowledge Base & RAG) 进入实现阶段时补充。前缀 `KB_001~099` 已预留。
+
+### 5.14 EVT - 事件/通知（TBD）
+
+> 待 Spec 16 (Notification & Events) 进入实现阶段时补充。前缀 `EVT_001~099` 已预留。
 
 ---
 
@@ -455,6 +497,91 @@ sequenceDiagram
 
 ---
 
+## 8. 测试策略
+
+### 8.1 关键场景
+
+| # | 场景 | 预期 | 优先级 |
+|---|------|------|--------|
+| 1 | 全局异常处理器捕获 `MulanError` | 返回 `{error_code, message, detail}` 包络，HTTP 状态码与 `MulanError.status_code` 一致 | P0 |
+| 2 | 未捕获的 `Exception` 被兜底处理器捕获 | 返回 `SYS_001` + 500 | P0 |
+| 3 | 各模块 Error 工厂方法（如 `AuthError.session_expired()`） | 返回正确的 `error_code`、`message`、`status_code` | P0 |
+| 4 | 带 `detail` 参数的工厂方法 | `detail` 字段完整透传到响应 | P1 |
+| 5 | 前端收到 401 响应 | 清除会话，重定向 `/login` | P1 |
+| 6 | 前端收到 429 响应 | 显示限流提示，读取 `Retry-After` | P2 |
+| 7 | `error_code` 格式校验 | 所有已注册 error_code 符合 `{PREFIX}_{NNN}` 格式 | P1 |
+
+### 8.2 验收标准
+
+- [ ] `MulanError` 基类已实现于 `backend/app/core/errors.py`
+- [ ] 全局异常处理器已注册于 `backend/app/main.py`
+- [ ] 所有已有模块 Error 类（SYS/AUTH/DS/DDL/TAB/MCP/SM/LLM/HS/SEARCH/GOV/DQC）的工厂方法与 Section 5 错误码表一一对应
+- [ ] 后端无裸 `raise HTTPException`（除标注 `# LEGACY` 的历史代码外）
+- [ ] 前端 `ErrorResponse` 类型定义存在，拦截器按 Section 6 策略处理
+- [ ] 单元测试覆盖场景 1-4
+
+### 8.3 Mock 与测试约束
+
+- **`MulanError`**：继承 `HTTPException` 并在 `__init__` 中双写 `self.error_detail` 和 `super().__init__(detail=...)`。测试时应通过 HTTP 响应 JSON 断言 `error_code` 字段，不要直接断言异常对象的 `detail` 属性（它是 FastAPI 的 dict 包装，不是原始 detail）
+- **全局兜底处理器**：测试时触发一个非 `MulanError` 的异常（如 `RuntimeError`），断言响应为 `{"error_code": "SYS_001", ...}`
+
+---
+
+## 9. 开发交付约束
+
+### 9.1 架构约束
+
+- 所有 Error 工厂类（`AuthError`、`DSError` 等）必须定义在 `backend/app/core/errors.py`，不得分散到各 service 模块
+- `services/` 层可以 `from app.core.errors import XXXError` 抛出错误，但不得自行定义 `HTTPException` 子类
+- 一个 `error_code` 只能出现在一个工厂方法中，禁止重复定义
+
+### 9.2 强制检查清单
+
+- [ ] **禁止裸 `raise HTTPException`**：所有 4xx/5xx 必须通过模块 Error 工厂抛出
+- [ ] **新模块必须注册前缀**：在 Section 4 追加一行，PR 中同步更新 spec 和代码
+- [ ] **`error_code` 格式强制**：`{PREFIX}_{NNN}`，数字三位前补零
+- [ ] **spec 与代码同步**：`errors.py` 中的每个工厂方法必须在 Section 5 有对应行，反之亦然
+- [ ] **`message` 必须中文**：面向用户的 message 不得使用英文
+
+### 9.3 验证命令
+
+```bash
+# 检查是否存在裸 HTTPException（LEGACY 标注除外）
+grep -rn "raise HTTPException" backend/app/api/ | grep -v "# LEGACY" && echo "FAIL: 存在裸 HTTPException" || echo "PASS"
+
+# 检查 errors.py 中的 error_code 格式
+grep -oP '"[A-Z]+_\d+"' backend/app/core/errors.py | sort -u
+
+# 检查 error_code 是否有重复定义
+grep -oP '"[A-Z]+_\d+"' backend/app/core/errors.py | sort | uniq -d && echo "FAIL: 存在重复 error_code" || echo "PASS"
+
+# 后端编译检查
+cd backend && python3 -m py_compile app/core/errors.py
+
+# 后端测试
+cd backend && pytest tests/ -x -q
+```
+
+### 9.4 正确/错误示范
+
+```python
+# ❌ 错误：裸 HTTPException
+raise HTTPException(status_code=404, detail="数据源不存在")
+
+# ✅ 正确：使用模块 Error 工厂
+from app.core.errors import DSError
+raise DSError.not_found()
+
+# ❌ 错误：在 services/ 中自定义异常
+class MyServiceError(HTTPException): ...
+
+# ✅ 正确：在 errors.py 中注册，services/ 中引用
+from app.core.errors import GOVError
+raise GOVError.rule_not_found()
+```
+
+---
+
 ## 附录 A: 错误码速查索引
 
 | 错误码 | HTTP | 模块 | 描述 |
@@ -524,3 +651,26 @@ sequenceDiagram
 | MCP_008 | 429 | MCP V2 | MCP 请求频率超限 |
 | MCP_009 | 500 | MCP V2 | MCP 响应解析失败 |
 | MCP_010 | 400 | MCP V2 | 目标资产不是 datasource 类型 |
+| GOV_001 | 404 | 治理 | 质量规则不存在 |
+| GOV_002 | 404 | 治理 | 质量检测结果不存在 |
+| GOV_003 | 409 | 治理 | 质量扫描任务进行中 |
+| GOV_004 | 400 | 治理 | 数据源连接失败 |
+| DQC_001 | 404 | DQC | 监控资产不存在 |
+| DQC_002 | 409 | DQC | 监控资产已存在 |
+| DQC_003 | 400 | DQC | 数据源不存在或未激活 |
+| DQC_004 | 403 | DQC | 非资产所有者 |
+| DQC_010 | 400 | DQC | 维度权重非法 |
+| DQC_011 | 400 | DQC | 信号阈值非法 |
+| DQC_020 | 400 | DQC | 规则类型不支持 |
+| DQC_021 | 400 | DQC | 规则配置参数无效 |
+| DQC_022 | 400 | DQC | 维度与规则类型不兼容 |
+| DQC_023 | 409 | DQC | 规则已存在 |
+| DQC_024 | 404 | DQC | 规则不存在 |
+| DQC_025 | 400 | DQC | custom_sql 非只读 |
+| DQC_030 | 409 | DQC | DQC cycle 正在运行 |
+| DQC_031 | 404 | DQC | cycle 不存在 |
+| DQC_040 | 502 | DQC | 目标数据库连接失败 |
+| DQC_041 | 504 | DQC | 目标数据库查询超时 |
+| DQC_042 | 422 | DQC | 扫描行数超限 |
+| DQC_050 | 502 | DQC | LLM 调用失败 |
+| DQC_051 | 502 | DQC | LLM 响应解析失败 |

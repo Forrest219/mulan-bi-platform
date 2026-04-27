@@ -58,6 +58,20 @@
 
 > MCP 配置保持在"设置"域下，不动。
 
+### 实现文件
+
+- **菜单配置**：`frontend/src/config/menu.ts` — `menuConfig` 数组，`MenuDomain > MenuItem` 两级结构
+- **侧边栏组件**：`frontend/src/components/layout/AppSidebar.tsx` — 消费 `menuConfig`，通过 `isItemVisible()` 过滤权限
+- 数据源管理、Tableau 连接菜单项已存在于 `menuConfig` 中，无需新增
+
+### 权限规则
+
+| 路由 | 菜单权限 | 路由权限（`router/config.tsx`） |
+|------|---------|------|
+| `/assets/datasources` | `requiredRole: 'data_admin'` | `<ProtectedRoute requiredPermission="database_monitor">` |
+| `/assets/tableau-connections` | `requiredPermission: 'tableau'` | `<ProtectedRoute requiredPermission="tableau">` |
+| `/assets/tableau-connections/:connId/sync-logs` | 继承父级 | `<ProtectedRoute requiredPermission="tableau">` |
+
 ---
 
 ## 三、路由变更
