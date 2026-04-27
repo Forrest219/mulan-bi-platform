@@ -183,7 +183,7 @@ jobs:
           LLM_ENCRYPTION_KEY: test-llm-key-32-bytes-ok!!!!
           SERVICE_JWT_SECRET: test-service-jwt-secret-32-bytes!
           PYTHONPATH: backend
-        run: python3 -c -c "from app.main import app; print('Backend app OK')"
+        run: python3 -c "from app.main import app; print('Backend app OK')"
 
       - name: Run tests with coverage
         env:

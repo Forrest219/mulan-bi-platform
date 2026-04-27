@@ -16,7 +16,7 @@ FRONTEND="$ROOT/frontend"
 LOG_DIR="$ROOT/.dev-logs"
 PID_DIR="$ROOT/.dev-pids"
 
-export DATABASE_URL="${DATABASE_URL:-postgresql://mulan:***@localhost:5432/mulan_bi}"
+export DATABASE_URL="${DATABASE_URL:-postgresql://mulan:mulan@localhost:5432/mulan_bi}"
 source "$ROOT/.env" 2>/dev/null || true
 export SESSION_SECRET="${SESSION_SECRET:-}"
 
