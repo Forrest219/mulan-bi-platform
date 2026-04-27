@@ -20,7 +20,7 @@ import logging
 from typing import Optional, Any
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -178,7 +178,7 @@ async def list_connections(request: Request, db: Session = Depends(get_db)):
 @router.post("/connections", response_model=dict)
 async def create_connection(
     request: Request,
-    connection_type: str = Field(..., description="连接类型: sql_database/tableau_site/llm_provider"),
+    connection_type: str = Query(..., description="连接类型: sql_database/tableau_site/llm_provider"),
     db: Session = Depends(get_db),
 ):
     """创建新连接（所有连接类型）
