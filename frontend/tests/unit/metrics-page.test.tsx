@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import MetricsPage from '../../src/pages/data-governance/metrics/page';
 import * as metricsApi from '../../src/api/metrics';
 import * as datasourcesApi from '../../src/api/datasources';
@@ -79,7 +80,7 @@ describe('MetricsPage', () => {
 
   // ── Test 1: 列表渲染 ──
   it('列表渲染: 表格中出现 "gmv" 和 "order_count" 两个指标名', async () => {
-    render(<MetricsPage />);
+    render(<MemoryRouter><MetricsPage /></MemoryRouter>);
     await expect(screen.findByText('gmv')).resolves.toBeInTheDocument();
     expect(screen.getByText('order_count')).toBeInTheDocument();
   });
@@ -87,7 +88,7 @@ describe('MetricsPage', () => {
   // ── Test 2: 搜索过滤 ──
   it('搜索过滤: 在搜索框输入 "gmv"，fetch 被调用时 URL 包含 search=gmv', async () => {
     const user = userEvent.setup();
-    render(<MetricsPage />);
+    render(<MemoryRouter><MetricsPage /></MemoryRouter>);
     await screen.findByText('gmv');
 
     const searchInput = screen.getByPlaceholderText('搜索指标名或中文名');
@@ -101,7 +102,7 @@ describe('MetricsPage', () => {
 
   // ── Test 3: 新建按钮权限 ──
   it('新建按钮权限: analyst 角色新建指标按钮不存在', async () => {
-    render(<MetricsPage />);
+    render(<MemoryRouter><MetricsPage /></MemoryRouter>);
     await screen.findByText('gmv');
 
     // 新建按钮应该不存在（isDataAdmin=false 时隐藏）
