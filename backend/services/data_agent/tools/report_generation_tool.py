@@ -11,7 +11,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext
+from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,12 @@ class ReportGenerationTool(BaseTool):
 
     name = "report_generation"
     description = "自动生成分析报告。将归因分析、趋势分析等结论生成为结构化报告（JSON规范层 + Markdown渲染层）。"
+    metadata = ToolMetadata(
+        category="reporting",
+        version="1.0.0",
+        dependencies=["requires_database"],
+        tags=["report", "markdown", "analysis-output"],
+    )
     parameters_schema = {
         "type": "object",
         "properties": {

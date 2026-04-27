@@ -7,7 +7,7 @@
  * - 用户信息 + 登出
  */
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { getAvatarGradient } from '../../config';
 
@@ -68,6 +68,14 @@ export default function AppHeader() {
           <>
             <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
             <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-slate-200 rounded-xl shadow-lg z-50 py-1">
+              <Link
+                to="/account/security"
+                onClick={() => setMenuOpen(false)}
+                className="w-full flex items-center gap-2 px-4 py-2.5 text-[13px] text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                <i className="ri-shield-keyhole-line text-base" />
+                账户安全
+              </Link>
               <button
                 onClick={handleLogout}
                 className="w-full flex items-center gap-2 px-4 py-2.5 text-[13px] text-slate-600 hover:bg-slate-50 hover:text-red-600 transition-colors"

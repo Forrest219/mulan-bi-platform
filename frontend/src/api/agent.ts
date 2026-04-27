@@ -258,6 +258,62 @@ export interface AgentStep {
   created_at: string | null;
 }
 
+// ─── Tool Discovery Types ───────────────────────────────────────────────────
+
+export interface AgentToolMetadata {
+  name: string;
+  description: string;
+  parameters_schema: Record<string, unknown>;
+  category: string;
+  version: string;
+  dependencies: string[];
+  tags: string[];
+}
+
+// ─── Session Monitoring Types ───────────────────────────────────────────────
+
+export interface AgentSessionItem {
+  id: string;
+  user_id: number;
+  title: string | null;
+  connection_id: number | null;
+  status: string;
+  message_count: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface AgentSessionsResponse {
+  items: AgentSessionItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface AgentSessionMessage {
+  id: number;
+  role: string;
+  content: string;
+  response_type: string | null;
+  tools_used: string[] | null;
+  trace_id: string | null;
+  steps_count: number | null;
+  execution_time_ms: number | null;
+  created_at: string | null;
+}
+
+export interface AgentSessionDetail {
+  id: string;
+  user_id: number;
+  title: string | null;
+  connection_id: number | null;
+  status: string;
+  created_at: string | null;
+  updated_at: string | null;
+  messages: AgentSessionMessage[];
+  runs: AgentRun[];
+}
+
 export const agentAdminApi = {
   /**
    * GET /api/admin/agent/stats
@@ -296,6 +352,51 @@ export const agentAdminApi = {
    */
   getRunSteps: (runId: string): Promise<AgentStep[]> =>
     fetch(`/api/admin/agent/runs/${runId}/steps`, {
+      credentials: 'include',
+    }).then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    }),
+
+  /**
+   * GET /api/agent/tools — 工具动态发现
+   */
+  getTools: (category?: string): Promise<AgentToolMetadata[]> => {
+    const query = category ? `?category=${encodeURIComponent(category)}` : '';
+    return fetch(`/api/agent/tools${query}`, {
+      credentials: 'include',
+    }).then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    });
+  },
+
+  /**
+   * GET /api/admin/agent/sessions — 会话列表
+   */
+  getSessions: (params: {
+    limit: number;
+    offset: number;
+    status?: string;
+  }): Promise<AgentSessionsResponse> => {
+    const query = new URLSearchParams({
+      limit: String(params.limit),
+      offset: String(params.offset),
+      ...(params.status ? { status: params.status } : {}),
+    });
+    return fetch(`/api/admin/agent/sessions?${query}`, {
+      credentials: 'include',
+    }).then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    });
+  },
+
+  /**
+   * GET /api/admin/agent/sessions/{id} — 会话详情
+   */
+  getSessionDetail: (sessionId: string): Promise<AgentSessionDetail> =>
+    fetch(`/api/admin/agent/sessions/${sessionId}`, {
       credentials: 'include',
     }).then((r) => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);

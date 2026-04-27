@@ -11,7 +11,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext
+from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,12 @@ class FunnelAnalysisTool(BaseTool):
 
     name = "funnel_analysis"
     description = "漏斗分析。分析用户行为漏斗，计算各步骤转化率、流失率，识别漏斗中的关键瓶颈和优化点。"
+    metadata = ToolMetadata(
+        category="analysis",
+        version="1.0.0",
+        dependencies=["requires_database"],
+        tags=["funnel", "conversion", "user-behavior"],
+    )
     parameters_schema = {
         "type": "object",
         "properties": {

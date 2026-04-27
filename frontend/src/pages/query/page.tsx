@@ -85,7 +85,7 @@ export default function QueryPage() {
   const [selectedDatasource, setSelectedDatasource] = useState<QueryDatasource | null>(null);
 
   // ── 会话状态 ─────────────────────────────────────────────────────────────
-  const { sessions, loading: sessionsLoading, refresh: refreshSessions } = useQuerySessions();
+  const { sessions, loading: sessionsLoading, refresh: refreshSessions, removeSession } = useQuerySessions();
   const { sessionId, messages, loading: asking, sendMessage, loadSession, resetSession } =
     useQuerySession();
 
@@ -98,6 +98,19 @@ export default function QueryPage() {
     resetSession();
     setSelectedDatasource(null);
   }, [resetSession]);
+
+  // ── 删除会话 ───────────────────────────────────────────────────────────────
+  const handleDeleteSession = useCallback(
+    async (session: QuerySession) => {
+      // 若删除的是当前激活会话，先重置
+      if (session.session_id === sessionIdRef.current) {
+        resetSession();
+        setSelectedDatasource(null);
+      }
+      await removeSession(session.session_id);
+    },
+    [removeSession, resetSession],
+  );
 
   // ── 历史会话点击 ─────────────────────────────────────────────────────────
   const handleSelectSession = useCallback(
@@ -157,6 +170,7 @@ export default function QueryPage() {
         onToggleCollapse={handleToggleSidebar}
         onNewSession={handleNewSession}
         onSelectSession={handleSelectSession}
+        onDeleteSession={handleDeleteSession}
       />
 
       {/* 侧边栏折叠时的展开按钮 */}

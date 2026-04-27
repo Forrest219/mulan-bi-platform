@@ -185,6 +185,33 @@ class PasswordResetToken(Base):
     )
 
 
+class ApiToken(Base):
+    """API Token 表 — 用于程序化/API 访问认证（Spec 27）
+
+    token_hash: SHA-256 hash，不存原始 token
+    prefix: token 前缀（如 'mlbi_xxxx'），便于用户识别
+    """
+    __tablename__ = "auth_api_tokens"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('auth_users.id', ondelete='CASCADE'), nullable=False)
+    name = Column(String(128), nullable=False)  # token 用途描述（如 "CI Pipeline"）
+    token_hash = Column(String(64), nullable=False, unique=True)  # SHA-256 hash
+    prefix = Column(String(16), nullable=False)  # 前缀用于识别（如 mlbi_a1b2）
+    scopes = Column(JSONB, nullable=True)  # 权限范围（JSON 数组），null 表示继承用户全部权限
+    expires_at = Column(DateTime, nullable=True)  # null 表示永不过期
+    last_used_at = Column(DateTime, nullable=True)
+    is_active = Column(Boolean, default=True, server_default=sa_text('true'), nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
+    revoked_at = Column(DateTime, nullable=True)  # 撤销时间
+
+    __table_args__ = (
+        Index("ix_api_tokens_user_id", "user_id"),
+        Index("ix_api_tokens_token_hash", "token_hash"),
+        Index("ix_api_tokens_prefix", "prefix"),
+    )
+
+
 # 从中央配置导入 SessionLocal
 from app.core.database import SessionLocal
 from sqlalchemy.orm import Session

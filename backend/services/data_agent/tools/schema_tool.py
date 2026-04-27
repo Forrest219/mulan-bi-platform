@@ -14,7 +14,7 @@ from sqlalchemy import create_engine, text
 
 from app.core.crypto import get_datasource_crypto
 from app.core.database import SessionLocal
-from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext
+from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
 from services.datasources.models import DataSource
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,12 @@ class SchemaTool(BaseTool):
 
     name = "schema"
     description = "查询数据源的表结构、字段信息。当用户询问「有哪些表」「某表的字段是什么」「数据结构」时使用。"
+    metadata = ToolMetadata(
+        category="query",
+        version="1.0.0",
+        dependencies=["requires_database"],
+        tags=["schema", "metadata", "table-structure"],
+    )
     parameters_schema = {
         "type": "object",
         "properties": {

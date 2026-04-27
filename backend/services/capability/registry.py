@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -109,9 +108,6 @@ def _load_yaml_config() -> list[CapabilityDefinition]:
     if not config_path.exists():
         project_root = backend_dir.parent.parent
         config_path = project_root / "config" / "capabilities.yaml"
-
-    # 环境变量覆盖路径
-    config_path = Path(os.environ.get("CAPABILITY_CONFIG_PATH", config_path))
 
     if not config_path.exists():
         raise CapabilityRegistryError(f"Capability config not found at {config_path}")

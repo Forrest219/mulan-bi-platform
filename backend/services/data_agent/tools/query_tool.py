@@ -10,7 +10,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext
+from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
 from services.llm.nlq_service import one_pass_llm, execute_query, route_datasource, NLQError
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,12 @@ class QueryTool(BaseTool):
 
     name = "query"
     description = "执行自然语言数据查询。将用户问题转换为 Tableau VizQL 查询并返回结构化数据结果。适用于询问销售额、数量、统计数据等。"
+    metadata = ToolMetadata(
+        category="query",
+        version="1.0.0",
+        dependencies=["requires_database", "requires_tableau"],
+        tags=["nlq", "vizql", "data-query"],
+    )
     parameters_schema = {
         "type": "object",
         "properties": {

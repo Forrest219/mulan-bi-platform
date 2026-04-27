@@ -301,12 +301,12 @@ export default function ConnectionCenterPage() {
               </button>
             </div>
             <div className="mt-4 space-y-2 text-sm">
-              <div><span className="text-slate-500">名称:</span> {selectedItem.name}</div>
-              <div><span className="text-slate-500">类型:</span> {selectedItem.platform}</div>
-              <div><span className="text-slate-500">地址:</span> {selectedItem.endpoint}</div>
-              <div><span className="text-slate-500">负责人:</span> {selectedItem.owner}</div>
-              <div><span className="text-slate-500">状态:</span> {selectedItem.status === 'healthy' ? '正常' : selectedItem.status === 'warning' ? '警告' : '失败'}</div>
-              <div><span className="text-slate-500">更新时间:</span> {new Date(selectedItem.updatedAt).toLocaleString()}</div>
+              <div><span className="text-slate-500">名称：</span> {selectedItem.name}</div>
+              <div><span className="text-slate-500">类型：</span> {selectedItem.platform}</div>
+              <div><span className="text-slate-500">地址：</span> {selectedItem.endpoint}</div>
+              <div><span className="text-slate-500">负责人：</span> {selectedItem.owner}</div>
+              <div><span className="text-slate-500">状态：</span> {selectedItem.status === 'healthy' ? '正常' : selectedItem.status === 'warning' ? '警告' : '失败'}</div>
+              <div><span className="text-slate-500">更新时间：</span> {new Date(selectedItem.updatedAt).toLocaleString()}</div>
               {selectedItem.note && <div className="pt-2 text-slate-500">{selectedItem.note}</div>}
             </div>
           </div>

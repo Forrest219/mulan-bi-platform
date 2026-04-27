@@ -11,7 +11,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext
+from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,12 @@ class DataComparisonTool(BaseTool):
 
     name = "data_comparison"
     description = "跨数据集比较。对比两个数据集、指标或维度分类的差异，返回差异点、相似点和统计显著性。"
+    metadata = ToolMetadata(
+        category="analysis",
+        version="1.0.0",
+        dependencies=["requires_database"],
+        tags=["comparison", "diff", "statistical"],
+    )
     parameters_schema = {
         "type": "object",
         "properties": {

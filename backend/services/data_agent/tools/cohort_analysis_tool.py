@@ -11,7 +11,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext
+from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,12 @@ class CohortAnalysisTool(BaseTool):
 
     name = "cohort_analysis"
     description = "队列分析。基于时间或其他维度划分队列，分析不同队列的行为差异、留存曲线和生命周期价值。"
+    metadata = ToolMetadata(
+        category="analysis",
+        version="1.0.0",
+        dependencies=["requires_database"],
+        tags=["cohort", "retention", "lifecycle"],
+    )
     parameters_schema = {
         "type": "object",
         "properties": {

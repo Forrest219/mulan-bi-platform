@@ -55,7 +55,31 @@ export async function listQuerySessions(): Promise<QuerySession[]> {
     throw new Error(err?.detail?.message ?? err?.message ?? `HTTP ${resp.status}`);
   }
   const json = await resp.json();
-  return Array.isArray(json) ? json : (json.items ?? []);
+  const raw: unknown[] = Array.isArray(json) ? json : (json.items ?? []);
+  // 后端返回 { id, title, ... }，前端统一用 session_id
+  return raw.map((item: unknown) => {
+    const r = item as Record<string, unknown>;
+    return {
+      session_id: (r.session_id ?? r.id ?? '') as string,
+      title: (r.title ?? '') as string,
+      created_at: (r.created_at ?? '') as string,
+      updated_at: (r.updated_at ?? '') as string,
+      datasource_luid: r.datasource_luid as string | undefined,
+      datasource_name: r.datasource_name as string | undefined,
+      connection_id: r.connection_id as number | undefined,
+    };
+  });
+}
+
+export async function deleteQuerySession(sessionId: string): Promise<void> {
+  const resp = await fetch(`/api/query/sessions/${sessionId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!resp.ok && resp.status !== 204) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err?.detail?.message ?? err?.message ?? `HTTP ${resp.status}`);
+  }
 }
 
 // ─── 消息 ─────────────────────────────────────────────────────────────────────
@@ -77,7 +101,8 @@ export async function listQueryMessages(sessionId: string): Promise<QueryMessage
     throw new Error(err?.detail?.message ?? err?.message ?? `HTTP ${resp.status}`);
   }
   const json = await resp.json();
-  return Array.isArray(json) ? json : (json.items ?? []);
+  // 后端返回 { session_id, messages: [...], total }
+  return Array.isArray(json) ? json : (json.messages ?? json.items ?? []);
 }
 
 // ─── Ask ──────────────────────────────────────────────────────────────────────

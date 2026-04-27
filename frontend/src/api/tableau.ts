@@ -184,7 +184,7 @@ export async function syncConnection(id: number): Promise<{ success: boolean; me
   });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
-    throw new Error(extractErrorMessage(err, '同步失败'));
+    throw new Error(extractErrorMessage(err, '同步连接失败'));
   }
   return res.json();
 }
@@ -250,7 +250,7 @@ export async function listSyncLogs(connId: number, params?: {
     ...(params?.page_size && { page_size: String(params.page_size) }),
   });
   const res = await fetch(`${API_BASE}/api/tableau/connections/${connId}/sync-logs?${sp}`, { credentials: 'include' });
-  if (!res.ok) throw new Error('获取同步日志列表失败');
+  if (!res.ok) throw new Error('获取同步日志失败');
   return res.json();
 }
 
@@ -302,7 +302,7 @@ export async function explainAsset(assetId: number, refresh = false): Promise<{
     credentials: 'include',
     body: JSON.stringify({ refresh }),
   });
-  if (!res.ok) throw new Error('AI 解释生成失败');
+  if (!res.ok) throw new Error('资产解读失败');
   return res.json();
 }
 

@@ -11,7 +11,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext
+from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,12 @@ class ProactiveInsightTool(BaseTool):
 
     name = "proactive_insight"
     description = "主动洞察发现。扫描数据检测异常/趋势/维度集中度等，生成洞察并推送。用于定时巡检和异常告警触发。"
+    metadata = ToolMetadata(
+        category="analysis",
+        version="1.0.0",
+        dependencies=["requires_database"],
+        tags=["insight", "anomaly", "proactive"],
+    )
     parameters_schema = {
         "type": "object",
         "properties": {
