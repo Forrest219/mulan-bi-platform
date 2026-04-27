@@ -3,8 +3,6 @@ name: CI
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
 
 jobs:
   # ──────────────────────────────────────────────────────────────
@@ -183,7 +181,7 @@ jobs:
           LLM_ENCRYPTION_KEY: test-llm-key-32-bytes-ok!!!!
           SERVICE_JWT_SECRET: test-service-jwt-secret-32-bytes!
           PYTHONPATH: backend
-        run: python3 -c -c "from app.main import app; print('Backend app OK')"
+        run: python3 -c "from app.main import app; print('Backend app OK')"
 
       - name: Run tests with coverage
         env:
@@ -302,7 +300,7 @@ jobs:
           cd backend
           alembic upgrade head
 
-      # ── Seed 测试用户 ─────────────────────────────────────────
+      # ── Seed 测试用户（调用统一 seed_smoke.py） ──────────────────
       - name: Seed smoke test users
         env:
           DATABASE_URL: postgresql://mulan:mulan@localhost:5432/mulan_bi_test
@@ -313,53 +311,10 @@ jobs:
           TABLEAU_ENCRYPTION_KEY: smoke-tableau-key-32-bytes!!
           LLM_ENCRYPTION_KEY: smoke-llm-key-32-bytes-ok!!!!
           SERVICE_JWT_SECRET: smoke-service-jwt-secret-32-bytes
+          PYTHONPATH: backend
         run: |
           cd backend
-          python3 -c "
-          import os, sys
-          sys.path.insert(0, '.')
-          from app.database import SessionLocal, engine
-          from app.models.user import User
-          from app.services.common.password import hash_password
-
-          db = SessionLocal()
-          try:
-              # 创建 admin（如果不存在）
-              admin = db.query(User).filter(User.username == 'admin').first()
-              if not admin:
-                  admin = User(
-                      username='admin',
-                      display_name='Smoke Admin',
-                      password_hash=hash_password('admin123'),
-                      role='admin',
-                      is_active=True,
-                  )
-                  db.add(admin)
-                  print('Created admin user')
-              else:
-                  print('Admin user already exists')
-
-              # 创建 smoke_analyst（仅 database_monitor 权限）
-              analyst = db.query(User).filter(User.username == 'smoke_analyst').first()
-              if not analyst:
-                  analyst = User(
-                      username='smoke_analyst',
-                      display_name='Smoke Analyst',
-                      password_hash=hash_password('analyst123'),
-                      role='analyst',
-                      is_active=True,
-                      permissions=['database_monitor'],
-                  )
-                  db.add(analyst)
-                  print('Created smoke_analyst user')
-              else:
-                  print('smoke_analyst user already exists')
-
-              db.commit()
-              print('Seed complete')
-          finally:
-              db.close()
-          "
+          python3 scripts/seed_smoke.py
 
       # ── 启动后端服务 ───────────────────────────────────────────
       - name: Start backend
@@ -413,6 +368,12 @@ jobs:
           # 额外等待，确保 Vite HMR 热更新完成
           sleep 5
 
+      # ── 路由清单校验 ───────────────────────────────────────────
+      - name: Validate smoke route consistency
+        run: |
+          cd frontend
+          npx tsx tests/route-validator.ts
+
       # ── 安装 Playwright 浏览器 ────────────────────────────────
       - name: Install Playwright browsers
         run: |
@@ -427,6 +388,8 @@ jobs:
           SESSION_SECRET: smoke-test-secret!!
           ADMIN_USERNAME: admin
           ADMIN_PASSWORD: admin123
+          SMOKE_ADMIN_USERNAME: admin
+          SMOKE_ADMIN_PASSWORD: admin123
           SMOKE_ANALYST_USERNAME: smoke_analyst
           SMOKE_ANALYST_PASSWORD: analyst123
           DATASOURCE_ENCRYPTION_KEY: smoke-datasource-key-32-bytes!!

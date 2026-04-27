@@ -5,12 +5,13 @@ import { test, expect } from '@playwright/test';
 const ADMIN_USER = 'admin';
 const ADMIN_PASS = 'admin123';
 const TABLEAU_PAT = process.env.TABLEAU_PAT;
-const TABLEAU_SERVER_URL = process.env.TABLEAU_SERVER_URL ?? 'https://prod.useast.tableau.com';
+const TABLEAU_SERVER_URL = process.env.TABLEAU_SERVER_URL;
 
-test.describe('MCP 配置管理 - 使用真实 Tableau PAT', () => {
-  test('使用真实 Tableau PAT 创建 MCP Tableau 配置并保存', async ({ page }) => {
+test.describe('MCP 配置管理 - 使用真实 Tableau PAT @external @tableau @mcp', () => {
+  test('使用真实 Tableau PAT 创建 MCP Tableau 配置并保存 @external @tableau @mcp', async ({ page }) => {
     // 跳过测试如果未配置 PAT
     test.skip(!TABLEAU_PAT, 'TABLEAU_PAT 环境变量未配置，跳过此测试');
+    test.skip(!TABLEAU_SERVER_URL, 'TABLEAU_SERVER_URL 环境变量未配置，跳过此测试');
     // 1. 登录
     await page.goto(`${process.env.BASE_URL}/login`);
     await page.getByPlaceholder('用户名').fill(ADMIN_USER);

@@ -1,4 +1,5 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+import { auth } from '../fixtures/auth';
 
 /**
  * Smoke Test: 权限重定向
@@ -17,42 +18,28 @@ import { test, expect } from '@playwright/test';
  */
 test.describe('权限重定向', () => {
 
-  // ── 测试账号凭证 ────────────────────────────────────────────
-  const SMOKE_USER = process.env.SMOKE_ANALYST_USERNAME ?? 'smoke_analyst';
-  const SMOKE_PASS = process.env.SMOKE_ANALYST_PASSWORD ?? 'analyst123';
-  const ADMIN_USER = process.env.SMOKE_ADMIN_USERNAME ?? 'smoke_admin';
-  const ADMIN_PASS = process.env.SMOKE_ADMIN_PASSWORD ?? 'admin123';
-
-  // ── 登录辅助函数 ────────────────────────────────────────────
-  async function loginAs(page: any, username: string, password: string) {
-    await page.goto('/login');
-    await page.locator('input[type="text"]').fill(username);
-    await page.locator('input[type="password"]').fill(password);
-    await page.locator('button[type="submit"]').click();
-    await page.waitForTimeout(1500);
-    // 如果登录失败（CI 账号不存在），跳过该测试
-    const loginFailed = await page.locator('text=用户名或密码错误').isVisible({ timeout: 1000 }).catch(() => false);
-    if (loginFailed) {
-      test.skip();
-      return false;
-    }
-    return true;
-  }
-
   // ── 权限拒绝断言 ────────────────────────────────────────────
   /**
    * 检查 page 是否表现出"无权限"状态：
    * - URL 包含 /403，或
    * - 页面包含"无权限"/"访问被拒绝"/"Forbidden"文案
    */
-  async function expectForbidden(page: any) {
-    const url = page.url();
-    const isForbidden = url.includes('/403');
-    const hasForbiddenText =
-      await page.locator('text=无权限').isVisible().catch(() => false) ||
-      await page.locator('text=访问被拒绝').isVisible().catch(() => false) ||
-      await page.locator('text=Forbidden').isVisible().catch(() => false);
-    expect(isForbidden || hasForbiddenText).toBe(true);
+  async function expectForbidden(page: Page) {
+    const forbiddenText = page.getByText(/权限不足|无权限|访问被拒绝|Forbidden/).first();
+
+    await Promise.race([
+      page.waitForURL(/\/403(?:$|[?#])/, { timeout: 5000 }),
+      forbiddenText.waitFor({ state: 'visible', timeout: 5000 }),
+    ]).catch(() => {
+      // Fall through to the explicit assertions below for a clearer failure.
+    });
+
+    if (/\/403(?:$|[?#])/.test(page.url())) {
+      await expect(page).toHaveURL(/\/403(?:$|[?#])/);
+      return;
+    }
+
+    await expect(forbiddenText).toBeVisible();
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -65,9 +52,9 @@ test.describe('权限重定向', () => {
       // dev 前缀路由（router config 中在 /dev 下）
       { path: '/dev/ddl-validator',   name: 'DDL 检查',       permission: 'ddl_check' },
       { path: '/dev/rule-config',     name: '规则配置',       permission: 'rule_config' },
-      { path: '/dev/health-center',   name: '健康中心',       permission: 'database_monitor' },
+      { path: '/governance/health-center', name: '健康中心',       permission: 'database_monitor' },
       // tableau 语义层路由
-      { path: '/semantic/datasources', name: '语义数据源列表', permission: 'tableau' },
+      { path: '/governance/semantic/datasources', name: '语义数据源列表', permission: 'tableau' },
       // system admin 路由
       { path: '/system/users',         name: '用户管理',       permission: 'adminOnly' },
       { path: '/system/groups',         name: '用户组',         permission: 'adminOnly' },
@@ -91,74 +78,57 @@ test.describe('权限重定向', () => {
   test.describe('smoke_analyst 登录后 — 无权限路由应被拒绝', () => {
 
     test('访问 DDL 检查（需 ddl_check 权限）应被拒绝', async ({ page }) => {
-      const ok = await loginAs(page, SMOKE_USER, SMOKE_PASS);
-      if (!ok) return;
-
+      await auth.asAnalyst(page);
       await page.goto('/dev/ddl-validator');
-      await page.waitForTimeout(1500);
       await expectForbidden(page);
     });
 
     test('访问规则配置（需 rule_config 权限）应被拒绝', async ({ page }) => {
-      const ok = await loginAs(page, SMOKE_USER, SMOKE_PASS);
-      if (!ok) return;
+      await auth.asAnalyst(page);
 
       await page.goto('/dev/rule-config');
-      await page.waitForTimeout(1500);
       await expectForbidden(page);
     });
 
     test('访问语义数据源（需 tableau 权限）应被拒绝', async ({ page }) => {
-      const ok = await loginAs(page, SMOKE_USER, SMOKE_PASS);
-      if (!ok) return;
+      await auth.asAnalyst(page);
 
-      await page.goto('/semantic/datasources');
-      await page.waitForTimeout(1500);
+      await page.goto('/governance/semantic/datasources');
       await expectForbidden(page);
     });
 
     test('访问用户管理（adminOnly）应被拒绝', async ({ page }) => {
-      const ok = await loginAs(page, SMOKE_USER, SMOKE_PASS);
-      if (!ok) return;
+      await auth.asAnalyst(page);
 
       await page.goto('/system/users');
-      await page.waitForTimeout(1500);
       await expectForbidden(page);
     });
 
     test('访问用户组（adminOnly）应被拒绝', async ({ page }) => {
-      const ok = await loginAs(page, SMOKE_USER, SMOKE_PASS);
-      if (!ok) return;
+      await auth.asAnalyst(page);
 
       await page.goto('/system/groups');
-      await page.waitForTimeout(1500);
       await expectForbidden(page);
     });
 
     test('访问权限总览（adminOnly）应被拒绝', async ({ page }) => {
-      const ok = await loginAs(page, SMOKE_USER, SMOKE_PASS);
-      if (!ok) return;
+      await auth.asAnalyst(page);
 
       await page.goto('/system/permissions');
-      await page.waitForTimeout(1500);
       await expectForbidden(page);
     });
 
     test('访问任务管理（adminOnly）应被拒绝', async ({ page }) => {
-      const ok = await loginAs(page, SMOKE_USER, SMOKE_PASS);
-      if (!ok) return;
+      await auth.asAnalyst(page);
 
       await page.goto('/system/tasks');
-      await page.waitForTimeout(1500);
       await expectForbidden(page);
     });
 
     test('访问操作日志（adminOnly）应被拒绝', async ({ page }) => {
-      const ok = await loginAs(page, SMOKE_USER, SMOKE_PASS);
-      if (!ok) return;
+      await auth.asAnalyst(page);
 
       await page.goto('/system/activity');
-      await page.waitForTimeout(1500);
       await expectForbidden(page);
     });
   });
@@ -170,63 +140,50 @@ test.describe('权限重定向', () => {
   test.describe('smoke_analyst 登录后 — 有权限路由应正常访问', () => {
 
     test('可访问健康中心（database_monitor 权限）', async ({ page }) => {
-      const ok = await loginAs(page, SMOKE_USER, SMOKE_PASS);
-      if (!ok) return;
+      await auth.asAnalyst(page);
 
-      await page.goto('/dev/health-center');
-      await page.waitForTimeout(1500);
+      await page.goto('/governance/health-center');
 
-      expect(page.url()).toContain('/dev/health-center');
-      const hasContent = await page.locator('h1').first().isVisible().catch(() => false);
-      expect(hasContent).toBe(true);
+      await expect(page).toHaveURL(/\/governance\/health-center(?:$|[?#])/);
+      await expect(page.locator('h1').first()).toBeVisible();
     });
   });
 
   test.describe('admin 登录后 — 所有受保护路由均应正常访问', () => {
 
     test('admin 可访问 DDL 检查', async ({ page }) => {
-      const ok = await loginAs(page, ADMIN_USER, ADMIN_PASS);
-      if (!ok) return;
+      await auth.asAdmin(page);
 
       await page.goto('/dev/ddl-validator');
-      await page.waitForTimeout(1500);
-      expect(page.url()).toContain('/dev/ddl-validator');
+      await expect(page).toHaveURL(/\/dev\/ddl-validator(?:$|[?#])/);
     });
 
     test('admin 可访问规则配置', async ({ page }) => {
-      const ok = await loginAs(page, ADMIN_USER, ADMIN_PASS);
-      if (!ok) return;
+      await auth.asAdmin(page);
 
       await page.goto('/dev/rule-config');
-      await page.waitForTimeout(1500);
-      expect(page.url()).toContain('/dev/rule-config');
+      await expect(page).toHaveURL(/\/dev\/rule-config(?:$|[?#])/);
     });
 
     test('admin 可访问语义数据源', async ({ page }) => {
-      const ok = await loginAs(page, ADMIN_USER, ADMIN_PASS);
-      if (!ok) return;
+      await auth.asAdmin(page);
 
-      await page.goto('/semantic/datasources');
-      await page.waitForTimeout(1500);
-      expect(page.url()).toContain('/semantic/datasources');
+      await page.goto('/governance/semantic/datasources');
+      await expect(page).toHaveURL(/\/governance\/semantic\/datasources(?:$|[?#])/);
     });
 
     test('admin 可访问用户管理', async ({ page }) => {
-      const ok = await loginAs(page, ADMIN_USER, ADMIN_PASS);
-      if (!ok) return;
+      await auth.asAdmin(page);
 
       await page.goto('/system/users');
-      await page.waitForTimeout(1500);
-      expect(page.url()).toContain('/system/users');
+      await expect(page).toHaveURL(/\/system\/users(?:$|[?#])/);
     });
 
     test('admin 可访问用户组', async ({ page }) => {
-      const ok = await loginAs(page, ADMIN_USER, ADMIN_PASS);
-      if (!ok) return;
+      await auth.asAdmin(page);
 
       await page.goto('/system/groups');
-      await page.waitForTimeout(1500);
-      expect(page.url()).toContain('/system/groups');
+      await expect(page).toHaveURL(/\/system\/groups(?:$|[?#])/);
     });
   });
 
@@ -237,30 +194,24 @@ test.describe('权限重定向', () => {
   test.describe('公开页面 — 所有登录用户均可访问', () => {
 
     test('smoke_analyst 可正常访问首页', async ({ page }) => {
-      const ok = await loginAs(page, SMOKE_USER, SMOKE_PASS);
-      if (!ok) return;
+      await auth.asAnalyst(page);
 
       await page.goto('/');
-      await page.waitForTimeout(1000);
-      expect(page.url()).toContain('localhost');
+      await expect(page).toHaveURL(/\/(?:$|[?#])/);
     });
 
     test('smoke_analyst 可正常访问知识库', async ({ page }) => {
-      const ok = await loginAs(page, SMOKE_USER, SMOKE_PASS);
-      if (!ok) return;
+      await auth.asAnalyst(page);
 
       await page.goto('/analytics/knowledge');
-      await page.waitForTimeout(1000);
-      expect(page.url()).toMatch(/\/(analytics\/)?knowledge/);
+      await expect(page).toHaveURL(/\/(analytics\/)?knowledge(?:$|[?#])/);
     });
 
     test('admin 可正常访问首页', async ({ page }) => {
-      const ok = await loginAs(page, ADMIN_USER, ADMIN_PASS);
-      if (!ok) return;
+      await auth.asAdmin(page);
 
       await page.goto('/');
-      await page.waitForTimeout(1000);
-      expect(page.url()).toContain('localhost');
+      await expect(page).toHaveURL(/\/(?:$|[?#])/);
     });
   });
 
@@ -271,13 +222,11 @@ test.describe('权限重定向', () => {
   test.describe('已登录用户访问 /login — 应跳转首页', () => {
 
     test('smoke_analyst 访问 /login 应跳转到首页（而非停留在登录页）', async ({ page }) => {
-      const ok = await loginAs(page, SMOKE_USER, SMOKE_PASS);
-      if (!ok) return;
+      await auth.asAnalyst(page);
 
       await page.goto('/login');
-      await page.waitForTimeout(1500);
       // 已登录状态下访问 login 应重定向到首页，而非停留在 /login
-      expect(page.url()).not.toMatch(/\/login/);
+      await expect(page).toHaveURL(/\/(?:$|[?#])/);
     });
   });
 

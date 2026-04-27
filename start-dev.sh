@@ -16,7 +16,19 @@ FRONTEND="$ROOT/frontend"
 LOG_DIR="$ROOT/.dev-logs"
 PID_DIR="$ROOT/.dev-pids"
 
+source "$ROOT/.env" 2>/dev/null || true
 export DATABASE_URL="${DATABASE_URL:-postgresql://mulan:mulan@localhost:5432/mulan_bi}"
+export SESSION_SECRET="${SESSION_SECRET:-}"
+export DATASOURCE_ENCRYPTION_KEY="${DATASOURCE_ENCRYPTION_KEY:-}"
+export TABLEAU_ENCRYPTION_KEY="${TABLEAU_ENCRYPTION_KEY:-}"
+export LLM_ENCRYPTION_KEY="${LLM_ENCRYPTION_KEY:-}"
+export CELERY_BROKER_URL="${CELERY_BROKER_URL:-}"
+export CELERY_RESULT_BACKEND="${CELERY_RESULT_BACKEND:-}"
+export ADMIN_USERNAME="${ADMIN_USERNAME:-}"
+export ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
+export ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-}"
+export SECURE_COOKIES="${SECURE_COOKIES:-}"
+export SERVICE_JWT_SECRET="${SERVICE_JWT_SECRET:-}"
 
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
@@ -55,19 +67,19 @@ printf "${GREEN}ok${RESET}\n"
 # 后端
 printf "backend... "
 cd "$BACKEND"
-uvicorn app.main:app --reload --port 8000 > "$LOG_DIR/backend.log" 2>&1 &
+python3 -m uvicorn app.main:app --reload --port 8000 > "$LOG_DIR/backend.log" 2>&1 &
 echo $! > "$PID_DIR/backend.pid"
 printf "${GREEN}ok${RESET}  ${DIM}http://localhost:8000${RESET}\n"
 
 # Celery Beat
 printf "celery-beat... "
-celery -A services.tasks beat --loglevel=warning > "$LOG_DIR/celery-beat.log" 2>&1 &
+python3 -m celery -A services.tasks beat --loglevel=warning > "$LOG_DIR/celery-beat.log" 2>&1 &
 echo $! > "$PID_DIR/celery-beat.pid"
 printf "${GREEN}ok${RESET}\n"
 
 # Celery Worker
 printf "celery-worker... "
-celery -A services.tasks worker --pool=solo --loglevel=warning > "$LOG_DIR/celery-worker.log" 2>&1 &
+python3 -m celery -A services.tasks worker --pool=solo --loglevel=warning > "$LOG_DIR/celery-worker.log" 2>&1 &
 echo $! > "$PID_DIR/celery-worker.pid"
 printf "${GREEN}ok${RESET}\n"
 
