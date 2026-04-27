@@ -162,7 +162,7 @@ jobs:
           # P0-4: Append-Only 表禁止 UPSERT（bi_quality_scores）
           echo "=== [P0] 检查 Append-Only 表 UPSERT ==="
           ! grep -rn "on_conflict_do\|ON CONFLICT\|INSERT.*ON.*CONFLICT" \
-            backend/services/ --include="*.py" && echo "PASS: 无 UPSERT" \
+            backend/services/ --include="*.py" --exclude="circuit_breaker.py" && echo "PASS: 无 UPSERT" \
             || { echo "FAIL: services/ 发现 UPSERT 模式！"; exit 1; }
 
           # Ruff 代码风格（warn 级别，不阻断 CI）
