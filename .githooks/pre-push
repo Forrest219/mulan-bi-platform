@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+branch="$(git branch --show-current)"
+
+if [ "$branch" != "main" ]; then
+  echo "push rejected: only main is allowed, current branch is '${branch:-detached}'" >&2
+  exit 1
+fi
+
+while read -r local_ref local_sha remote_ref remote_sha
+do
+  if [ "$remote_ref" != "refs/heads/main" ]; then
+    echo "push rejected: only refs/heads/main may be pushed" >&2
+    exit 1
+  fi
+done

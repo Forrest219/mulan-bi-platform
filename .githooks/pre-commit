@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+branch="$(git branch --show-current)"
+
+if [ "$branch" != "main" ]; then
+  echo "commit rejected: only main is allowed, current branch is '${branch:-detached}'" >&2
+  exit 1
+fi
