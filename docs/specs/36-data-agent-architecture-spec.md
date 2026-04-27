@@ -646,6 +646,15 @@ sequenceDiagram
 - [ ] 多轮对话上下文正确传递
 - [ ] 现有首页功能无回归（`/api/chat/stream` 透传正常）
 
+### 12.3 Mock 与测试约束
+
+- **ReAct Engine 单元测试**：所有工具 mock 为 `AsyncMock`，返回固定 `ToolResult`；断言 Engine 在 `max_steps` 内终止，思考链和工具调用序列正确
+- **QueryTool 集成测试**：调用真实 `nlq_service.query()`，不 mock LLM；断言返回数据结构符合 VizQL 响应格式
+- **SSE 测试**：使用 `httpx.AsyncClient` 的 `stream()` 方法消费 SSE 事件，断言事件类型序列为 `thinking → tool_call → tool_result → ... → done`
+- **Session Manager 不可 mock**：会话读写必须使用真实数据库，验证 `agent_conversations` / `agent_conversation_messages` 表写入
+- **LLM 不可用降级**：mock `LLMService.complete()` 抛出异常，断言 Agent 返回 `AGT_002` 错误码和友好提示
+- **Playwright mock**：`page.route('**/api/agent/stream')` 返回 SSE mock 时，`answer` 文本必须出现在 DOM 断言中
+
 ---
 
 ## 13. 开放问题
@@ -656,3 +665,66 @@ sequenceDiagram
 | 2 | thinking 事件是否暴露给前端 | 已决定：暴露，前端可选择隐藏 |
 | 3 | 会话历史是否与 query_sessions 合并 | 已决定：独立，不合并 |
 | 4 | LLM purpose 配置 | 已决定：优先 agent purpose，fallback 到 general |
+
+---
+
+## 14. 开发交付约束
+
+> 通用约束见 `.claude/rules/dev-constraints.md`（自动加载），以下为 Agent 架构模块特有约束。
+
+### 架构红线（违反 = PR 拒绝）
+
+1. **services/data_agent/ 层无 Web 框架依赖** — Engine、Tool、Session 均在 services 层，不得 import FastAPI/Request/Response
+2. **工具注册必须通过 ToolRegistry** — 禁止在 Engine 中硬编码工具列表，新工具必须通过 `@register_tool` 装饰器注册
+3. **ReAct 循环有上限** — `max_steps` 必须有默认值且不可无限循环，超限时基于已有信息回答
+4. **SSE 事件格式不可变** — `thinking` / `tool_call` / `tool_result` / `done` / `error` 事件类型定义后不可在 Phase 内变更
+5. **Agent API 与 chat API 独立** — `POST /api/agent/stream` 和 `POST /api/chat/stream` 共存，Phase 1b 做转发但不合并端点
+6. **所有用户可见文案为中文**
+
+### SPEC 36 强制检查清单
+
+- [ ] `services/data_agent/` 不 import `fastapi` 或 `starlette`
+- [ ] 所有工具通过 `ToolRegistry.register()` 注册
+- [ ] `max_steps` 默认值存在且 ≤ 10
+- [ ] SSE 事件类型覆盖 `thinking` / `tool_call` / `tool_result` / `done` / `error`
+- [ ] `agent_conversations` / `agent_conversation_messages` 表前缀为 `agent_`
+- [ ] Phase 1b 完成后 `/api/chat/stream` 转发到 Agent，不直接删除
+
+### 验证命令
+
+```bash
+# 检查 services/ 层无 Web 框架依赖
+grep -r "from fastapi\|from starlette" backend/services/data_agent/ && echo "FAIL: web framework in services/" || echo "PASS"
+
+# 检查工具注册模式
+grep -r "register_tool\|ToolRegistry" backend/services/data_agent/tools/ | head -5
+
+# 检查 max_steps 存在
+grep -r "max_steps" backend/services/data_agent/engine.py || echo "FAIL: no max_steps"
+```
+
+### 正确 / 错误示范
+
+```python
+# ❌ 错误：Engine 中硬编码工具
+class DataAgentEngine:
+    tools = [QueryTool(), SchemaTool(), MetricsTool()]
+
+# ✅ 正确：通过 ToolRegistry 注入
+class DataAgentEngine:
+    def __init__(self, tool_registry: ToolRegistry):
+        self.tools = tool_registry.get_all()
+
+# ❌ 错误：无限循环
+while True:
+    result = await llm.complete(prompt)
+    ...
+
+# ✅ 正确：有上限
+for step in range(self.max_steps):
+    result = await llm.complete(prompt)
+    if result.is_final:
+        break
+else:
+    return self._summarize_partial(observations)
+```

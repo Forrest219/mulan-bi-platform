@@ -586,9 +586,41 @@ sequenceDiagram
 - [ ] user 角色无法访问发布日志页面
 - [ ] 重试/回滚按钮根据状态和角色正确控制可见性
 
+### 9.3 Mock 与测试约束
+
+- **数据库层**：后端单元测试 mock `SessionLocal`，不得连接真实 PostgreSQL；使用 `create_autospec(Session)` 保持接口保真
+- **publish_service 依赖**：API 测试 mock `publish_service.retry()` / `publish_service.rollback()`，断言入参 `log_id` 和 `operator_id` 正确传递
+- **权限测试**：构造 `current_user = {"role": "analyst", "id": 42}` 注入 Depends，断言查询自动追加 `operator_id=42` 过滤
+- **DiffViewer 前端测试**：传入固定 `diff` prop（含新增、修改、未变化三种场景），断言 DOM 中存在对应的红/绿/灰色 class
+- **Playwright mock**：`page.route('**/api/semantic-maintenance/publish-logs**')` 返回的 mock 数据中，`object_name` 等唯一值必须出现在表格行 DOM 断言中（遵守 `docs/TESTING.md` 闭环要求）
+- **时间范围**：测试 `start_date > end_date` 场景时，使用固定日期字符串（如 `2026-01-10` / `2026-01-01`），不依赖 `Date.now()`
+
 ---
 
-## 10. 开放问题
+## 10. 集成点
+
+### 10.1 上游依赖
+
+| 模块 | 接口 | 说明 |
+|------|------|------|
+| Spec 09（语义维护核心） | `publish_service.publish()` / `publish_service.retry()` / `publish_service.rollback()` | 发布日志由语义发布服务写入 `tableau_publish_log` 表，本模块只读取不写入 |
+| Spec 07（Tableau MCP V1） | `GET /api/tableau/connections` | 筛选栏连接下拉列表数据源 |
+| 认证模块（Spec 01） | `get_current_user` Depends | 角色判断 + analyst 数据过滤 |
+
+### 10.2 下游消费
+
+| 模块 | 消费方式 | 说明 |
+|------|---------|------|
+| Spec 18（菜单重构） | 路由注册 `/governance/semantic/publish-logs` | 侧边栏菜单入口 |
+| Spec 20（运维工作台） | 可选：OpsSnapshotPanel 展示最近失败的发布日志 | 若 OpsSnapshot 需要，可调用本模块列表 API + `status=failed` |
+
+### 10.3 事件
+
+本模块不发布事件。发布日志的创建由 Spec 09 `publish_service` 负责。
+
+---
+
+## 11. 开放问题
 
 | # | 问题 | 负责人 | 状态 |
 |---|------|--------|------|
@@ -598,3 +630,59 @@ sequenceDiagram
 | 4 | 发布日志的数据保留策略：是否设置自动清理（如保留 1 年）？ | 运维团队 | 待定 |
 | 5 | 回滚操作是否需要二次确认弹窗（当前 `publish_service.py` 直接执行）？ | UX 设计 | 建议是 |
 | 6 | 列表页是否需要实时刷新（WebSocket / 轮询）以显示 pending 状态变化？ | 前端负责人 | 暂不考虑 |
+
+---
+
+## 12. 开发交付约束
+
+### 架构红线（违反 = PR 拒绝）
+
+1. **本模块只读发布日志** — `publish-logs` 页面和 API 不得对 `tableau_publish_log` 表执行 INSERT/UPDATE/DELETE，日志写入由 Spec 09 `publish_service` 负责
+2. **services/ 层无 Web 框架依赖** — `services/semantic_maintenance/` 下不得 import FastAPI/Request/Response
+3. **analyst 数据隔离在 API 层强制** — `operator_id` 过滤必须在 API 路由层注入（`Depends(get_current_user)`），不可依赖前端传参
+4. **DiffViewer 纯展示** — 不得在 DiffViewer 组件内发起 API 请求，数据由父组件传入 props
+5. **所有用户可见文案为中文** — 按钮、状态标签、空状态提示、错误消息一律中文
+
+### SPEC 19 强制检查清单
+
+- [ ] `tableau_publish_log` 表无 INSERT/UPDATE/DELETE 操作出现在本模块代码中
+- [ ] `services/semantic_maintenance/` 不 import `fastapi` 或 `starlette`
+- [ ] analyst 角色查询自动追加 `operator_id` 过滤（API 层实现，非前端传参）
+- [ ] user 角色访问返回 403（SM_021）
+- [ ] DiffViewer 组件内无 `fetch` / `useQuery` 调用
+- [ ] 重试按钮仅 admin/data_admin 可见，回滚按钮仅 admin 可见
+- [ ] 所有新增前端文案为中文
+
+### 验证命令
+
+```bash
+# 检查本模块不写入 publish_log 表
+grep -r "INSERT\|UPDATE\|DELETE\|\.add(\|\.delete(" backend/services/semantic_maintenance/publish_log* && echo "FAIL: write to publish_log" || echo "PASS"
+
+# 检查 services/ 层无 Web 框架依赖
+grep -r "from fastapi\|from starlette" backend/services/semantic_maintenance/ && echo "FAIL: web framework in services/" || echo "PASS"
+
+# 检查 DiffViewer 无 API 调用
+grep -r "fetch\|useQuery\|useMutation" frontend/src/pages/semantic-maintenance/publish-logs/components/DiffViewer.tsx && echo "FAIL: API call in DiffViewer" || echo "PASS"
+```
+
+### 正确 / 错误示范
+
+```python
+# ❌ 错误：在本模块中写入 publish_log 表
+session.add(TableauPublishLog(status="pending", ...))
+
+# ✅ 正确：只读查询
+logs = session.query(TableauPublishLog).filter(...)
+
+# ❌ 错误：前端传 operator_id 实现权限过滤
+@router.get("/publish-logs")
+async def list_logs(operator_id: int = Query(None)):
+    ...
+
+# ✅ 正确：API 层从 current_user 注入
+@router.get("/publish-logs")
+async def list_logs(current_user = Depends(get_current_user)):
+    if current_user["role"] == "analyst":
+        params.operator_id = current_user["id"]
+```

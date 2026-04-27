@@ -109,6 +109,18 @@ Mulan BI 平台已经拥有：
 
 **并行而非替换**：Spec 15 仍然为"单规则 + 单阈值"的低层治理保留；DQC 专注"表级健康评估"，两者可独立使用。长期来看，Spec 15 可能会被折叠进 DQC 的 rule engine，但本版本不做此迁移。
 
+### 1.5 关联文档
+
+| 文档 | 路径 | 关系 |
+|------|------|------|
+| Spec 01 | `docs/specs/01-error-codes-standard.md` | DQC_ 前缀注册 |
+| Spec 06 | `docs/specs/06-ddl-compliance-spec.md` | 无直接依赖，不共享 DB 连接池 |
+| Spec 08 | `docs/specs/08-llm-layer-spec.md` | LLM 根因分析和规则建议调用 LLMService |
+| Spec 11 | `docs/specs/11-health-scanning-spec.md` | 可选输入源，不再主导评分 |
+| Spec 15 | `docs/specs/15-data-governance-quality-spec.md` | 并行系统，共享只读连接逻辑 |
+| Spec 16 | `docs/specs/16-events-notification-spec.md` | EventService 事件发射 + notification_router |
+| 架构总览 | `docs/ARCHITECTURE.md` | 分层约束 |
+
 ---
 
 ## 2. 架构设计
@@ -190,7 +202,7 @@ Mulan BI 平台已经拥有：
 | EventService | `services.events.event_service.emit_event()` 在信号变更、cycle 完成、P0/P1 触发时调用 | 在 `backend/services/dqc/orchestrator.py` 内调用 |
 | notification_router | 新增 6 个事件类型的路由函数（`dqc.cycle.*` / `dqc.asset.*`） | `backend/services/events/notification_router.py` 末尾追加 |
 | 既有只读连接逻辑 | 复用 `backend/services/governance/engine.py` 的 `QualitySQLEngine`（方言适配、60s 超时、`max_scan_rows` 熔断） | DQC `rule_engine.py` 内部委托 |
-| LLM 层 | 复用 `backend/services/llm/` 的 client；新建 DQC 专用 prompt 模板文件 | `backend/services/dqc/prompts/*.py` |
+| LLM 层 | 复用 `backend/services/llm/service.py` 的 `LLMService`；新建 DQC 专用 prompt 模板文件 | `backend/services/dqc/prompts/*.py` |
 
 ---
 
@@ -2381,6 +2393,27 @@ def cleanup_old_analyses(self):
 
 ---
 
+## 10.5 安全与权限
+
+### 角色权限矩阵
+
+| 操作 | admin | data_admin | analyst | user |
+|------|:-----:|:----------:|:-------:|:----:|
+| 查看监控资产列表 | Y | Y | Y | Y |
+| 查看资产详情/评分/快照/分析 | Y | Y | Y | Y |
+| 添加监控资产 | Y | Y | N | N |
+| 更新资产权重/阈值（owner） | Y | Y（owner） | N | N |
+| 停止监控（软删，owner） | Y | Y（owner） | N | N |
+| 添加/更新/删除规则（owner） | Y | Y（owner） | N | N |
+| 触发 LLM 建议规则（owner） | Y | Y（owner） | N | N |
+| 手动触发 DQC cycle | Y | N | N | N |
+| 查看 cycle 列表/详情 | Y | Y | Y | Y |
+| 查看总览看板 | Y | Y | Y | Y |
+
+> `owner` 表示仅限创建该监控资产的 data_admin 本人或 admin。IDOR 防护：API 层校验 `asset.created_by == current_user.id or current_user.role == "admin"`。
+
+---
+
 ## 11. 错误码（DQC_ 前缀）
 
 > 需同步更新 `backend/app/core/errors.py` 的 `DQCError` 类，并在 `docs/specs/01-error-codes-standard.md` 第 4 节模块前缀分配表中追加 `DQC` 行；第 5 节追加 5.11 小节。
@@ -2843,6 +2876,101 @@ def get_bi_adapters() -> List[BILineagePort]:
 | OI-09 | 每小时 light cycle 是否在大表上仍跑 `max_scan_rows` 熔断 | 性能 | P1 | **是**；同一规则同一 `max_scan_rows`，触发熔断记一条失败 rule_result（不会在 light cycle 里崩溃 worker） | 已决 |
 | OI-10 | BILineagePort 是否在 V1 预留到 orchestrator 调用点（即使 adapter 为空） | 可扩展性 | P2 | v1 只定义 Protocol，不在 orchestrator 中 import；V2 再接入，避免 MVP 期代码空转 | 已决 |
 | OI-11 | 是否允许用户在同一资产上为同一维度配置相互冲突的规则（如 null_rate 0.99 + null_rate 0.95） | 逻辑清晰度 | P3 | 允许，按"通过率法"平均体现；若用户真有需求让他删 | 已决 |
+
+### 16.2 验收标准
+
+- [ ] 用户可对任意 `(datasource, schema, table)` 添加监控资产并获得 profiling 结果
+- [ ] 单张表在一个 cycle 内产出 6 个维度分（Completeness/Accuracy/Timeliness/Validity/Uniqueness/Consistency）
+- [ ] 信号灯根据维度分 + 阈值自动判定 GREEN/P1/P0，边界值全部通过单测
+- [ ] 漂移检测 `drift_24h` / `drift_vs_7d_avg` 可计算，可触发信号降级
+- [ ] 添加监控表时自动 profiling + LLM 生成建议规则草稿
+- [ ] P0/P1 事件自动触发 LLM 根因分析，输出 `root_cause + fix_suggestion + fix_sql`
+- [ ] 信号变更触发 `dqc.*` 事件，通过 EventService 发送通知
+- [ ] Spec 15 `bi_quality_rules` / `bi_quality_results` 不受影响
+- [ ] data_admin 只能操作自己创建的资产（IDOR 防护）
+- [ ] `POST /cycles/run` 并发锁生效（第 2 个请求返回 DQC_030）
+- [ ] Append-Only 表（`bi_dqc_dimension_scores` / `bi_dqc_asset_snapshots` / `bi_dqc_rule_results`）无 UPDATE/DELETE 操作
+
+### 16.3 Mock 与测试约束
+
+- **QualitySQLEngine 单元测试可 mock**：`rule_engine.py` 单元测试 mock `QualitySQLEngine.execute()`，返回固定 `(null_count, total_count)` 等；集成测试须连接真实数据库
+- **Redis 锁 mock**：`test_orchestrator_lock.py` mock Redis `SET NX` 返回值，断言锁命中时返回 `DQC_030`
+- **LLM 单元测试 mock**：`test_llm_analyzer_prompt.py` / `test_llm_parsing.py` mock LLM 响应 JSON，不调用真实 LLM；断言 prompt 不含敏感数据、`fix_sql` 含危险关键字被过滤
+- **scorer.py 不可 mock**：评分计算必须使用真实函数，输入固定 `rule_results` 列表，断言 6 维度分 + ConfidenceScore + signal 判定正确
+- **EventService mock**：单元测试 mock `emit_event()`，断言事件类型和 payload 正确；集成测试需验证事件写入 `bi_events` 表
+- **Celery 集成测试**：使用 `task_always_eager = True` 同步执行；或启动真实 Worker 验证 `dqc_tasks.py` 调度
+- **测试数据 seeding**：必须使用 `backend/tests/fixtures/dqc/` 下的标准化 fixture，不在测试文件中硬编码大量数据
+
+---
+
+## 17. 开发交付约束
+
+> 通用约束见 `.claude/rules/dev-constraints.md`（自动加载），以下为 DQC 模块特有约束。
+
+### 架构红线（违反 = PR 拒绝）
+
+1. **Append-Only 表禁止 UPSERT** — `bi_dqc_dimension_scores`、`bi_dqc_asset_snapshots`、`bi_dqc_rule_results` 只允许 INSERT，禁止 `ON CONFLICT DO UPDATE` / `UPDATE` / `DELETE`
+2. **services/dqc/ 层无 Web 框架依赖** — 不得 import FastAPI/Request/Response
+3. **DQC 核心链路单 coder 负责** — `orchestrator.py` + `scorer.py` + `rule_engine.py` + `drift_detector.py` 同一 PR 由同一人修改
+4. **custom_sql 规则推迟到 V2** — V1 不实现 `custom_sql` 规则类型（OI-02 已决）
+5. **LLM prompt 不泄露敏感数据** — prompt 构造时过滤敏感字段值，仅包含列名和统计信息
+6. **所有用户可见文案为中文**
+
+### SPEC 31 强制检查清单
+
+- [ ] Append-Only 表无 UPDATE/DELETE/UPSERT 操作
+- [ ] `services/dqc/` 不 import `fastapi` 或 `starlette`
+- [ ] `bi_dqc_*` 表前缀统一使用
+- [ ] IDOR 防护：data_admin 写操作校验 `asset.created_by == current_user.id`
+- [ ] Redis 锁 key 格式 `dqc:cycle:lock` 统一
+- [ ] `fix_sql` 输出经过危险关键字过滤（DROP/DELETE/TRUNCATE/ALTER）
+- [ ] `DQC_` 错误码在 `errors.py` 中注册
+- [ ] 所有新增前端文案为中文
+
+### 验证命令
+
+```bash
+# 检查 Append-Only 表无 UPSERT
+grep -r "ON CONFLICT\|\.update(\|\.delete(" backend/services/dqc/ | grep -v "test_\|__pycache__" | grep -i "dimension_scores\|asset_snapshots\|rule_results" && echo "FAIL: UPSERT on Append-Only table" || echo "PASS"
+
+# 检查 services/ 层无 Web 框架依赖
+grep -r "from fastapi\|from starlette" backend/services/dqc/ && echo "FAIL: web framework in services/" || echo "PASS"
+
+# 检查 bi_dqc_ 表前缀
+grep -r '__tablename__' backend/services/dqc/models.py | grep -v 'bi_dqc_' && echo "FAIL: missing bi_dqc_ prefix" || echo "PASS"
+
+# 检查 fix_sql 危险关键字过滤
+grep -r "DROP\|DELETE\|TRUNCATE\|ALTER" backend/services/dqc/prompts/ --include="*.py" -l && echo "CHECK: ensure blacklist filter exists" || echo "PASS"
+```
+
+### 正确 / 错误示范
+
+```python
+# ❌ 错误：对 Append-Only 表做 UPSERT
+session.query(DqcDimensionScore).filter(...).update({...})
+
+# ✅ 正确：只 INSERT
+session.add(DqcDimensionScore(asset_id=..., dimension=..., score=...))
+
+# ❌ 错误：LLM prompt 包含实际数据值
+prompt = f"表 {table} 数据：{actual_rows}"
+
+# ✅ 正确：LLM prompt 仅包含统计信息
+prompt = f"表 {table} 统计：行数={row_count}, null率={null_rate}"
+
+# ❌ 错误：未校验 asset ownership
+@router.patch("/assets/{id}")
+async def update_asset(id: int, ...):
+    asset = get_asset(id)
+    asset.description = new_desc  # 任何人都能改
+
+# ✅ 正确：IDOR 防护
+@router.patch("/assets/{id}")
+async def update_asset(id: int, current_user=Depends(get_current_user)):
+    asset = get_asset(id)
+    if current_user["role"] != "admin" and asset.created_by != current_user["id"]:
+        raise DQCError("DQC_002", status_code=403)
+```
 
 ---
 

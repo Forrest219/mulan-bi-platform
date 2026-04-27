@@ -592,6 +592,29 @@ expected = linear_trend(过去 7 天斜率) extrapolated
 
 ---
 
+## 6.5 安全与权限
+
+### 角色权限矩阵
+
+| 操作 | admin | data_admin | analyst | user |
+|------|:-----:|:----------:|:-------:|:----:|
+| 查看指标列表/详情 | Y | Y | Y | N |
+| 创建指标 | Y | Y | N | N |
+| 编辑指标 | Y | Y（owner） | N | N |
+| 删除指标（软删） | Y | Y（owner） | N | N |
+| 提交审核 | Y | Y（owner） | N | N |
+| 审批指标 | Y | N | N | N |
+| 发布指标 | Y | Y（owner，审批通过后） | N | N |
+| 触发血缘解析 | Y | Y（owner） | N | N |
+| 触发一致性校验 | Y | Y | N | N |
+| 查看异常记录 | Y | Y | Y | N |
+| 更新异常状态 | Y | Y | N | N |
+| 指标口径 lookup（服务调用） | 服务 JWT | 服务 JWT | 服务 JWT | 服务 JWT |
+
+> `owner` 表示仅限创建该指标的 data_admin 本人或 admin。`/api/metrics/lookup` 端点使用 Service JWT 认证，不走用户角色体系。
+
+---
+
 ## 7. 集成点
 
 ### 7.1 上游依赖
@@ -722,3 +745,74 @@ sequenceDiagram
 | 2 | 血缘自动解析是否使用 LLM（成本 vs 准确率权衡） | 待定 | 待定 |
 | 3 | 指标异常告警的推送渠道（Email / Slack / 企业微信） | 待定 | 待定 |
 | 4 | 派生指标的 formula_template 参数化填充的 NL-to-Query 协作协议 | 待定 | 待定 |
+
+---
+
+## 11. Mock 与测试约束
+
+- **指标 CRUD 单元测试**：mock `SessionLocal`，使用 `create_autospec(Session)` 保持接口保真；断言唯一约束校验（MC_001）和状态机流转
+- **血缘解析测试**：LLM 血缘解析（如使用）mock LLM 返回固定 `upstream_fields` 列表；断言 `lineage_status` 从 `unknown` 变为 `resolved`
+- **异常检测 scorer 不可 mock**：Z-Score / 分位数计算必须使用真实函数，传入固定 `metric_values` 列表，断言 `|z| > 3` 时写入 `bi_metric_anomalies`
+- **一致性校验测试**：构造两个数据源的同名指标值（固定值），断言 diff_pct 计算正确、tolerance 阈值判定正确
+- **Service JWT 测试**：mock JWT 验证中间件，断言无 JWT 时 `/api/metrics/lookup` 返回 401
+- **formula 安全测试**：构造含 SQL 注入片段的 `formula` 字段，断言写入前被参数化查询拦截或白名单拒绝
+- **Playwright mock**：`page.route('**/api/metrics/**')` 返回的 mock 数据中，`name_zh` / `formula` 等唯一值必须出现在 DOM 断言中
+
+---
+
+## 12. 开发交付约束
+
+> 通用约束见 `.claude/rules/dev-constraints.md`（自动加载），以下为 Metrics Agent 模块特有约束。
+
+### 架构红线（违反 = PR 拒绝）
+
+1. **services/metrics_agent/ 层无 Web 框架依赖** — 不得 import FastAPI/Request/Response
+2. **formula 不得拼接用户输入** — `bi_metric_definitions.formula` 生成 SQL 时必须使用参数化查询或白名单校验
+3. **formula_template Jinja2 沙箱** — 模板渲染必须在沙箱环境执行，禁止动态导入模块或执行任意代码
+4. **Append-Only 表禁止 UPSERT** — `bi_metric_versions` 只允许 INSERT，记录每次变更
+5. **sensitivity_level 自动降级** — 上游字段 `sensitivity_level` 高于指标标注时自动降级到高级别（MC_004 警告但不阻塞）
+6. **所有用户可见文案为中文**
+
+### SPEC 30 强制检查清单
+
+- [ ] `services/metrics_agent/` 不 import `fastapi` 或 `starlette`
+- [ ] `formula` 字段写入前经过参数化查询或白名单校验
+- [ ] `formula_template` Jinja2 渲染在沙箱中执行
+- [ ] `bi_metric_versions` 表无 UPDATE/DELETE 操作
+- [ ] `bi_metric_definitions.name` 唯一约束校验（MC_001）
+- [ ] 指标状态机流转正确（draft → review → approved → published）
+- [ ] `/api/metrics/lookup` 使用 Service JWT 认证
+- [ ] `is_active=false` 的指标不被 lookup 返回
+
+### 验证命令
+
+```bash
+# 检查 services/ 层无 Web 框架依赖
+grep -r "from fastapi\|from starlette" backend/services/metrics_agent/ && echo "FAIL: web framework in services/" || echo "PASS"
+
+# 检查 formula 安全（不应有 f-string SQL 拼接）
+grep -r 'f"SELECT\|f"INSERT\|f"UPDATE' backend/services/metrics_agent/ && echo "FAIL: SQL string interpolation" || echo "PASS"
+
+# 检查 bi_metric_versions 无 UPDATE
+grep -r "\.update(\|\.delete(" backend/services/metrics_agent/ | grep "metric_versions" && echo "FAIL: write to versions table" || echo "PASS"
+```
+
+### 正确 / 错误示范
+
+```python
+# ❌ 错误：formula 直接拼接到 SQL
+sql = f"SELECT {metric.formula} FROM {table}"
+
+# ✅ 正确：参数化查询或预编译
+sql = text("SELECT :formula_expr FROM :table_name")
+# 或使用白名单校验后的 SQLAlchemy Core 表达式
+
+# ❌ 错误：Jinja2 不安全渲染
+from jinja2 import Template
+result = Template(metric.formula_template).render(**params)
+
+# ✅ 正确：沙箱渲染
+from jinja2.sandbox import SandboxedEnvironment
+env = SandboxedEnvironment()
+result = env.from_string(metric.formula_template).render(**params)
+```

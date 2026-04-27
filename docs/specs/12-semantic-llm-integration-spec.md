@@ -881,8 +881,8 @@ sequenceDiagram
 
 | 编号 | 问题 | 优先级 | 状态 |
 |------|------|--------|------|
-| OI-01 | 当前上下文组装逻辑内嵌在 `service.py` 的各 `generate_ai_draft_*` 方法中，是否需要抽取独立的 `ContextAssembler` 类？ | **P0** | ⚠️ **前置要求**（开发前必须实现） |
-| OI-02 | Token 预算 3000 的计算目前依赖字符数估算，是否需要引入 `tiktoken` 做精确计算？ | **P0** | ⚠️ **前置要求**（字符估算极易导致 API 400 报错） |
+| OI-01 | 当前上下文组装逻辑内嵌在 `service.py` 的各 `generate_ai_draft_*` 方法中，是否需要抽取独立的 `ContextAssembler` 类？ | **P0** | ✅ **已解决**（`ContextAssembler` 已实现于 `backend/services/semantic_maintenance/context_assembler.py`） |
+| OI-02 | Token 预算 3000 的计算目前依赖字符数估算，是否需要引入 `tiktoken` 做精确计算？ | **P0** | ✅ **已解决**（`tiktoken>=0.7.0` 已集成，使用 `cl100k_base` 编码器） |
 | OI-03 | `NL_TO_QUERY_TEMPLATE` 已定义但无对应 API 端点，需确定接入时间线和路由设计（对应 08-spec OI-07） | P1 | ✅ **已解决**（NL-to-Query 已移交 Spec 14，本规格书不再覆盖） |
 | OI-04 | Prompt 注入防护目前仅依赖输入长度限制，是否需要引入检测中间件或 guardrails？ | P2 | 待讨论 |
 | OI-05 | 当前 `confidence` 字段在数据源语义输出中为 `ai_confidence`，在字段语义输出中也为 `ai_confidence`，但 `ARCHITECTURE.md` §6.2 定义为 `confidence`，需统一字段命名 | P1 | ✅ **已解决**（§5.3 明确备注：LLM 输出 key=confidence，ORM 层映射为 ai_confidence） |
@@ -891,4 +891,165 @@ sequenceDiagram
 | OI-08 | NL-to-VizQL 的字段模糊匹配逻辑是否需要引入向量相似度计算，而非简单的字符串匹配？ | P3 | ✅ **已解决**（NL-to-VizQL 已从本规格书移出，相关问题见 Spec 14） |
 | OI-09 | 错误码前缀：`ARCHITECTURE.md` §6.2 使用 `SM_006`，本规格书使用 `SLI_003`，需协商统一命名 | P1 | ✅ **已解决**（SLI_00x 为本层统一前缀，ARCHITECTURE.md §6.2 中的 SM_006 已移除引用） |
 
-> **开发前置要求声明**：OI-01（ContextAssembler 抽取）和 OI-02（Token 估算机制）被标记为 P0 前置要求，必须在开发前完成架构改造，否则将导致 Prompt 硬编码堆积和 API 400 超限风险。
+> **开发前置要求声明**：OI-01（ContextAssembler 抽取）和 OI-02（tiktoken 精确计算）均已在代码中完成实现，不再阻塞开发。
+
+---
+
+## 12. 数据模型（跨引用）
+
+本模块不新增独立表，读写以下表（由 Spec 09 定义）：
+
+| 表名 | 来源 Spec | 本模块操作 | 关键字段 |
+|------|----------|-----------|---------|
+| `tableau_field_semantics` | Spec 09 | READ（上下文组装）+ UPDATE（写入 AI 生成结果） | `semantic_name`, `semantic_definition`, `ai_confidence`, `status` |
+| `tableau_datasource_semantics` | Spec 09 | READ + UPDATE | `semantic_name`, `semantic_description`, `business_definition`, `sensitivity_level` |
+| `ai_llm_configs` | Spec 08 | READ（获取 LLM 配置） | `provider`, `model`, `purpose`, `is_active` |
+
+> 完整表定义见 `docs/specs/09-semantic-maintenance-spec.md` Section 2 和 `docs/specs/08-llm-layer-spec.md` Section 2。Alembic 迁移由各来源 Spec 负责。
+
+---
+
+## 13. API 端点设计
+
+### 13.1 端点总览
+
+| Method | Path | 说明 | 权限 |
+|--------|------|------|------|
+| POST | `/api/semantic-maintenance/fields/{id}/generate-ai` | 触发单字段 AI 语义生成 | admin, data_admin |
+| POST | `/api/semantic-maintenance/datasources/{id}/generate-ai` | 触发数据源 AI 语义生成 | admin, data_admin |
+
+### 13.2 `POST /api/semantic-maintenance/fields/{id}/generate-ai`
+
+**路径参数**：`id` — `tableau_field_semantics.id`
+
+**请求体**：无（使用已有字段元数据作为上下文）
+
+**响应 200**：
+
+```json
+{
+  "id": 42,
+  "status": "ai_generated",
+  "semantic_name": "订单金额",
+  "semantic_name_zh": "订单金额",
+  "semantic_definition": "用户下单时的实际支付金额，包含折扣后价格",
+  "ai_confidence": 0.85,
+  "warnings": []
+}
+```
+
+**错误响应**：
+
+| 错误码 | HTTP | 场景 |
+|--------|------|------|
+| `SLI_001` | 503 | LLM 未配置或不可用 |
+| `SLI_002` | 502 | LLM 调用超时/API 错误 |
+| `SLI_003` | 502 | LLM 返回非法 JSON（重试 1 次后仍失败） |
+| `SLI_005` | 403 | 字段敏感度为 HIGH/CONFIDENTIAL |
+
+### 13.3 `POST /api/semantic-maintenance/datasources/{id}/generate-ai`
+
+**路径参数**：`id` — `tableau_datasource_semantics.id`
+
+**请求体**：无
+
+**响应 200**：与字段生成类似，返回更新后的数据源语义对象。
+
+---
+
+## 14. 角色权限矩阵
+
+| 操作 | admin | data_admin | analyst | user |
+|------|:-----:|:----------:|:-------:|:----:|
+| 触发字段 AI 语义生成 | Y | Y | N | N |
+| 触发数据源 AI 语义生成 | Y | Y | N | N |
+| 查看 AI 生成结果 | Y | Y | Y | N |
+| 审核/确认 AI 生成语义 | Y | Y | N | N |
+
+> analyst 可在语义维护界面查看 AI 生成结果，但不可触发生成或确认。user 角色无权限访问语义维护模块。
+
+---
+
+## 15. 验收标准
+
+- [ ] `POST /fields/{id}/generate-ai` 返回完整 AI 语义结果，`status` 变为 `ai_generated`
+- [ ] `POST /datasources/{id}/generate-ai` 返回完整 AI 语义结果
+- [ ] 敏感字段（HIGH/CONFIDENTIAL）调用生成接口返回 SLI_005，不调用 LLM
+- [ ] LLM 未配置时返回 SLI_001
+- [ ] LLM 返回非法 JSON 时重试 1 次，仍失败返回 SLI_003
+- [ ] 上下文组装不超过 Token 预算（3000），P0 字段始终保留
+- [ ] `ai_confidence` 正确记录到数据库
+- [ ] Prompt 中不包含行级数据值，不包含 HIGH/CONFIDENTIAL 字段信息
+
+---
+
+## 16. Mock 与测试约束
+
+- **LLMService 单元测试必须 mock**：`generate_ai_draft_field()` / `generate_ai_draft_datasource()` 中的 LLM 调用使用 mock 返回固定 JSON，验证解析和校验逻辑
+- **ContextAssembler 不可 mock**：上下文组装逻辑必须使用真实函数，传入固定字段列表，断言输出格式和 Token 预算
+- **敏感度检查不可 mock**：`pre_llm_sensitivity_check()` 必须使用真实逻辑
+- **集成测试 LLM 可用性**：端到端测试需真实 LLM 配置或明确标注 `@pytest.mark.requires_llm` 跳过
+- **Playwright mock**：`page.route('**/api/semantic-maintenance/*/generate-ai')` 返回固定 AI 结果，断言 `ai_confidence` 值出现在 DOM 中
+- **JSON 解析测试**：构造 Markdown 代码块包裹的 JSON（`` ```json ... ``` ``）作为 LLM 模拟输出，验证正确提取
+
+---
+
+## 17. 开发交付约束
+
+> 通用约束见 `.claude/rules/dev-constraints.md`（自动加载），以下为本模块特有约束。
+
+### 架构红线（违反 = PR 拒绝）
+
+1. **services/semantic_maintenance/ 不得 import fastapi** — AI 生成逻辑在 services 层，API 层仅做参数校验和权限检查
+2. **Prompt 不含行级数据** — LLM 上下文只包含字段元数据（名称、类型、角色），不包含实际数据值
+3. **HIGH/CONFIDENTIAL 字段绝对拦截** — `pre_llm_sensitivity_check` 必须在 LLM 调用前执行，不可跳过
+4. **JSON 输出必须 Schema 校验** — LLM 返回 JSON 必须通过 Section 5.2 Schema 校验后才写入数据库
+5. **所有用户可见文案为中文**
+
+### SPEC 12 强制检查清单
+
+- [ ] `services/semantic_maintenance/` 不 import `fastapi` 或 `starlette`
+- [ ] LLM prompt 不含行级数据值
+- [ ] `pre_llm_sensitivity_check` 在每次 LLM 调用前执行
+- [ ] LLM 返回 JSON 通过 Schema 校验后才写入数据库
+- [ ] `ai_confidence` 字段正确映射到 ORM 层
+- [ ] 错误码使用 `SLI_` 前缀
+
+### 验证命令
+
+```bash
+# 检查 services/ 层无 Web 框架依赖
+grep -r "from fastapi\|from starlette" backend/services/semantic_maintenance/ && echo "FAIL: web framework in services/" || echo "PASS"
+
+# 检查敏感度检查存在
+grep -r "pre_llm_sensitivity_check\|BLOCKED_FOR_LLM" backend/services/semantic_maintenance/ || echo "FAIL: no sensitivity check"
+
+# 检查 SLI_ 错误码注册
+grep -r "SLI_" backend/services/semantic_maintenance/ | grep -v "__pycache__" | head -5
+```
+
+### 正确 / 错误示范
+
+```python
+# ❌ 错误：直接调用 LLM 不检查敏感度
+async def generate_ai_draft_field(field_id: int):
+    context = assembler.build(field)
+    result = await llm_service.complete(prompt)  # 未检查敏感度
+
+# ✅ 正确：LLM 调用前执行敏感度检查
+async def generate_ai_draft_field(field_id: int):
+    error = pre_llm_sensitivity_check(field)
+    if error:
+        raise SLIError("SLI_005", message=error)
+    context = assembler.build(field)
+    result = await llm_service.complete(prompt)
+
+# ❌ 错误：LLM 输出直接写入数据库
+field.semantic_name = llm_output["semantic_name"]
+
+# ✅ 正确：先 Schema 校验再写入
+validated = validate_against_schema(llm_output, FIELD_OUTPUT_SCHEMA)
+if not validated.ok:
+    raise SLIError("SLI_004", details=validated.errors)
+field.semantic_name = validated.data["semantic_name"]
+```

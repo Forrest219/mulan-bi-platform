@@ -200,7 +200,7 @@ relationships:
 ```
 
 **解析约束**：
-- `schema_yaml` 内容在写入前必须通过 YAML 语法校验，校验失败返回 `KB_010`
+- `schema_yaml` 内容在写入前必须通过 YAML 语法校验，校验失败返回 `KB_011`
 - `tables[].columns[].name` 和 `tables[].name` 为必填字段，缺失则视为脏数据，不生成 Embedding
 - 版本升级时（`version` 字段递增），旧版本 `schema_yaml` 保留用于历史溯源
 
@@ -737,6 +737,7 @@ RAG 上下文以结构化文本块注入 Prompt：
 | `KB_008` | 500 | pgvector 扩展未安装或查询异常 | 向量检索服务不可用 |
 | `KB_009` | 400 | 搜索 query 为空 | 搜索内容不能为空 |
 | `KB_010` | 400 | 不支持的 source_type | 不支持的知识来源类型: {type} |
+| `KB_011` | 400 | `schema_yaml` YAML 语法校验失败 | Schema YAML 格式无效 |
 
 ---
 
@@ -932,6 +933,54 @@ sequenceDiagram
 | 权限隔离 | user 角色无法访问知识库 API |
 | 敏感数据隔离 | HIGH/CONFIDENTIAL 数据源的 Schema 不出现在 RAG 结果中 |
 | AI 建议审核 | `ai_suggested` 术语在 `pending_review` 状态时不参与 RAG |
+
+### 11.5 验收标准
+
+- [ ] 术语 CRUD 正常，`canonical_term` 唯一约束生效（重复返回 KB_002）
+- [ ] 同义词匹配按优先级命中（精确 > canonical > synonyms）
+- [ ] 文档创建后 Celery 异步生成 Embedding 并写入 `kb_embeddings`
+- [ ] 文档更新时先 DELETE 旧 Embedding 再 INSERT 新 Embedding（无 ghost data）
+- [ ] `schema_yaml` 写入前通过 JSON Schema v1.0 校验（失败返回 KB_011）
+- [ ] 向量检索 top-5 在 10 万条数据下 < 100ms
+- [ ] RAG 上下文组装：术语匹配 + 向量检索结果合并去重，总 Token ≤ 800
+- [ ] user 角色访问知识库 API 返回 403
+- [ ] HIGH/CONFIDENTIAL 数据源的 Schema 不出现在 RAG 检索结果中
+- [ ] `ai_suggested` 来源术语在 `pending_review` 状态时不参与 RAG
+
+### 11.6 Mock 与测试约束
+
+- **pgvector 集成测试必须使用真实 PostgreSQL**：不得 mock `VECTOR` 类型或 cosine distance 查询，使用 `docker-compose.yml` 中的 `pgvector/pgvector:pg16` 实例
+- **LLM Embedding 单元测试可 mock**：`EmbeddingService.generate()` 返回固定维度向量（如 `[0.1] * 1536`），但集成测试须使用真实 LLM 调用验证维度一致性
+- **Celery 异步任务测试**：单元测试使用 `celery.conf.task_always_eager = True` 同步执行；集成测试启动真实 Worker
+- **tiktoken 不可 mock**：分块逻辑必须使用真实 `cl100k_base` 编码器，确保 Token 计数准确
+- **RAG 上下文测试**：mock `EmbeddingService` 返回已知向量，但 `GlossaryService` 术语匹配必须走真实数据库查询
+- **Playwright mock**：`page.route('**/api/knowledge/**')` 返回的 mock 数据中，`canonical_term` / `title` 等唯一值必须出现在 DOM 断言中（遵守 `docs/TESTING.md` 闭环要求）
+
+---
+
+## 11.7 集成点
+
+### 上游依赖
+
+| 模块 | 接口 | 说明 |
+|------|------|------|
+| Spec 08（LLM 层） | `LLMService.generate_embedding()` | Embedding 向量生成，支持 MiniMax / OpenAI 等多供应商 |
+| Spec 08（LLM 层） | `LLMService.complete()` | RAG 上下文注入后的 LLM 补全调用 |
+| pgvector 扩展 | `CREATE EXTENSION vector` | PostgreSQL 向量存储与 cosine distance 检索 |
+| Celery + Redis | `@shared_task` | 文档 Embedding 异步生成任务队列 |
+| tiktoken | `cl100k_base` 编码器 | 文本分块和 Token 预算计算 |
+
+### 下游消费
+
+| 模块 | 消费方式 | 说明 |
+|------|---------|------|
+| Spec 14（NL-to-Query） | `RAGService.build_rag_context()` | NL-to-Query 流水线注入 RAG 上下文提升查询准确度 |
+| Spec 12（语义-LLM） | `GlossaryService.match_term()` | AI 语义生成时查询知识库术语定义 |
+| Spec 09（语义维护） | `GlossaryService` | 语义维护界面展示关联术语 |
+
+### 事件
+
+本模块不发布事件。写操作通过 `bi_operation_logs` 记录审计日志（见 Section 9.3）。
 
 ---
 

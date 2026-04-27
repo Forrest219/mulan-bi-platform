@@ -938,6 +938,26 @@ sequenceDiagram
 - 数据延迟 48 小时（HIGH 级 freshness 规则失败）
 - 预期综合评分 < 60 分
 
+### 11.5 验收标准
+
+- [ ] 13 种规则类型的 SQL 生成均有单元测试覆盖
+- [ ] 7 种运算符（eq/ne/gt/gte/lt/lte/between）阈值比较逻辑正确
+- [ ] 评分计算覆盖全通过(100)、全失败(0)、混合场景
+- [ ] `custom_sql` 规则仅允许 SELECT，INSERT/DELETE/DROP 被拦截
+- [ ] `max_scan_rows` 熔断生效：到达行数限制中断并返回 partial result
+- [ ] 非 owner 用户不能为他人数据源创建规则（IDOR 防护）
+- [ ] analyst 角色不能创建/删除规则，user 角色无法访问
+- [ ] `bi_quality_scores` 表只有 INSERT，无 UPSERT
+- [ ] `cd backend && pytest tests/ -x -q` 全通过
+
+### 11.6 Mock 与测试约束
+
+- **数据库连接**：单元测试中 `patch('services.governance.database.SessionLocal')` 返回 mock session，集成测试使用真实 PostgreSQL
+- **目标数据源查询**：`rule_engine.py` 中的 `_execute_rule_sql()` 在单元测试中 mock `create_engine`，传入预构造的 `DataFrame` 结果；集成测试使用测试数据库
+- **Celery 任务**：`cleanup_expired_data.delay()` 在单元测试中 mock 为同步调用；不测试真实调度
+- **评分计算**：`scorer.py` 测试直接传入 `List[RuleResult]`，不依赖数据库查询；三输入源（健康扫描/DDL/质量）可单独 mock
+- **custom_sql 安全**：测试必须覆盖 SQL 注入场景（`; DROP TABLE`、子查询、UNION 注入），断言全部被拦截
+
 ---
 
 ## 12. 开放问题
