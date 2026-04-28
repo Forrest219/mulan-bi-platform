@@ -358,6 +358,25 @@ expected = linear_trend(过去 7 天斜率) extrapolated
 触发条件：|current - expected| / expected > tolerance_pct（默认 5%）
 ```
 
+#### 4.2.1 异常算法参数与冷启动规约
+
+> ⚠️ **实现状态**：当前仅 **Z-Score 已实现**（status: `implemented`）；其他算法均为 spec 声明范围内的待实现项（status: `planned`），上线前必须按本节注册参数与冷启动条件，未注册不得发布。
+
+| 算法 | 状态 | 关键参数（默认值） | 冷启动条件 | 误报抑制窗口 | 适用场景 |
+|------|------|------------------|-----------|-------------|---------|
+| Z-Score | implemented | `window_size=30` / `threshold=3.0` / `direction=both` | 至少 14 个连续点；不足 14 点返回 `INSUFFICIENT_DATA`，跳过检测不写 anomaly | 同 metric_id + 同 algorithm + 同 direction，1 小时内不重复告警（去重，非合并） | 平稳指标（GMV、订单数等中心化分布） |
+| IQR | planned | `window_size=30` / `k=1.5` / `direction=both` | 至少 14 个连续点；不足返回 `INSUFFICIENT_DATA` | 同 Z-Score（1 小时去重） | 偏态分布指标（金额、停留时长） |
+| Holt-Winters | planned | `alpha=0.3` / `beta=0.1` / `gamma=0.1` / `season_len=7` | 至少 2 个完整周期（即 `2 * season_len = 14` 个点）；不足返回 `INSUFFICIENT_DATA` | 季节边界（period 起止点 ±1 点）自动放宽阈值 ±1 σ；其余区间走 1 小时去重 | 季节性指标（DAU、订单波次） |
+| 分位数 | planned | `lower=0.05` / `upper=0.95` / `window_size=30` | 至少 50 个点；不足返回 `INSUFFICIENT_DATA` | 同 Z-Score（1 小时去重） | 长尾分布（响应时长、加载耗时） |
+| Prophet | planned | `changepoint_prior_scale=0.05` / `yearly_seasonality=auto` / `weekly_seasonality=auto` / `holidays=cn` | 至少 60 天历史；不足返回 `INSUFFICIENT_DATA` | 节假日窗口（前后各 1 天）自动扩展阈值；其余区间走 1 小时去重 | 趋势 + 季节叠加（GMV 大盘、流量大盘） |
+
+**通用规约**：
+
+1. **冷启动产物**：检测器在数据点不足时必须返回 `{status: "INSUFFICIENT_DATA", points_required: N, points_available: M}`，**不得**写入 `bi_metric_anomalies` 表；上层调度器记录 INFO 级别日志，不触发事件。
+2. **误报抑制实现**：去重键 = `(metric_id, algorithm, direction, dimension_context_hash)`；同键在 `suppression_window`（默认 3600s）内只产生 1 条 anomaly，后续命中只刷新 `last_seen_at`，**替代**而非合并。
+3. **静默期（maintenance window）**：admin 可在 `bi_metric_definitions.filters.maintenance_window`（或独立配置表）声明 `[start, end]` 区间；检测器命中区间时直接跳过，不写 anomaly 也不发事件。
+4. **误报反馈学习**：用户将 anomaly 标记为 `status=false_positive` 后，相同特征 = `(algorithm, direction, magnitude_bucket)`（magnitude_bucket = `floor(|z|)` 或 `floor(deviation_score)`）的异常，24 小时内自动抑制（写入 anomaly 但 `status=auto_suppressed`，不发事件）。
+
 ### 4.3 指标口径校验规则
 
 | 规则 | 描述 | 违规处理 |
@@ -377,6 +396,112 @@ expected = linear_trend(过去 7 天斜率) extrapolated
 4. 差值百分比 ≤ tolerance_pct → pass
 5. 差值百分比 > tolerance_pct → fail（记录 bi_metric_consistency_checks）
 ```
+
+### 4.5 校验规则 SQL 模板
+
+> ⚠️ **占位符约定**：`{table}` / `{column}` / `{date_col}` / `{threshold}` / `{min}` / `{max}` 等均为参数化绑定占位符，**禁止字符串拼接**。执行层使用 SQLAlchemy `text()` + bindparam 或驱动级 `?` / `%s` 占位，绕过模板渲染直接进入 SQL 执行层即视为违规（参考 §12 架构红线）。
+>
+> ⚠️ **期望产出格式**：所有规则统一返回 `{passed: bool, value: number, threshold: number, detail: object}`，由 Metrics Agent 的 RuleRunner 统一适配。
+
+#### 规则 1：数据新鲜度（Freshness）
+
+```sql
+-- 模板
+SELECT EXTRACT(EPOCH FROM (NOW() - MAX({date_col}))) / 3600 AS lag_hours
+FROM {table};
+```
+
+- **触发阈值默认值**：`lag_hours > 24`（即超过 24 小时无新数据 → fail）
+- **方言差异**：
+  - PostgreSQL：`EXTRACT(EPOCH FROM (NOW() - MAX(...))) / 3600`
+  - StarRocks：`(UNIX_TIMESTAMP(NOW()) - UNIX_TIMESTAMP(MAX({date_col}))) / 3600`
+- **产出**：`{passed: lag_hours <= 24, value: lag_hours, threshold: 24, detail: {max_date: "..."}}`
+
+#### 规则 2：行数突变（Volume Drift）
+
+```sql
+-- 模板：当日 vs 过去 7 日均值偏差
+WITH today AS (
+  SELECT COUNT(*) AS cnt FROM {table}
+  WHERE {date_col} = CURRENT_DATE
+),
+baseline AS (
+  SELECT AVG(daily_cnt) AS avg_cnt FROM (
+    SELECT {date_col} AS d, COUNT(*) AS daily_cnt
+    FROM {table}
+    WHERE {date_col} BETWEEN CURRENT_DATE - INTERVAL '7' DAY AND CURRENT_DATE - INTERVAL '1' DAY
+    GROUP BY {date_col}
+  ) sub
+)
+SELECT today.cnt, baseline.avg_cnt,
+       ABS(today.cnt - baseline.avg_cnt) / NULLIF(baseline.avg_cnt, 0) AS drift_pct
+FROM today, baseline;
+```
+
+- **触发阈值默认值**：`drift_pct > 0.30`（30% 偏差 → fail）
+- **方言差异**：
+  - PostgreSQL：`INTERVAL '7' DAY` 写作 `INTERVAL '7 days'`
+  - StarRocks：`DATE_SUB(CURRENT_DATE, INTERVAL 7 DAY)`
+- **产出**：`{passed: drift_pct <= 0.30, value: drift_pct, threshold: 0.30, detail: {today: N, baseline: M}}`
+
+#### 规则 3：空值率（Null Rate）
+
+```sql
+-- 模板
+SELECT
+  SUM(CASE WHEN {column} IS NULL THEN 1 ELSE 0 END) * 1.0 / NULLIF(COUNT(*), 0) AS null_rate,
+  COUNT(*) AS total
+FROM {table}
+WHERE {date_col} = CURRENT_DATE;
+```
+
+- **触发阈值默认值**：`null_rate > 0.05`（5% 空值率 → fail）
+- **方言差异**：PG 与 SR 语法兼容，无差异；StarRocks 注意 `NULLIF` 在 v3.0+ 支持
+- **产出**：`{passed: null_rate <= threshold, value: null_rate, threshold: 0.05, detail: {total: N}}`
+
+#### 规则 4：唯一性（Uniqueness）
+
+```sql
+-- 模板
+SELECT
+  COUNT(*) - COUNT(DISTINCT {column}) AS dup_count,
+  COUNT(*) AS total
+FROM {table}
+WHERE {date_col} = CURRENT_DATE;
+```
+
+- **触发阈值默认值**：`dup_count > 0`（任何重复 → fail）
+- **方言差异**：PG 与 SR 语法兼容；大表场景 StarRocks 建议改写为 `BITMAP_UNION_COUNT` 提速
+- **产出**：`{passed: dup_count == 0, value: dup_count, threshold: 0, detail: {total: N}}`
+
+#### 规则 5：取值范围（Value Range）
+
+```sql
+-- 模板
+SELECT COUNT(*) AS out_of_range, MIN({column}) AS min_val, MAX({column}) AS max_val
+FROM {table}
+WHERE {column} NOT BETWEEN {min} AND {max}
+  AND {date_col} = CURRENT_DATE;
+```
+
+- **触发阈值默认值**：`out_of_range == 0`（任何越界 → fail）；`{min}` / `{max}` 由规则配置注入
+- **方言差异**：PG 与 SR 语法兼容
+- **产出**：`{passed: out_of_range == 0, value: out_of_range, threshold: 0, detail: {min: ..., max: ..., observed_min: ..., observed_max: ...}}`
+
+#### 规则执行约束
+
+- 所有模板的占位符**必须**经规则注册时白名单校验（`{table}` / `{column}` 仅允许 `[a-zA-Z_][a-zA-Z0-9_]*` 形式，且必须在 `bi_metric_definitions.table_name` / `column_name` 已登记）
+- 数值阈值（`{threshold}` / `{min}` / `{max}`）以 bindparam 注入，**不得**进入模板字符串
+- 失败规则写入 `bi_metric_anomalies`（`detection_method=rule_check`），并发射 `metric.anomaly.detected` 事件
+
+### 4.6 告警去重与抑制
+
+| 机制 | 规则 | 实现位置 |
+|------|------|---------|
+| **连续异常去重** | 同 `(metric_id, algorithm, direction, dimension_context_hash)`：1 小时内只发 1 次（**替代**最新值，不合并），后续命中刷新 `last_seen_at` | RuleRunner 写 anomaly 前查询窗口内同键记录 |
+| **静默期（maintenance window）** | admin 可配 `{start, end, reason}`；区间内所有该 metric 的检测结果跳过，不写 anomaly 不发事件 | 检测器入口前置过滤 |
+| **误报反馈学习** | 用户将 anomaly 标记 `status=false_positive` 后，特征 = `(algorithm, direction, magnitude_bucket)` 的异常 24 小时内 `status=auto_suppressed`，写入但不发事件 | anomaly 落库前查询 `bi_metric_anomalies` 中近 24h 的 `false_positive` 记录 |
+| **同因合并** | 跨 metric 的同根因（如同一上游表故障）通过 `bi_metric_lineage.upstream_hash` 聚合：5 分钟窗口内同上游 hash 的异常合并为一个事件，Payload 含 `affected_metric_ids` 列表 | 事件发射器层聚合，不影响 anomaly 落库 |
 
 ---
 
@@ -722,6 +847,11 @@ sequenceDiagram
 | 6 | 跨数据源同名指标差值 10%（tolerance=5%） | consistency_check status=fail | P1 |
 | 7 | 指标口径 lookup（内部服务调用） | 200 返回标准口径，404 返回 not_found | P0 |
 | 8 | 指标版本历史完整性 | 每次变更新增一条版本记录，change_type 正确 | P1 |
+| 9 | **冷启动**：Z-Score 仅 10 个数据点（< 14） | 返回 `INSUFFICIENT_DATA`，不写 anomaly 不发事件 | P0 |
+| 10 | **连续异常去重**：1 小时内 5 次同方向异常 | 仅 1 条 anomaly 记录，`last_seen_at` 刷新 5 次，仅 1 次告警事件 | P0 |
+| 11 | **maintenance window**：检测时间落在静默期 | 跳过检测，不写 anomaly 不发事件，记录 INFO 日志 | P0 |
+| 12 | **SQL 模板跨方言**：5 条规则模板分别在 PostgreSQL 和 StarRocks 各执行一次 | 两侧返回结果格式一致 `{passed, value, threshold, detail}`，方言差异已正确处理 | P0 |
+| 13 | **误报反馈学习**：用户标记 false_positive 后 24h 内同特征异常 | 后续异常 `status=auto_suppressed`，不发事件 | P1 |
 
 ### 9.2 验收标准
 
@@ -783,6 +913,8 @@ sequenceDiagram
 - [ ] 指标状态机流转正确（draft → review → approved → published）
 - [ ] `/api/metrics/lookup` 使用 Service JWT 认证
 - [ ] `is_active=false` 的指标不被 lookup 返回
+- [ ] **新增异常算法必须同步注册参数默认值 + 冷启动条件 + 误报抑制策略**（参见 §4.2.1，未注册不得发布）
+- [ ] **SQL 模板必须支持参数化绑定（bindparam / `?` / `%s`），禁止字符串拼接**（参见 §4.5，违规 = SQL 注入风险）
 
 ### 验证命令
 

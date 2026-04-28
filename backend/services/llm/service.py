@@ -137,27 +137,85 @@ class LLMService:
         return client
 
     async def complete(self, prompt: str, system: str = None, timeout: int = 15, purpose: str = "default") -> dict:
-        """异步 LLM 调用
-        Returns: { "content": str } or { "error": str }
+        """异步 LLM 调用（带优先级 fallback 链路）
+
+        降级链路逻辑（Spec §4.2.2）：
+        1. 查所有 is_active=True 的配置，按 priority DESC 排序
+        2. 尝试优先级最高的配置
+        3. 失败 → 降级到下一个配置（WARNING 日志）
+        4. 直到成功或全部失败
+        5. 记录每个尝试的结果（provider/model/latency_ms/error）
+
+        Returns: { "content": str } or { "error": str, "attempts": [...] }
         """
-        config = self._load_config(purpose=purpose)
-        if not config or not config.is_active or not config.api_key_encrypted:
+        configs = self._config_db.get_active_configs(purpose=purpose)
+        if not configs:
             return {"error": "LLM 未配置，请联系管理员"}
 
-        try:
-            api_key = _decrypt(config.api_key_encrypted)
-        except Exception as e:
-            logger.error("LLM API Key 解密失败: %s", e, exc_info=True)
-            return {"error": "LLM 认证配置错误"}
+        attempts = []
 
-        try:
-            if config.provider in ("anthropic", "minimax") or "anthropic" in (config.base_url or ""):
-                return await self._anthropic_complete(api_key, config, prompt, system, timeout)
-            else:
-                return await self._openai_complete(api_key, config, prompt, system, timeout)
-        except Exception as e:
-            logger.error("LLM 调用失败: %s", e, exc_info=True)
-            return {"error": str(e)}
+        for config in configs:
+            # Skip configs without valid api_key
+            if not config.api_key_encrypted:
+                attempts.append({
+                    "provider": config.provider,
+                    "model": config.model,
+                    "latency_ms": None,
+                    "error": "API Key 未配置",
+                })
+                continue
+
+            try:
+                api_key = _decrypt(config.api_key_encrypted)
+            except Exception as e:
+                logger.error("LLM API Key 解密失败: %s", e, exc_info=True)
+                attempts.append({
+                    "provider": config.provider,
+                    "model": config.model,
+                    "latency_ms": None,
+                    "error": "LLM 认证配置错误",
+                })
+                continue
+
+            try:
+                start_time = time.time()
+                if config.provider in ("anthropic", "minimax") or "anthropic" in (config.base_url or ""):
+                    result = await self._anthropic_complete(api_key, config, prompt, system, timeout)
+                else:
+                    result = await self._openai_complete(api_key, config, prompt, system, timeout)
+                latency_ms = int((time.time() - start_time) * 1000)
+
+                if "content" in result:
+                    return result
+
+                # LLM 调用失败，记录并降级
+                attempts.append({
+                    "provider": config.provider,
+                    "model": config.model,
+                    "latency_ms": latency_ms,
+                    "error": result.get("error", "未知错误"),
+                })
+                logger.warning(
+                    "LLM 调用失败 [priority=%d, provider=%s, model=%s]: %s，降级至下一配置",
+                    config.priority, config.provider, config.model,
+                    result.get("error", "未知错误"),
+                )
+            except Exception as e:
+                import time as _time
+                attempts.append({
+                    "provider": config.provider,
+                    "model": config.model,
+                    "latency_ms": int((_time.time() - start_time) * 1000) if 'start_time' in dir() else None,
+                    "error": str(e),
+                })
+                logger.warning(
+                    "LLM 调用异常 [priority=%d, provider=%s, model=%s]: %s，降级至下一配置",
+                    config.priority, config.provider, config.model, e,
+                )
+
+        # 全部失败
+        errors = [a["error"] for a in attempts]
+        return {"error": "; ".join(errors), "attempts": attempts}
 
     async def complete_with_temp(
         self, prompt: str, system: str = None, timeout: int = 15, temperature: float = 0.1, purpose: str = "default"

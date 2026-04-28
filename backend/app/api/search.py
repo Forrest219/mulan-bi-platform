@@ -5,7 +5,7 @@ Spec 24 P0 改动：
 - task_run_id 可空字段：响应中补充此字段，向后兼容
 """
 import logging
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
@@ -1364,6 +1364,231 @@ async def _handle_meta_datasource_duplicates(connections: list, db: Session) -> 
     }
 
 
+# === T1.3 入口3：NLQ 流水线核心逻辑（供 nlq_service.run 委派）===
+async def _execute_nlq_pipeline(
+    question: str,
+    datasource_luid: Optional[str] = None,
+    connection_id: Optional[int] = None,
+    conversation_id: Optional[str] = None,
+    options: Optional[dict] = None,
+    use_conversation_context: bool = False,
+    target_sites: Optional[list] = None,
+    request=None,
+    response=None,
+    user: Optional[dict] = None,
+    db=None,
+    trace_id: str = None,
+) -> Dict[str, Any]:
+    """
+    NLQ 查询核心流水线逻辑（Entry 3 委派层）。
+
+    供 nlq_service.run() 通过 wrapper.invoke("nlq_search") 计量包装后调用。
+    包含完整的 try/except 块，返回查询结果 dict。
+    """
+    from services.llm.nlq_service import execute_query
+    from services.llm.models import log_nlq_query
+
+    # ── P2-1：追问上下文继承 ──────────────────────────────────
+    if use_conversation_context and conversation_id and not datasource_luid and not connection_id:
+        try:
+            import json as _json
+            from sqlalchemy import text as _text
+            _msg = db.execute(_text("""
+                SELECT m.query_context FROM conversation_messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                WHERE m.conversation_id=:cid AND c.user_id=:uid
+                  AND m.role='assistant' AND m.query_context IS NOT NULL
+                ORDER BY m.created_at DESC LIMIT 1
+            """), {"cid": conversation_id, "uid": user.get("id")}).fetchone()
+            if _msg:
+                _ctx = _msg._mapping["query_context"]
+                if isinstance(_ctx, str):
+                    _ctx = _json.loads(_ctx)
+                if isinstance(_ctx, dict):
+                    if not datasource_luid and _ctx.get("datasource_luid"):
+                        datasource_luid = _ctx["datasource_luid"]
+                    if not connection_id and _ctx.get("connection_id"):
+                        connection_id = int(_ctx["connection_id"])
+        except Exception as _ctx_err:
+            logger.warning("读取追问上下文失败（不影响主流程）: %s", _ctx_err)
+
+    # ── META 查询优先检测 ────────────────────────────────────
+    _intent_hint = request.headers.get("X-Intent-Hint", "") if request else ""
+    meta_intent = _intent_hint if _intent_hint else classify_meta_intent(question)
+    if meta_intent:
+        if connection_id is None:
+            result = await handle_meta_query_all(meta_intent, db, user, question=question)
+        else:
+            result = await handle_meta_query(meta_intent, connection_id, db, user, question=question)
+        if response:
+            response.headers["X-Trace-ID"] = trace_id or ""
+        return {"trace_id": trace_id or "", **result}
+
+    # ── 数据源可用性前置检查 ─────────────────────────────────
+    if not datasource_luid and not connection_id:
+        _db_tmp = TableauDatabase()
+        _sess = _db_tmp.session
+        try:
+            from services.tableau.models import TableauConnection as _TC
+            _has_conn = _sess.query(_TC).filter(_TC.is_active == True).first()
+            if not _has_conn:
+                raise _nlq_error_response("NLQ_012", "暂无可用数据源，请先配置数据连接")
+        finally:
+            _sess.close()
+
+    # ── 意图分类 ─────────────────────────────────────────────
+    intent = classify_intent(question)
+
+    # ── 数据源路由 ─────────────────────────────────────────────
+    chosen_ds = None
+    if datasource_luid:
+        asset = _get_asset_by_luid(datasource_luid)
+        if not asset:
+            raise _nlq_error_response("NLQ_009", "数据源不存在或已删除")
+        from app.utils.auth import verify_connection_access
+        verify_connection_access(asset.connection_id, user, db)
+        if is_datasource_sensitivity_blocked(datasource_luid):
+            raise _nlq_error_response("NLQ_011", "该数据源为高敏级别")
+        chosen_ds = {
+            "datasource_luid": datasource_luid,
+            "datasource_name": asset.name,
+            "connection_id": asset.connection_id,
+        }
+    elif connection_id:
+        from app.utils.auth import verify_connection_access
+        verify_connection_access(connection_id, user, db)
+        chosen_ds = route_datasource(question, connection_id=connection_id)
+        if not chosen_ds:
+            raise _nlq_error_response("NLQ_005", "未找到匹配的数据源，请指定 datasource_luid")
+    else:
+        chosen_ds = route_datasource(question)
+        if not chosen_ds:
+            return {
+                "trace_id": trace_id or "",
+                "response_type": "text",
+                "content": "未能识别您想查询的数据源，您可以先问「你有哪些数据源」获取数据源列表，再指定数据源名称提问。",
+                "intent": None,
+                "confidence": None,
+                "datasource": None,
+                "datasource_luid": None,
+            }
+
+    ds_luid = chosen_ds["datasource_luid"]
+    ds_name = chosen_ds["datasource_name"]
+    is_mcp_discovery = chosen_ds.get("mcp_discovery", False)
+
+    # ── 获取数据源字段 ────────────────────────────────────────
+    db2 = TableauDatabase()
+    session2 = db2.session
+    asset = session2.query(TableauAsset).filter(
+        TableauAsset.tableau_id == ds_luid,
+        TableauAsset.is_deleted == False,
+    ).first()
+    session2.close()
+
+    if not asset and is_mcp_discovery:
+        # MCP 动态数据源：通过 MCP 获取字段元数据
+        try:
+            if chosen_ds.get("connection_id") is not None:
+                mcp_client = get_tableau_mcp_client(connection_id=chosen_ds["connection_id"])
+                metadata = mcp_client.get_datasource_metadata(ds_luid, timeout=30)
+            else:
+                metadata = await _mcp_get_datasource_metadata(
+                    chosen_ds["mcp_base_url"], ds_luid, timeout=30
+                )
+            # 解析 MCP 返回的字段（GraphQL Metadata API 格式）
+            raw_fields = metadata.get("data", {}).get("publishedDatasources", [{}])
+            if raw_fields and len(raw_fields) > 0:
+                mcp_fields = raw_fields[0].get("fields", [])
+                fields = []
+                for f in mcp_fields:
+                    fname = f.get("name", "") or f.get("Name", "")
+                    ftype = f.get("dataType", "") or f.get("dataType", "")
+                    frole = f.get("role", "dimension")
+                    if fname:
+                        fields.append({
+                            "field_caption": fname,
+                            "field_name": fname,
+                            "role": frole,
+                            "data_type": ftype,
+                            "formula": None,
+                            "sensitivity_level": "low",
+                        })
+                sanitized_fields = sanitize_fields_for_llm(fields)
+                fields_with_types = _build_fields_with_types(sanitized_fields)
+                logger.info("MCP 字段元数据获取成功: %d 个字段", len(fields))
+            else:
+                sanitized_fields = []
+                fields_with_types = "无可用字段"
+                logger.warning("MCP 字段元数据为空")
+        except Exception as mcp_err:
+            logger.warning("MCP 动态数据源获取字段元数据失败: %s", mcp_err)
+            fields_with_types = ""
+            sanitized_fields = []
+            term_mappings = "无"
+    elif not asset:
+        raise _nlq_error_response("NLQ_009", "数据源不存在")
+    else:
+        raw_fields = recall_fields(asset.id)
+        fields = [f for f in raw_fields if f.get("field_caption") or f.get("field_name")]
+        sanitized_fields = sanitize_fields_for_llm(fields)
+        assembler = ContextAssembler()
+        fields_with_types = assembler.assemble_field_list(sanitized_fields)
+        glossary_terms = glossary_service.get_glossary_terms(asset.id) or []
+        term_mappings = (
+            "\n".join(f"{t.get('source_term', t.get('term',''))} -> {t.get('mapped_term', t.get('definition',''))}" for t in glossary_terms)
+            if glossary_terms else "无"
+        )
+
+    # ── 意图分类 + VizQL 生成（One-Pass LLM）───────────────────
+    llm_result = await one_pass_llm(
+        question=question,
+        datasource_luid=ds_luid,
+        datasource_name=ds_name,
+        fields_with_types=fields_with_types,
+        term_mappings=term_mappings,
+        intent_hint=intent.intent_type if intent else None,
+    )
+
+    vizql_json = llm_result["vizql_json"]
+    response_type = llm_result.get("response_type", "auto")
+
+    # ── 查询执行（execute_query 会自动从 _wrapper_ctx 获取 wrapper 包装 query_metric）───
+    query_result = execute_query(
+        datasource_luid=ds_luid,
+        vizql_json=vizql_json,
+        limit=(options or {}).get("limit", 1000),
+        connection_id=chosen_ds.get("connection_id"),
+    )
+
+    mcp_fields = query_result.get("fields", [])
+    mcp_rows = query_result.get("rows", [])
+
+    # ── 结果格式化 ─────────────────────────────────────────────
+    if response_type == "number" or (response_type == "auto" and len(mcp_rows) == 1 and len(mcp_rows[0]) == 1):
+        value = mcp_rows[0][0] if mcp_rows and isinstance(mcp_rows[0], list) else (mcp_rows[0] if mcp_rows else None)
+        formatted = f"{value:,.2f}" if isinstance(value, float) else str(value) if value is not None else ""
+        api_data = format_response(value, intent=intent, response_type_hint="number")
+    elif response_type == "text" or (response_type == "auto" and len(mcp_rows) == 0):
+        api_data = format_response([], intent=intent, response_type_hint="text")
+    else:
+        api_data = format_response(mcp_rows, intent=intent, response_type_hint="table")
+
+    # ── 响应头透传 trace_id ────────────────────────────────────
+    if response:
+        response.headers["X-Trace-ID"] = trace_id or ""
+
+    return {
+        "trace_id": trace_id or "",
+        **api_data,
+        "response_type": response_type,
+        "intent": intent.intent_type if intent else None,
+        "confidence": llm_result.get("confidence"),
+        "datasource": {"id": asset.id, "name": ds_name} if asset else None,
+        "datasource_luid": ds_luid,
+    }
+
+
 # === API 端点 ===
 @router.post("/query")
 async def query(
@@ -1430,419 +1655,55 @@ async def query(
             f"问题长度不能超过 {MAX_QUERY_LENGTH} 字符",
         )
 
-    # 初始化审计记录（Spec 24 P0: trace_id 已在此 scope 顶部统一）
-    audit_record = InvocationRecord(
-        trace_id=trace_id,
-        principal_id=user_id,
-        principal_role=user.get("role", "user"),
-        capability="query_metric",
-        params_jsonb={"question_length": len(question)},
-        status="started",
-    )
+    # ── T1.3 入口3：通过 wrapper.invoke("nlq_search") 包装 NLQ 流水线 ──
+    from services.capability.wrapper import CapabilityWrapper
+    _wrapper = CapabilityWrapper()
+    _principal = {"id": user.get("id"), "role": user.get("role", "analyst"), "tenant_id": user.get("tenant_id")}
 
     try:
-        # ── META 查询优先检测（Q1-Q3 业务口径，不走 VizQL 流水线）────────
-        # X-Intent-Hint 由 ask_data.py per-user 缓存注入，命中时跳过重复关键词匹配
-        _intent_hint = request.headers.get("X-Intent-Hint", "")
-        meta_intent = _intent_hint if _intent_hint else classify_meta_intent(question)
-        if meta_intent:
-            audit_record.params_jsonb["intent"] = meta_intent
-            if connection_id is None:
-                # 全部连接聚合查询
-                result = await handle_meta_query_all(meta_intent, db, user, question=question)
-            else:
-                result = await handle_meta_query(meta_intent, connection_id, db, user, question=question)
-            audit_record.status = "ok"
-            # Spec 24 P0: 响应头透传 trace_id
-            response.headers["X-Trace-ID"] = audit_record.trace_id
-            return {
-                "trace_id": audit_record.trace_id,
-                "task_run_id": body.task_run_id,  # Spec 24 P0: 可空，向后兼容
-                **result,
-            }
-
-        # ── 数据源可用性前置检查 ─────────────────────────────
-        if not datasource_luid and not connection_id:
-            from services.tableau.models import TableauConnection as _TC
-            _db_tmp = TableauDatabase()
-            _sess = _db_tmp.session
-            try:
-                _has_conn = _sess.query(_TC).filter(_TC.is_active == True).first()
-                if not _has_conn:
-                    raise _nlq_error_response("NLQ_012", "暂无可用数据源，请先配置数据连接")
-            finally:
-                _sess.close()
-
-        # ── 意图分类（阶段0）─────────────────────────────────────
-        intent = classify_intent(question)
-        audit_record.params_jsonb["intent"] = intent.type if intent else None
-
-        # ── 数据源路由（PRD §7.1）─────────────────────────────
-        chosen_ds = None
-        if datasource_luid:
-            asset = _get_asset_by_luid(datasource_luid)
-            if not asset:
-                raise _nlq_error_response("NLQ_009", "数据源不存在或已删除")
-            from app.utils.auth import verify_connection_access
-            verify_connection_access(asset.connection_id, user, db)
-            if is_datasource_sensitivity_blocked(datasource_luid):
-                raise _nlq_error_response("NLQ_011", "该数据源为高敏级别")
-            chosen_ds = {
+        # wrapper.invoke 会自动处理：鉴权、敏感度检查、限流、熔断、缓存、成本计量、审计
+        pipeline_result = await _wrapper.invoke(
+            principal=_principal,
+            capability_name="nlq_search",
+            params={
+                "question": question,
                 "datasource_luid": datasource_luid,
-                "datasource_name": asset.name,
-                "connection_id": asset.connection_id,
-            }
-        elif connection_id:
-            from app.utils.auth import verify_connection_access
-            verify_connection_access(connection_id, user, db)
-            chosen_ds = route_datasource(question, connection_id=connection_id)
-            if not chosen_ds:
-                raise _nlq_error_response("NLQ_005", "未找到匹配的数据源，请指定 datasource_luid")
-        else:
-            # 尝试多数据源路由
-            chosen_ds = route_datasource(question)
-            if not chosen_ds:
-                # Fallback：尝试通过 MCP 动态发现数据源
-                logger.info("路由未命中，尝试 MCP 动态发现数据源 trace=%s", audit_record.trace_id)
-                try:
-                    from services.tableau.models import TableauConnection as _TableauConnection
-                    from services.mcp.models import McpServer
-
-                    db_temp = TableauDatabase()
-                    session_temp = db_temp.session
-                    active_conn = session_temp.query(_TableauConnection).filter(
-                        _TableauConnection.is_active == True,
-                    ).order_by(_TableauConnection.id.asc()).first()
-
-                    if not active_conn:
-                        # TableauConnection 为空，从活跃 MCP server config 获取 credentials
-                        mcp_server_record = session_temp.query(McpServer).filter(
-                            McpServer.is_active == True,
-                            McpServer.type == "tableau",
-                        ).order_by(McpServer.id.asc()).first()
-
-                        if mcp_server_record and mcp_server_record.credentials:
-                            creds = mcp_server_record.credentials
-                            mcp_base_url = mcp_server_record.server_url
-                            tableau_server = creds.get("tableau_server", "")
-                            site_name = creds.get("site_name", "")
-                            pat_name = creds.get("pat_name", "")
-                            pat_value = creds.get("pat_value", "")
-
-                            if tableau_server and site_name and pat_name and pat_value:
-                                # 用 MCP config credentials 直接调用 MCP JSON-RPC
-                                ds_list = await _mcp_list_datasources(
-                                    mcp_base_url, tableau_server, site_name, pat_name, pat_value
-                                )
-                                if ds_list and len(ds_list) > 0:
-                                    first_ds = ds_list[0]
-                                    chosen_ds = {
-                                        "datasource_luid": first_ds.get("luid") or first_ds.get("id", ""),
-                                        "datasource_name": first_ds.get("name", "MCP 数据源"),
-                                        "connection_id": None,
-                                        "mcp_discovery": True,
-                                        "mcp_base_url": mcp_base_url,
-                                        "mcp_site": site_name,
-                                        "mcp_token_name": pat_name,
-                                        "mcp_token_value": pat_value,
-                                    }
-                                    logger.info("MCP 动态发现数据源成功: luid=%s, name=%s trace=%s",
-                                                chosen_ds["datasource_luid"], chosen_ds["datasource_name"], audit_record.trace_id)
-
-                    elif active_conn:
-                        mcp_client = get_tableau_mcp_client(active_conn.id)
-                        mcp_result = mcp_client.list_datasources(limit=10, timeout=15)
-                        ds_list = mcp_result.get("datasources", [])
-                        if ds_list and len(ds_list) > 0:
-                            first_ds = ds_list[0]
-                            chosen_ds = {
-                                "datasource_luid": first_ds.get("luid") or first_ds.get("datasource_luid") or first_ds.get("id"),
-                                "datasource_name": first_ds.get("name") or first_ds.get("datasourceName") or "MCP 数据源",
-                                "connection_id": active_conn.id,
-                                "mcp_discovery": True,
-                            }
-                            logger.info("MCP 动态发现数据源成功: luid=%s, name=%s trace=%s",
-                                        chosen_ds["datasource_luid"], chosen_ds["datasource_name"], audit_record.trace_id)
-
-                    session_temp.close()
-                except Exception as mcp_err:
-                    logger.warning("MCP 动态发现失败: %s trace=%s", mcp_err, audit_record.trace_id)
-
-            if not chosen_ds:
-                audit_record.status = "ok"
-                return {
-                    "trace_id": audit_record.trace_id,
-                    "response_type": "text",
-                    "content": "未能识别您想查询的数据源，您可以先问「你有哪些数据源」获取数据源列表，再指定数据源名称提问。",
-                    "intent": None,
-                    "confidence": None,
-                    "datasource": None,
-                    "datasource_luid": None,
-                }
-
-        ds_luid = chosen_ds["datasource_luid"]
-        ds_name = chosen_ds["datasource_name"]
-        is_mcp_discovery = chosen_ds.get("mcp_discovery", False)
-
-        # 1c. 获取数据源字段（TableauAsset 使用 tableau_id 存储 Tableau LUID）
-        db = TableauDatabase()
-        session = db.session
-        asset = session.query(TableauAsset).filter(
-            TableauAsset.tableau_id == ds_luid,
-            TableauAsset.is_deleted == False,
-        ).first()
-        session.close()
-
-        # MCP 动态发现的数据源（不在本地 DB）→ 通过 MCP 获取字段元数据
-        if not asset and is_mcp_discovery:
-            logger.info("MCP 动态数据源，获取字段元数据 trace=%s", audit_record.trace_id)
-            try:
-                # connection_id 为 None 表示使用 MCP config credentials（绕过 TableauConnection）
-                if chosen_ds.get("connection_id") is not None:
-                    mcp_client = get_tableau_mcp_client(connection_id=chosen_ds["connection_id"])
-                    metadata = mcp_client.get_datasource_metadata(ds_luid, timeout=30)
-                else:
-                    # 使用 MCP config credentials 直接调用 MCP JSON-RPC
-                    metadata = await _mcp_get_datasource_metadata(
-                        chosen_ds["mcp_base_url"], ds_luid, timeout=30
-                    )
-                # 解析 MCP 返回的字段（GraphQL Metadata API 格式）
-                raw_fields = metadata.get("data", {}).get("publishedDatasources", [{}])
-                if raw_fields and len(raw_fields) > 0:
-                    mcp_fields = raw_fields[0].get("fields", [])
-                    fields = []
-                    for f in mcp_fields:
-                        fname = f.get("name", "") or f.get("Name", "")
-                        ftype = f.get("dataType", "") or f.get("dataType", "")
-                        frole = f.get("role", "dimension")
-                        if fname:
-                            fields.append({
-                                "field_caption": fname,
-                                "field_name": fname,
-                                "role": frole,
-                                "data_type": ftype,
-                                "formula": None,
-                                "sensitivity_level": "low",
-                            })
-                    sanitized_fields = sanitize_fields_for_llm(fields)
-                    fields_with_types = _build_fields_with_types(sanitized_fields)
-                    asset_datasource_id = None
-                    logger.info("MCP 字段元数据获取成功: %d 个字段 trace=%s", len(fields), audit_record.trace_id)
-                else:
-                    sanitized_fields = []
-                    fields_with_types = "无可用字段"
-                    asset_datasource_id = None
-                    logger.warning("MCP 字段元数据为空 trace=%s", audit_record.trace_id)
-            except Exception as meta_err:
-                logger.error("MCP 获取字段元数据失败: %s trace=%s", meta_err, audit_record.trace_id)
-                raise _nlq_error_response("NLQ_009", "无法获取数据源字段信息，请联系管理员")
-
-        elif not asset:
-            raise _nlq_error_response("NLQ_009", "数据源不存在或已删除")
-        else:
-            field_records = db.get_datasource_fields(asset.id)
-
-            # 提取 field_registry_id（= TableauDatasourceField.id）用于批量查敏感度
-            field_ids = [f.id for f in field_records]
-
-            # 批量查询字段敏感度（JOIN TableauFieldSemantics）
-            # 注意：使用新的 session 查询，因为前面的 session 已关闭
-            sensitivity_map: Dict[int, str] = {}
-            if field_ids:
-                from services.semantic_maintenance.models import TableauFieldSemantics
-
-                db2 = TableauDatabase()
-                session2 = db2.session
-                try:
-                    semantics_records = session2.query(
-                        TableauFieldSemantics.field_registry_id,
-                        TableauFieldSemantics.sensitivity_level,
-                    ).filter(
-                        TableauFieldSemantics.field_registry_id.in_(field_ids),
-                        TableauFieldSemantics.connection_id == asset.connection_id,
-                    ).all()
-                    sensitivity_map = {
-                        row.field_registry_id: (row.sensitivity_level or "low").lower()
-                        for row in semantics_records
-                    }
-                finally:
-                    session2.close()
-
-            fields = [
-                {
-                    "field_caption": f.field_caption,
-                    "field_name": f.field_name,
-                    "role": f.role,
-                    "data_type": f.data_type,
-                    "formula": f.formula,
-                    "sensitivity_level": sensitivity_map.get(f.id, "low"),
-                }
-                for f in field_records
-            ]
-
-            # 敏感度过滤（高敏字段不暴露给 LLM）
-            sanitized_fields = sanitize_fields_for_llm(fields)
-            fields_with_types = _build_fields_with_types(sanitized_fields)
-            asset_datasource_id = asset.datasource_id
-
-        # ── P3 增强：recall_fields 语义重排序 ──────────────────
-        try:
-            recalled = await recall_fields(question, datasource_ids=[asset_datasource_id] if asset_datasource_id else None)
-        except Exception as recall_err:
-            logger.warning("recall_fields 失败（跳过语义重排序）: %s trace=%s", recall_err, audit_record.trace_id)
-            recalled = []
-        if recalled:
-            recalled_names = {r["semantic_name_zh"] or r["semantic_name"] for r in recalled}
-            # 将语义匹配度高的字段排在前面
-            def boost_key(f):
-                name = f.get("field_caption", "") or f.get("field_name", "")
-                return (0 if name in recalled_names else 1, 0)
-            sanitized_fields.sort(key=boost_key)
-
-        # ── 术语表增强（PRD §8.2）──────────────────────────────
-        try:
-            _gl_db = TableauDatabase().session
-            glossary_terms = glossary_service.match_terms(_gl_db, question)
-            _gl_db.close()
-        except Exception as gl_err:
-            logger.warning("术语表查询失败（跳过）: %s trace=%s", gl_err, audit_record.trace_id)
-            glossary_terms = []
-        term_mappings = (
-            "\n".join(f"{t.get('source_term', t.get('term',''))} -> {t.get('mapped_term', t.get('definition',''))}" for t in glossary_terms)
-            if glossary_terms else "无"
+                "connection_id": connection_id,
+                "conversation_id": conversation_id,
+                "options": options,
+                "use_conversation_context": use_conversation_context,
+                "target_sites": target_sites,
+                "request": request,
+                "response": response,
+                "user": user,
+                "db": db,
+            },
+            trace_id=trace_id,
         )
-
-        # ── 意图分类 + VizQL 生成（One-Pass LLM）───────────────
-        llm_result = await one_pass_llm(
-            question=question,
-            datasource_luid=ds_luid,
-            datasource_name=ds_name,
-            fields_with_types=fields_with_types,
-            term_mappings=term_mappings,
-            intent_hint=intent.intent_type if intent else None,
-        )
-        audit_record.llm_tokens_in = llm_result.get("tokens_in")
-        audit_record.llm_tokens_out = llm_result.get("tokens_out")
-
-        vizql_json = llm_result["vizql_json"]
-        response_type = llm_result.get("response_type", "auto")
-
-        # ── 查询执行（MCP Stage 3）─────────────────────────────
-        query_result = execute_query(
-            datasource_luid=ds_luid,
-            vizql_json=vizql_json,
-            limit=options.get("limit", 1000),
-            connection_id=chosen_ds.get("connection_id"),
-        )
-
-        mcp_fields = query_result.get("fields", [])
-        mcp_rows = query_result.get("rows", [])
-
-        if response_type == "number" or (response_type == "auto" and len(mcp_rows) == 1 and len(mcp_rows[0]) == 1):
-            # PRD §6.2 number 格式：
-            # {"value": 345678.0, "label": "销售额", "unit": "", "formatted": "345,678.00"}
-            # MCP rows = [[345678.0]]，fieldCaption = "Sales"
-            if mcp_rows and isinstance(mcp_rows[0], list) and len(mcp_rows[0]) == 1:
-                value = mcp_rows[0][0]
-            else:
-                value = mcp_rows[0] if mcp_rows else None
-            if isinstance(value, (int, float)):
-                formatted = f"{value:,.2f}" if isinstance(value, float) else str(value)
-            else:
-                formatted = str(value) if value is not None else ""
-            formatted = format_response(
-                value,  # 传标量，不是 [[value]]
-                intent=intent,
-                response_type_hint="number",
-            )
-            api_data = formatted  # format_response 返回完整的 data 对象
-
-        elif response_type == "text" or (response_type == "auto" and len(mcp_rows) == 0):
-            api_data = format_response([], intent=intent, response_type_hint="text")
-
-        else:
-            # PRD §6.2 table 格式：
-            # {"columns": [{Name, label, type}], "rows": [{col1: v1, col2: v2}], ...}
-            # MCP rows = [[v1, v2], ...]（数组），需转为 [{col1: v1, col2: v2}, ...]
-            api_data = format_response(mcp_rows, intent=intent, response_type_hint="table")
-
-        audit_record.status = "ok"
-        logger.info("NLQ 查询成功 trace=%s", audit_record.trace_id)
-
-        # 写入对话历史（可选，失败不影响主流程）
-        if body.conversation_id:
-            try:
-                import json as _json
-                answer_text = _json.dumps(api_data, ensure_ascii=False, default=str)
-                # P2-1：构建 query_context 供追问继承
-                _query_context = {
-                    "connection_id": chosen_ds.get("connection_id"),
-                    "datasource_luid": ds_luid,
-                    "datasource_name": ds_name,
-                    "field_names": [
-                        f.get("field_caption") or f.get("field_name")
-                        for f in sanitized_fields[:20]
-                    ],
-                }
-                _append_messages_to_conversation(
-                    db=db,
-                    conversation_id=body.conversation_id,
-                    user_id=user_id,
-                    question=question,
-                    answer=answer_text,
-                    query_context=_query_context,
-                )
-            except Exception as _e:
-                logger.warning("写入对话消息失败（不影响主流程）: %s", _e)
-
-        # 写查询日志
-        log_nlq_query(
-            user_id=user_id,
-            question=question,
-            intent=intent.intent_type if intent else "unknown",
-            datasource_luid=ds_luid,
-            vizql_json=llm_result.get("vizql_json"),
-            response_type=response_type,
-            execution_time_ms=audit_record.latency_ms,
-        )
+        # wrapper 返回 CapabilityResult，取 .data
+        result_data = pipeline_result.data if hasattr(pipeline_result, "data") else pipeline_result
 
         # Spec 24 P0: 响应头透传 trace_id
-        response.headers["X-Trace-ID"] = audit_record.trace_id
-
+        response.headers["X-Trace-ID"] = trace_id
         return {
-            "trace_id": audit_record.trace_id,
+            "trace_id": trace_id,
             "task_run_id": body.task_run_id,  # Spec 24 P0: 可空，向后兼容
-            **api_data,
-            "response_type": response_type,
-            "intent": intent.intent_type if intent else None,
-            "confidence": llm_result.get("confidence"),
-            "datasource": {"id": asset.id, "name": ds_name},
-            "datasource_luid": ds_luid,
+            **result_data,
         }
 
     except NLQError as e:
-        audit_record.status = "failed"
-        audit_record.error_code = e.code
-        audit_record.error_detail = e.message
-        logger.warning("NLQ 错误 [%s] trace=%s: %s", e.code, audit_record.trace_id, e.message, exc_info=True)
+        logger.warning("NLQ 错误 [%s] trace=%s: %s", e.code, trace_id, e.message, exc_info=True)
         raise _nlq_error_response(e.code, e.message, e.details)
 
     except HTTPException:
-        audit_record.status = "failed"
         raise
 
     except Exception as exc:
-        audit_record.status = "failed"
-        audit_record.error_code = "SYS_001"
-        audit_record.error_detail = str(exc)
-        logger.error("NLQ 意外错误 trace=%s: %s", audit_record.trace_id, exc, exc_info=True)
+        logger.error("NLQ 意外错误 trace=%s: %s", trace_id, exc, exc_info=True)
         raise HTTPException(
             status_code=500,
             detail={"code": "SYS_001", "message": "服务器内部错误", "details": {}},
         )
-
-    finally:
-        write_audit(audit_record)
 
 
 def _append_messages_to_conversation(

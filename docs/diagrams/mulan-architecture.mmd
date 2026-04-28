@@ -1,0 +1,70 @@
+flowchart TB
+    subgraph Frontend["前端层"]
+        VITE[Vite Dev Server<br/>:5173]
+        REACT[React 19 + TypeScript<br/>Tailwind CSS]
+        ROUTER[React Router v7]
+    end
+
+    subgraph Backend["后端层"]
+        FASTAPI[FastAPI<br/>:8000]
+        ROUTES["app/api/<br/>路由层"]
+        SERVICES["services/<br/>业务逻辑层"]
+    end
+
+    subgraph Infra["基础设施"]
+        PG[(PostgreSQL 16<br/>:5432)]
+        REDIS[(Redis 7<br/>:6379)]
+        CELERY[Celery Worker<br/>+ Beat]
+    end
+
+    subgraph Services["服务模块"]
+        AUTH[Auth/RBAC]
+        TAB[Tableau MCP]
+        SM[Semantic<br/>语义治理]
+        DDL[DDL Checker]
+        HS[Health Scan]
+        LLM[LLM Service]
+        NLQ[NL-to-Query]
+    end
+
+    subgraph External["外部系统"]
+        TABLEAU[Tableau Server<br/>TSC + REST API]
+        OPENAI[OpenAI /<br/>Anthropic]
+    end
+
+    VITE --> REACT --> ROUTER
+    ROUTER --> FASTAPI
+    FASTAPI --> ROUTES --> SERVICES
+
+    SERVICES --> AUTH
+    SERVICES --> TAB
+    SERVICES --> SM
+    SERVICES --> DDL
+    SERVICES --> HS
+    SERVICES --> LLM
+
+    AUTH --> PG
+    TAB --> PG
+    SM --> PG
+    DDL --> PG
+    HS --> PG
+    LLM --> PG
+
+    AUTH --> REDIS
+    LLM --> REDIS
+
+    CELERY --> REDIS
+    CELERY --> PG
+    CELERY --> TAB
+    CELERY --> HS
+
+    TAB --> TABLEAU
+    LLM --> OPENAI
+    SM --> LLM
+    NLQ --> LLM
+
+    style VITE fill:#61dafb,color:#000
+    style PG fill:#336791,color:#fff
+    style REDIS fill:#dc382d,color:#fff
+    style TABLEAU fill:#e97627,color:#fff
+    style OPENAI fill:#10a37f,color:#fff

@@ -74,10 +74,27 @@ class TestConversationPersistence:
     # -------------------------------------------------------------------------
     def test_get_user_conversations_returns_list(self, session_mgr, mock_db):
         """TC-API-009: get_user_conversations 返回用户会话列表"""
-        mock_db.query.return_value.filter.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+        mock_db.query.return_value.filter.return_value.filter.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
         result = session_mgr.get_user_conversations(user_id=1)
         mock_db.query.assert_called_once()
         assert isinstance(result, list)
+
+    def test_get_user_conversations_filters_empty_sessions(self, session_mgr, mock_db):
+        """回归：侧边栏不应展示没有任何消息的空会话"""
+        user_filtered = MagicMock()
+        message_filtered = MagicMock()
+        status_filtered = MagicMock()
+        mock_db.query.return_value.filter.return_value = user_filtered
+        user_filtered.filter.return_value = message_filtered
+        message_filtered.filter.return_value = status_filtered
+        status_filtered.order_by.return_value.limit.return_value.all.return_value = []
+
+        result = session_mgr.get_user_conversations(user_id=1)
+
+        message_exists_filter = user_filtered.filter.call_args.args[0]
+        assert "EXISTS" in str(message_exists_filter)
+        assert "agent_conversation_messages" in str(message_exists_filter)
+        assert result == []
 
     # -------------------------------------------------------------------------
     # TC-API-010: 续接会话

@@ -69,6 +69,9 @@ app.include_router(tableau_mcp.router, prefix="/tableau-mcp", tags=["tableau-mcp
 from app.api import visualization
 app.include_router(visualization.router, prefix="/api/visualization", tags=["Viz Agent"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["任务管理"])
+from app.api import task_runs
+app.include_router(task_runs.router)
+
 app.include_router(notifications.router, prefix="/api/notifications", tags=["通知"])
 app.include_router(events.router, prefix="/api/events", tags=["事件"])
 app.include_router(knowledge_base.router, prefix="/api/knowledge-base", tags=["知识库"])

@@ -21,6 +21,7 @@ def emit_event(
     source_id: Optional[str] = None,
     severity: str = "info",
     actor_id: Optional[int] = None,
+    extra_data: Optional[dict] = None,
 ) -> int:
     """
     发射一个事件。
@@ -37,6 +38,7 @@ def emit_event(
         source_id: 来源对象标识
         severity: 严重级别 info/warning/error
         actor_id: 触发者用户 ID
+        extra_data: 扩展数据（如 semantic_table_id, table_name 等，Spec 9 → Spec 16）
 
     Returns:
         新创建的事件 ID
@@ -60,6 +62,7 @@ def emit_event(
         source_id=source_id,
         severity=severity,
         actor_id=actor_id,
+        extra_data=extra_data,
     )
     logger.info("事件已创建: id=%s, type=%s", event.id, event_type)
 
@@ -117,4 +120,9 @@ def _build_link(source_module: str, event_type: str, payload: dict) -> Optional[
         scan_id = payload.get("scan_id")
         if scan_id:
             return f"/governance/health/scans/{scan_id}"
+    elif event_type == "anomaly.detected":
+        # anomaly.detected 专用链接（Spec 30）
+        metric_id = payload.get("metric_id")
+        if metric_id:
+            return f"/metrics/{metric_id}/anomalies"
     return None

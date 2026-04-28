@@ -1,6 +1,8 @@
 # SQL Agent 技术规格书
 
-> 版本：v0.2 | 状态：已审查 | 日期：2026-04-20 | 关联 PRD：待创建
+> 版本：v0.3 | 状态：已审查（minimax 通过） | 日期：2026-04-28 | 关联 PRD：待创建
+
+> **变更说明（v0.3）**：补齐开发交付约束章节、Spec 20 wrapper 集成、Spec 28 actor 契约对齐、Hive 方言定位、注释 / 多语句 / UNION 注入防护、对应 P0 测试。
 
 ---
 
@@ -100,16 +102,18 @@ SQL Agent 是**执行层 Agent**——它不负责查询规划或自然语言理
 
 ### 3.1 方言配置矩阵
 
-| 维度 | StarRocks | MySQL | PostgreSQL（平台内部） |
-|------|-----------|-------|----------------------|
-| **定位** | OLAP 数仓，读写皆可 | OLTP 业务库，严格读保护 | 平台元数据库，只读 |
-| **允许的 DQL** | SELECT / SHOW / DESCRIBE / EXPLAIN | SELECT / SHOW / DESCRIBE / EXPLAIN | SELECT / SHOW / DESCRIBE / EXPLAIN |
-| **允许的 DML** | SELECT / INSERT（不禁） | **SELECT only（P0）** | SELECT only |
-| **危险语句拦截** | DROP / TRUNCATE / DELETE / ALTER / CREATE / GRANT | INSERT / UPDATE / DELETE / DROP / TRUNCATE / ALTER / CREATE / GRANT | 同 MySQL |
-| **LIMIT 默认上限** | 10,000 行 | 1,000 行 | 5,000 行 |
-| **超时控制** | 60s | 30s | 30s |
-| **连表限制** | 最多 10 张表 | 最多 8 张表 | 最多 8 张表（实际平台查询 ≤ 3 张） |
-| **子查询深度** | 最多 5 层 | 最多 3 层 | 最多 3 层 |
+| 维度 | StarRocks | MySQL | PostgreSQL（平台内部） | Hive |
+|------|-----------|-------|----------------------|------|
+| **定位** | OLAP 数仓，读写皆可 | OLTP 业务库，严格读保护 | 平台元数据库，只读 | 离线数仓 / 湖仓底座 |
+| **允许的 DQL** | SELECT / SHOW / DESCRIBE / EXPLAIN | SELECT / SHOW / DESCRIBE / EXPLAIN | SELECT / SHOW / DESCRIBE / EXPLAIN | — |
+| **允许的 DML** | SELECT / INSERT（不禁） | **SELECT only（P0）** | SELECT only | — |
+| **危险语句拦截** | DROP / TRUNCATE / DELETE / ALTER / CREATE / GRANT | INSERT / UPDATE / DELETE / DROP / TRUNCATE / ALTER / CREATE / GRANT | 同 MySQL | — |
+| **LIMIT 默认上限** | 10,000 行 | 1,000 行 | 5,000 行 | — |
+| **超时控制** | 60s | 30s | 30s | — |
+| **连表限制** | 最多 10 张表 | 最多 8 张表 | 最多 8 张表（实际平台查询 ≤ 3 张） | — |
+| **子查询深度** | 最多 5 层 | 最多 3 层 | 最多 3 层 | — |
+
+> **Hive 方言决策（v1.x out-of-scope）**：v1.x 阶段 SQL Agent 不支持 Hive 作为目标数据源。Hive 列以 `—` 占位，明示不支持，避免下游误以为已就绪。如确有 Hive 离线分析需求，走 StarRocks 外表（External Catalog）方案，由 StarRocks 方言路径承担。**Hive 原生方言纳入 v2 路线图**，届时需补全：sqlglot dialect=`hive` 解析支撑、HiveServer2 / JDBC 驱动适配、Hive 系统表黑名单（如 `sys.*` / `information_schema.*`）、超时与 LIMIT 上限基线、危险语句矩阵（含 `LOAD DATA` / `EXPORT` / `INSERT OVERWRITE`）。
 
 > **连表/子查询差异说明**：StarRocks 的 10 张 / 5 层限制是保守估计，基于 OLAP 场景常见的大宽表 join 模式。如实际业务中 StarRocks 也不会超过 8 张 / 3 层，可统一为更严格的值以保持一致性。
 
@@ -201,6 +205,52 @@ SQL Agent 是**执行层 Agent**——它不负责查询规划或自然语言理
 
 > `information_schema` 中除上述明确拦截的表/视图外，其他只读表（如 `information_schema.tables`、`information_schema.columns`）允许访问——这些是标准元数据查询，是分析工具的合法需求。
 
+### 3.3.1 注释绕过拦截
+
+攻击者常用注释切割关键字绕过黑名单（如 `SELE/* x */CT`、`DR--\nOP TABLE`）。本节定义注释处理规则。
+
+| 项目 | 规则 |
+|------|------|
+| 块注释 | `/* ... */`（含跨行）一律剥离 |
+| 行注释 | `--` 至行尾 / `#` 至行尾（MySQL 兼容）一律剥离 |
+| 处理时机 | **解析阶段先剥离注释，再扫描黑名单关键字**（必须先于 §3.3 危险语句扫描） |
+| 可疑模式 | 若剥离后仍出现 `/*`、`*/`、`--`、`#` 残留（说明注释嵌套或截断），直接拒绝 |
+| 错误码 | `SQLA_008`（HTTP 400 — SQL 含可疑注释模式） |
+
+**实现要点**：注释剥离统一在 `services/sql_agent/security.py::strip_comments(sql)`，禁止在执行器或路由层重复实现。剥离后的 SQL 既用于黑名单扫描，也用于持久化到 `sql_agent_query_log.sql_text`。
+
+### 3.3.2 多语句拼接拦截
+
+| 项目 | 规则 |
+|------|------|
+| 拦截目标 | 单次请求中包含多条独立语句（如 `SELECT 1; DROP TABLE users`） |
+| 判定 | trim 后若分号 `;` 后仍有非空白字符，拒绝 |
+| 例外 | 单条语句以 `;` 结尾允许（trim 后视为合法） |
+| 错误码 | `SQLA_009`（HTTP 400 — 不允许多语句） |
+
+**实现要点**：使用 `sqlglot.parse(sql, dialect=...)` 后判断返回的 statement list 长度 > 1 即拒绝。不依赖字符串切分（避免字符串字面量内 `;` 误伤）。
+
+### 3.3.3 UNION 系统表 / 提权拦截
+
+攻击者常用 `UNION SELECT ... FROM <系统表>` 提权读取敏感信息。本节定义 UNION 接系统表的硬拦截规则。
+
+**按方言定义系统表黑名单：**
+
+| 方言 | 黑名单表 / 视图 |
+|------|----------------|
+| MySQL | `mysql.user` / `mysql.db` / `information_schema.user_privileges` / `performance_schema.*`（按需） |
+| PostgreSQL | `pg_catalog.pg_user` / `pg_authid` / `pg_shadow` / `information_schema.role_*` |
+| StarRocks | `information_schema.user_privileges` / `information_schema.column_privileges` |
+
+**拦截规则：**
+
+- AST 中检测到 `UNION` / `UNION ALL` 节点，且任一分支的 FROM 表命中黑名单 → 拒绝
+- 黑名单匹配大小写不敏感、Schema 限定（`mysql.user` 与 `MYSQL.USER` 同视）
+- 与 §3.3 已有"系统表/视图拦截规则"互补：本节针对 UNION 提权场景的硬阻断；§3.3 已有规则针对直接 SELECT 的访问控制
+- 错误码 `SQLA_010`（HTTP 403 — 系统表访问拒绝）
+
+**实现要点**：在 `services/sql_agent/security.py::scan_union_system_tables(sql_clean, dialect)` 中实现，作为四道闸门的最后一道（详见 §12.1）。
+
 ---
 
 ## 4. 数据模型
@@ -263,7 +313,15 @@ SQL Agent 是**执行层 Agent**——它不负责查询规划或自然语言理
 {
   "datasource_id": 1,
   "sql": "SELECT region, SUM(sales) FROM orders WHERE dt >= '2026-01-01' GROUP BY region",
-  "timeout_seconds": 30
+  "timeout_seconds": 30,
+  "actor": {
+    "user_id": 42,
+    "role": "analyst",
+    "session_id": "sess_2026_abc123"
+  },
+  "allowed_metrics": ["sales", "gmv"],
+  "session_id": "sess_2026_abc123",
+  "task_run_id": 9876
 }
 ```
 
@@ -272,6 +330,15 @@ SQL Agent 是**执行层 Agent**——它不负责查询规划或自然语言理
 | datasource_id | integer | ✅ | 目标数据源 ID |
 | sql | string | ✅ | SQL 语句（自动经过安全校验） |
 | timeout_seconds | integer | ❌ | 超时秒数，默认按 db_type 设定 |
+| actor | object | ✅ | 调用主体上下文，**与 Spec 28 §4.2 `sql_execute` 入参对齐**：`{user_id: int, role: str, session_id: str \| null}`，用于 RBAC 二次校验 + 审计 |
+| allowed_metrics | string[] / null | ❌ | 调用方限定的 metric 白名单（Spec 28 归因引擎传入），SQL 涉及指标超出白名单时拒绝 |
+| session_id | string / null | ❌ | Agent 会话上下文 ID，用于跨步骤串联日志 |
+| task_run_id | integer / null | ❌ | 关联 Spec 24 `TaskRun.id`，便于离线任务追溯 |
+
+> **actor 校验规则**：
+> - 缺失 `actor` 或 `actor.user_id` → `SQLA_011`（HTTP 400 — actor 字段缺失）
+> - `actor.role` 与 connection 所有权 / 表权限不符 → `SQLA_012`（HTTP 403 — RBAC 拒绝）
+> - `actor` 字段必须在 `services/sql_agent/executor.py` 入口校验，**禁止下沉到 SQL 拼接层**（详见 §12.1 架构红线）
 
 **响应 (200)：**
 ```json
@@ -364,6 +431,11 @@ SQL Agent 是**执行层 Agent**——它不负责查询规划或自然语言理
 | `SQLA_005` | 408 | 查询超时 | 超过 timeout_seconds |
 | `SQLA_006` | 500 | 目标数据库连接失败 | 连接超时 / 认证失败 |
 | `SQLA_007` | 500 | 执行引擎异常 | 非预期 SQL 执行错误 |
+| `SQLA_008` | 400 | SQL 含可疑注释模式 | 注释剥离后仍残留 `/*` / `*/` / `--` / `#`，疑似绕过尝试 |
+| `SQLA_009` | 400 | 不允许多语句 | trim 后分号 `;` 之后仍有非空白字符 |
+| `SQLA_010` | 403 | 系统表访问拒绝 | UNION / UNION ALL 命中方言系统表黑名单（`mysql.user` / `pg_authid` 等） |
+| `SQLA_011` | 400 | actor 字段缺失 | 请求缺 `actor` 或 `actor.user_id` |
+| `SQLA_012` | 403 | RBAC 拒绝 | `actor.role` 与 connection 所有权 / 表权限不符 |
 | `SQLA_W01` | 200 | LIMIT 被替换 | 原有 LIMIT > 方言上限，被强制截断 |
 | `SQLA_W02` | 200 | 结果被截断 | 实际行数 == LIMIT 上限，可能还有更多 |
 
@@ -400,8 +472,11 @@ SQL Agent 是**执行层 Agent**——它不负责查询规划或自然语言理
 
 | 模块 | 接口 | 用途 |
 |------|------|------|
-| Data Agent（Spec 28） | `POST /api/sql-agent/query` | 归因分析 / 报告生成中的 SQL 执行 |
-| NL-to-Query（Spec 14） | `POST /api/sql-agent/query` | **同层协作**：意图分类后执行查询 |
+| `services/capability/wrapper.py`（Spec 20） | `wrapper.invoke(principal, "sql_execute", params, trace_id)` | **用户交互链路必须经 wrapper**（限流 / 熔断 / 审计 / 敏感度门禁） |
+| Data Agent（Spec 28） | `POST /api/sql-agent/query` | 归因分析 / 报告生成中的 SQL 执行（经 wrapper） |
+| NL-to-Query（Spec 14） | `POST /api/sql-agent/query` | **同层协作**：意图分类后执行查询（经 wrapper） |
+
+> **wrapper 强制约束**：Spec 28 Data Agent / Spec 36 Agent 框架调用 SQL Agent 时，必须经 capability wrapper（Spec 20 §4.2 P0 入口清单），不得直接 import `services/sql_agent/executor`。仅内部任务（Beat / 后台 worker / 数据迁移脚本）允许直调 executor，且需在代码注释中说明豁免理由。
 
 ### 8.2 下游消费者
 
@@ -467,6 +542,12 @@ sequenceDiagram
 | 8 | 已有 LIMIT > 上限 → 强制截断 | limit_applied = 上限，truncated = true，warning = W01 | P1 |
 | 9 | 查询超时 → SQLA_005 | 400 | P1 |
 | 10 | 未知数据源 → 404 | 数据源不存在 | P0 |
+| 11 | `SELECT/* drop */ FROM users` 注释绕过 | SQLA_008 拦截，400 | P0 |
+| 12 | `SELECT 1; DROP TABLE users` 多语句 | SQLA_009 拦截，400 | P0 |
+| 13 | `SELECT 1 UNION SELECT * FROM mysql.user`（MySQL） | SQLA_010 拦截，403 | P0 |
+| 14 | `SELECT 1 UNION SELECT * FROM pg_catalog.pg_user`（PG） | SQLA_010 拦截，403 | P0 |
+| 15 | 请求缺 actor 字段 | SQLA_011 拒绝，400 | P0 |
+| 16 | `actor.role` 与 connection 所有权 / 表权限不符 | SQLA_012 拒绝，403 | P0 |
 
 ### 10.2 验收标准
 
@@ -510,7 +591,107 @@ reasoning_text: TEXT          # 该步骤的推理描述
 
 ---
 
-## 12. 开放问题
+## 12. 开发交付约束
+
+### 12.1 架构红线
+
+- `services/sql_agent/` **不得 import `app/api`**（防止反向依赖）
+- 所有用户交互入口必须经 Spec 20 capability wrapper；只有内部任务（Beat / 后台 worker / 离线脚本）允许直调 `services/sql_agent/executor`
+- 危险关键词黑名单 + 注释剥离 + 多语句拦截 + UNION 系统表拦截，**四道闸门顺序不可调换**：
+  1. **注释剥离**（`strip_comments` → `SQLA_008`）
+  2. **多语句拒绝**（`reject_multistatement` → `SQLA_009`）
+  3. **危险关键词扫描**（`scan_blacklist_keywords` → `SQLA_001` / `SQLA_002`）
+  4. **UNION 系统表扫描**（`scan_union_system_tables` → `SQLA_010`）
+- LIMIT 注入唯一实现：`services/sql_agent/limit_enforcer.py`，业务代码不得自行拼接 LIMIT
+- `actor` 字段在 `services/sql_agent/executor.py` 入口校验，**禁止下沉到 SQL 拼接层**
+- 错误码统一 `SQLA_*` 前缀，扩展时同步注册到 `app/errors/error_codes.py`
+
+### 12.2 强制检查清单
+
+- [ ] 新增方言必须更新 §3.1 矩阵 + §3.3.3 黑名单表 + 单元测试三处，缺一不收 PR
+- [ ] 注释剥离 / 多语句 / UNION 黑名单各自有单元测试 P0
+- [ ] `sql_execute` 入口 grep 不到 `params['user_message']` 或绕过 actor 的写法
+- [ ] LIMIT 注入测试覆盖每种方言（StarRocks / MySQL / PostgreSQL）
+- [ ] 真实危险 SQL 用例集（`tests/fixtures/dangerous_sql.txt`）≥ 50 条，CI 跑全过
+- [ ] 四道闸门顺序在代码中以函数调用顺序固化，禁止用 if/else 跳过
+
+### 12.3 验证命令
+
+```bash
+# 单元测试
+cd backend && pytest tests/services/test_sql_agent_safety.py -x
+cd backend && pytest tests/services/test_sql_agent_limit.py -x
+cd backend && pytest tests/api/test_sql_agent_query.py -x
+
+# 红线 grep（CI 必跑）
+! grep -rE "from app\.api" backend/services/sql_agent
+! grep -rE "f\".*LIMIT \{" backend/services/sql_agent --include="*.py" | grep -v limit_enforcer
+! grep -rE "execute_sql\(.*user_message" backend/services/sql_agent
+```
+
+### 12.4 正确 / 错误示范
+
+**示例 1：调用入口必须经 wrapper**
+
+```python
+# ✗ 错误 — 直接调 SQL Agent，未经 wrapper（用户交互链路）
+from services.sql_agent.executor import execute_sql
+result = await execute_sql(sql, connection_id, user_id=user.id)
+
+# ✓ 正确 — 经 capability wrapper
+result = await capability_wrapper.invoke(
+    principal={"id": user.id, "role": user.role},
+    capability="sql_execute",
+    params={
+        "sql": sql,
+        "connection_id": connection_id,
+        "actor": {"user_id": user.id, "role": user.role, "session_id": session_id},
+    },
+    trace_id=trace_id,
+)
+```
+
+**示例 2：LIMIT 注入唯一实现**
+
+```python
+# ✗ 错误 — 业务代码自行拼接 LIMIT
+sql = f"{user_sql} LIMIT {limit}"
+
+# ✓ 正确 — 经 limit_enforcer
+sql = limit_enforcer.inject_limit(user_sql, dialect="postgres", max_rows=10000)
+```
+
+**示例 3：四道闸门顺序**
+
+```python
+# ✗ 错误 — 直接扫黑名单不剥离注释
+if "DROP" in sql.upper():
+    raise SQLA_002
+
+# ✓ 正确 — 四道闸门顺序
+sql_clean = strip_comments(sql)                       # SQLA_008
+reject_multistatement(sql_clean)                       # SQLA_009
+scan_blacklist_keywords(sql_clean)                     # SQLA_002
+scan_union_system_tables(sql_clean, dialect=dialect)   # SQLA_010
+```
+
+**示例 4：actor 必填**
+
+```python
+# ✗ 错误 — actor 缺失却继续执行
+def execute(sql, connection_id, user_id=None):
+    return ...
+
+# ✓ 正确 — actor 是必填
+def execute(sql: str, connection_id: int, *, actor: Actor) -> SqlResult:
+    if not actor or not actor.user_id:
+        raise SqlAgentError("SQLA_011", "actor 字段缺失")
+    ...
+```
+
+---
+
+## 13. 开放问题
 
 | # | 问题 | 负责人 | 状态 |
 |---|------|--------|------|
@@ -519,10 +700,11 @@ reasoning_text: TEXT          # 该步骤的推理描述
 | 3 | ~~SQL Agent 与 Data Agent 是否共享 `query_log`？~~ | — | **已确定：保持分离，通过 FK 关联** |
 | 4 | 查询取消（long-running query cancellation）是否需要支持？ | 待定 | P1 |
 | 5 | `sql_agent_query_log` 的数据保留策略（多久清理一次？） | 待定 | P2 |
+| 6 | Hive 原生方言纳入 v2 路线图（驱动 / 黑名单 / 危险语句矩阵） | 待定 | v2 |
 
 ---
 
-## 13. 目录结构
+## 14. 目录结构
 
 ```
 backend/

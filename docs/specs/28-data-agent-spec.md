@@ -1,6 +1,10 @@
 # Data Agent 技术规格书
 
-> 版本：v0.1 | 状态：草稿 | 日期：2026-04-20 | 关联 PRD：待定
+> 版本：v0.3 | 状态：Engineering Spec — minimax 可开发（业务用例已冻结于 §1.1） | 日期：2026-04-28 | 关联 PRD：本期用例集见 §1.1，PRD 仅做范围裁剪不影响开发启动
+>
+> **变更记录**
+> - v0.3（2026-04-28）— 0.5c 补丁 + minimax 收口：§4.4 11 工具 IO 契约、§4.5 编排约束、§9.4 归因六步↔状态机映射、§1.1 冻结 3 条业务用例、§9.5 UC-1 端到端 walkthrough、§4.3 工具缺失风险处置（scoped / mock / out-of-scope）；与 Spec 29 v0.3 actor 契约对齐
+> - v0.1（2026-04-20）— 初版草稿
 
 ---
 
@@ -11,6 +15,67 @@
 定义 Mulan BI 平台 Data Agent 的完整技术规格。Data Agent 是 AI 驱动的数据分析智能体，核心能力包括：**归因分析**（指标异动 → 多步推理验证 → 定位根因）、**自动报告生成**（给定主题 → 多轮查询 → 输出叙事结构报告）、**主动洞察发现**（主动扫描 → 发现异常/趋势 → 推送）。
 
 本模块**不是**简单的 Chatbot 包装，而是真正的分析引擎 —— 基于 ReAct 框架的因果推理能力。
+
+#### 1.1.1 v0.3 冻结业务用例
+
+> 本节冻结 v0.3 阶段归因分析的 3 条候选业务用例，**作为 T2.1/T2.2 开发的事实输入**——开发不再依赖 PRD 拍板即可启动。PM 在批次 0 T0.x 中可裁剪用例数（≥1 即可），但**禁止新增超出本节范围的用例**——超出范围视为 v0.4 工作。
+>
+> 选型原则：UC-1/UC-2 为通用 BI 高频场景（销售/活跃），覆盖 14 工具中 ≥80% 的关键路径；UC-3 为多源聚合备用场景，工具栈与 UC-1 部分重叠。
+
+**UC-1 销售额环比下滑**（T2.1 端到端默认用例）
+
+- 业务问题：某区域/品类的销售额（GMV）相对上一周期出现显著下滑，需定位主因维度并量化影响。
+- 预期输入示例：
+  ```json
+  {
+    "metric": "gmv",
+    "dimensions": ["region", "product_category", "channel"],
+    "time_range": {"start": "2026-04-01", "end": "2026-04-15"},
+    "compare_mode": "mom",
+    "threshold_pct": -0.05,
+    "context": {"tenant_id": 1, "scenario": "causation"}
+  }
+  ```
+- 预期输出形态：`{delta_abs, delta_pct, root_dimension, root_value, confidence, narrative_summary}` + InsightReport（§7.1）。
+- 覆盖工具子集（7 个）：`metric_definition_lookup` → `time_series_compare` → `schema_lookup` → `dimension_drilldown` → `sql_execute` → `statistical_analysis` → `report_write`。
+- 验收阈值：6 步内收敛 / 端到端延迟 < 30s / 单次 `sql_execute` 行数 ≤ 10000 / `confidence ≥ 0.7`。
+
+**UC-2 活跃用户流失**（T2.2 第二条用例）
+
+- 业务问题：DAU/WAU 较基线显著下降，需识别是新客获取下滑还是老客留存恶化，并定位渠道/版本维度。
+- 预期输入示例：
+  ```json
+  {
+    "metric": "dau",
+    "dimensions": ["user_segment", "channel", "app_version"],
+    "time_range": {"start": "2026-04-08", "end": "2026-04-14"},
+    "compare_mode": "wow",
+    "threshold_pct": -0.03,
+    "context": {"tenant_id": 1, "scenario": "causation", "cross_table": true}
+  }
+  ```
+- 预期输出形态：`{delta_abs, delta_pct, segment_breakdown, correlated_metric, confidence, narrative_summary}` + InsightReport。
+- 覆盖工具子集（8 个）：`metric_definition_lookup` → `time_series_compare` → `schema_lookup` → `dimension_drilldown` → `sql_execute` → `correlation_detect` → `statistical_analysis` → `report_write`。
+- 验收阈值：8 步内收敛 / 端到端延迟 < 45s / 跨表 join 单查询行数 ≤ 50000 / 至少 1 条相关性证据 `|coefficient| ≥ 0.5`。
+
+**UC-3 库存周转异常**（T2.x 候选 / 备用）
+
+- 业务问题：某 SKU 集合的库存周转天数突破阈值，需聚合多数据源（销售 + 库存 + 采购）定位异常 SKU 及成因。
+- 预期输入示例：
+  ```json
+  {
+    "metric": "inventory_turnover_days",
+    "dimensions": ["sku_category", "warehouse"],
+    "time_range": {"start": "2026-04-01", "end": "2026-04-20"},
+    "threshold_abs": 60,
+    "context": {"tenant_id": 1, "scenario": "insight_scan", "datasources": [1, 3, 5]}
+  }
+  ```
+- 预期输出形态：`{breached_skus[], turnover_delta, root_factor, confidence}` + 推送通知（无需完整 InsightReport）。
+- 覆盖工具子集（6 个）：`metric_definition_lookup` → `quality_check` → `sql_execute` → `dimension_drilldown` → `statistical_analysis` → `insight_publish`。
+- 验收阈值：6 步内收敛 / 端到端延迟 < 60s（多源聚合）/ 至少触发 1 次 `quality_check` 验证数据新鲜度 / `confidence ≥ 0.6`。
+
+> **PRD 决策影响范围**：PM 在批次 0 T0.x 中可裁剪用例数（≥1 即可），但**禁止新增超出本节范围的用例**——超出范围视为 v0.4 工作。T2.1 必须实现 UC-1，UC-2/UC-3 可按 PRD 决策延后。
 
 ### 1.2 范围
 
@@ -539,6 +604,240 @@ erDiagram
 | `correlation_detect` | 可用 Python stats 库 | P2 |
 | `past_analysis_retrieve` | 可复用现有搜索能力 | P2 |
 
+#### 4.3.1 v0.3 阶段处置决策（spec 内冻结）
+
+> 处置原则：UC-1/UC-2 必经的工具一律 **scoped**（本期实现）；仅 UC-3 备用用例需要的工具可 **mock**（返回固定结构占位）；与 Spec 26-viz / Spec 30 metrics 路线图重叠的工具 **out-of-scope**（不在 v0.3 范围）。处置即决策，无需另开会。
+
+| 工具 | 处置 | 用例归属 | 决策理由 |
+|------|------|---------|---------|
+| `sql_execute` | scoped | UC-1/2/3 | 全部用例必经；§4.2 已详定义，HTTP 调 SQL Agent |
+| `metric_definition_lookup` | scoped | UC-1/2/3 | 指标口径源头，UC-1 第一步即调；委托 Spec 30 但 v0.3 先以薄封装实现 |
+| `schema_lookup` | scoped | UC-1/2 | UC-1 维度分解前必经；可用现有元数据服务接口包装 |
+| `time_series_compare` | scoped | UC-1/2 | UC-1/2 异动确认必经；编排 `metric_definition_lookup`+`sql_execute` |
+| `dimension_drilldown` | scoped | UC-1/2/3 | UC-1/2/3 维度分解必经；编排 `schema_lookup`+`sql_execute` |
+| `statistical_analysis` | scoped | UC-1/2/3 | UC-1/2/3 异动确认/根因量化必经；Python stats 库封装 |
+| `quality_check` | scoped | UC-3（必经） / UC-1/2（降级用） | §4.2 已详定义；UC-3 强依赖，UC-1/2 数据缺失时降级触发 |
+| `report_write` | scoped | UC-1/2 | UC-1/2 终点产出 InsightReport 必经 |
+| `hypothesis_store` | scoped | UC-1/2 | ReAct 循环假设树持久化必经；§4.2 已详定义 |
+| `correlation_detect` | scoped | UC-2 | UC-2 跨指标相关性证据必经；Python stats 库封装 |
+| `insight_publish` | scoped | UC-3 | UC-3 终点推送必经；UC-1/2 推送降级可选 |
+| `past_analysis_retrieve` | mock | 仅 UC-2 增强 | v0.3 不引入向量索引；返回 `{matches: []}` 占位，开放问题 §15 #2 |
+| `tableau_query` | mock | 备用 | v0.3 不打通 Tableau MCP；返回 `{objects: [], total: 0}` 占位，待 Spec 26-viz 推进 |
+| `visualization_spec` | out-of-scope | — | 委托 Spec 26 Viz Agent，本期 `report_write` 输出 chart_intent，由 Viz Agent 异步生成 spec |
+
+> **registry 启动自检约束（§16）**：所有 14 工具必须在 `services/data_agent/tools/registry.py` 注册，缺一即应用启动失败。**mock** 工具以 `MockTool` 子类注册，返回固定结构；**out-of-scope** 工具以 `DelegatedTool` 子类注册，调用时返回 `CAP_NOT_SCOPED` 引导调用方走异步链路。
+
+### 4.4 剩余工具 IO 契约
+
+> 本节补全 §4.1 总览中**除 §4.2 已详定义的 `sql_execute` / `hypothesis_store` / `quality_check` 外**的 11 个工具的入参、出参、错误模式契约。所有工具入参均隐含携带**调用上下文** `task_run_id: str`、`scenario: enum(causation|insight_scan|report)` 由 ToolRegistry 自动注入；所有工具出参均隐含携带 **meta** `latency_ms: int`、`audit_id: uuid`、`capability_used: str`（由 §20 wrapper 透传），下文表格不再重复列出。
+
+#### 4.4.1 schema_lookup
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| **入参** | | | |
+| datasource_id | int | Y | 数据源 ID |
+| table_name | string | N | 表名（不传则返回库级清单） |
+| field_pattern | string | N | 字段模糊匹配 |
+| include_lineage | bool | N | 是否携带血缘（默认 false） |
+| **出参 data** | | | |
+| tables[] | object | — | `{name, business_meaning, fields[]}` |
+| fields[].sensitivity | enum | — | PII/FINANCIAL/INTERNAL/PUBLIC |
+| lineage | object | — | 上游表/视图/语义层引用（可选） |
+| **错误码** | DAT_007 / CAP_403_DATASOURCE / CAP_504_META_TIMEOUT | | |
+
+#### 4.4.2 metric_definition_lookup
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| **入参** | | | |
+| metric_name | string | Y | 业务指标名 |
+| as_of_date | date | N | 指标版本时点（默认今天） |
+| **出参 data** | | | |
+| canonical_name | string | — | 标准化指标名 |
+| formula_sql | string | — | 标准计算 SQL 片段 |
+| dimensions_allowed[] | string[] | — | 允许下钻维度白名单 |
+| sensitivity | enum | — | 同上 |
+| **错误码** | DAT_001 / CAP_404_METRIC | | |
+
+> 实现委托：参见 **Spec 30 Metrics Agent §4.x**，本工具为对其 `/api/agents/metrics/lookup` 的薄封装。
+
+#### 4.4.3 tableau_query
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| **入参** | | | |
+| object_type | enum | Y | workbook / view / datasource |
+| filter | object | N | `{site_id, project, name_like}` |
+| include_metadata_fields[] | string[] | N | 指定返回字段 |
+| **出参 data** | | | |
+| objects[] | object | — | Tableau 对象元数据列表 |
+| total | int | — | 命中总数 |
+| **错误码** | DAT_007 / CAP_502_TABLEAU_MCP / CAP_403_SITE | | |
+
+#### 4.4.4 time_series_compare
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| **入参** | | | |
+| metric | string | Y | 指标名（须在 metric_definition_lookup 中） |
+| current_window | object | Y | `{start, end}` |
+| compare_mode | enum | Y | yoy / mom / wow / custom |
+| baseline_window | object | N | compare_mode=custom 时必填 |
+| dimensions[] | string[] | N | 同时拆分的维度 |
+| **出参 data** | | | |
+| current_value | float | — | 当期值 |
+| baseline_value | float | — | 基线值 |
+| delta_abs / delta_pct | float | — | 绝对/相对变化 |
+| significance | object | — | `{p_value, method}` |
+| **错误码** | DAT_001 / DAT_005 / DAT_004 | | |
+
+> 实现委托：内部调用 `sql_execute`（见 §4.5）；本工具为编排层，不直接访问 DB。
+
+#### 4.4.5 dimension_drilldown
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| **入参** | | | |
+| metric | string | Y | 指标名 |
+| time_range | object | Y | `{start, end}` |
+| dimensions[] | string[] | Y | 待分解维度（≤5） |
+| top_n | int | N | 每维度返回 Top N（默认 10） |
+| **出参 data** | | | |
+| breakdowns[] | object | — | `{dimension, contribution, top_factor, impact}` |
+| concentration_point | string | — | 最集中维度值 |
+| **错误码** | DAT_001 / DAT_005 / CAP_403_DIM | | |
+
+#### 4.4.6 statistical_analysis
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| **入参** | | | |
+| series_ref | string | Y | `raw_data_ref` 或内联数组 |
+| methods[] | string[] | Y | mean/std/zscore/iqr/holt_winters |
+| params | object | N | 算法参数 override |
+| **出参 data** | | | |
+| stats | object | — | 各方法计算结果 |
+| anomalies[] | object | — | `{index, value, score, method}` |
+| **错误码** | DAT_005 / DAT_006 | | |
+
+#### 4.4.7 correlation_detect
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| **入参** | | | |
+| series_a_ref / series_b_ref | string | Y | 两个序列引用 |
+| method | enum | N | pearson / spearman（默认 spearman） |
+| min_overlap | int | N | 最少重叠点数（默认 12） |
+| **出参 data** | | | |
+| coefficient | float | — | 相关系数 [-1, 1] |
+| p_value | float | — | 显著性 |
+| overlap_n | int | — | 实际重叠样本数 |
+| **错误码** | DAT_005 / DAT_006 | | |
+
+#### 4.4.8 past_analysis_retrieve
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| **入参** | | | |
+| query_text | string | Y | 自然语言检索意图 |
+| filters | object | N | `{metric, date_from, date_to, author}` |
+| top_k | int | N | 默认 5 |
+| **出参 data** | | | |
+| matches[] | object | — | `{session_id, subject, summary, similarity}` |
+| **错误码** | DAT_007 / CAP_404_VECTOR_INDEX | | |
+
+#### 4.4.9 report_write
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| **入参** | | | |
+| session_id | uuid | Y | 关联分析会话 |
+| canonical_json | object | Y | 符合 §7.1 的 JSON 规范层 |
+| output_formats[] | string[] | N | json/markdown（默认全部） |
+| **出参 data** | | | |
+| report_id | uuid | — | 生成的报告 ID |
+| storage_refs | object | — | 各格式的存储路径 |
+| **错误码** | DAT_006 / CAP_507_STORAGE | | |
+
+#### 4.4.10 visualization_spec
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| **入参** | | | |
+| data_ref | string | Y | `raw_data_ref` |
+| chart_intent | enum | Y | trend / breakdown / compare / anomaly |
+| dimensions[] / metrics[] | string[] | N | 显式指定时跳过自动推断 |
+| **出参 data** | | | |
+| chart_spec | object | — | 符合 §7.3 的 chart_spec |
+| renderer_hint | enum | — | echarts / tableau |
+| **错误码** | DAT_006 | | |
+
+#### 4.4.11 insight_publish
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| **入参** | | | |
+| insight_payload | object | Y | 已脱敏的洞察 JSON |
+| channels[] | string[] | Y | platform / slack / feishu / email |
+| confidence | float | Y | 用于渠道阈值过滤 |
+| **出参 data** | | | |
+| insight_id | uuid | — | 已发布洞察 ID |
+| dispatched[] | object | — | `{channel, status, message_id}` |
+| **错误码** | DAT_007 / CAP_502_NOTIFICATION | | |
+
+### 4.5 工具间编排约束
+
+**工具角色分层：**
+
+| 层级 | 工具 | 说明 |
+|------|------|------|
+| **叶子工具（只能被调用，不再调子工具）** | `sql_execute`、`schema_lookup`、`metric_definition_lookup`、`tableau_query`、`quality_check`、`hypothesis_store`、`past_analysis_retrieve`、`statistical_analysis`、`correlation_detect`、`report_write`、`visualization_spec`、`insight_publish` | 直接对下游服务/DB/算法库 |
+| **编排工具（可调子工具）** | `time_series_compare`（→ `metric_definition_lookup` + `sql_execute`）、`dimension_drilldown`（→ `metric_definition_lookup` + `schema_lookup` + `sql_execute`） | 仅允许在 ToolRegistry 声明的子工具白名单内调用，禁止跨级调用 LLM |
+
+**禁止编排：**
+- 任何工具不得在内部直接调用 LLM（LLM 推理只发生在 ReAct Loop 主循环）
+- `insight_publish` / `report_write` 不得回调任何查询类工具（输出层只接收已脱敏 payload）
+- 编排深度 ≤ 2（避免递归爆炸）
+
+**工具调用图（按归因六步分层）：**
+
+```mermaid
+flowchart TB
+    subgraph S1[Step 1 异动确认]
+        TSC[time_series_compare]
+        STAT[statistical_analysis]
+        QC[quality_check]
+    end
+    subgraph S2[Step 2 维度分解]
+        SL[schema_lookup]
+        DD[dimension_drilldown]
+    end
+    subgraph S3[Step 3 假设生成]
+        MDL[metric_definition_lookup]
+        PAR[past_analysis_retrieve]
+    end
+    subgraph S4[Step 4 假设验证]
+        SE[sql_execute]
+        CD[correlation_detect]
+        QC2[quality_check]
+    end
+    subgraph S5[Step 5 根因定位]
+        HS[hypothesis_store]
+    end
+    subgraph S6[Step 6 影响量化]
+        SE2[sql_execute]
+        VS[visualization_spec]
+        RW[report_write]
+        IP[insight_publish]
+    end
+
+    TSC --> SE
+    DD --> SE
+    DD --> SL
+    S1 --> S2 --> S3 --> S4 --> S5 --> S6
+```
+
 ---
 
 ## 5. 归因分析六步流程
@@ -982,6 +1281,99 @@ erDiagram
 | running（活跃） | 2 小时无新 step | 自动暂停（paused），等待用户恢复 |
 | paused | 24 小时无 resume | 自动标记为 expired |
 
+### 9.4 归因六步 → 状态机 / step_type 映射
+
+> §9.2 状态机控制**会话级别**生命周期；本节定义会话内部 `analysis_session_steps.step_type` 与 §5 归因六步的映射，开发须按本表写入步骤记录，方便审计回放与 Phase 进度可视化。`step_type` 枚举：`route`（路由/前置判断）、`capability_invoke`（外部能力调用）、`reason`（LLM 纯推理）、`finalize`（结果固化）。
+
+| 步骤 | §5 章节 | 会话状态 | step_type | 主要工具调用 | 入参契约 | 出参契约 | 失败/中断转移 |
+|------|--------|---------|-----------|------------|---------|---------|---------------|
+| **Step 1** 异动确认 | §5.1 | running | route + capability_invoke | `time_series_compare` → `statistical_analysis` →（失败时）`quality_check` | §4.4.4 / §4.4.6 / §4.2 quality_check | §5.1 输出 JSON | `confirmed=false` → completed（无显著异动）；数据缺失 → 进入 quality_check 后 failed(DAT_005) |
+| **Step 2** 维度分解 | §5.2 | running | capability_invoke | `schema_lookup` → `dimension_drilldown` | §4.4.1 / §4.4.5 | §5.2 输出 JSON | 维度均匀 → 跳到 Step 3 但写入 `concentration_point=null` |
+| **Step 3** 假设生成 | §5.3 | running | reason（含 `past_analysis_retrieve` 检索） | `metric_definition_lookup`、`past_analysis_retrieve` | §4.4.2 / §4.4.8 | §5.3 输出 JSON | LLM 失败 → DAT_006 → failed |
+| **Step 4** 假设验证 | §5.4 | running | capability_invoke（并发 ≤3） | `sql_execute`、`correlation_detect`、`quality_check`、`hypothesis_store(update)` | §4.2 sql_execute / §4.4.7 / §4.2 quality_check / §4.2 hypothesis_store | §5.4 输出 JSON | 数据不可用 → `inconclusive` 写入 hypothesis_store，继续；超过 5 次迭代 → 进入 Step 5 |
+| **Step 5** 根因定位 | §5.5 | running | reason + capability_invoke | `hypothesis_store(read/confirm)` | §4.2 hypothesis_store | §5.5 输出 JSON | 全部 rejected → 回溯 Step 3（仅 1 次，由 §9.1 ReAct 控制器记录 `backtrack_count`） |
+| **Step 6** 影响量化与结论 | §5.6 | running → completed | capability_invoke + finalize | `sql_execute`、`visualization_spec`、`report_write`、`insight_publish` | §4.2 sql_execute / §4.4.10 / §4.4.9 / §4.4.11 | §5.6 输出 JSON + 最终 report_id / insight_id | `report_write` 失败 → DAT_006 → failed；`insight_publish` 失败 → completed（已生成 report，仅推送降级） |
+
+**实现约束：**
+- 每个 Step 在 `analysis_session_steps` 表中至少落 **1 条** `step_type` 记录；编排工具产生的子调用作为附加 row 写入，`parent_step_id` 指向父记录。
+- Step 切换前必须 commit 上一 Step 的所有 row（事务边界），保障审计回放幂等。
+- `current_step` 字段值为 1–6，与本表第一列对齐；超过 6 即视为 completed。
+
+### 9.5 端到端归因 walkthrough（默认用例 UC-1）
+
+> 本节以 §1.1 UC-1（销售额环比下滑）为例走完整六步，给开发提供"按行抄"参考。每步示意 `capability_invoke` 请求体（伪 JSON ≤ 8 行），并标注失败分支的 step.failed 错误码及 ReAct 决策。
+
+| 步骤 | step_type | capability | 输入摘要 | 输出摘要 | latency_ms（估） | 失败 → 决策 |
+|------|-----------|-----------|---------|---------|------------------|------------|
+| 1 | route | metric_definition_lookup | metric=gmv | canonical_name, formula_sql, allowed_dims | 80 | DAT_001 → 终止（指标不存在） |
+| 2 | capability_invoke | time_series_compare | gmv, mom, [04-01,04-15] | delta_pct=-0.12, p<0.05 | 1800 | DAT_005 → 调 quality_check 降级；DAT_004 → 重试 1 次后终止 |
+| 3 | capability_invoke | schema_lookup | datasource_id=1, table=orders | dims[region,product_category,channel] | 120 | DAT_007 → 重试 2 次后终止 |
+| 4 | capability_invoke | dimension_drilldown | gmv, dims, top_n=10 | concentration_point=region=北京, contribution=0.65 | 2400 | DAT_005 → 标记 inconclusive，跳到 Step 5 用全局假设 |
+| 5 | capability_invoke | sql_execute | intent="北京 GMV YoY" | delta_pct_yoy=-0.22, row_count=12 | 3500 | DAT_004 超时 → 重试 1 次；DAT_007 → 终止 |
+| 6 | reason + capability_invoke | statistical_analysis | series_ref=query_xxx, methods=[zscore] | anomalies[], confidence=0.82 | 600 | DAT_006 → 降级 confidence=0.5 继续 |
+| 7 | finalize | report_write | session_id, canonical_json | report_id, storage_refs | 900 | DAT_006 → 重试 1 次后 failed |
+
+**伪 JSON 调用示例（每步 ≤ 8 行）：**
+
+```jsonc
+// Step 1
+{"capability": "metric_definition_lookup", "args": {"metric_name": "gmv"}}
+// Step 2
+{"capability": "time_series_compare", "args": {"metric": "gmv", "current_window": {"start":"2026-04-01","end":"2026-04-15"}, "compare_mode": "mom"}}
+// Step 3
+{"capability": "schema_lookup", "args": {"datasource_id": 1, "table_name": "orders"}}
+// Step 4
+{"capability": "dimension_drilldown", "args": {"metric": "gmv", "time_range": {"start":"2026-04-01","end":"2026-04-15"}, "dimensions": ["region","product_category","channel"], "top_n": 10}}
+// Step 5
+{"capability": "sql_execute", "args": {"natural_language_intent": "北京 GMV YoY 对比", "max_rows": 10000, "query_timeout_seconds": 30}}
+// Step 6
+{"capability": "statistical_analysis", "args": {"series_ref": "query_20260428_005", "methods": ["zscore","iqr"]}}
+// Step 7
+{"capability": "report_write", "args": {"session_id": "uuid-...", "canonical_json": {"summary": "...", "sections": [...]}, "output_formats": ["json","markdown"]}}
+```
+
+**调用图（按时间轴展开）：**
+
+```mermaid
+flowchart LR
+    T0[task_run_id=tr_uc1<br/>scenario=causation] --> S1[step_run #1<br/>route:metric_definition_lookup<br/>80ms]
+    S1 --> S2[step_run #2<br/>capability:time_series_compare<br/>1800ms<br/>delta_pct=-0.12]
+    S2 --> S3[step_run #3<br/>capability:schema_lookup<br/>120ms]
+    S3 --> S4[step_run #4<br/>capability:dimension_drilldown<br/>2400ms<br/>北京=0.65]
+    S4 --> S5[step_run #5<br/>capability:sql_execute<br/>3500ms<br/>YoY=-0.22]
+    S5 --> S6[step_run #6<br/>reason+statistical_analysis<br/>600ms<br/>confidence=0.82]
+    S6 --> S7[step_run #7<br/>finalize:report_write<br/>900ms<br/>report_id=rp_xxx]
+    S7 --> DONE[session=completed<br/>total≈9.4s]
+
+    S2 -.DAT_005.-> QC[quality_check 降级]
+    S5 -.DAT_004.-> RETRY[重试1次]
+```
+
+**终点 InsightReport 范例（符合 §7.1）：**
+
+```json
+{
+  "metadata": {
+    "subject": "华北区域 2026-04 上半月 GMV 环比下滑归因",
+    "time_range": {"start": "2026-04-01", "end": "2026-04-15"},
+    "generated_at": "2026-04-28T10:00:00Z",
+    "confidence": 0.82,
+    "author": "Data Agent"
+  },
+  "summary": "GMV 环比下降 12%，主因北京区域贡献 65%，去年同期同幅下滑印证春节后复工延迟假设。",
+  "sections": [
+    {"type": "finding", "title": "异动确认", "narrative": "MoM -12%, p<0.05"},
+    {"type": "finding", "title": "维度分解", "narrative": "region=北京 贡献度 0.65"},
+    {"type": "finding", "title": "根因", "narrative": "北京 YoY -22%，与去年 Q1 -23% 相近"},
+    {"type": "recommendation", "narrative": "调低北京 Q2 目标；排查数据同步延迟"}
+  ],
+  "report_id": "rp_uc1_20260428",
+  "session_id": "uuid-..."
+}
+```
+
+> **失败兜底**：任意步骤 ReAct 决策为"终止"时，`session.status=failed`，已落 step_run 不回滚，已生成的 partial output 在 `analysis_session_steps.result_summary` 可审计；用户侧返回最近一次成功 step 的 `result_summary` + `error_code`。
+
 ---
 
 ## 10. 错误码
@@ -1249,7 +1641,7 @@ sequenceDiagram
 
 ---
 
-## 15.2 Mock 与测试约束
+### 15.2 Mock 与测试约束
 
 - **ReAct Engine 单元测试**：所有工具 mock 为 `AsyncMock`，返回固定 `ToolResult`；断言 6 步归因流程在 `max_steps` 内终止
 - **SQL Agent 调用可 mock**：单元测试 mock HTTP 调用 `POST /api/sql-agent/execute`，返回固定查询结果；集成测试须使用真实 SQL Agent
@@ -1287,6 +1679,8 @@ sequenceDiagram
 - [ ] `result_summary` 写入前脱敏（不含 `sample_rows` 原始数据）
 - [ ] 服务令牌 `X-Forward-User-JWT` / `X-Scan-Service-JWT` 互斥校验
 - [ ] 所有新增前端文案为中文
+- [ ] §4.1 列出的 14 个工具**全部**在工具注册表 `services/data_agent/tools/registry.py` 注册，缺一即应用启动失败（启动期 self-check）
+- [ ] 新增工具必须**同步更新** §4.4 IO 契约表 + §9.4 归因六步状态映射表，PR diff 须同时包含三处修改（registry.py / spec §4.4 / spec §9.4），缺任一项 PR 拒绝
 
 ### 验证命令
 

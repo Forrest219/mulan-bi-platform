@@ -1,0 +1,62 @@
+flowchart TB
+    subgraph Sources["数据源层"]
+        DS_PG[(PostgreSQL<br/>数据源)]
+        DS_TAB[(Tableau<br/>Datasources)]
+        DS_API[(REST API<br/>外部数据)]
+    end
+
+    subgraph Ingestion["接入层"]
+        CONNECT[bi_data_sources<br/>连接配置]
+        SYNC_LOG[tableau_sync_logs<br/>同步日志]
+        SCAN_LOG[bi_scan_logs<br/>扫描日志]
+    end
+
+    subgraph Storage["存储层"]
+        ASSETS[tableau_assets<br/>资产表]
+        FIELDS[tableau_datasource_fields<br/>字段表]
+        SEM[tableau_field_semantics<br/>语义表]
+        PUB_LOG[tableau_publish_logs<br/>发布日志]
+    end
+
+    subgraph Semantic["语义层"]
+        SM_DRAFT[draft<br/>草稿]
+        SM_AI[ai_generated<br/>AI生成]
+        SM_REVIEW[reviewed<br/>审核中]
+        SM_APPROVED[approved<br/>已批准]
+        SM_PUBLISHED[published<br/>已发布]
+    end
+
+    subgraph Output["输出层"]
+        TABLEAU_WB[Tableau<br/>Workbooks]
+        NL_QUERY[NL查询<br/>自然语言]
+        HEALTH_RPT[健康报告<br/>Health Report]
+    end
+
+    DS_PG & DS_TAB & DS_API --> CONNECT
+    CONNECT --> SYNC_LOG
+    CONNECT --> SCAN_LOG
+
+    SYNC_LOG --> ASSETS
+    SYNC_LOG --> FIELDS
+    SCAN_LOG --> ASSETS
+
+    ASSETS --> SEM
+    FIELDS --> SEM
+
+    SEM --> SM_DRAFT --> SM_AI --> SM_REVIEW --> SM_APPROVED --> SM_PUBLISHED
+    SM_PUBLISHED --> PUB_LOG
+
+    SM_PUBLISHED --> TABLEAU_WB
+    SM_PUBLISHED --> NL_QUERY
+    ASSETS --> HEALTH_RPT
+    SEM --> HEALTH_RPT
+
+    classDef source fill:#94a3b8,color:#000
+    classDef storage fill:#64748b,color:#fff
+    classDef semantic fill:#8b5cf6,color:#fff
+    classDef output fill:#10b981,color:#fff
+
+    class DS_PG,DS_TAB,DS_API source
+    class CONNECT,SYNC_LOG,SCAN_LOG,ASSETS,FIELDS storage
+    class SM_DRAFT,SM_AI,SM_REVIEW,SM_APPROVED,SM_PUBLISHED semantic
+    class TABLEAU_WB,NL_QUERY,HEALTH_RPT output

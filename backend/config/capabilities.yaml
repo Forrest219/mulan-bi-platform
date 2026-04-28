@@ -5,10 +5,10 @@
 version: 1
 capabilities:
   # ---------------------------------------------------------------------------
-  # query_metric — 核心指标查询能力
+  # llm_complete — LLM 推理能力（backend: llm_complete）
   # ---------------------------------------------------------------------------
-  - name: query_metric
-    description: "按业务字段 + 过滤 + 聚合查询指标"
+  - name: llm_complete
+    description: "通用 LLM 推理调用"
     roles:
       - analyst
       - data_admin
@@ -17,58 +17,92 @@ capabilities:
       $schema: "http://json-schema.org/draft-07/schema#"
       type: "object"
       required:
-        - datasource_id
-        - metric
+        - prompt
       properties:
-        datasource_id:
+        prompt:
+          type: "string"
+          description: "用户 prompt"
+        system:
+          type: "string"
+          description: "系统 prompt（可选）"
+        timeout:
           type: "integer"
-          description: "数据源 ID"
-        metric:
+          default: 15
+          description: "超时秒数"
+        purpose:
           type: "string"
-          description: "指标名称"
-        dims:
-          type: "array"
-          items:
-            type: "string"
-          default: []
-          description: "维度字段列表"
-        filters:
-          type: "array"
-          default: []
-          description: "过滤条件列表"
-        aggregation:
+          default: "default"
+          description: "LLM 配置用途"
+    guards:
+      sensitivity_block: []
+      max_rows: 10000
+      forbid_raw_pii: false
+    rate_limit: "120/min/user"
+    timeout_seconds: 30
+    cache:
+      ttl_seconds: 60
+      key_fields:
+        - principal_role
+        - prompt
+        - purpose
+    circuit_breaker:
+      failure_threshold: 5
+      recovery_seconds: 30
+    audit: always
+    backend: llm_complete
+
+  # ---------------------------------------------------------------------------
+  # query_metric — 核心指标查询能力（对应 nlq_service.execute_query / MCP query-datasource）
+  # ---------------------------------------------------------------------------
+  - name: query_metric
+    description: "执行 NLQ 查询（VizQL JSON → Tableau MCP query-datasource）"
+    roles:
+      - analyst
+      - data_admin
+      - admin
+    params_schema:
+      $schema: "http://json-schema.org/draft-07/schema#"
+      type: "object"
+      required:
+        - datasource_luid
+        - vizql_json
+      properties:
+        datasource_luid:
           type: "string"
-          enum:
-            - SUM
-            - AVG
-            - COUNT
-            - MIN
-            - MAX
-          default: SUM
-          description: "聚合方式"
+          description: "Tableau 数据源 LUID"
+        vizql_json:
+          type: "object"
+          description: "VizQL 查询 JSON"
         limit:
           type: "integer"
           minimum: 1
           maximum: 10000
           default: 1000
           description: "返回行数上限"
+        timeout:
+          type: "integer"
+          minimum: 5
+          maximum: 120
+          default: 30
+          description: "查询超时秒数"
+        connection_id:
+          type: "integer"
+          description: "连接 ID"
     guards:
       sensitivity_block:
         - high
         - confidential
       max_rows: 10000
-      forbid_raw_pii: true
     rate_limit: "30/min/user"
     timeout_seconds: 30
     cache:
       ttl_seconds: 300
       key_fields:
         - principal_role
-        - datasource_id
-        - metric
-        - dims
-        - filters
-        - aggregation
+        - datasource_luid
+        - vizql_json
+        - limit
+        - connection_id
     circuit_breaker:
       failure_threshold: 5
       recovery_seconds: 60
@@ -203,6 +237,105 @@ capabilities:
       recovery_seconds: 60
     audit: always
     backend: tableau_mcp
+
+  # ---------------------------------------------------------------------------
+  # llm_complete — LLM 统一调用能力（NLQ / 分析摘要 / 语义维护通用）
+  # ---------------------------------------------------------------------------
+  - name: llm_complete
+    description: "统一 LLM 调用入口（NLQ / 分析摘要 / 语义维护）"
+    roles:
+      - analyst
+      - data_admin
+      - admin
+    params_schema:
+      $schema: "http://json-schema.org/draft-07/schema#"
+      type: "object"
+      required:
+        - prompt
+      properties:
+        prompt:
+          type: "string"
+          description: "用户 prompt"
+        system:
+          type: "string"
+          description: "系统提示词"
+        timeout:
+          type: "integer"
+          default: 30
+          description: "超时秒数"
+        purpose:
+          type: "string"
+          default: "default"
+          description: "调用目的（nlq / default / semantic）"
+    guards:
+      sensitivity_block: []
+      max_rows: 0
+      forbid_raw_pii: false
+    rate_limit: "60/min/user"
+    timeout_seconds: 60
+    cache:
+      ttl_seconds: 0
+      key_fields: []
+    circuit_breaker:
+      failure_threshold: 10
+      recovery_seconds: 60
+    audit: always
+    backend: llm
+
+  # ---------------------------------------------------------------------------
+  # nlq_search — NL 查询搜索入口能力
+  # ---------------------------------------------------------------------------
+  - name: nlq_search
+    description: "NL 查询搜索入口（对应 search.py /api/search/query）"
+    roles:
+      - analyst
+      - data_admin
+      - admin
+    params_schema:
+      $schema: "http://json-schema.org/draft-07/schema#"
+      type: "object"
+      required:
+        - question
+      properties:
+        question:
+          type: "string"
+          description: "用户自然语言问题"
+        datasource_luid:
+          type: "string"
+          description: "数据源 LUID"
+        connection_id:
+          type: "integer"
+          description: "连接 ID"
+        conversation_id:
+          type: "string"
+          description: "对话 ID"
+        options:
+          type: "object"
+          description: "可选参数"
+        use_conversation_context:
+          type: "boolean"
+          default: false
+        target_sites:
+          type: "array"
+          items:
+            type: "string"
+          description: "多站点并发查询目标"
+    guards:
+      sensitivity_block:
+        - high
+        - confidential
+      max_rows: 10000
+      forbid_raw_pii: true
+    rate_limit: "30/min/user"
+    timeout_seconds: 60
+    cache:
+      ttl_seconds: 0
+      key_fields: []
+    circuit_breaker:
+      failure_threshold: 5
+      recovery_seconds: 60
+    audit: always
+    backend: nlq
 
   # ---------------------------------------------------------------------------
   # explain_asset — 资产解释/来源追踪

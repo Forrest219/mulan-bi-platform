@@ -11,6 +11,7 @@ export interface AgentConversationItem {
   title: string | null;
   connection_id: number | null;
   status: string;
+  message_count: number;
   created_at: string;
   updated_at: string;
 }

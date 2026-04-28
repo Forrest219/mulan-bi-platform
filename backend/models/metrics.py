@@ -110,6 +110,7 @@ class BiMetricAnomaly(Base):
     metric_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("bi_metric_definitions.id"), nullable=False)
     datasource_id: Mapped[int] = mapped_column(Integer, nullable=False)
     detection_method: Mapped[str] = mapped_column(String(32), nullable=False)
+    algorithm: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, comment="zscore | quantile")
     metric_value: Mapped[float] = mapped_column(Float, nullable=False)
     expected_value: Mapped[float] = mapped_column(Float, nullable=False)
     deviation_score: Mapped[float] = mapped_column(Float, nullable=False)

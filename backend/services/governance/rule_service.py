@@ -8,7 +8,11 @@ from typing import Optional, List, Tuple
 
 from sqlalchemy.orm import Session
 
-from backend.models.governance import BiQualityRule, BiQualityResult, BiQualityScore
+from services.governance.models import (
+    QualityRule as BiQualityRule,
+    QualityResult as BiQualityResult,
+    QualityScore as BiQualityScore,
+)
 from backend.services.governance.schemas import RuleCreate, RuleUpdate
 from backend.services.governance.validators import validate_threshold
 from backend.services.governance.cron_validator import validate_cron

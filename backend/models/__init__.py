@@ -10,12 +10,6 @@ from models.metrics import (  # noqa: F401
     BiMetricConsistencyCheck,
 )
 
-from models.governance import (  # noqa: F401
-    BiQualityRule,
-    BiQualityResult,
-    BiQualityScore,
-)
-
 from models.dqc import (  # noqa: F401
     DqcMonitoredAsset,
     DqcQualityRule,

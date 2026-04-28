@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import exists
 from sqlalchemy.orm import Session as DBSession
 
 from services.data_agent.models import AgentConversation, AgentConversationMessage
@@ -208,6 +209,8 @@ class SessionManager:
             AgentConversation.id == session.conversation_id
         ).first()
         if conversation:
+            if role == "user" and not conversation.title:
+                conversation.title = content.strip()[:50] or "新对话"
             conversation.updated_at = datetime.utcnow()
 
         self.db.commit()
@@ -246,6 +249,8 @@ class SessionManager:
         """Get all conversations for a user"""
         query = self.db.query(AgentConversation).filter(
             AgentConversation.user_id == user_id
+        ).filter(
+            exists().where(AgentConversationMessage.conversation_id == AgentConversation.id)
         )
         if status:
             query = query.filter(AgentConversation.status == status)

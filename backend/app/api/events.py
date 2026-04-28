@@ -2,14 +2,30 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from services.events import EVT_ERROR_MESSAGES, EvtErrorCode
+from services.events import (
+    ANOMALY_DETECTED,
+    EVT_ERROR_MESSAGES,
+    EvtErrorCode,
+)
 from services.events.models import EventDatabase
 
 router = APIRouter()
+
+
+class AnomalySubscriptionCreate(BaseModel):
+    """POST /api/events/anomaly-subscriptions 请求体"""
+    metric_id: str
+    event_type: str = "anomaly.detected"
+
+
+class AnomalySubscriptionDelete(BaseModel):
+    """DELETE /api/events/anomaly-subscriptions 请求体"""
+    subscription_id: int
 
 
 @router.get("")
@@ -73,3 +89,97 @@ async def list_events(
         end_time=end_dt,
     )
     return result
+
+
+# =============================================================================
+# 异常告警订阅管理（Spec 30）
+# =============================================================================
+
+@router.get(
+    "/anomaly-subscriptions",
+    summary="查询当前用户的异常告警订阅列表",
+)
+def list_anomaly_subscriptions(
+    request: Request,
+    event_type: Optional[str] = Query(default=None, description="事件类型过滤"),
+    target_id: Optional[str] = Query(default=None, description="指标 ID 过滤"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """GET /api/events/anomaly-subscriptions — 查询当前用户的订阅列表"""
+    user = get_current_user(request, db)
+    event_db = EventDatabase()
+
+    # 仅允许查询自己的订阅
+    result = event_db.list_subscriptions(
+        db=db,
+        user_id=user["id"],
+        event_type=event_type,
+        target_id=target_id,
+        page=page,
+        page_size=page_size,
+    )
+    return result
+
+
+@router.post(
+    "/anomaly-subscriptions",
+    status_code=201,
+    summary="订阅特定指标的异常告警通知",
+)
+def subscribe_anomaly(
+    request: Request,
+    body: AnomalySubscriptionCreate,
+    db: Session = Depends(get_db),
+):
+    """POST /api/events/anomaly-subscriptions — 订阅指定指标的异常告警（analyst+）"""
+    user = get_current_user(request, db)
+    event_db = EventDatabase()
+
+    # 仅允许 anomaly.detected
+    if body.event_type != ANOMALY_DETECTED:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": EvtErrorCode.INVALID_EVENT_TYPE,
+                "message": f"目前仅支持订阅 anomaly.detected，实际：{body.event_type}",
+            },
+        )
+
+    sub = event_db.upsert_subscription(
+        db=db,
+        user_id=user["id"],
+        event_type=body.event_type,
+        target_id=body.metric_id,
+    )
+    return {"subscription_id": sub.id, "event_type": sub.event_type, "target_id": sub.target_id}
+
+
+@router.delete(
+    "/anomaly-subscriptions",
+    summary="取消异常告警订阅",
+)
+def unsubscribe_anomaly(
+    request: Request,
+    body: AnomalySubscriptionDelete,
+    db: Session = Depends(get_db),
+):
+    """DELETE /api/events/anomaly-subscriptions — 取消订阅（仅所有者可删除）"""
+    user = get_current_user(request, db)
+    event_db = EventDatabase()
+
+    deleted = event_db.delete_subscription(
+        db=db,
+        subscription_id=body.subscription_id,
+        user_id=user["id"],
+    )
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": EvtErrorCode.NOTIFICATION_NOT_FOUND,
+                "message": "订阅不存在或无权删除",
+            },
+        )
+    return {"ok": True}

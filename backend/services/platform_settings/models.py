@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Dict, Any
 
-from sqlalchemy import Column, Integer, String, DateTime, CheckConstraint
+from sqlalchemy import Column, Integer, String, DateTime, CheckConstraint, JSON
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base, JSONB, sa_func, sa_text
@@ -17,6 +17,7 @@ class PlatformSettings(Base):
     platform_subtitle = Column(String(256), nullable=True, default="数据建模与治理平台")
     logo_url = Column(String(512), nullable=False)
     favicon_url = Column(String(512), nullable=True)
+    extra_settings = Column(JSON, nullable=True, default=dict)  # Spec 36 §15: KV 扩展字段
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
     updated_at = Column(DateTime, nullable=False, server_default=sa_func.now(), onupdate=sa_func.now())
 

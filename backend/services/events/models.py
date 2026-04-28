@@ -21,6 +21,8 @@ class BiEvent(Base):
     severity = Column(String(16), nullable=False, server_default=sa_text("'info'"))
     actor_id = Column(BigInteger, ForeignKey("auth_users.id", ondelete="SET NULL"), nullable=True)
     payload_json = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"))
+    # extra_data: 携带 semantic_table_id / table_name 等扩展信息（Spec 9 → Spec 16）
+    extra_data = Column(JSONB, nullable=True, server_default=sa_text("'{}'::jsonb"))
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
 
     __table_args__ = (
@@ -38,6 +40,7 @@ class BiEvent(Base):
             "severity": self.severity,
             "actor_id": self.actor_id,
             "payload_json": self.payload_json,
+            "extra_data": self.extra_data,
             "created_at": self.created_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.created_at else None,
         }
 
@@ -77,6 +80,36 @@ class BiNotification(Base):
         }
 
 
+class BiEventSubscription(Base):
+    """用户事件订阅表 bi_event_subscriptions（支持按 metric 维度订阅异常告警，Spec 30）"""
+    __tablename__ = "bi_event_subscriptions"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("auth_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    event_type = Column(String(64), nullable=False, index=True)
+    # target_id 对应不同事件类型的关联对象 ID，如 anomaly.detected 时为 metric_id
+    target_id = Column(String(128), nullable=True, index=True)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"))
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
+    updated_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_event_sub_user_event_target", "user_id", "event_type", "target_id"),
+        Index("ix_event_sub_event_active", "event_type", "is_active"),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "event_type": self.event_type,
+            "target_id": self.target_id,
+            "is_active": self.is_active,
+            "created_at": self.created_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.updated_at else None,
+        }
+
+
 class EventDatabase:
     """事件与通知数据库管理"""
 
@@ -92,6 +125,7 @@ class EventDatabase:
         source_id: Optional[str] = None,
         severity: str = "info",
         actor_id: Optional[int] = None,
+        extra_data: Optional[dict] = None,
     ) -> BiEvent:
         """创建事件记录"""
         event = BiEvent(
@@ -101,6 +135,7 @@ class EventDatabase:
             severity=severity,
             actor_id=actor_id,
             payload_json=payload_json,
+            extra_data=extra_data or {},
         )
         db.add(event)
         db.commit()
@@ -269,3 +304,96 @@ class EventDatabase:
         from services.tableau.models import TableauConnection
         conn = db.query(TableauConnection).filter(TableauConnection.id == connection_id).first()
         return conn.owner_id if conn else None
+
+    # -------------------------------------------------------------------------
+    # 异常告警订阅管理（Spec 30）
+    # -------------------------------------------------------------------------
+
+    def create_subscription(
+        self,
+        db: Session,
+        user_id: int,
+        event_type: str,
+        target_id: Optional[str] = None,
+    ) -> BiEventSubscription:
+        """创建事件订阅"""
+        sub = BiEventSubscription(
+            user_id=user_id,
+            event_type=event_type,
+            target_id=target_id,
+            is_active=True,
+        )
+        db.add(sub)
+        db.commit()
+        db.refresh(sub)
+        return sub
+
+    def get_subscription(self, db: Session, subscription_id: int) -> Optional[BiEventSubscription]:
+        """获取单个订阅"""
+        return db.query(BiEventSubscription).filter(BiEventSubscription.id == subscription_id).first()
+
+    def list_subscriptions(
+        self,
+        db: Session,
+        user_id: int,
+        event_type: Optional[str] = None,
+        target_id: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        """查询用户订阅列表"""
+        q = db.query(BiEventSubscription).filter(BiEventSubscription.user_id == user_id)
+        if event_type:
+            q = q.filter(BiEventSubscription.event_type == event_type)
+        if target_id is not None:
+            q = q.filter(BiEventSubscription.target_id == target_id)
+
+        total = q.count()
+        items = (
+            q.order_by(BiEventSubscription.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return {
+            "items": [s.to_dict() for s in items],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    def delete_subscription(self, db: Session, subscription_id: int, user_id: int) -> bool:
+        """删除订阅（仅所有者可删除）"""
+        sub = db.query(BiEventSubscription).filter(
+            BiEventSubscription.id == subscription_id,
+            BiEventSubscription.user_id == user_id,
+        ).first()
+        if not sub:
+            return False
+        db.delete(sub)
+        db.commit()
+        return True
+
+    def upsert_subscription(
+        self,
+        db: Session,
+        user_id: int,
+        event_type: str,
+        target_id: Optional[str],
+    ) -> BiEventSubscription:
+        """
+        幂等 upsert：若同 user_id + event_type + target_id 的订阅已存在则返回已有记录，
+        否则创建新订阅。
+        """
+        existing = (
+            db.query(BiEventSubscription)
+            .filter(
+                BiEventSubscription.user_id == user_id,
+                BiEventSubscription.event_type == event_type,
+                BiEventSubscription.target_id == target_id,
+            )
+            .first()
+        )
+        if existing:
+            return existing
+        return self.create_subscription(db, user_id, event_type, target_id)

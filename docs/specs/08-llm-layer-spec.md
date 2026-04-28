@@ -785,7 +785,78 @@ generate_asset_summary(asset)
 - [ ] `nlq_query_logs` 表 fire-and-forget 写入，失败不阻塞主流程
 - [ ] `cd backend && pytest tests/ -x -q` 全通过
 
-### 10.5 Mock 与测试约束
+### 10.5 LLM 熔断器审计点
+
+> 本节为模板符合度审计补齐内容，针对 provider 层熔断的状态机、metrics 与验收测试做独立约束。
+
+#### 10.5.1 熔断状态机
+
+provider 层熔断器以 `(provider, model)` 为粒度独立计数，状态迁移如下：
+
+```mermaid
+stateDiagram-v2
+    [*] --> closed
+    closed --> open: 连续失败次数 >= failure_threshold (默认 5)
+    open --> half_open: 距上次打开 >= recovery_timeout (默认 30s)
+    half_open --> closed: 探测成功 (success_threshold 次连续成功，默认 1)
+    half_open --> open: 探测失败 (任一次失败立即回退)
+    closed --> closed: 调用成功 (重置失败计数)
+    open --> open: 直接 fail-fast (不发出真实请求)
+```
+
+状态切换规则：
+
+| 当前状态 | 触发条件 | 下一状态 | 副作用 |
+|----------|---------|---------|--------|
+| `closed` | 连续失败 >= 阈值 | `open` | 记录 `circuit_open` 事件 + audit；触发 failover |
+| `open` | 距打开时间 >= recovery_timeout | `half_open` | 允许放行 1 个探测请求 |
+| `half_open` | 探测请求成功 | `closed` | 重置失败计数；记录 `circuit_recovered` 事件 |
+| `half_open` | 探测请求失败 | `open` | 重置 `opened_at` 计时；记录 `circuit_reopen` 事件 |
+| 任意 | 配置变更（model/api_key 切换） | `closed` | 状态强制重置 |
+
+#### 10.5.2 关键 Metrics（必须暴露给 Prometheus / 内部审计）
+
+| 指标名 | 类型 | 标签 | 含义 |
+|--------|------|------|------|
+| `llm_complete_total` | Counter | `provider, model, status` | 所有 `complete()` 调用计数（status: `success`/`failure`/`circuit_open`） |
+| `llm_complete_failure_total` | Counter | `provider, model, error_code` | 失败调用按错误码分类（`LLM_002`~`LLM_005`、`timeout`、`5xx` 等） |
+| `llm_circuit_state` | Gauge | `provider, model` | 熔断状态（`0`=closed / `1`=open / `2`=half_open），supervised by sampler 周期更新 |
+| `llm_complete_latency_seconds` | Histogram | `provider, model, status` | 调用延迟分布（建议桶：0.1/0.5/1/2/5/10/15s） |
+| `llm_provider_failover_total` | Counter | `from_provider, to_provider` | provider 间 failover 触发次数（仅 open/half_open 失败路径会增加） |
+
+实施约束：
+
+- 所有 metrics 在 `services/llm/metrics.py` 模块统一注册，禁止 inline 创建 Counter/Gauge
+- `complete()` / `complete_with_temp()` / `complete_for_semantic()` 三个入口必须共享同一套埋点
+- `llm_circuit_state` 通过状态机切换钩子同步写入，不依赖周期采样轮询
+
+#### 10.5.3 验收 P0 测试
+
+| 测试编号 | 场景 | 验证点 |
+|---------|------|-------|
+| CB-P0-01 | 主 provider 连续 N 次返回 5xx（N = failure_threshold） | `llm_circuit_state{provider=primary}` 由 0 → 1；`llm_complete_failure_total` 准确计数；`circuit_open` 审计日志写入 |
+| CB-P0-02 | 熔断打开期间向 `complete()` 发起请求 | 自动 failover 到次级 provider，`llm_provider_failover_total{from=primary,to=secondary}` +1；不向主 provider 发出真实 HTTP 请求（fail-fast） |
+| CB-P0-03 | recovery_timeout 后 half_open 探测成功 | 状态由 1 → 2 → 0；`llm_circuit_state` Gauge 同步更新；`circuit_recovered` 事件写入 audit |
+| CB-P0-04 | half_open 探测失败 | 状态由 2 → 1；`opened_at` 重置；下一次 recovery_timeout 后再次进入 half_open |
+| CB-P0-05 | 配置 PATCH（model 或 api_key 变更） | 熔断状态强制重置为 closed；旧客户端在 `_TimedClientCache` TTL 内仍存在但不再被路由 |
+
+测试需使用 `respx` / `aioresponses` mock provider 端点返回 5xx，并通过 `freezegun` 推进 `recovery_timeout`，**不得**使用真实 sleep。
+
+#### 10.5.4 与 Spec 20 wrapper 熔断器的层级关系
+
+| 维度 | Spec 20 §5.5 wrapper CircuitBreaker | 本节 LLM 熔断器 |
+|------|------------------------------------|----------------|
+| 作用层 | capability 层（业务能力调用：报表生成、NL2Q 等） | provider 层（LLM SDK 调用：OpenAI/Anthropic） |
+| 粒度 | `(capability_name, version)` | `(provider, model)` |
+| 触发条件 | capability 级别失败率 / 超时 | provider 级别 5xx / 超时 / 鉴权失败 |
+| 失败动作 | capability 整体降级或 fail-fast 给上游 | failover 到次级 provider 配置 |
+| 互斥性 | **两层独立，互不替代** —— wrapper 熔断打开时仍会调用本层 LLM 熔断；本层熔断打开仅影响 LLM 调用，不影响其他 capability |
+
+**不变量**：本层 metrics 标签集中**不得**包含 `capability_name`（避免与 wrapper 层耦合），capability 层有自己的独立 metrics 命名空间。
+
+---
+
+### 10.6 Mock 与测试约束
 
 - **`LLMService` 单例**：测试中需要 `patch('services.llm.service.LLMService._instance', None)` 重置单例，否则跨测试污染。或用 `patch.object(llm_service, '_load_config')` 绕过单例直接 mock 配置加载
 - **`_TimedClientCache`**：测试客户端缓存过期时，mock `time.time()` 推进 300+ 秒，不要用 `sleep()`
@@ -830,6 +901,9 @@ generate_asset_summary(asset)
 - [ ] `NlqQueryLog` 表存在，`log_nlq_query()` fire-and-forget
 - [ ] `to_dict()` 返回 `api_key_preview` 和 `api_key_updated_at`
 - [ ] `display_name` 查重在 API 层实现（409 冲突），非数据库 UNIQUE 约束
+- [ ] 所有 `complete()` 调用注册了 metrics 计数（`llm_complete_total` / `llm_complete_failure_total` / `llm_complete_latency_seconds`）
+- [ ] 熔断状态变更必须同步写日志 + audit（`circuit_open` / `circuit_recovered` / `circuit_reopen` 事件）
+- [ ] failover 路径有 e2e 测试（主 provider mock 5xx，验证次级 provider 接管 + `llm_provider_failover_total` 计数）
 
 ### 验证命令
 
@@ -883,6 +957,7 @@ async def delete_config():
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-04-28 | v1.3 | 模板符合度审计补齐：新增 §10.5 LLM 熔断器审计点（状态机 + 5 个 metrics + 5 项 P0 测试 + 与 Spec 20 wrapper 层级关系），原 Mock 约束节迁移到 §10.6；§12 强制检查清单追加 3 条（metrics 注册、状态变更审计、failover e2e）。 |
 | 2026-04-27 | v1.2 | Spec 合规补齐：新增 Section 1.3 关联文档、Section 12 开发交付约束；补入 `PATCH /configs/{id}/active`、`GET /assets/{id}/explain`、`generate_embedding()`/`generate_embedding_minimax()` 接口；新增 `NlqQueryLog` 表定义、`api_key_updated_at`/`api_key_preview` 字段；`DELETE /config` 标记为 410 Gone 废弃；更新客户端缓存为 `_TimedClientCache`（5 分钟 TTL + 复合 key）；新增 10.4 验收标准、10.5 Mock 约束；关闭 OI-02/OI-03。 |
 | 2026-04-16 | v1.1 | P1 改造：支持多配置 purpose 路由。`ai_llm_configs` 表新增 `purpose`、`display_name`、`priority` 字段；`get_config(purpose)` 实现 purpose → default 两级路由；新增 `GET/POST /api/llm/configs`、`PUT/DELETE /api/llm/configs/{id}` 四个 admin-only CRUD 端点；`complete_for_semantic()` NLQ 调用传 `purpose="nlq"`；客户端缓存改为带 TTL 的 `_TimedClientCache`（5 分钟过期）。 |
 | 2026-04-03 | v1.0 | 初始版本，单配置全局模式 |

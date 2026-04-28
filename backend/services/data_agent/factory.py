@@ -32,6 +32,7 @@ def create_engine() -> Tuple[ReActEngine, ToolRegistry]:
     from .tools.cohort_analysis_tool import CohortAnalysisTool
     from .tools.root_cause_analysis_tool import RootCauseAnalysisTool
     from services.llm.service import LLMService
+    from services.capability import CapabilityWrapper
 
     registry = ToolRegistry()
     registry.register(QueryTool())
@@ -50,6 +51,7 @@ def create_engine() -> Tuple[ReActEngine, ToolRegistry]:
     registry.register(RootCauseAnalysisTool())
 
     llm_service = LLMService()
-    engine = ReActEngine(registry=registry, llm_service=llm_service)
+    wrapper = CapabilityWrapper()
+    engine = ReActEngine(registry=registry, llm_service=llm_service, wrapper=wrapper)
 
     return engine, registry

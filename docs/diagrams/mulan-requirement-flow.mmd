@@ -1,0 +1,54 @@
+flowchart LR
+    subgraph Input["需求输入"]
+        PM[产品经理<br/>录入需求]
+        DS[数据管理员<br/>提报质量问题]
+        AI[AI 自动发现<br/>数据问题]
+    end
+
+    subgraph Process["处理流程"]
+        SUB[提交需求]
+        TRIAGE[需求分类]
+        ALLOC[分配负责人]
+        IMP[实施开发]
+        TEST[测试验收]
+        PUBLISH[发布上线]
+    end
+
+    subgraph States["需求状态"]
+        DRAFT[草稿<br/>draft]
+        PENDING[待审核<br/>pending]
+        INPROGRESS[进行中<br/>in_progress]
+        QA[测试中<br/>qa]
+        DONE[已完成<br/>done]
+        REJECT[已驳回<br/>rejected]
+    end
+
+    PM & DS & AI --> SUB
+    SUB --> TRIAGE
+    TRIAGE -->|分类结果| ALLOC
+    ALLOC -->|分配| IMP
+    IMP -->|开发完成| TEST
+    TEST -->|验收通过| PUBLISH
+    TEST -->|不通过| REJECT
+    REJECT -->|打回修改| IMP
+    PUBLISH --> DONE
+
+    DRAFT --> PENDING
+    PENDING -->|通过| INPROGRESS
+    PENDING -->|驳回| REJECT
+    INPROGRESS --> QA
+    QA -->|通过| DONE
+    QA -->|打回| INPROGRESS
+    REJECT --> DRAFT
+
+    classDef input fill:#4ade80,color:#000
+    classDef process fill:#60a5fa,color:#000
+    classDef state fill:#f59e0b,color:#000
+    classDef done fill:#22c55e,color:#fff
+    classDef reject fill:#ef4444,color:#fff
+
+    class PM,DS,AI input
+    class SUB,TRIAGE,ALLOC,IMP,TEST,PUBLISH process
+    class DRAFT,PENDING,INPROGRESS,QA state
+    class DONE done
+    class REJECT reject

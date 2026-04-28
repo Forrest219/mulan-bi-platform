@@ -38,6 +38,7 @@ export interface Conversation {
   title: string;        // 取首条消息前 20 字
   updated_at: string;   // ISO 8601 UTC
   messages: ConversationMessage[];
+  message_count?: number;
 }
 
 // ─── LocalStorage helpers ─────────────────────────────────────────────────────
@@ -160,6 +161,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
           title: item.title ?? '新对话',
           updated_at: item.updated_at,
           messages: [],
+          message_count: item.message_count,
         }));
         dispatch({ type: 'LOAD', payload: mapped });
       })

@@ -1,10 +1,12 @@
 # SPEC 20 — Capability Wrapper 能力封装层
 
-> 版本:v0.1(骨架草稿)
-> 日期:2026-04-15
-> 状态:Draft — 仅 Phase 1(审计+敏感度)已落地([[tech-capability-audit-v1]]),Phase 1.5+ 待实施
+> 版本:v0.2(minimax 工程可开发)
+> 日期:2026-04-28
+> 状态:Engineering Spec — Phase 1 已落地([[tech-capability-audit-v1]]),Phase 1.5 本版本可直接交付开发
 > 类别:Tier 2 · 集成层
-> 依赖:SPEC 04(Auth)· SPEC 07(Tableau v1)· SPEC 08(LLM)· SPEC 13(Tableau MCP v2)· SPEC 14(NL-to-Query)· SPEC 16(Events)
+> 依赖:SPEC 04(Auth)· SPEC 07(Tableau v1)· SPEC 08(LLM)· SPEC 13(Tableau MCP v2)· SPEC 14(NL-to-Query)· SPEC 16(Events)· SPEC 24(Task Runtime)
+>
+> **v0.2 变更**(2026-04-28):补齐 §4.2 LLM/MCP 入口改造点清单、§5.7 默认阈值参数表、§10 测试用例 P0/P1 分级、§13 开发交付约束(架构红线 / 强制检查清单 / 验证命令 / 正错示范)。原 v0.1 章节内容保留。
 
 ---
 
@@ -132,6 +134,46 @@ class CapabilityWrapper:
         """
 ```
 
+### 4.2 LLM / MCP 入口改造点清单（Phase 1.5 必改）
+
+> 这一节是 v0.2 新增。开发拿到这份清单可以直接动工，不需要再问 PM"哪些 LLM 调用要走 wrapper"。grep 路径以现有代码（截至 2026-04-28）为准；如重构发生位移，以"语义入口"为准而非具体路径。
+
+#### 4.2.1 必改入口（P0，wrapper 不接通这些位置就视为 Phase 1.5 未完成）
+
+| # | 文件 | 当前调用 | 改造后 | 阻塞下游 |
+|---|------|---------|---------|----------|
+| 1 | `backend/services/llm/nlq_service.py` | `llm_service.complete(...)` 直调 | `wrapper.invoke(principal, "llm_complete", ...)` | Spec 14 NL→VizQL |
+| 2 | `backend/services/tableau/mcp_client.py` 调用方 | `mcp_client.query_datasource(...)` 直调 | `wrapper.invoke(principal, "query_metric", ...)` | Spec 13 / 14 |
+| 3 | `backend/app/api/search.py` `/api/search/query` | `nlq_service.run(...)` 直调 | 入口先 `wrapper.invoke(...)` 再委派 | 首页问数 |
+| 4 | `backend/services/agent/engine.py` (Spec 36) | Agent 工具直调 LLM / MCP | 全部经 `wrapper.invoke` | Spec 28 / 36 |
+| 5 | `backend/services/data_agent/tools/*.py` (Spec 28 14 工具) | 内部 LLM/SQL 直调 | 工具实现内部统一走 wrapper | Spec 28 |
+| 6 | `backend/services/llm/service.py::complete` | 多供应商分发 | wrapper 调用 → 此函数变成 capability `llm_complete` 的 backend，对外只暴露 wrapper | Spec 8 |
+
+#### 4.2.2 暂不改造（P2，灰度后再切）
+
+| 入口 | 原因 |
+|------|------|
+| `backend/services/sql_agent/executor.py` (Spec 29) | Spec 29 已上线且自带审计/限流，纳入 wrapper 属重构非阻塞 |
+| `backend/services/health_scan/*` (Spec 11) | 内部任务非用户交互链路，纳入 wrapper 收益小 |
+| `backend/services/embedding/*` (Spec 17) | 嵌入异步刷新走 Celery，单独一条限流路径 |
+
+#### 4.2.3 禁止绕过（红线）
+
+- ❌ 任何**用户交互**触发的 LLM 调用绕过 wrapper（含首页 / Agent / NLQ）
+- ❌ 任何**用户交互**触发的 MCP `query_datasource` 绕过 wrapper
+- ❌ Capability 实现内部再起一次 wrapper 嵌套（防递归与重复审计）
+- ❌ 测试 mock 时直接 mock `llm_service.complete`（应 mock wrapper.invoke 或下游 backend）
+
+#### 4.2.4 接通验收
+
+```bash
+# 这两条 grep 在 Phase 1.5 完成后必须为空（除 capabilities/ 目录内部）
+! grep -rE "llm_service\.complete\(" backend/app backend/services \
+    --exclude-dir=capability --exclude-dir=tests
+! grep -rE "mcp_client\.query_datasource\(" backend/app backend/services \
+    --exclude-dir=capability --exclude-dir=tests
+```
+
 ---
 
 ## §5 Business Logic
@@ -205,6 +247,58 @@ def check(principal: dict, capability: str, params: dict) -> None:
 key 计算:`sha256(f"{capability}:{canonical_json(cache_key_fields)}")`。
 命中:响应 `meta.cached = true`,跳过下游调用。
 失效:写入时 `SETEX(ttl)`;手动清除走 admin API。
+
+### 5.7 默认阈值参数表（Phase 1.5 启用初始值）
+
+> 这一节是 v0.2 新增。所有阈值**保守起步**，可在 admin 后台热更（除 `params_schema`，热更见 §7 红线）；首次上线时不做生产数据基线，按下列默认值发布，灰度 1 周后据 metrics 调整。
+
+#### 5.7.1 限流默认（按 capability × principal）
+
+| capability | rate_limit | scope | 备注 |
+|-----------|------------|-------|------|
+| llm_complete | 60/min/user | 用户级 | LLM 单次成本高，user 维度足够 |
+| query_metric | 30/min/user | 用户级 | 含 MCP 调用，与 Tableau 抖动相关 |
+| search_asset | 120/min/user | 用户级 | 只读检索 |
+| list_datasources | 120/min/user | 用户级 | |
+| describe_datasource | 60/min/user | 用户级 | |
+| explain_asset | 30/min/user | 用户级 | LLM 加 MCP，最贵 |
+| **默认（兜底）** | 30/min/user | 用户级 | 未声明 capability 触发兜底 + 告警 |
+
+#### 5.7.2 熔断默认
+
+| 维度 | 默认值 | 说明 |
+|------|--------|------|
+| failure_threshold | 5 | 连续失败次数 |
+| failure_window_seconds | 60 | 窗口期内统计 |
+| recovery_seconds | 60 | open → half_open 等待 |
+| half_open_probe_count | 1 | half_open 放几个试探请求 |
+
+例外：`llm_complete` 的 `failure_threshold` 提高到 8（多供应商容错）。
+
+#### 5.7.3 缓存 TTL 默认
+
+| capability | ttl_seconds | 说明 |
+|-----------|------------|------|
+| query_metric | 300 | 5 分钟，与 Tableau 资产变更窗口相称 |
+| search_asset | 60 | 检索类，短缓存 |
+| list_datasources | 600 | 数据源变更频率低 |
+| describe_datasource | 300 | |
+| llm_complete | 0 | LLM 默认不缓存（除非 prompt 显式标记 idempotent） |
+| explain_asset | 600 | LLM 解释结果稳定，长缓存 |
+
+#### 5.7.4 超时默认
+
+| capability | timeout_seconds | 说明 |
+|-----------|----------------|------|
+| llm_complete | 30 | 与现有 LLM service 一致 |
+| query_metric | 30 | MCP 直连有内部超时 |
+| 其他 | 15 | 非 LLM 默认 |
+
+#### 5.7.5 阈值热更协议
+
+- 阈值通过 `admin/capabilities` 后台修改 → 写入 `bi_capability_thresholds`(新增) → wrapper 监听并热更（最终一致 ≤ 30 秒）
+- `params_schema` / `roles` / `guards.sensitivity_block` **不允许热更**（必须走 PR 改 YAML）
+- 热更操作走 audit append-only
 
 ---
 
@@ -328,23 +422,31 @@ sequenceDiagram
 
 ## §10 Tests
 
-### 10.1 单元
+### 10.1 单元（**P0** 必须通过才能 ship Phase 1.5）
 
-- [ ] Registry 加载不合法 YAML → 启动失败 + CAP_010
-- [ ] Authz 不足 → CAP_001,审计记 `status=denied`
-- [ ] params 不符 Schema → CAP_002
-- [ ] 敏感度拦截 → CAP_003,审计 `redacted_fields` 非空
-- [ ] 限流触发 → CAP_004,`Retry-After` 头
-- [ ] 缓存命中 → 下游不调用,`meta.cached=true`
-- [ ] 熔断 open → CAP_006;half_open 放 1 试探
-- [ ] Capability 实现抛异常 → CAP_009,审计含堆栈摘要
+- [ ] **P0** Registry 加载不合法 YAML → 启动失败 + CAP_010
+- [ ] **P0** Authz 不足 → CAP_001,审计记 `status=denied`
+- [ ] **P0** params 不符 Schema → CAP_002
+- [ ] **P0** 敏感度拦截 → CAP_003,审计 `redacted_fields` 非空
+- [ ] **P0** 限流触发 → CAP_004,响应头含 `Retry-After`
+- [ ] **P0** 缓存命中 → 下游不调用,`meta.cached=true`
+- [ ] **P0** 熔断 open → CAP_006;half_open 放 1 试探
+- [ ] **P0** Capability 实现抛异常 → CAP_009,审计含堆栈摘要
+- [ ] **P0** 关 wrapper 总开关后所有 LLM 调用立即失败（防退化测试，对应 §13 验收）
+- [ ] **P1** 阈值热更后 30 秒内生效，且 audit 写入
+- [ ] **P1** wrapper 内嵌套调用 wrapper（递归）→ 立即拒绝 + CAP_009
 
-### 10.2 集成
+### 10.2 集成（**P0** = Phase 1.5 GA 必通过；**P1** = GA 后 1 周内补齐）
 
-- [ ] LLM 输出 `{capability, params}` → Wrapper 跑通 E2E
-- [ ] 并发 30 req/user 触发限流
-- [ ] Tableau 连续 5 失败触发熔断
-- [ ] Cache 跨用户角色不串(analyst/admin 不共享 key)
+- [ ] **P0** LLM 输出 `{capability, params}` → Wrapper 跑通 E2E（首页问数）
+- [ ] **P0** 并发 30 req/user 触发限流
+- [ ] **P0** Tableau 连续 5 失败触发熔断,自动 open
+- [ ] **P0** Cache 跨用户角色不串(analyst/admin 不共享 key)
+- [ ] **P0** §4.2.4 grep 验收（无 wrapper 旁路）通过
+- [ ] **P1** Spec 36 Agent 工具全部经 wrapper 调用，trace_id 贯穿
+- [ ] **P1** Spec 24 TaskRun StepRun output_ref 与 wrapper meta.audit_id 互查可回溯
+- [ ] **P1** Multi-LLM provider 主备切换时 wrapper 视图统一（CAP_005 不抖动）
+- [ ] **P1** Redis 故障下限流 fallback 行为（拒绝 vs 放行）符合 §11 OI-B 决策
 
 ---
 
@@ -368,4 +470,109 @@ sequenceDiagram
 - [[tech-embedding-retrieval]] — 召回层(与本 spec 平行)
 - [[tech-homepage-askbar]] — 前端入口
 - SPEC 14 NL-to-Query Pipeline — LLM 输出 schema 变更的上游
+- SPEC 24 Task Runtime — StepRun 调用 wrapper 的上游编排者
 - `.claude/rules/dev-constraints.md` 通用约束（自动加载）
+
+---
+
+## §13 开发交付约束（v0.2 新增）
+
+> 对应模板 §11。Phase 1.5 ship 前必须全部满足。
+
+### 13.1 架构约束（红线）
+
+- `services/capability/` **不得** import `app/api` 层任何模块
+- `services/capability/wrapper.py` 是**唯一**对外入口；调用方禁止直接 import `services.capability.authz / sensitivity / rate_limiter / circuit_breaker / result_cache` 等子模块
+- Capability 实现（`services/capability/capabilities/*.py`）**禁止**：
+  - 直接读 `os.environ`（凭据走依赖注入）
+  - 直接连数据库（应通过 service 层）
+  - 内部嵌套调 `wrapper.invoke`（防递归 / 重复审计 / 双重计费）
+  - 返回原始 PII（必须经 ResultShaper 脱敏）
+- `wrapper.invoke` 调用链中 `trace_id` **不可断裂**（如调用方未传，wrapper 自动生成；下游必须沿用）
+- `bi_capability_invocations` 写入 **append-only**，禁 UPDATE / DELETE
+- `params_schema`、`roles`、`guards.sensitivity_block` 三类字段**禁止**运行时热更，必须走 PR 改 YAML（防权限/敏感度被旁路）
+
+### 13.2 强制检查清单（PR 拒绝条件）
+
+- [ ] §4.2.4 两条 grep 验收命令为空（无 wrapper 旁路）
+- [ ] 新增 capability 时 `config/capabilities.yaml` + `services/capability/capabilities/*.py` + 单元测试三处同步
+- [ ] 所有错误码（CAP_001~CAP_010）抛出位置都写了对应 audit 记录
+- [ ] `result_cache` 的 cache key 计算包含 `principal_role`（防越权命中）
+- [ ] capability 实现 grep 不到 `os.environ.get` / `os.getenv`
+- [ ] 测试中 mock 位置统一在 wrapper 边界，不直接 mock 下游 `llm_service.complete` / `mcp_client.query_datasource`
+
+### 13.3 验证命令
+
+```bash
+# 后端
+cd backend && python3 -m py_compile services/capability/*.py services/capability/capabilities/*.py
+cd backend && pytest tests/services/test_capability_*.py -x -q
+cd backend && pytest tests/api/test_search_via_capability.py -x -q
+
+# 红线 grep
+! grep -rE "llm_service\.complete\(" backend/app backend/services \
+    --exclude-dir=capability --exclude-dir=tests
+! grep -rE "mcp_client\.query_datasource\(" backend/app backend/services \
+    --exclude-dir=capability --exclude-dir=tests
+! grep -rE "os\.(environ|getenv)" backend/services/capability/capabilities
+
+# YAML 校验
+cd backend && python3 -m services.capability.registry --validate config/capabilities.yaml
+
+# 阈值热更端到端
+cd backend && pytest tests/admin/test_capability_threshold_hotreload.py -x
+```
+
+### 13.4 正确 / 错误示范
+
+```python
+# ✗ 错误 — 直接调 LLM，绕过 wrapper
+from services.llm.service import complete
+async def handle_query(req):
+    answer = await complete(prompt=req.prompt)
+    return answer
+
+# ✓ 正确 — 经 wrapper
+async def handle_query(req, principal):
+    result = await wrapper.invoke(
+        principal=principal,
+        capability="llm_complete",
+        params={"prompt": req.prompt},
+        trace_id=req.trace_id,
+    )
+    return result.data
+```
+
+```python
+# ✗ 错误 — Capability 内部再起 wrapper（递归 + 重复审计）
+class QueryMetric:
+    async def run(self, principal, params):
+        llm_result = await wrapper.invoke(principal, "llm_complete", ...)
+        return await mcp.query(...)
+
+# ✓ 正确 — Capability 直接调下游 backend，不起 wrapper
+class QueryMetric:
+    async def run(self, principal, params, *, llm_backend, mcp_backend):
+        plan = await llm_backend.complete(...)   # 内部 backend，由 wrapper 注入
+        return await mcp_backend.query(plan)
+```
+
+```python
+# ✗ 错误 — Cache key 不含 principal_role，admin 缓存被 analyst 命中
+key = sha256(f"query_metric:{json.dumps(params)}".encode()).hexdigest()
+
+# ✓ 正确 — 含 principal_role
+key = sha256(
+    f"query_metric:{principal['role']}:{canonical_json(params)}".encode()
+).hexdigest()
+```
+
+```python
+# ✗ 错误 — Capability 实现读环境变量
+api_key = os.environ["OPENAI_API_KEY"]
+
+# ✓ 正确 — 凭据由 wrapper 通过 backend 依赖注入
+class LLMComplete:
+    def __init__(self, llm_backend):  # backend 由 registry 装配
+        self.llm_backend = llm_backend
+```

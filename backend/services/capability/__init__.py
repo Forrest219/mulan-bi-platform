@@ -34,13 +34,14 @@ from .registry import (
 )
 from .result_cache import ResultCache
 from .sensitivity import check as sensitivity_check
-from .wrapper import CapabilityResult, CapabilityWrapper
+from .wrapper import CapabilityResult, CapabilityWrapper, register_backend
 
 __all__ = [
     # Core
     "CapabilityWrapper",
     "CapabilityResult",
     "CapabilityDefinition",
+    "register_backend",
     # Registry
     "RateLimitConfig",
     "CacheConfig",

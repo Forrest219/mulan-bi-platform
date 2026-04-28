@@ -39,6 +39,22 @@ from .registry import CapabilityDefinition, get_capability, list_all
 from .result_cache import ResultCache
 from .sensitivity import check as sensitivity_check
 
+
+# ---------------------------------------------------------------------------
+# Backend registry — maps capability.backend name → async callable
+# ---------------------------------------------------------------------------
+
+_BACKENDS: dict[str, callable] = {}
+
+
+def register_backend(name: str, handler: callable) -> None:
+    """Register a backend handler for a capability.
+
+    Handler signature: async def handler(params: dict) -> Any
+    """
+    _BACKENDS[name] = handler
+    logger.info("Backend registered: %s → %s", name, handler.__module__ or handler.__qualname__)
+
 logger = logging.getLogger(__name__)
 
 
@@ -246,11 +262,56 @@ class CapabilityWrapper:
         """
         调度具体 capability 实现。
 
-        目前是占位符，实际 downstream 调用通过 MCP 或 capability 特定实现。
+        优先从 _BACKENDS 查找已注册的 backend；fallback 到 llm_service.complete
+        作为 llm_complete capability 的 backend 实现。
         """
-        # TODO: 实际调用 downstream（Tableau MCP / SQL Engine / etc）
-        # 目前返回 mock 数据，等 downstream 实现接入
-        logger.info("Dispatching capability '%s' with params %s", capability_name, params)
+        backend_name = cap_def.backend
+
+        # 1. 已知 backend（tableau_mcp 等外部 MCP）
+        if backend_name in _BACKENDS:
+            logger.info("Dispatching capability '%s' → backend '%s'", capability_name, backend_name)
+            return await _BACKENDS[backend_name](params)
+
+        # 2. llm_service backend: complete_for_semantic (nlq/semantic 专用)
+        if backend_name == "llm":
+            from services.llm.service import LLMService
+            llm = LLMService()
+            result = await llm.complete_for_semantic(
+                prompt=params.get("prompt", ""),
+                system=params.get("system"),
+                timeout=params.get("timeout", 30),
+                purpose=params.get("purpose", "default"),
+            )
+            return result
+
+        # 3. nlq backend: delegate to nlq_service.run (nlq_search capability)
+        if backend_name == "nlq":
+            from services.llm import nlq_service as _nlq_svc
+            result = await _nlq_svc.run(
+                question=params.get("question", ""),
+                datasource_luid=params.get("datasource_luid"),
+                connection_id=params.get("connection_id"),
+                conversation_id=params.get("conversation_id"),
+                options=params.get("options"),
+                use_conversation_context=params.get("use_conversation_context", False),
+                target_sites=params.get("target_sites"),
+            )
+            return result
+
+        # 4. query_metric backend: delegate to query_executor.execute_query
+        if backend_name == "tableau_mcp":
+            from services.llm.query_executor import execute_query as _qe
+            result = await _qe(
+                datasource_luid=params.get("datasource_luid"),
+                vizql_json=params.get("vizql_json"),
+                limit=params.get("limit", 1000),
+                timeout=params.get("timeout", 30),
+                connection_id=params.get("connection_id"),
+            )
+            return result
+
+        # 5. Unknown backend → mock
+        logger.warning("Unknown backend '%s' for capability '%s', returning mock", backend_name, capability_name)
         return {"status": "ok", "capability": capability_name, "params": params}
 
 

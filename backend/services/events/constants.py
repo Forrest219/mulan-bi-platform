@@ -14,6 +14,13 @@ SEMANTIC_PUBLISH_FAILED = "semantic.publish_failed"
 SEMANTIC_ROLLBACK = "semantic.rollback"
 SEMANTIC_AI_GENERATED = "semantic.ai_generated"
 
+# === Semantic Table 语义状态流转事件（Spec 9 → Spec 16） ===
+SEMANTIC_TABLE_CREATED = "semantic_table.created"
+SEMANTIC_TABLE_SUBMITTED = "semantic_table.submitted"     # under_review 入口
+SEMANTIC_TABLE_PUBLISHED = "semantic_table.published"     # published 入口
+SEMANTIC_TABLE_DEPRECATED = "semantic_table.deprecated"   # deprecated 入口
+FIELD_SYNC_COMPLETED = "field_sync.completed"
+
 # === Health 模块事件 ===
 HEALTH_SCAN_COMPLETED = "health.scan.completed"
 HEALTH_SCAN_FAILED = "health.scan.failed"
@@ -32,6 +39,9 @@ SYSTEM_ERROR = "system.error"
 METRIC_PUBLISHED = "metric.published"
 METRIC_ANOMALY_DETECTED = "metric.anomaly.detected"
 METRIC_CONSISTENCY_FAILED = "metric.consistency.failed"
+
+# === 异常检测告警事件（Spec 30） ===
+ANOMALY_DETECTED = "anomaly.detected"
 
 # === DQC 模块事件 ===
 DQC_CYCLE_STARTED = "dqc.cycle.started"
@@ -53,6 +63,11 @@ ALL_EVENT_TYPES = [
     SEMANTIC_PUBLISH_FAILED,
     SEMANTIC_ROLLBACK,
     SEMANTIC_AI_GENERATED,
+    SEMANTIC_TABLE_CREATED,
+    SEMANTIC_TABLE_SUBMITTED,
+    SEMANTIC_TABLE_PUBLISHED,
+    SEMANTIC_TABLE_DEPRECATED,
+    FIELD_SYNC_COMPLETED,
     HEALTH_SCAN_COMPLETED,
     HEALTH_SCAN_FAILED,
     HEALTH_SCORE_DROPPED,
@@ -64,6 +79,7 @@ ALL_EVENT_TYPES = [
     METRIC_PUBLISHED,
     METRIC_ANOMALY_DETECTED,
     METRIC_CONSISTENCY_FAILED,
+    ANOMALY_DETECTED,
     DQC_CYCLE_STARTED,
     DQC_CYCLE_COMPLETED,
     DQC_ASSET_SIGNAL_CHANGED,

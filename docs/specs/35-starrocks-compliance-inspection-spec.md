@@ -83,7 +83,63 @@
 | RULE_SR_024 | DM 部门前缀 | MEDIUM | sr_layer_naming | ALL | `{"pattern": "^[a-z][a-z0-9_]+$", "databases": ["dm"]}` |
 | RULE_SR_025 | 视图命名 _vw 后缀 | MEDIUM | sr_view_naming | ALL | `{"pattern": "_vw$"}` |
 
-### 2.3 TableInfo 扩展
+### 2.4 SR 25 条合规规则清单（引擎级合规视图）
+
+> 本节将 §2.2 的 25 条规则按"StarRocks 引擎合规维度"重新映射并定型，给出工程化清单。规则编号统一使用 `SR-<类别>-<序号>` 形式（与 §2.2 `RULE_SR_*` 一一对应，由种子数据 `meta_json.engine_rule_id` 字段维护映射）。**总数严格 25 条**：Schema 8 + 分区分桶 6 + 副本与一致性 4 + 性能 4 + 元数据 3 = 25。
+
+#### 2.4.1 Schema 类（8 条）
+
+| rule_id | 名称 | 严重级别 | 触发条件（一句话） | 默认阈值 | 修复指引（≤ 30 字） |
+|---------|------|---------|-------------------|---------|--------------------|
+| SR-SCH-001 | 主键表必须显式声明 PRIMARY KEY | critical | 表 KEYS_TYPE='PRIMARY_KEYS' 但 DDL 无 PRIMARY KEY 子句 | N/A | ALTER TABLE 重建并显式声明 PRIMARY KEY |
+| SR-SCH-002 | 大宽表必须使用列存模型 | high | 列数 ≥ 200 且非列存（DUP/UNI/PRI/AGG 之外） | 列数 ≥ 200 | 重建为 DUPLICATE/PRIMARY KEY 列存表 |
+| SR-SCH-003 | 时间字段必须使用 DATETIME 而非 VARCHAR | high | 列名后缀 _time/_at/_dt 但类型为 VARCHAR/CHAR/STRING | 后缀正则 `_(time|at|dt)$` | 改为 DATETIME，迁移期双写 |
+| SR-SCH-004 | 分区列必须为 DATE/DATETIME/INT | critical | PARTITION 列类型不在 {DATE, DATETIME, INT, BIGINT} | 白名单 4 类 | 用合法类型重建分区 |
+| SR-SCH-005 | 主键长度 ≤ 128 字节 | high | PRIMARY KEY 列 SUM(byte_length) > 128 | 128 byte | 缩短主键或改用代理键 |
+| SR-SCH-006 | 表名 / 列名长度 ≤ 64 | medium | length(name) > 64 | 64 char | 改名遵循 snake_case 缩写 |
+| SR-SCH-007 | 字符集统一为 utf8mb4 | medium | session/table charset != utf8mb4 | utf8mb4 | 通过 ADMIN SET CONFIG 调整 |
+| SR-SCH-008 | 禁止 BLOB 字段 | high | 任意列类型 in {BLOB, MEDIUMBLOB, LONGBLOB} | 黑名单 | 改用对象存储 + url 列 |
+
+#### 2.4.2 分区分桶类（6 条）
+
+| rule_id | 名称 | 严重级别 | 触发条件 | 默认阈值 | 修复指引 |
+|---------|------|---------|---------|---------|---------|
+| SR-PART-001 | 单表分区数 ≤ 1000 | high | COUNT(partitions) > 1000 | 1000 | 启用动态分区 TTL，归档冷分区 |
+| SR-PART-002 | 单分区数据量 1-10GB | medium | DataSize < 1GB 或 > 10GB | [1GB, 10GB] | 调粒度（日→月）或拆分桶 |
+| SR-PART-003 | 分桶数 = 分区数据 / 1GB | high | bucket_num 不在 [1, 256] 或与 DataSize/1GB 偏差 > 50% | 1-256 | ALTER 重设 BUCKETS |
+| SR-PART-004 | 分桶列必须为高基数列 | high | DISTINCT(bucket_col)/COUNT(*) < 0.1 | 基数比 ≥ 0.1 | 换更高基数列重建 |
+| SR-BUCK-005 | 分桶列禁止为可空列 | critical | 分桶列 IS_NULLABLE='YES' | NOT NULL | 改为 NOT NULL 重建 |
+| SR-PART-006 | 大表必须按时间分区 | high | DataSize > 100GB 且无 PARTITION BY | 100GB | 加 PARTITION BY date_trunc('day', dt) |
+
+#### 2.4.3 副本与一致性（4 条）
+
+| rule_id | 名称 | 严重级别 | 触发条件 | 默认阈值 | 修复指引 |
+|---------|------|---------|---------|---------|---------|
+| SR-REP-001 | 生产环境副本数 = 3 | critical | env=prod 且 ReplicationNum != 3 | 3 | ALTER TABLE SET("default.replication_num"="3") |
+| SR-REP-002 | 测试环境副本数 ≥ 2 | high | env in {test,staging} 且 ReplicationNum < 2 | ≥ 2 | ALTER 调整 |
+| SR-REP-003 | 副本均衡度 (max-min)/avg ≤ 0.1 | medium | (max-min)/avg > 0.1 | 0.1 | 触发 ADMIN REPAIR / 均衡 |
+| SR-REP-004 | colocate group 内表副本布局一致 | high | 同一 colocate group 各表 bucket→BE 映射不一致 | 完全一致 | ADMIN SET 重新均衡 colocate group |
+
+#### 2.4.4 性能类（4 条）
+
+| rule_id | 名称 | 严重级别 | 触发条件 | 默认阈值 | 修复指引 |
+|---------|------|---------|---------|---------|---------|
+| SR-PERF-001 | 单表 Tablet 数 ≤ 30000 | high | COUNT(tablets) > 30000 | 30000 | 减少分区/分桶或合并冷分区 |
+| SR-PERF-002 | 单 Tablet 大小 ≤ 5GB | high | MAX(tablet_size) > 5GB | 5GB | 增加 BUCKETS 拆 tablet |
+| SR-PERF-003 | Compaction 累计待合并 < 100 | high | SUM(compaction_score) ≥ 100 | 100 | 排查导入频率，调 BE compaction 线程 |
+| SR-PERF-004 | 慢查询比例 < 5%（rolling 24h） | medium | slow_query / total_query > 0.05（24h 滚动） | 5% | 排查热点 SQL，加物化视图/索引 |
+
+#### 2.4.5 元数据类（3 条）
+
+| rule_id | 名称 | 严重级别 | 触发条件 | 默认阈值 | 修复指引 |
+|---------|------|---------|---------|---------|---------|
+| SR-META-001 | 表必须有 COMMENT | high | table_comment IS NULL OR length=0 | 非空 | ALTER TABLE COMMENT '...' |
+| SR-META-002 | 关键列必须有 COMMENT | high | 主键 / 分区列 / 分桶列 column_comment 为空 | 非空 | ALTER TABLE MODIFY COLUMN ... COMMENT '...' |
+| SR-META-003 | 表 owner 必须设置 | medium | table_properties 缺少 owner / owner='' | 非空 | ALTER TABLE SET("owner"="<team>") |
+
+> **规则总数校验：8 + 6 + 4 + 4 + 3 = 25**。新增 SR 规则必须同时更新本表与 §2.2 种子数据，并由 §11 强制清单第 8 项把关。
+
+### 2.5 TableInfo 扩展（原 2.3）
 
 `backend/services/ddl_checker/parser.py` 中 `TableInfo` dataclass 新增字段：
 
@@ -292,6 +348,155 @@ if db_type in ("mysql", "postgresql", "starrocks"):
 if self.config.get("db_type") in ("mysql", "starrocks"):
 ```
 
+### 4.8 规则检查 SQL 模板
+
+> 占位符约定：`{database}` = StarRocks 库名，`{table}` = 表名，`{bucket_col}` = 分桶列名。所有模板必须经 `text()` + 参数绑定执行（不允许字符串拼接）。每条返回结构统一为 `{passed: bool, actual: any, expected: any, message: str}`，由 validator 在 Python 侧组装。
+
+#### SR-PART-001 单表分区数
+
+```sql
+SELECT COUNT(*) AS partition_cnt
+FROM information_schema.partitions
+WHERE table_schema = :database AND table_name = :table;
+```
+- **期望返回**：`{passed: partition_cnt <= 1000, actual: partition_cnt, expected: "<= 1000", message: "分区数 {actual} 超阈值 1000"}`
+- **性能注意**：`information_schema.partitions` 全实例聚合，单次扫描 O(全部表)。**必须按 `(database, table)` 维度缓存 5 分钟**，scan run 内复用。
+
+#### SR-PART-002 单分区大小
+
+```sql
+SHOW PARTITIONS FROM `{database}`.`{table}`;
+```
+- **解析字段**：`DataSize`（字符串如 `"3.2 GB"`，需 Python 端归一为字节）
+- **期望返回**：`{passed: 1GB <= max_size <= 10GB, actual: max_size_bytes, expected: "[1GB, 10GB]", message: "存在分区 size={actual} 越界"}`
+- **性能注意**：`SHOW PARTITIONS` 无法用 `text()` 参数化，必须用白名单校验 `{database}/{table}` 后再拼接（防 SQL 注入）。
+
+#### SR-REP-001 副本数
+
+```sql
+SHOW PARTITIONS FROM `{database}`.`{table}`;
+```
+- **解析字段**：`ReplicationNum`（int）
+- **期望返回**：`{passed: all(rep == 3), actual: distinct_rep_set, expected: 3, message: "存在分区副本数 {actual}"}`
+- **性能注意**：与 SR-PART-002 共用一次 `SHOW PARTITIONS` 输出，validator 一次解析多规则。
+
+#### SR-PERF-001 Tablet 数
+
+```sql
+SELECT COUNT(*) AS tablet_cnt
+FROM information_schema.tablets
+WHERE database_name = :database AND table_name = :table;
+```
+- **期望返回**：`{passed: tablet_cnt <= 30000, actual: tablet_cnt, expected: "<= 30000", message: "Tablet 数 {actual} 超阈值"}`
+- **性能注意**：`information_schema.tablets` 行级开销大，巡检建议批量 `WHERE database_name = :database GROUP BY table_name`，per-database 一次拉齐全表。
+
+#### SR-PERF-003 Compaction 累计
+
+```sql
+-- Step 1：拿到所有 BE
+SHOW PROC '/backends';
+-- Step 2：对目标表查 tablet compaction score（StarRocks 3.x）
+SHOW PROC '/dbs/{db_id}/{table_id}/partitions/{partition_id}/{index_id}';
+```
+- **解析字段**：每行 `CompactionScore`，求和与 max
+- **期望返回**：`{passed: sum_score < 100, actual: sum_score, expected: "< 100", message: "Compaction 待合并 {actual}"}`
+- **性能注意**：需要先拿 db_id/table_id（来自 `information_schema.tables_config`），整个流程为多次 RPC，**每个 scan run 限频 1 次/分钟**，结果落 `bi_health_scan_records.metrics_json`。
+
+#### SR-META-001 表注释
+
+```sql
+SELECT table_comment
+FROM information_schema.tables
+WHERE table_schema = :database AND table_name = :table;
+```
+- **期望返回**：`{passed: table_comment IS NOT NULL AND length > 0, actual: table_comment, expected: "non-empty", message: "表 {database}.{table} 缺少 COMMENT"}`
+- **性能注意**：可与扫表流程的 `SELECT * FROM information_schema.tables WHERE table_schema = :database` 合并（一次拉全部表）。
+
+#### SR-SCH-001 主键
+
+```sql
+SHOW CREATE TABLE `{database}`.`{table}`;
+```
+- **解析**：取返回的 DDL 文本，正则 `PRIMARY\s+KEY\s*\(([^)]+)\)`；同时从 `information_schema.tables_config.TABLE_MODEL` 判断是否 `PRIMARY_KEYS`。
+- **期望返回**：`{passed: model != PRIMARY_KEYS OR has_pk_clause, actual: {model, has_pk_clause}, expected: "PRIMARY_KEYS ⇒ has_pk_clause=true", message: "主键模型表缺少 PRIMARY KEY 子句"}`
+- **性能注意**：`SHOW CREATE TABLE` 不能 `WHERE` 过滤，必须逐表执行，**强制走表名白名单校验后拼接**。
+
+#### SR-SCH-004 分区列类型
+
+```sql
+SELECT c.column_name, c.data_type
+FROM information_schema.columns c
+JOIN information_schema.partitions p
+  ON c.table_schema = p.table_schema AND c.table_name = p.table_name
+WHERE c.table_schema = :database
+  AND c.table_name = :table
+  AND FIND_IN_SET(c.column_name, p.partition_key) > 0;
+```
+- **期望返回**：`{passed: all(data_type in ['DATE','DATETIME','INT','BIGINT']), actual: [(col, type), ...], expected: "DATE/DATETIME/INT/BIGINT", message: "分区列 {col} 类型 {type} 非法"}`
+- **性能注意**：单表 JOIN 廉价；批量巡检时按 `:database` 一次性拉所有表的分区列（去掉 `:table` 条件）后在 Python 端分组。
+
+> **缓存策略**：在 `validator.py` 中以 `(scan_id, database, query_kind)` 为 key 维护内存缓存（TTL=scan run 生命周期），避免同一规则集对同一表重复发起 `information_schema.*` 查询。
+
+### 4.9 DatabaseRulesAdapter 过滤契约
+
+#### 接口签名
+
+```python
+class DatabaseRulesAdapter:
+    def get_rules_for(self, db_type: str) -> list[Rule]: ...
+```
+
+#### 输入
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `db_type` | `str` | 取自 connection 配置，规范化为小写；`'starrocks'` 触发 SR 规则集 |
+| `connection_id` | `int`（构造期） | adapter 实例化时绑定，用于错误信息回填 |
+
+#### 输出
+
+- `db_type='starrocks'` ⇒ 仅返回 `rule_id LIKE 'SR-%'`（即 §2.4 全部 25 条）+ `db_type='all'` 的通用规则
+- `db_type='postgresql'` ⇒ 仅返回 `rule_id LIKE 'PG-%'` + `'all'`
+- `db_type='mysql'` ⇒ 仅返回 `rule_id LIKE 'RULE_%'`（兼容存量）+ `'all'`
+- 输出顺序：`level=critical → high → medium → low`，同级按 `rule_id` 字典序
+
+#### 错误
+
+| 错误码 | 触发 | HTTP | 说明 |
+|--------|------|------|------|
+| `SR_ADAPT_001` | connection.db_type 不在已支持列表，但调用方仍传入了 `'starrocks'` | 400 | "connection #{id} 类型不是 starrocks，无法加载 SR 规则" |
+
+#### 实现红线
+
+- **不在 adapter 内做 SQL 调用**——规则来自 `RuleCache`/`bi_rule_configs`，纯内存过滤。
+- 过滤后 `len(rules) == 0` 不算错误（说明该 db_type 暂无启用规则），返回空列表 + WARN 日志。
+- 同一 adapter 实例必须可对不同 `db_type` 多次调用并返回稳定结果（无副作用）。
+
+### 4.10 TableInfo.database 注入契约
+
+#### 契约
+
+巡检引擎 `DDLScanner.scan_all_tables()` 在构造每个 `TableInfo` 时**必须**填充 `database` 字段，来源优先级：
+
+1. `connection.config["database"]`（数据源注册时的库名，单数据源=单库，见 §10 #2 决议）
+2. `information_schema.tables.table_schema`（兜底，确保多库扫描场景仍能拿到正确 schema）
+3. 上述两者均缺失 ⇒ 抛 `SR_ADAPT_002`
+
+#### 错误
+
+| 错误码 | 触发 | HTTP | 说明 |
+|--------|------|------|------|
+| `SR_ADAPT_002` | `TableInfo.database` 为空字符串或 None，但本次 scan db_type='starrocks' | 500 | "TableInfo.database 注入缺失，scan abort（避免误判）" |
+
+#### 失败优先策略
+
+- **缺失即失败，不允许降级**：SR 规则中 SR-001/008/009/010/011/015/021 等都依赖 `database` 判定分层。注入缺失时若继续运行 → 误判全表（误报或漏报）危险性高于直接失败。
+- 失败动作：`HealthScanEngine` 捕获 `SR_ADAPT_002` 后将 `scan_record.status='failed'`，写入 `error_message`，**不写任何 issues**。
+
+#### 测试 P0
+
+- 构造 `TableInfo(name='ods_db__crm__user', database='')`，调用 `_check_sr_layer_naming` ⇒ 必须抛 `SR_ADAPT_002`，**不得**被静默吞掉而误判。
+
 ---
 
 ## 5. 错误码
@@ -301,8 +506,10 @@ if self.config.get("db_type") in ("mysql", "starrocks"):
 | HS_001 | 404 | 数据源不存在 | 已有 |
 | HS_002 | 500 | 扫描执行失败 | 已有 |
 | DDL_010 | 400 | 不支持的数据库类型 | `db_type` 不在支持列表 — 本次加入 `starrocks` 后不再触发 |
+| SR_ADAPT_001 | 400 | connection 类型与请求 db_type 不匹配 | DatabaseRulesAdapter 收到 `'starrocks'` 但 connection 实际非 SR（见 §4.9） |
+| SR_ADAPT_002 | 500 | TableInfo.database 注入缺失 | StarRocks 巡检遍历表时未注入 database 字段（见 §4.10） |
 
-不新增错误码。
+新增 2 个 SR 适配层错误码（`SR_ADAPT_001/002`），用于隔离 adapter 与 scanner 的契约违规，不与现有 `HS_*` / `DDL_*` 冲突。
 
 ---
 
@@ -413,6 +620,11 @@ sequenceDiagram
 | 13 | 前端健康中心「数仓合规」Tab | Tab 可见，选择 StarRocks 数据源，触发扫描 | P1 |
 | 14 | 表名含中文 | SR-022 HIGH 违规 | P2 |
 | 15 | 表名含版本号 _v2 | SR-023 MEDIUM 违规 | P2 |
+| 16 | §2.4 25 条 SR 规则全部就位 | 启动时种子加载，缺一即 `seed_defaults()` 抛异常使 worker 启动失败 | P0 |
+| 17 | PG 数据源扫描不会执行 SR 规则 | DatabaseRulesAdapter 过滤后 SR 规则数 = 0；扫描结果零 SR-* violations | P0 |
+| 18 | SR 数据源扫描不会执行 PG 规则 | 同上反向；扫描结果零 PG-* violations | P0 |
+| 19 | 至少 5 条核心 SQL 模板在真实 SR 测试库跑通 | SR-PART-001/002、SR-REP-001、SR-PERF-001、SR-META-001 均返回预期结构 | P0 |
+| 20 | TableInfo.database 缺失时巡检直接抛 SR_ADAPT_002 | scan_record.status='failed'，无 issues 写入，error_message 含错误码 | P0 |
 
 ### 9.2 验收标准
 
@@ -490,6 +702,8 @@ sequenceDiagram
 - [ ] 种子数据 rule_id 使用 `RULE_SR_*` 前缀
 - [ ] `config_json` 中的 regex 用架构设计文档正例/反例验证
 - [ ] 前端文案全中文（"数仓合规"不是"Compliance"）
+- [ ] 新增 SR 规则必须同步：种子数据（§2.2）+ 引擎清单（§2.4）+ SQL 模板（§4.8）+ 修复指引；缺一不可合并
+- [ ] DatabaseRulesAdapter 单元测试必须覆盖每种 db_type 的过滤分支（mysql / postgresql / starrocks / 未知类型 → SR_ADAPT_001）
 
 ### 正确 / 错误示范
 

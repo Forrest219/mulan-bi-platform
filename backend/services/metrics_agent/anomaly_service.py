@@ -364,6 +364,7 @@ async def run_anomaly_detection(
 
     # commit 成功后批量发射事件（失败不阻断）
     from services.metrics_agent.events import emit_anomaly_detected as _emit_anomaly
+    from services.metrics_agent.events import publish_anomaly_event as _publish_anomaly
     for _evt in _pending_anomaly_events:
         try:
             _emit_anomaly(
@@ -379,6 +380,25 @@ async def run_anomaly_detection(
             logger.warning(
                 "emit_anomaly_detected 失败（已忽略）：anomaly_id=%s, error=%s",
                 _evt["anomaly_id"],
+                _exc,
+            )
+        try:
+            # Spec 30: 额外发射 anomaly.detected 事件（含完整 extra_data）
+            _publish_anomaly(
+                db=db,
+                metric_id=_evt["metric_id"],
+                metric_name=_evt["metric_name"],
+                algorithm=_evt["detection_method"],
+                anomaly_count=1,
+                max_score=_evt["deviation_score"],
+                window_start="",
+                window_end="",
+                tenant_id=_evt["tenant_id"],
+            )
+        except Exception as _exc:
+            logger.warning(
+                "publish_anomaly_event 失败（已忽略）：metric_id=%s, error=%s",
+                _evt["metric_id"],
                 _exc,
             )
 

@@ -273,11 +273,36 @@ def list_versions(
     db=Depends(get_db),
 ):
     """查询指标变更版本列表，分页（analyst+）"""
-    # P2-2：改为标准 501 HTTP 响应，而非触发 500 的 NotImplementedError
-    raise HTTPException(
-        status_code=501,
-        detail={"error_code": "NOT_IMPLEMENTED", "message": "版本历史接口待实现"},
+    import math
+
+    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    items, total = registry.get_versions(
+        db,
+        metric_id=metric_id,
+        tenant_id=tenant_id,
+        page=page,
+        page_size=page_size,
     )
+    return {
+        "metric_id": str(metric_id),
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": math.ceil(total / page_size) if page_size else 0,
+        "items": [
+            {
+                "id": str(v.id),
+                "metric_id": str(v.metric_id),
+                "version": v.version,
+                "change_type": v.change_type,
+                "changes": v.changes,
+                "changed_by": v.changed_by,
+                "change_reason": v.change_reason,
+                "created_at": v.created_at.isoformat() if v.created_at else None,
+            }
+            for v in items
+        ],
+    }
 
 
 # =============================================================================
@@ -403,6 +428,82 @@ async def detect_anomalies(
         threshold=threshold,
     )
     return result
+
+
+@router.get(
+    "/detect",
+    summary="滑动窗口异常检测（单指标）",
+)
+def detect_anomalies(
+    metric_id: uuid.UUID = Query(..., description="指标 ID"),
+    method: str = Query(default="zscore", description="算法：zscore | quantile"),
+    window_size: int = Query(default=7, ge=3, le=365, description="滑动窗口大小"),
+    k: float = Query(default=1.5, ge=0.1, le=10.0, description="IQR 倍数（quantile 时有效）"),
+    min_periods: int = Query(default=3, ge=2, le=30, description="最小数据点数"),
+    current_user: dict = Depends(require_roles(["analyst", "data_admin", "admin"])),
+    db=Depends(get_db),
+):
+    """
+    对指定指标执行滑动窗口异常检测（analyst+）。
+
+    算法说明：
+    - zscore：滑动窗口计算均值/std，异常定义 z > 3.0
+    - quantile：滑动窗口计算 Q1/Q3/IQR，异常定义 value < Q1-k*IQR 或 > Q3+k*IQR
+
+    误报窗口：连续 3 个异常点才算真正异常
+
+    示例：
+    GET /api/metrics/detect?metric_id=1&method=quantile&window_size=7&k=1.5
+    """
+    from models.metrics import BiMetricDefinition, BiMetricAnomaly
+    from services.metrics.service import detect_anomalies as _detect
+
+    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+
+    # 查询指标定义
+    metric = db.query(BiMetricDefinition).filter(
+        BiMetricDefinition.id == metric_id,
+        BiMetricDefinition.tenant_id == tenant_id,
+    ).first()
+
+    if not metric:
+        raise HTTPException(status_code=404, detail={"error_code": "MC_404", "message": f"指标不存在：{metric_id}"})
+
+    # 拉取历史每日聚合值（复用 anomaly_service 的查询逻辑）
+    from services.metrics_agent.anomaly_service import _fetch_daily_values
+
+    values = _fetch_daily_values(db, metric, window_days=window_size)
+    if not values:
+        return {
+            "metric_id": str(metric_id),
+            "anomalies": [],
+            "lower_bound": 0.0,
+            "upper_bound": 0.0,
+            "q1": 0.0,
+            "q3": 0.0,
+            "iqr": 0.0,
+            "method": method,
+            "window_size": window_size,
+            "k": k,
+            "message": "数据不足或无数据",
+        }
+
+    result = _detect(
+        series=values,
+        method=method,
+        window_size=window_size,
+        k=k,
+        min_periods=min_periods,
+    )
+
+    return {
+        "metric_id": str(metric_id),
+        "metric_name": metric.name,
+        "data_points": len(values),
+        **result,
+        "window_size": window_size,
+        "k": k,
+    }
 
 
 @router.get(

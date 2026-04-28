@@ -16,6 +16,7 @@ from app.core.database import SessionLocal
 logger = logging.getLogger(__name__)
 
 _trace_id_var: ContextVar[Optional[str]] = ContextVar("capability_trace_id", default=None)
+_principal_var: ContextVar[Optional[dict]] = ContextVar("capability_principal", default=None)
 
 
 def new_trace_id() -> str:
@@ -28,6 +29,16 @@ def new_trace_id() -> str:
 def get_trace_id() -> Optional[str]:
     """获取当前 context 的 trace_id"""
     return _trace_id_var.get()
+
+
+def set_principal(principal: dict) -> None:
+    """设置当前请求的 principal 到 context（供下游调用链路获取）"""
+    _principal_var.set(principal)
+
+
+def get_principal() -> Optional[dict]:
+    """获取当前 context 的 principal"""
+    return _principal_var.get()
 
 
 @dataclass

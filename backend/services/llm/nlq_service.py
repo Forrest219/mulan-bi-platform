@@ -7,10 +7,11 @@ import re
 import tiktoken
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
+from contextvars import ContextVar
 
 from sqlalchemy.orm import Session
 
-from services.capability.audit import get_trace_id
+from services.capability.audit import get_trace_id, get_principal
 from services.llm.service import llm_service
 from services.llm.prompts import ONE_PASS_NL_TO_QUERY_TEMPLATE, ONE_PASS_RETRY_TEMPLATE
 from services.tableau.models import TableauDatabase, TableauAsset
@@ -104,6 +105,7 @@ def execute_query(
     limit: int = 1000,
     timeout: int = 30,
     connection_id: Optional[int] = None,
+    wrapper=None,
 ) -> Dict[str, Any]:
     """
     Stage 3：查询执行。
@@ -121,6 +123,7 @@ def execute_query(
         limit: 最大返回行数（默认 1000）
         timeout: 查询超时秒数
         connection_id: 租户连接 ID（必填，用于 MCP 路由到正确的 Tableau Site）
+        wrapper: CapabilityWrapper 实例（可选，用于包装 query_metric capability）
 
     返回：
         {"fields": [...], "rows": [[...], ...]}
@@ -129,6 +132,26 @@ def execute_query(
         NLQError: NLQ_006（执行失败）/ NLQ_007（超时）/ NLQ_009（无权限）
     """
     from services.tableau.mcp_client import get_tableau_mcp_client, TableauMCPError
+
+    # T1.3 入口2：优先通过 wrapper.invoke("query_metric") 包装 MCP 调用
+    # 先从 context var 获取（被 run() 设置），再从参数获取（直接传入优先）
+    _ctx_wrapper = get_wrapper()
+    effective_wrapper = wrapper if wrapper is not None else _ctx_wrapper
+
+    if effective_wrapper is not None:
+        principal = get_principal() or {"id": 0, "role": "analyst"}
+        cap_result = effective_wrapper.invoke(
+            principal=principal,
+            capability_name="query_metric",
+            params={
+                "datasource_luid": datasource_luid,
+                "vizql_json": vizql_json,
+                "limit": limit,
+                "timeout": timeout,
+                "connection_id": connection_id,
+            },
+        )
+        return cap_result.data if hasattr(cap_result, "data") else cap_result
 
     if connection_id is None:
         # Fallback：当 connection_id=None 时，从活跃 MCP server config 获取 credentials
@@ -189,6 +212,98 @@ def execute_query(
         raise NLQError(nlq_code, message=e.message, details=e.details)
 
 logger = logging.getLogger(__name__)
+
+# === T1.3 入口1+2 共享：CapabilityWrapper context var ===
+# 供 execute_query（入口2）和内部 LLM 调用（入口1）从 context 获取 wrapper 实例
+_wrapper_ctx: ContextVar[Optional[Any]] = ContextVar("nlq_wrapper", default=None)
+
+
+def set_wrapper(wrapper: Any) -> None:
+    """设置当前请求的 CapabilityWrapper 到 context（供 execute_query 等获取）"""
+    _wrapper_ctx.set(wrapper)
+
+
+def get_wrapper() -> Any:
+    """获取当前请求的 CapabilityWrapper（可能为 None）"""
+    return _wrapper_ctx.get()
+
+
+# === T1.3 入口3：NLQ 完整流水线入口（供 search.py /api/search/query 委派）===
+async def run(
+    question: str,
+    datasource_luid: Optional[str] = None,
+    connection_id: Optional[int] = None,
+    conversation_id: Optional[str] = None,
+    options: Optional[dict] = None,
+    use_conversation_context: bool = False,
+    target_sites: Optional[list] = None,
+    request=None,  # FastAPI Request（可选，用于提取 trace_id）
+    response=None,  # FastAPI Response（可选）
+    user: Optional[dict] = None,  # 用户 principal dict
+    db: Optional[Any] = None,  # SQLAlchemy Session
+    wrapper=None,  # CapabilityWrapper 实例（T1.3 入口3 由 search.py 传入）
+) -> Dict[str, Any]:
+    """
+    NLQ 完整流水线入口（Entry 3）。
+
+    供 search.py /api/search/query 委派使用：
+      result = await wrapper.invoke(principal, "nlq_search", params)  # 计量层
+      result = await nlq_service.run(**params)                       # 执行层
+
+    参数（与 QueryRequest 对齐）：
+        question: 用户自然语言问题
+        datasource_luid: 指定数据源 LUID
+        connection_id: 指定连接 ID
+        conversation_id: 对话 ID（追问用）
+        options: 查询选项（如 limit）
+        use_conversation_context: 是否使用追问上下文
+        target_sites: 多站点并发目标
+        request: FastAPI Request（用于 trace_id）
+        response: FastAPI Response（用于 trace_id 透传）
+        user: 用户 principal dict（id, role, tenant_id）
+        db: SQLAlchemy Session
+        wrapper: CapabilityWrapper 实例（由 search.py 传入）
+
+    返回：
+        NLQ 查询结果 dict（与 search.py /api/search/query 响应格式一致）
+    """
+    from services.capability.audit import set_principal, set_trace_id
+    import uuid
+
+    # ── 1. 初始化上下文 ───────────────────────────────────────
+    if request is not None:
+        incoming_trace = request.headers.get("X-Trace-ID") if hasattr(request, "headers") else None
+        trace_id = incoming_trace or str(uuid.uuid4())
+    else:
+        trace_id = str(uuid.uuid4())
+
+    # 设置 audit context
+    set_trace_id(trace_id)
+    if user:
+        set_principal(user)
+
+    # ── 2. 设置 wrapper 到 context var（供 execute_query 等获取）──
+    if wrapper is not None:
+        set_wrapper(wrapper)
+
+    # ── 3. 委派给 search.py 的核心查询逻辑执行 ──────────────────
+    from app.api.search import _execute_nlq_pipeline
+    result = await _execute_nlq_pipeline(
+        question=question,
+        datasource_luid=datasource_luid,
+        connection_id=connection_id,
+        conversation_id=conversation_id,
+        options=options,
+        use_conversation_context=use_conversation_context,
+        target_sites=target_sites,
+        request=request,
+        response=response,
+        user=user,
+        db=db,
+        trace_id=trace_id,
+    )
+    return result
+
 
 # === PRD §10.2 数据量限制常量 ===
 MAX_QUERY_LENGTH = 500
@@ -588,12 +703,28 @@ async def _retry_field_consistency(
         available_fields=available_fields_str,
     ) + "\n\n原始问题：\n" + prompt
 
-    result = await llm_service.complete_for_semantic(
-        prompt=retry_prompt,
-        system=system_prompt,
-        timeout=30,
-        purpose="nlq",
-    )
+    # T1.3 入口1：一致性重试时也通过 wrapper.invoke("llm_complete") 包装
+    wrapper = get_wrapper()
+    if wrapper is not None:
+        principal = get_principal() or {"id": 0, "role": "analyst"}
+        cap_result = await wrapper.invoke(
+            principal=principal,
+            capability_name="llm_complete",
+            params={
+                "prompt": retry_prompt,
+                "system": system_prompt,
+                "timeout": 30,
+                "purpose": "nlq",
+            },
+        )
+        result = cap_result.data if hasattr(cap_result, "data") else cap_result
+    else:
+        result = await llm_service.complete_for_semantic(
+            prompt=retry_prompt,
+            system=system_prompt,
+            timeout=30,
+            purpose="nlq",
+        )
 
     if "error" in result:
         return None, f"一致性重试 LLM 调用失败：{result['error']}"
@@ -730,16 +861,32 @@ async def one_pass_llm(
 
     system_prompt = "你是一个 Tableau 数据查询专家。"
 
-    # 首次调用：使用 complete_for_semantic（Spec 14 v1.1 §5.1 + Spec 12 v1.2 §4.2）
-    # - temperature=0.1
-    # - OpenAI: response_format={"type": "json_object"}
-    # - Anthropic: 仅 temperature=0.1（不支持 response_format）
-    result = await llm_service.complete_for_semantic(
-        prompt=prompt,
-        system=system_prompt,
-        timeout=30,
-        purpose="nlq",
-    )
+    # T1.3 入口1：优先通过 wrapper.invoke("llm_complete") 包装 LLM 调用
+    wrapper = get_wrapper()
+    if wrapper is not None:
+        principal = get_principal() or {"id": 0, "role": "analyst"}
+        cap_result = await wrapper.invoke(
+            principal=principal,
+            capability_name="llm_complete",
+            params={
+                "prompt": prompt,
+                "system": system_prompt,
+                "timeout": 30,
+                "purpose": "nlq",
+            },
+        )
+        result = cap_result.data if hasattr(cap_result, "data") else cap_result
+    else:
+        # 首次调用：使用 complete_for_semantic（Spec 14 v1.1 §5.1 + Spec 12 v1.2 §4.2）
+        # - temperature=0.1
+        # - OpenAI: response_format={"type": "json_object"}
+        # - Anthropic: 仅 temperature=0.1（不支持 response_format）
+        result = await llm_service.complete_for_semantic(
+            prompt=prompt,
+            system=system_prompt,
+            timeout=30,
+            purpose="nlq",
+        )
 
     if "error" in result:
         raise NLQError("NLQ_008", details={"llm_error": result["error"]})
@@ -804,12 +951,28 @@ async def _retry_with_feedback(
     """
     retry_prompt = ONE_PASS_RETRY_TEMPLATE.format(error_details=error_details) + "\n\n原始 Prompt：\n" + prompt
 
-    result = await llm_service.complete_for_semantic(
-        prompt=retry_prompt,
-        system=system_prompt,
-        timeout=30,
-        purpose="nlq",
-    )
+    # T1.3 入口1：重试时也通过 wrapper.invoke("llm_complete") 包装
+    wrapper = get_wrapper()
+    if wrapper is not None:
+        principal = get_principal() or {"id": 0, "role": "analyst"}
+        cap_result = await wrapper.invoke(
+            principal=principal,
+            capability_name="llm_complete",
+            params={
+                "prompt": retry_prompt,
+                "system": system_prompt,
+                "timeout": 30,
+                "purpose": "nlq",
+            },
+        )
+        result = cap_result.data if hasattr(cap_result, "data") else cap_result
+    else:
+        result = await llm_service.complete_for_semantic(
+            prompt=retry_prompt,
+            system=system_prompt,
+            timeout=30,
+            purpose="nlq",
+        )
 
     if "error" in result:
         return None, f"重试失败：{result['error']}"

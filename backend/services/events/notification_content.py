@@ -195,6 +195,23 @@ def build_metric_anomaly_detected_content(payload: Dict[str, Any]) -> tuple:
     return title, content
 
 
+def build_anomaly_detected_content(payload: Dict[str, Any]) -> tuple:
+    """anomaly.detected — 异常告警邮件/站内模板（Spec 30）"""
+    title = f"异常告警：{payload.get('metric_name', '未知指标')}"
+    detected_at = payload.get("detected_at", "未知")
+    score = payload.get("max_score") or payload.get("deviation_score") or 0.0
+    link = payload.get("link") or ""
+    content = (
+        f"检测算法：{payload.get('algorithm', payload.get('detection_method', '未知'))}\n"
+        f"异常点数量：{payload.get('anomaly_count', 1)}\n"
+        f"最大偏差分数：{score:.4f}\n"
+        f"检测时间：{detected_at}\n"
+        f"窗口区间：{payload.get('window_start', 'N/A')} ~ {payload.get('window_end', 'N/A')}\n"
+        + (f"查看详情：{link}" if link else "")
+    )
+    return title, content
+
+
 def build_metric_consistency_failed_content(payload: Dict[str, Any]) -> tuple:
     """metric.consistency.failed"""
     title = "指标一致性校验失败"
@@ -277,6 +294,7 @@ CONTENT_BUILDERS = {
     "metric.published": build_metric_published_content,
     "metric.anomaly.detected": build_metric_anomaly_detected_content,
     "metric.consistency.failed": build_metric_consistency_failed_content,
+    "anomaly.detected": build_anomaly_detected_content,
     "dqc.cycle.completed": build_dqc_cycle_completed_content,
     "dqc.asset.signal_changed": build_dqc_asset_signal_changed_content,
     "dqc.asset.p0_triggered": build_dqc_asset_p0_triggered_content,

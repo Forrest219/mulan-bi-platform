@@ -664,3 +664,39 @@ def lookup_metrics(
         "metrics": found,
         "not_found": not_found,
     }
+
+
+# =============================================================================
+# 版本历史查询
+# =============================================================================
+
+def get_versions(
+    db,
+    metric_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list["BiMetricVersion"], int]:
+    """
+    查询指标版本历史，分页返回。
+
+    Returns:
+        (items: list[BiMetricVersion], total: int)
+    """
+    # 先校验指标存在且属于该租户
+    _get_metric_or_404(db, metric_id, tenant_id)
+
+    q = db.query(BiMetricVersion).filter(
+        BiMetricVersion.metric_id == metric_id,
+        BiMetricVersion.tenant_id == tenant_id,
+    )
+
+    total = q.count()
+    offset = (page - 1) * page_size
+    items = (
+        q.order_by(BiMetricVersion.version.desc())
+        .offset(offset)
+        .limit(page_size)
+        .all()
+    )
+    return items, total

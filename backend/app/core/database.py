@@ -54,7 +54,7 @@ def init_db():
         from services.tableau.models import TableauConnection, TableauAsset, TableauAssetDatasource, TableauSyncLog, TableauDatasourceField
         from services.health_scan.models import HealthScanRecord, HealthScanIssue
         from services.semantic_maintenance.models import TableauDatasourceSemantics, TableauDatasourceSemanticVersion, TableauFieldSemantics, TableauFieldSemanticVersion, TableauPublishLog
-        from services.events.models import BiEvent, BiNotification
+        from services.events.models import BiEvent, BiNotification, BiEventSubscription
         from services.knowledge_base.models import KbGlossary, KbSchema, KbDocument, KbEmbedding
         from services.governance.models import QualityRule, QualityResult, QualityScore
 

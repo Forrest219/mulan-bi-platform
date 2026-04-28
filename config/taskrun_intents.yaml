@@ -1,0 +1,7 @@
+# Task Runtime Intent 白名单（Spec 24 §4.2）
+# 新增 intent 时必须同步更新本文件 + 单元测试
+allowed:
+  - agent_chat      # Agent 对话模式
+  - nlq_query       # NLQ 查询模式
+  - bulk_action     # 批量操作（仅 admin/data_admin 可用）
+  - health_scan     # 健康扫描（仅 admin/data_admin 可用）

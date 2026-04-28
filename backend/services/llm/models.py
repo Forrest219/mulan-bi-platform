@@ -138,6 +138,32 @@ class LLMConfigDatabase:
         finally:
             session.close()
 
+    def get_active_configs(self, purpose: str = "default") -> list:
+        """
+        获取指定 purpose 下所有活跃配置，按 priority DESC 排序。
+
+        用于 complete() fallback 链路：尝试所有活跃配置直到成功。
+        """
+        session = self.get_session()
+        try:
+            configs = (
+                session.query(LLMConfig)
+                .filter(LLMConfig.purpose == purpose, LLMConfig.is_active == True)
+                .order_by(LLMConfig.priority.desc())
+                .all()
+            )
+            if not configs and purpose != "default":
+                # Fallback to default purpose
+                configs = (
+                    session.query(LLMConfig)
+                    .filter(LLMConfig.purpose == "default", LLMConfig.is_active == True)
+                    .order_by(LLMConfig.priority.desc())
+                    .all()
+                )
+            return configs
+        finally:
+            session.close()
+
     def save_config(
         self,
         provider,

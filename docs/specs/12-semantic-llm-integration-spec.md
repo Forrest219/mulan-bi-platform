@@ -2,8 +2,8 @@
 
 | 属性 | 值 |
 |------|-----|
-| 版本 | v1.2 |
-| 日期 | 2026-04-06 |
+| 版本 | v1.3 |
+| 日期 | 2026-04-28 |
 | 状态 | 草稿（修订中） |
 | 作者 | Mulan BI Platform Team |
 | 模块路径 | `backend/services/semantic_maintenance/` + `backend/services/llm/` |
@@ -24,6 +24,13 @@
 9. [时序图](#9-时序图)
 10. [测试策略](#10-测试策略)
 11. [开放问题](#11-开放问题)
+12. [数据模型（跨引用）](#12-数据模型跨引用)
+13. [API 端点设计](#13-api-端点设计)
+14. [角色权限矩阵](#14-角色权限矩阵)
+15. [验收标准](#15-验收标准)
+16. [Mock 与测试约束](#16-mock-与测试约束)
+17. [开发交付约束](#17-开发交付约束)
+18. [TokenBudget 统一控制器（v1.3 新增）](#18-tokenbudget-统一控制器v13-新增)
 
 ---
 
@@ -168,6 +175,8 @@ Token 估算规则：
 
 - 优先：使用 `tiktoken.get_encoding("cl100k_base")` 进行精确计算
 - 回退：无 tiktoken 时使用保守截断（按中文字符 2.0 token/字估算，保证不超限）
+
+> **v1.3 注**：本节阈值（3000 tokens）已迁移到 `config/token_budget.yaml` 的 `semantic_field/ds` scenario，由统一 TokenBudget 模块管理（见 §18）。
 
 ### 3.3 字段元数据序列化格式
 
@@ -890,8 +899,9 @@ sequenceDiagram
 | OI-07 | 多模型路由策略：不同场景（语义生成 vs NL-to-Query）是否需要使用不同的模型和参数（如 temperature）？当前为单配置模式 | P2 | 待讨论 |
 | OI-08 | NL-to-VizQL 的字段模糊匹配逻辑是否需要引入向量相似度计算，而非简单的字符串匹配？ | P3 | ✅ **已解决**（NL-to-VizQL 已从本规格书移出，相关问题见 Spec 14） |
 | OI-09 | 错误码前缀：`ARCHITECTURE.md` §6.2 使用 `SM_006`，本规格书使用 `SLI_003`，需协商统一命名 | P1 | ✅ **已解决**（SLI_00x 为本层统一前缀，ARCHITECTURE.md §6.2 中的 SM_006 已移除引用） |
+| OI-10 | Token 预算控制目前内嵌在语义生成场景；NLQ / Agent / RAG 等下游场景各自实现，缺少跨场景统一接口、超限熔断契约与计费埋点收口 | **P0** | ✅ **已解决**（v1.3 抽出 `services/token_budget/` 统一控制器，方案见 §18） |
 
-> **开发前置要求声明**：OI-01（ContextAssembler 抽取）和 OI-02（tiktoken 精确计算）均已在代码中完成实现，不再阻塞开发。
+> **开发前置要求声明**：OI-01（ContextAssembler 抽取）和 OI-02（tiktoken 精确计算）均已在代码中完成实现，不再阻塞开发。OI-10（统一 TokenBudget）方案见 §18，落地按 §18.9 阶段 A→C 推进。
 
 ---
 
@@ -1053,3 +1063,295 @@ if not validated.ok:
     raise SLIError("SLI_004", details=validated.errors)
 field.semantic_name = validated.data["semantic_name"]
 ```
+
+---
+
+## 18. TokenBudget 统一控制器（v1.3 新增）
+
+### 18.1 背景与必要性
+
+当前 Token 预算控制散落在以下模块中，各自维护独立常量与回退策略：
+
+| 模块 | 当前实现 | 内置上限 |
+|------|---------|---------|
+| `services/semantic_maintenance/context_assembler.py` | 语义生成上下文截断（基于 tiktoken） | 3000 tokens |
+| `services/llm/nlq_service.py` | NLQ pipeline 内嵌 prompt 拼装 | 4096 tokens |
+| `services/data_agent/`（推断中） | Agent 14 工具上下文（per step） | 8192 tokens |
+| `services/embedding/` | RAG context window 直接传给 LLM | 未统一 |
+
+存在的问题：
+- 各模块独自维护魔法常量（3000 / 4096 / 8192），变更牵一发动全身
+- tiktoken 编码器在多处重复 `get_encoding`，无缓存复用
+- 超限行为不一致：有的 silent 截断、有的直接 422、有的丢弃高优先级
+- 计费埋点（OI-D）未收口，token 用量难以审计、对账
+
+v1.3 抽出统一 `services/token_budget/` 模块，提供：
+- 跨场景配置（按 `scenario` 维度 + 按 `provider/model` 维度）
+- 统一 tiktoken 计算入口（编码器全局缓存）
+- 统一截断策略接口（Policy）
+- 超限统一异常 + 错误码（TBD_001~TBD_006）
+- 计费埋点接口（Meter，收口于 `bi_capability_invocations`）
+- 短熔断（防 LLM 抖动放大）
+
+### 18.2 模块结构
+
+```
+backend/services/token_budget/
+├── __init__.py
+├── budget.py              # TokenBudget dataclass / Enforcer 主类
+├── counter.py             # tiktoken 封装 + 模型 → 编码器映射
+├── policies.py            # 截断策略：priority / FIFO / sliding-window
+├── meter.py               # 计费埋点接口
+├── errors.py              # TBD_001~TBD_006
+└── config.py              # 默认配置 + scenario 注册表
+
+config/
+└── token_budget.yaml      # 场景级配置
+```
+
+### 18.3 类接口
+
+```python
+# budget.py
+@dataclass(frozen=True)
+class TokenBudget:
+    scenario: str            # "semantic_field" / "semantic_ds" / "nlq" / "agent_step" / "rag_context" / ...
+    model: str               # "gpt-4o" / "claude-sonnet-4" / "deepseek-v3" ...
+    total_tokens: int        # 上限
+    system_reserved: int     # System Prompt 预留
+    instruction_reserved: int  # User Instruction 预留
+    response_reserved: int   # 响应预留（影响 max_tokens）
+
+    @property
+    def context_available(self) -> int:
+        """= total_tokens - system_reserved - instruction_reserved - response_reserved"""
+        ...
+
+
+@dataclass
+class BudgetReport:
+    scenario: str
+    used_tokens: int
+    truncated_items: int
+    elapsed_ms: int
+    cost_estimate_usd: float | None
+
+
+@dataclass
+class BudgetItem:
+    content: str
+    priority: int             # 0 = highest
+    droppable: bool = True
+    truncatable: bool = False  # True 表示可摘要 / 截断子串
+    metadata: dict = field(default_factory=dict)
+
+
+class BudgetEnforcer:
+    def __init__(self, budget: TokenBudget, *, policy: Policy, meter: Meter | None = None): ...
+
+    def fit(self, items: list[BudgetItem]) -> tuple[list[BudgetItem], BudgetReport]:
+        """按策略截断 items 直到不超 budget.context_available。返回保留项 + 报告。"""
+
+    def assert_fits(self, text: str) -> None:
+        """硬校验：超限直接 raise BudgetExceeded(TBD_001)。"""
+```
+
+### 18.4 默认配置（YAML）
+
+`config/token_budget.yaml`（覆盖 5 scenario × 3 provider 矩阵）：
+
+```yaml
+# 字段格式：total / system_reserved / instruction_reserved / response_reserved
+defaults: { system_reserved: 200, instruction_reserved: 300, response_reserved: 512 }
+scenarios:
+  semantic_field:
+    openai:    { model: gpt-4o,           total: 3000,  response_reserved: 512 }
+    anthropic: { model: claude-sonnet-4,  total: 4096,  response_reserved: 1024 }
+    deepseek:  { model: deepseek-v3,      total: 8192,  response_reserved: 1024 }
+  semantic_ds:
+    openai:    { model: gpt-4o,           total: 3000,  response_reserved: 512 }
+    anthropic: { model: claude-sonnet-4,  total: 4096,  response_reserved: 1024 }
+    deepseek:  { model: deepseek-v3,      total: 8192,  response_reserved: 1024 }
+  nlq:
+    openai:    { model: gpt-4o,           total: 4096,  response_reserved: 1024 }
+    anthropic: { model: claude-sonnet-4,  total: 8192,  response_reserved: 2048 }
+    deepseek:  { model: deepseek-v3,      total: 16384, response_reserved: 2048 }
+  agent_step:
+    openai:    { model: gpt-4o,           total: 8192,  response_reserved: 2048 }
+    anthropic: { model: claude-sonnet-4,  total: 16384, response_reserved: 4096 }
+    deepseek:  { model: deepseek-v3,      total: 32768, response_reserved: 4096 }
+  rag_context:
+    openai:    { model: gpt-4o,           total: 6144,  response_reserved: 1024 }
+    anthropic: { model: claude-sonnet-4,  total: 12288, response_reserved: 2048 }
+    deepseek:  { model: deepseek-v3,      total: 24576, response_reserved: 2048 }
+```
+
+### 18.5 截断策略（Policy）
+
+```python
+class Policy(Protocol):
+    def order(self, items: list[BudgetItem]) -> list[BudgetItem]: ...
+    def shrink(self, item: BudgetItem, target_tokens: int) -> BudgetItem | None: ...
+```
+
+内置三种实现：
+
+| 策略 | 行为 | 默认场景 |
+|------|------|---------|
+| `PriorityDropPolicy` | 按 priority 升序保留，超限丢 `droppable=True` 的低优先级项 | `semantic_field` / `semantic_ds`（核心字段优先） |
+| `FIFODropPolicy` | 按时间序丢老消息（最早进入的先弃） | `agent_step`（多轮对话） |
+| `SummarizePolicy` | 对 `truncatable=True` 的项调摘要 LLM 压缩；摘要失败回退到 truncate | `rag_context`（可选） |
+
+### 18.6 超限熔断行为
+
+按 scenario 配置三档模式：
+
+| 模式 | 行为 | 适用场景 |
+|------|------|---------|
+| `truncate` | 调 `Policy.fit`；丢弃低优先级；记 `BudgetReport.truncated_items > 0` 但不抛异常 | 语义生成 / RAG |
+| `error` | 一旦原始 items 估算 > budget，抛 `TBD_001`；调用方决定是否降级 | NLQ / Agent step（避免 silent 截断关键上下文） |
+| `circuit_break` | 同 scenario 在 60 秒内连续 5 次 fit 失败 → 触发短熔断（30 秒）；期间 `fit()` 直接 `TBD_005`，不再调用 tiktoken | 防 LLM 抖动放大 |
+
+熔断状态存内存（与 Spec 20 §5.5 同型，但作用域为 **scenario**，不是 capability）。跨 scenario 隔离：A 熔断不影响 B。
+
+### 18.7 计费埋点接口
+
+```python
+class Meter(Protocol):
+    def record(
+        self,
+        scenario: str,
+        *,
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cost_usd: float,
+        trace_id: str | None,
+    ) -> None: ...
+```
+
+内置实现：
+
+| 实现 | 用途 | 写入位置 |
+|------|------|---------|
+| `BiCapabilityInvocationsMeter` | 生产默认；OI-D 计费收口 | `bi_capability_invocations.llm_tokens_*`（Spec 20） |
+| `LogMeter` | 开发态默认 | 仅打日志 |
+
+**约束**：
+- 上游必须在 LLM 调用返回后**立即** `meter.record(...)`，禁止异步延迟（防丢失）
+- `meter.record` 内部禁止抛异常（try/except 包裹，失败仅记 `TBD_006` 日志，不影响业务）
+
+### 18.8 错误码
+
+所有 TokenBudget 模块错误使用 `TBD` 前缀（**T**oken **B**u**D**get）。
+
+| 错误码 | HTTP | 说明 | 触发位置 |
+|--------|------|------|---------|
+| `TBD_001` | 422 | 上下文超 budget（error 模式） | `enforcer.fit` / `assert_fits` |
+| `TBD_002` | 500 | tiktoken 编码器不支持该 model | `counter.encode_for(model)` |
+| `TBD_003` | 500 | YAML 配置缺失 scenario | config 加载 |
+| `TBD_004` | 422 | `system_reserved + instruction_reserved + response_reserved > total` | 配置校验（启动时） |
+| `TBD_005` | 503 | 熔断打开 | 同 scenario 短期连续超限 |
+| `TBD_006` | 500 | `meter.record` 失败但不应回滚业务 | 计费埋点（仅日志） |
+
+### 18.9 与现有 ContextAssembler 的关系（迁移路径）
+
+| 阶段 | 动作 | 风险控制 |
+|------|------|---------|
+| 阶段 A（v1.3 GA） | `services/semantic_maintenance/context_assembler.py` 内部用 `TokenBudget(scenario="semantic_field"...)` + `PriorityDropPolicy`；外部 API 不变 | 仅替换实现，回归测试覆盖 §3.4 P0/P1 字段保留 |
+| 阶段 B | NLQ / Agent / RAG 各模块替换内部 token 估算为 `BudgetEnforcer`，去除局部常量 | 灰度开关：`FEATURE_TOKEN_BUDGET_UNIFIED` |
+| 阶段 C | 灰度通过后删除各模块旧的截断逻辑 | 清理 grep 红线（见 §18.12） |
+
+### 18.10 测试 P0 / P1
+
+**P0（必须覆盖）**：
+- `TokenBudget.context_available` 正确（`total - system_reserved - instruction_reserved - response_reserved`）
+- `PriorityDropPolicy` 严格按优先级保留高优先级（priority=0 永不丢弃）
+- `error` 模式超限抛 `TBD_001`
+- `truncate` 模式超限不抛、`BudgetReport.truncated_items > 0`
+- 配置 `system + instruction + response > total` → 启动时 `TBD_004`
+- `counter` 不支持的 model → `TBD_002`
+
+**P1**：
+- 熔断 5 次失败 → `TBD_005`，30 秒后恢复
+- `Meter.record` 异常不阻塞业务（只记 `TBD_006` 日志）
+- `SummarizePolicy` 调摘要 LLM 失败时回退到 truncate
+- 跨 scenario 熔断隔离（A 熔断不影响 B）
+
+### 18.11 集成点
+
+| 模块 | 集成方式 | 模式 |
+|------|---------|------|
+| `services/semantic_maintenance/context_assembler.py` | 内部使用 `BudgetEnforcer`（保留外部接口） | `truncate` |
+| `services/llm/nlq_service.py`（Spec 14） | NLQ pipeline 改为 `BudgetEnforcer(scenario="nlq")` | `error` |
+| `services/data_agent/engine.py`（Spec 28/36） | 每 step 上下文走 `BudgetEnforcer(scenario="agent_step")` | `error` |
+| `services/embedding/retrieval.py`（Spec 17） | RAG context 走 `BudgetEnforcer(scenario="rag_context")` | `truncate` |
+| `services/capability/wrapper.py`（Spec 20） | OI-D 计费归口：wrapper 调用 LLM 后调 `meter.record(...)` | — |
+
+### 18.12 开发交付约束
+
+#### 架构红线（违反 = PR 拒绝）
+
+1. `services/token_budget/` **不得 import** `app/api` 或 `services/llm/service`（防循环依赖）
+2. 所有 LLM 入口在 prompt 构造完成后，**必须**先 `enforcer.assert_fits(prompt)` 或 `enforcer.fit(items)` 再调 LLM
+3. tiktoken 编码器**必须全局缓存**（不要每次 `tiktoken.get_encoding(...)`）
+4. `meter.record` 内部禁止抛异常（try/except + 记 `TBD_006`）
+5. 配置在启动时一次加载，运行时禁止重读 YAML（除显式 admin reload）
+
+#### 强制检查清单
+
+- [ ] `grep -rE "tokens *= *len\(" backend/services` 在 `services/`（除 `token_budget/`、`tests/`）不得命中（禁字符数粗算）
+- [ ] `grep -rE "tiktoken\.get_encoding" backend/services` 仅在 `services/token_budget/counter.py` 命中
+- [ ] 新增 LLM 入口必须声明 `scenario` 并在 `token_budget.yaml` 注册
+- [ ] `BudgetEnforcer` 单元测试覆盖三种 mode（`truncate` / `error` / `circuit_break`）
+
+#### 验证命令
+
+```bash
+cd backend && pytest tests/services/test_token_budget.py -x
+cd backend && python3 -m services.token_budget.config --validate config/token_budget.yaml
+
+# 红线 grep（任意一条命中即 FAIL）
+! grep -rE "tokens *= *len\(" backend/services --exclude-dir=token_budget --exclude-dir=tests
+! grep -rE "tiktoken\.get_encoding" backend/services --exclude-dir=token_budget --exclude-dir=tests
+```
+
+#### 正确 / 错误示范
+
+```python
+# ❌ 错误：自己估算 token
+tokens = len(text) * 1.5
+
+# ✅ 正确：通过统一 counter
+counter = TokenCounter.for_model(model)
+tokens = counter.count(text)
+
+
+# ❌ 错误：硬编码上下文上限
+MAX_CONTEXT = 3000
+if len(prompt) > MAX_CONTEXT: ...
+
+# ✅ 正确：从 TokenBudget 取
+budget = registry.get("nlq", model=model)
+avail = budget.context_available
+
+
+# ❌ 错误：发出 LLM 请求前不校验 → 上线后 422 频繁
+result = await llm.complete(prompt)
+
+# ✅ 正确：调用前 assert_fits（error 模式）或 fit（truncate 模式）
+enforcer.assert_fits(prompt)        # NLQ / Agent
+# 或
+items, report = enforcer.fit(items) # 语义生成 / RAG
+result = await llm.complete(prompt)
+meter.record(scenario, model=model, prompt_tokens=..., ...)
+```
+
+### 18.13 开放问题
+
+| 编号 | 问题 | 优先级 | 状态 |
+|------|------|--------|------|
+| TBD-A | 多模态 token 计算（图片）是否纳入此层 | P3 | 待讨论 |
+| TBD-B | 流式响应的 token 增量计费 | P2 | 待讨论 |
+| TBD-C | Provider 自报 usage vs tiktoken 计算的对账机制 | P1 | 待讨论 |
+| TBD-D | Agent 多步累计预算（per run）vs 单步预算（per step）的协同 | P1 | 依赖 Spec 24/36 决策 |

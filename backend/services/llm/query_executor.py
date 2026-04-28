@@ -8,11 +8,13 @@ Stage 3：查询执行。
 约束 B：MCP ClientSession 长连接复用（单例）
 约束 C：VizQL JSON 的 fieldCaption 须与阶段2 resolved_fields 对齐
 """
+import asyncio
 import logging
 from contextvars import ContextVar
 from typing import Dict, Any, Optional
 
 from services.tableau.mcp_client import get_tableau_mcp_client, TableauMCPError
+from services.llm.nlq_service import get_wrapper, get_principal
 
 logger = logging.getLogger(__name__)
 
@@ -94,33 +96,50 @@ class QueryExecutor:
         Raises:
             QueryExecutorError: NLQ_006 / NLQ_007 / NLQ_009
         """
-        # 获取 MCP 客户端（单例）
-        if self.mcp_client is None:
-            self.mcp_client = get_tableau_mcp_client(connection_id=connection_id)
-
-        try:
-            result = self.mcp_client.query_datasource(
-                datasource_luid=datasource_luid,
-                query=vizql_json,
-                limit=limit,
-                timeout=timeout,
-                connection_id=connection_id,
-            )
+        # T1.3: 通过 wrapper.invoke("query_metric") 包装 MCP 调用（fallback 保持兼容）
+        wrapper = get_wrapper()
+        principal = get_principal() or {"id": 0, "role": "analyst"}
+        if wrapper is not None:
+            # wrapper.invoke 是 async，但 execute() 是 sync，用 asyncio.run 桥接
+            cap_result = asyncio.run(wrapper.invoke(
+                principal=principal,
+                capability_name="query_metric",
+                params={
+                    "datasource_luid": datasource_luid,
+                    "vizql_json": vizql_json,
+                    "limit": limit,
+                    "timeout": timeout,
+                    "connection_id": connection_id,
+                },
+            ))
+            result = cap_result.data if hasattr(cap_result, "data") else cap_result
+        else:
+            # Fallback: 直接 MCP 调用
+            if self.mcp_client is None:
+                self.mcp_client = get_tableau_mcp_client(connection_id=connection_id)
+            try:
+                result = self.mcp_client.query_datasource(
+                    datasource_luid=datasource_luid,
+                    query=vizql_json,
+                    limit=limit,
+                    timeout=timeout,
+                    connection_id=connection_id,
+                )
+            except TableauMCPError as e:
+                # TableauMCPError → NLQError 统一映射
+                code_map = {
+                    "NLQ_006": "NLQ_006",
+                    "NLQ_007": "NLQ_007",
+                    "NLQ_009": "NLQ_009",
+                }
+                nlq_code = code_map.get(e.code, "NLQ_006")
+                raise QueryExecutorError(
+                    code=nlq_code,
+                    message=e.message,
+                    details=e.details,
+                )
             return result
-
-        except TableauMCPError as e:
-            # TableauMCPError → NLQError 统一映射
-            code_map = {
-                "NLQ_006": "NLQ_006",
-                "NLQ_007": "NLQ_007",
-                "NLQ_009": "NLQ_009",
-            }
-            nlq_code = code_map.get(e.code, "NLQ_006")
-            raise QueryExecutorError(
-                code=nlq_code,
-                message=e.message,
-                details=e.details,
-            )
+        return result
 
     def execute_with_creds(
         self,

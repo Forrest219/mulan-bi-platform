@@ -1,9 +1,14 @@
 # 事件与通知系统规格书
 
-> **Version:** v1.0
-> **Date:** 2026-04-04
+> **Version:** v1.1
+> **Date:** 2026-04-28
 > **Status:** Draft
 > **Owner:** Mulan BI Platform Team
+
+**变更记录：**
+
+- v1.1（2026-04-28）补齐邮件 / Webhook 出站工程细节（渠道适配器接口、重试 / 退避 / 死信、签名校验、出站错误码、开发交付约束）
+- v1.0（2026-04-04）初版
 
 ---
 
@@ -99,7 +104,75 @@ Mulan BI Platform 当前各模块（Tableau 同步、语义治理、健康扫描
 | ix_notif_user_read_created | (user_id, is_read, created_at DESC) | BTREE | 用户通知列表查询（核心索引） |
 | ix_notif_event | event_id | BTREE | 按事件反查通知 |
 
-### 2.3 ER 关系图
+### 2.3 出站相关表（v1.1 新增）
+
+#### `bi_webhook_endpoints`
+
+管理员配置的 Webhook 接收端点。
+
+| 列 | 类型 | 约束 | 默认值 | 说明 |
+|----|------|------|--------|------|
+| id | BIGINT | PK, AUTO | - | 主键 |
+| name | VARCHAR(128) | NOT NULL | - | 端点名称（管理用） |
+| url | VARCHAR(1024) | NOT NULL | - | 接收端 URL（必须经 `url_validator` 校验） |
+| secret_encrypted | TEXT | NOT NULL | - | HMAC 签名密钥，**Fernet 加密存储**，禁止明文 |
+| event_type_pattern | VARCHAR(128) | NOT NULL | - | 订阅模式，如 `health.*` / `tableau.sync.failed` / `*` |
+| is_active | BOOLEAN | NOT NULL | `true` | 是否启用 |
+| owner_id | INTEGER | NOT NULL, FK→auth_users.id | - | 创建者（admin） |
+| created_at | TIMESTAMP | NOT NULL | `now()` | 创建时间 |
+| updated_at | TIMESTAMP | NOT NULL | `now()` | 更新时间 |
+
+**索引：**
+
+| 索引名 | 列 | 类型 | 说明 |
+|--------|-----|------|------|
+| ix_webhook_active_pattern | (is_active, event_type_pattern) | BTREE | 路由匹配查询 |
+
+#### `bi_notification_outbox`
+
+出站请求队列。所有邮件 / Webhook 投递必须通过该表中转，禁止业务代码直发。
+
+| 列 | 类型 | 约束 | 默认值 | 说明 |
+|----|------|------|--------|------|
+| id | BIGINT | PK, AUTO | - | 主键 |
+| notification_id | BIGINT | NULLABLE, FK→bi_notifications.id | - | 关联站内通知（webhook 可为空） |
+| channel | VARCHAR(16) | NOT NULL | - | `email` / `webhook` |
+| target | VARCHAR(512) | NOT NULL | - | 邮箱地址或 Webhook URL |
+| status | VARCHAR(16) | NOT NULL | `'pending'` | `pending` / `sent` / `dead` |
+| attempt_count | INT | NOT NULL | `0` | 已尝试次数 |
+| next_attempt_at | TIMESTAMP | NOT NULL | `now()` | 下次调度时间（驱动重试调度） |
+| last_error | TEXT | NULLABLE | - | 最近一次失败原因 |
+| signature_payload_hash | VARCHAR(64) | NULLABLE | - | 出站 payload SHA-256 摘要（审计用，不存原文） |
+| created_at | TIMESTAMP | NOT NULL | `now()` | 入队时间 |
+| updated_at | TIMESTAMP | NOT NULL | `now()` | 更新时间 |
+
+**索引：**
+
+| 索引名 | 列 | 类型 | 说明 |
+|--------|-----|------|------|
+| ix_outbox_status_next | (status, next_attempt_at) | BTREE | 重试调度核心索引 |
+| ix_outbox_notification | notification_id | BTREE | 按通知反查 |
+
+#### `bi_notification_dead_letters`
+
+死信表。重试用尽后写入，保留 90 天，按月分区。
+
+| 列 | 类型 | 约束 | 默认值 | 说明 |
+|----|------|------|--------|------|
+| id | BIGINT | PK, AUTO | - | 主键 |
+| outbox_id | BIGINT | NOT NULL, FK→bi_notification_outbox.id | - | 关联 outbox 记录 |
+| channel | VARCHAR(16) | NOT NULL | - | `email` / `webhook` |
+| target | VARCHAR(512) | NOT NULL | - | 邮箱或 Webhook URL |
+| event_type | VARCHAR(64) | NOT NULL | - | 事件类型 |
+| payload_json | JSONB | NOT NULL | `'{}'` | 原始 payload（已脱敏） |
+| failure_reason | TEXT | NOT NULL | - | 失败汇总原因 |
+| attempts | INT | NOT NULL | - | 累计尝试次数 |
+| first_failed_at | TIMESTAMP | NOT NULL | - | 首次失败时间 |
+| last_failed_at | TIMESTAMP | NOT NULL | - | 末次失败时间 |
+
+**分区与保留：** 按 `last_failed_at` 月分区（`bi_notification_dead_letters_YYYY_MM`），保留 90 天后 `DROP` 历史分区。
+
+### 2.4 ER 关系图
 
 ```mermaid
 erDiagram
@@ -404,19 +477,223 @@ sequenceDiagram
   - `bi_notifications` 孤儿记录（event_id 无对应事件）→ DELETE
   - 每次执行记录归档数量日志
 
-### 5.2 邮件通知（规划中）
+### 5.2 邮件通知（v1.1 工程态）
 
-- 仅针对 `severity = error` 的事件
-- 依赖 SMTP 配置（`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`）
-- 用户可在个人设置中开启/关闭邮件通知
-- 实现路径：在 `emit_event` 中增加邮件渠道分发
+**触发条件：** 仅对 `severity = error` 的事件触发邮件投递。用户级通知偏好（按事件类型订阅 / 退订）留 v2.0（见开放问题 Q4），v1.1 硬编码该规则。
 
-### 5.3 Webhook 出站（规划中）
+#### 5.2.1 渠道适配器接口
 
-- 允许管理员配置 Webhook URL
-- 事件发生时 POST 事件 payload 到外部系统
-- 支持签名验证（HMAC-SHA256）
-- 失败重试：最多 3 次，间隔 30s / 120s / 300s
+所有出站渠道继承 `BaseChannel` 抽象类，统一三态返回值。
+
+```python
+# backend/services/events/channels/base.py
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Literal
+
+
+DeliveryStatus = Literal["delivered", "retryable_failed", "permanent_failed"]
+
+
+@dataclass
+class ChannelDeliveryResult:
+    status: DeliveryStatus
+    detail: str               # 失败原因 / 投递返回信息
+    error_code: str | None    # 关联 EVT_xxx 错误码（失败时填）
+
+
+class BaseChannel(ABC):
+    @abstractmethod
+    def send(
+        self,
+        notification,           # BiNotification 实例
+        recipient: str,         # 邮箱地址 or webhook URL
+        *,
+        trace_id: str,
+    ) -> ChannelDeliveryResult: ...
+```
+
+`EmailChannel(BaseChannel)` 实现位于 `backend/services/events/channels/email_channel.py`。
+- `delivered`：SMTP 250 OK
+- `retryable_failed`：SMTP 4xx、连接超时、DNS 故障
+- `permanent_failed`：SMTP 5xx（地址不存在、用户被拒）、模板渲染异常
+
+#### 5.2.2 SMTP 配置项
+
+从 `.env` 读取，缺失或不可达时通道直接返回 `permanent_failed` 并写 EVT_010。
+
+| 变量 | 必填 | 示例 | 说明 |
+|------|:----:|------|------|
+| `SMTP_HOST` | Y | `smtp.qiye.aliyun.com` | SMTP 主机 |
+| `SMTP_PORT` | Y | `465` | 端口 |
+| `SMTP_USER` | Y | `noreply@example.com` | 登录用户 |
+| `SMTP_PASSWORD` | Y | - | 登录密码（不入日志） |
+| `SMTP_USE_TLS` | N | `true` | 是否启用 TLS（默认 true） |
+| `SMTP_FROM_ADDR` | Y | `Mulan BI <noreply@example.com>` | 发件人地址 |
+
+启动时校验：缺任一必填项 → 渠道整体禁用，启动日志 WARN，相关 outbox 记录入队后立即标记 `permanent_failed` + EVT_010。
+
+#### 5.2.3 模板
+
+模板按事件类型分文件，HTML / 纯文本双版本：
+
+```
+backend/services/events/email_templates/
+├── default.html.j2
+├── default.txt.j2
+├── tableau.sync.failed.html.j2
+├── tableau.sync.failed.txt.j2
+├── semantic.publish_failed.html.j2
+├── semantic.publish_failed.txt.j2
+├── health.scan.failed.html.j2
+└── health.scan.failed.txt.j2
+```
+
+模板查找顺序：`{event_type}.html.j2` → `default.html.j2`。未找到 default 抛 EVT_015。模板上下文注入 `notification`、`event`、`payload`、`base_url`。
+
+#### 5.2.4 重试与退避
+
+| 尝试次数 | 距上次间隔 |
+|----------|-----------|
+| 1 | 立即 |
+| 2 | 30s |
+| 3 | 120s |
+| 4 | 300s |
+| 5 | 900s |
+| 6（用尽）| 1800s 后判死信 |
+
+仅 `retryable_failed` 进入下一轮；`permanent_failed` 直接转 §5.2.5 死信。调度由 Celery Beat 每 30s 扫描 `bi_notification_outbox WHERE status='pending' AND next_attempt_at <= now()`。
+
+#### 5.2.5 死信
+
+第 5 次仍失败 → outbox `status='dead'` → 同步写入 `bi_notification_dead_letters`（payload 已脱敏）。运维通过 §6.6 出站管理 API 查询与重投。
+
+#### 5.2.6 用户偏好
+
+v1.1 硬编码"`severity=error` 才发邮件"，不区分用户。
+v2.0 引入 `bi_notification_preferences`（见开放问题 Q4），支持按事件类型 / 渠道 / 频次配置。
+
+### 5.3 Webhook 出站（v1.1 工程态）
+
+#### 5.3.1 数据模型
+
+`bi_webhook_endpoints`（见 §2.3）。新增端点必须经 §5.3.8 安全校验。订阅匹配规则：
+- 精确匹配：`tableau.sync.failed` 仅匹配该类型
+- 通配符：`health.*` 匹配 `health.scan.completed` / `health.scan.failed` / `health.score.dropped`
+- 全订阅：`*` 匹配所有事件
+
+#### 5.3.2 渠道适配器接口
+
+`WebhookChannel(BaseChannel)` 位于 `backend/services/events/channels/webhook_channel.py`，三态返回同 §5.2.1。
+- `delivered`：HTTP 2xx
+- `retryable_failed`：HTTP 5xx、连接超时、DNS 故障、读超时
+- `permanent_failed`：HTTP 4xx（接收端拒绝）、URL 校验失败、Fernet 解密失败
+
+#### 5.3.3 签名
+
+请求头 `X-Mulan-Signature: sha256=<hex>`，签名算法：
+
+```
+hmac.new(
+    key=fernet.decrypt(secret_encrypted),
+    msg=canonical_json_bytes,
+    digestmod=hashlib.sha256
+).hexdigest()
+```
+
+`canonical_json_bytes`：对 payload dict 调用 `json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')`，确保字段排序、UTF-8、紧凑分隔。
+
+接收端验签必须使用 `hmac.compare_digest`（见 §13.2、§13.4）。
+
+#### 5.3.4 请求格式
+
+| 项 | 值 |
+|----|-----|
+| Method | `POST` |
+| Content-Type | `application/json; charset=utf-8` |
+| Header `X-Mulan-Event-Type` | 事件类型，如 `tableau.sync.failed` |
+| Header `X-Mulan-Event-Id` | `bi_events.id` |
+| Header `X-Mulan-Trace-Id` | 调用链 trace_id |
+| Header `X-Mulan-Signature` | `sha256=<hex>`（见 §5.3.3） |
+| Header `User-Agent` | `Mulan-Webhook/1.1` |
+| Body | canonical JSON（见 §5.3.3） |
+| Connect Timeout | 5s |
+| Read Timeout | 10s |
+
+Payload > 64KB 自动截断 + 顶层增加 `_truncated: true`（见 §11.4 P1）。
+
+#### 5.3.5 重试与退避
+
+| 尝试次数 | 距上次间隔 |
+|----------|-----------|
+| 1 | 立即 |
+| 2 | 30s |
+| 3 | 120s |
+| 4（用尽）| 300s 后判死信 |
+
+5xx / 网络错 → `retryable_failed`；4xx → `permanent_failed`。
+
+#### 5.3.6 死信
+
+同 §5.2.5，写入 `bi_notification_dead_letters`。
+
+#### 5.3.7 接收端验签示例
+
+**Python（FastAPI）：**
+
+```python
+import hmac, hashlib, json
+from fastapi import Request, HTTPException
+
+SECRET = b"<your-shared-secret>"
+
+@app.post("/webhook/mulan")
+async def receive(req: Request):
+    raw = await req.body()
+    sig_header = req.headers.get("X-Mulan-Signature", "")
+    if not sig_header.startswith("sha256="):
+        raise HTTPException(400, "bad signature header")
+    expected = hmac.new(SECRET, raw, hashlib.sha256).hexdigest()
+    received = sig_header.split("=", 1)[1]
+    if not hmac.compare_digest(expected, received):
+        raise HTTPException(401, "signature mismatch")
+    payload = json.loads(raw)
+    return {"ok": True, "event_id": payload.get("event_id")}
+```
+
+**Node.js（Express）：**
+
+```js
+const crypto = require('crypto');
+const SECRET = process.env.MULAN_WEBHOOK_SECRET;
+
+app.post('/webhook/mulan', express.raw({ type: 'application/json' }), (req, res) => {
+  const sig = (req.header('X-Mulan-Signature') || '').replace(/^sha256=/, '');
+  const expected = crypto.createHmac('sha256', SECRET).update(req.body).digest('hex');
+  const a = Buffer.from(sig, 'hex');
+  const b = Buffer.from(expected, 'hex');
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    return res.status(401).json({ error: 'signature mismatch' });
+  }
+  res.json({ ok: true });
+});
+```
+
+#### 5.3.8 安全
+
+URL 校验在 `backend/services/events/channels/url_validator.py` **唯一实现**：
+
+- 协议必须为 `https://`（开发环境允许 `http://localhost`，生产强制 https）
+- 解析 hostname → DNS 解析后所有 IP 都不得命中私网段：
+  - `127.0.0.0/8`、`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`
+  - `169.254.0.0/16`（link-local / metadata）、`::1`、`fc00::/7`
+- 拒绝命中 → 抛 EVT_011（创建端点 / 测试 / 投递三处都校验）
+
+Secret 处理：
+- 写入 `bi_webhook_endpoints.secret_encrypted` 必须经 `cryptography.fernet.Fernet`
+- Fernet 主密钥从 `FERNET_MASTER_KEY` 环境变量读取，缺失抛 EVT_016
+- 所有日志、`outbox.last_error`、`dead_letters.failure_reason` 禁止包含明文 secret 或签名值
 
 ---
 
@@ -547,6 +824,64 @@ GET /api/events
 
 **权限：** 仅 admin
 
+### 6.6 出站管理 API（v1.1 新增）
+
+所有端点权限：**仅 admin**。
+
+#### `GET /api/webhook-endpoints`
+
+列出已配置端点。
+
+| 入参 | 类型 | 说明 |
+|------|------|------|
+| is_active | bool | 可选，过滤启用状态 |
+| event_type_pattern | string | 可选，模式匹配 |
+
+**出参字段：** `id` / `name` / `url` / `event_type_pattern` / `is_active` / `owner_id` / `created_at` / `updated_at`（**不返回 secret**）
+
+#### `POST /api/webhook-endpoints`
+
+创建端点。
+
+**入参字段：** `name` / `url` / `secret`（明文输入，落库前 Fernet 加密）/ `event_type_pattern` / `is_active`
+**出参字段：** 同 GET 单条
+**校验：** 调用 `url_validator.validate(url)`，失败抛 EVT_011
+
+#### `PATCH /api/webhook-endpoints/{id}`
+
+更新端点。
+
+**入参字段（全部可选）：** `name` / `url` / `secret` / `event_type_pattern` / `is_active`
+**出参字段：** 同 GET 单条
+**说明：** secret 仅当显式传入时更新
+
+#### `DELETE /api/webhook-endpoints/{id}`
+
+软删除（`is_active=false` + 保留记录用于审计）。
+
+**出参字段：** `id` / `is_active`
+
+#### `POST /api/webhook-endpoints/{id}/test`
+
+发送一条测试事件（`event_type=system.webhook_test`）到该端点，**不写 outbox**，直接同步调用并返回结果。
+
+**出参字段：** `status`（`delivered` / `retryable_failed` / `permanent_failed`）/ `http_status` / `latency_ms` / `error_code` / `detail`
+
+#### `GET /api/notifications/outbox`
+
+查询出站队列。
+
+**入参字段：** `status`（`pending` / `sent` / `dead`，可选）/ `channel`（`email` / `webhook`，可选）/ `page` / `page_size`
+**出参字段：** `id` / `notification_id` / `channel` / `target` / `status` / `attempt_count` / `next_attempt_at` / `last_error` / `created_at` / `updated_at`
+
+#### `POST /api/notifications/outbox/{id}/retry`
+
+把 `dead` 状态的 outbox 重排队。
+
+**入参字段：** 无
+**出参字段：** `id` / `status`（=`pending`）/ `attempt_count`（=0）/ `next_attempt_at`（=now）
+**约束：** 仅允许 `status='dead'` 的记录调用，否则 400
+
 ---
 
 ## 7. 错误码
@@ -561,6 +896,13 @@ GET /api/events
 | `EVT_004` | 400 | 事件载荷校验失败 | payload 不符合该事件类型的 Schema |
 | `EVT_005` | 500 | 通知创建失败 | 数据库写入异常 |
 | `EVT_006` | 403 | 需要管理员角色 | 非 admin 用户访问事件列表 |
+| `EVT_010` | 503 | 邮件 SMTP 配置缺失或不可达 | SMTP_HOST/USER/PASSWORD 缺失，或连接 / 认证失败 |
+| `EVT_011` | 422 | Webhook URL 不合法 | 协议非 https、命中 SSRF 私网黑名单、DNS 不可解析 |
+| `EVT_012` | 504 | Webhook 接收端超时 | 连接 / 读超时（5s / 10s） |
+| `EVT_013` | 502 | Webhook 接收端返回 5xx | 接收端服务异常，进入 retry |
+| `EVT_014` | 400 | Webhook 接收端返回 4xx | 接收端拒绝请求，permanent_failed 直接进死信 |
+| `EVT_015` | 500 | 模板渲染失败 | Jinja2 渲染抛错且 default 模板亦缺失 |
+| `EVT_016` | 403 | Webhook secret 不可解密 | `FERNET_MASTER_KEY` 缺失或密文损坏 |
 
 ---
 
@@ -586,6 +928,8 @@ GET /api/events
 | 标记自己的通知已读 | Y | Y | Y | Y |
 | 查看事件列表 | Y | - | - | - |
 | 发布系统广播 | Y | - | - | - |
+| 配置 Webhook | Y | - | - | - |
+| 查看 / 重投死信 | Y | - | - | - |
 
 ---
 
@@ -760,6 +1104,23 @@ sequenceDiagram
 - **查询性能**：`GET /api/notifications` 在 10,000 条通知下 < 100ms
 - **未读计数**：`GET /api/notifications/unread-count` < 20ms
 
+### 11.4 出站测试（v1.1 新增）
+
+测试统一 mock 在 `BaseChannel.send`，禁止直接 mock `smtplib` / `httpx`（见 §13.2）。
+
+| 优先级 | 用例 | 预期 | 文件位置建议 |
+|:------:|------|------|-------------|
+| P0 | 邮件：SMTP 不可达 | retry 5 次后进死信 + 写 EVT_010 日志 | `tests/services/test_event_channels.py::test_email_smtp_unreachable_dead_letter` |
+| P0 | 邮件：模板缺失 | 走 `default.html.j2`，不报错，正常 delivered | `tests/services/test_event_channels.py::test_email_fallback_default_template` |
+| P0 | Webhook：HMAC 签名稳定 | 同 payload + 同 secret 多次签名结果一致 | `tests/services/test_event_channels.py::test_webhook_signature_deterministic` |
+| P0 | Webhook：SSRF URL（127.0.0.1 / 10.x / 192.168.x）| 创建端点时 EVT_011 拦截，不入库 | `tests/api/test_webhook_endpoints.py::test_create_endpoint_ssrf_rejected` |
+| P0 | Webhook：接收端 5xx | retry 3 次 → 死信 + EVT_013 | `tests/services/test_event_channels.py::test_webhook_5xx_retry_then_dead` |
+| P0 | Webhook：接收端 4xx | 不重试，立即死信 + EVT_014 | `tests/services/test_event_channels.py::test_webhook_4xx_immediate_dead` |
+| P0 | outbox 重试调度 | `next_attempt_at` 未到期不取出，到期后取出 | `tests/services/test_outbox_scheduler.py::test_scheduler_respects_next_attempt_at` |
+| P1 | 死信重投 API | `status: dead → pending`，`attempt_count` 重置为 0 | `tests/api/test_webhook_endpoints.py::test_outbox_retry_dead_letter` |
+| P1 | payload 截断 | > 64KB 自动截断 + 顶层 `_truncated: true` | `tests/services/test_event_channels.py::test_webhook_payload_truncation` |
+| P1 | 接收端验签示例 | §5.3.7 示例代码可跑通（Python / Node 各一） | `tests/services/test_webhook_signature_consumer.py` |
+
 ---
 
 ## 12. 开放问题
@@ -776,6 +1137,73 @@ sequenceDiagram
 
 ---
 
+## 13. 开发交付约束（v1.1 新增）
+
+### 13.1 架构红线
+
+- `backend/services/events/channels/` 内部模块**不得 import `app/api`**（保持渠道层与 HTTP 层解耦）
+- 所有出站投递必须经 `bi_notification_outbox` + Celery worker 调度，**禁止业务代码 `await smtp.send(...)` / `await httpx.post(webhook_url, ...)` 直发**
+- Webhook secret 写入 `bi_webhook_endpoints.secret_encrypted` 必须经 Fernet 加密，**`bi_webhook_endpoints` 周边不得出现明文 secret 字段**（如 `secret_plaintext` / `secret_raw`）
+- 出站 payload 必须经 redactor 脱敏，PII / token 不得落入 outbox 可见字段（仅允许保留 `signature_payload_hash` 摘要）
+- URL 校验在 `backend/services/events/channels/url_validator.py` **唯一实现**，业务代码 / API 层不得自行做 hostname / IP 段判断
+
+### 13.2 强制检查清单（PR 拒绝条件）
+
+- [ ] 新增 / 修改 channel 必须实现 `BaseChannel.send`，返回 `ChannelDeliveryResult` 三态
+- [ ] 出站新增事件类型必须在 §3.1 注册 + `email_templates/` 给出对应模板，或显式接受 `default.html.j2` 回退
+- [ ] HMAC 签名比对使用 `hmac.compare_digest`，**禁止使用 `==`**
+- [ ] outbox 重试调度走 `next_attempt_at` + Celery Beat，**禁止 `time.sleep` / busy loop**
+- [ ] 测试 mock 位置在 `BaseChannel.send`，**禁止直接 mock `smtplib` / `aiosmtplib` / `httpx`**
+
+### 13.3 验证命令
+
+```bash
+# 单元 + 集成测试
+cd backend && pytest tests/services/test_event_channels.py -x
+cd backend && pytest tests/services/test_outbox_scheduler.py -x
+cd backend && pytest tests/api/test_webhook_endpoints.py -x
+
+# 红线 grep（CI 中作为 fail-fast 步骤）
+! grep -rE "smtplib\.|aiosmtplib\." backend/app backend/services --exclude-dir=channels
+! grep -rE "httpx\..*post.*webhook" backend/app backend/services --exclude-dir=channels
+! grep -rE "secret_plaintext|secret_raw" backend/services/events
+```
+
+### 13.4 正确 / 错误示范
+
+**示范 1：直发 vs outbox**
+
+- 错：业务代码直接 `await smtp.send_message(msg)` —— 绕过 outbox / 重试 / 死信，故障不可观测
+- 对：业务代码 `emit_event(...)` → 路由 → `outbox` 入队 → worker 拉 outbox → `channel.send(...)`
+
+**示范 2：HMAC 比对**
+
+- 错：
+
+  ```python
+  if signature == expected_signature:
+      ...
+  ```
+
+- 对：
+
+  ```python
+  if hmac.compare_digest(signature, expected_signature):
+      ...
+  ```
+
+**示范 3：URL 校验**
+
+- 错：业务代码直接 `httpx.post(url, ...)` 或自行 `urlparse(url).hostname not in BLACKLIST`
+- 对：
+
+  ```python
+  from services.events.channels.url_validator import validate
+  validate(url)  # 不合法时抛 EVT_011（SSRF / 协议非 https / DNS 不可解析）
+  ```
+
+---
+
 ## 附录 A：文件结构
 
 ```
@@ -784,12 +1212,29 @@ backend/services/events/
 ├── event_service.py          # emit_event 核心函数
 ├── notification_router.py    # 通知路由注册表
 ├── notification_content.py   # 通知标题/内容模板
-├── models.py                 # SQLAlchemy 模型 (BiEvent, BiNotification)
-└── constants.py              # 事件类型枚举常量
+├── models.py                 # SQLAlchemy 模型 (BiEvent, BiNotification, BiWebhookEndpoint, BiNotificationOutbox, BiNotificationDeadLetter)
+├── constants.py              # 事件类型枚举常量
+├── outbox_service.py         # outbox 入队 / 状态机 / 死信迁移（v1.1）
+├── redactor.py               # payload 脱敏（v1.1）
+├── channels/
+│   ├── __init__.py
+│   ├── base.py               # BaseChannel + ChannelDeliveryResult（v1.1）
+│   ├── email_channel.py      # EmailChannel(BaseChannel)（v1.1）
+│   ├── webhook_channel.py    # WebhookChannel(BaseChannel)（v1.1）
+│   └── url_validator.py      # SSRF / 协议 / 黑名单校验（v1.1）
+└── email_templates/          # Jinja2 双版本模板（v1.1）
+    ├── default.html.j2
+    ├── default.txt.j2
+    └── {event_type}.{html,txt}.j2
+
+backend/services/tasks/
+└── outbox_tasks.py           # Celery Beat 重试调度（v1.1）
 
 backend/app/api/
 ├── notifications.py          # 通知 API 路由
-└── events.py                 # 事件 API 路由（admin）
+├── events.py                 # 事件 API 路由（admin）
+├── webhook_endpoints.py      # Webhook 端点 CRUD + test（admin，v1.1）
+└── outbox.py                 # outbox 查询 + 死信重投（admin，v1.1）
 ```
 
 ## 附录 B：数据库迁移
@@ -800,6 +1245,9 @@ cd backend && alembic upgrade head
 ```
 
 迁移脚本需包含：
-1. 创建 `bi_events` 表 + 索引
+1. 创建 `bi_events` 表 + 索引（含按月分区）
 2. 创建 `bi_notifications` 表 + 索引
-3. `downgrade()` 中 DROP 两张表
+3. 创建 `bi_webhook_endpoints` 表 + 索引（v1.1）
+4. 创建 `bi_notification_outbox` 表 + 索引（v1.1）
+5. 创建 `bi_notification_dead_letters` 表 + 索引 + 月分区（v1.1）
+6. `downgrade()` 中 DROP 上述五张表

@@ -32,6 +32,7 @@ from app.core.database import Base, sa_func, sa_text
 # services.tableau / services.llm 均不依赖 services.query，无循环风险
 from services.tableau.mcp_client import TableauMCPClient, TableauMCPError  # noqa: E402
 from services.llm.service import llm_service  # noqa: E402
+from services.llm.nlq_service import get_wrapper, get_principal  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -609,13 +610,28 @@ class QueryService:
                 question=message,
                 data_preview=data_preview,
             )
-            # llm_service.complete 是异步方法
-            llm_result = await llm_service.complete(
-                prompt=prompt,
-                system=_ANALYSIS_SYSTEM,
-                timeout=20,
-                purpose="default",
-            )
+            # T1.3: 通过 wrapper.invoke("llm_complete") 包装（fallback 保持兼容）
+            wrapper = get_wrapper()
+            principal = get_principal() or {"id": 0, "role": "analyst"}
+            if wrapper is not None:
+                cap_result = await wrapper.invoke(
+                    principal=principal,
+                    capability_name="llm_complete",
+                    params={
+                        "prompt": prompt,
+                        "system": _ANALYSIS_SYSTEM,
+                        "timeout": 20,
+                        "purpose": "default",
+                    },
+                )
+                llm_result = cap_result.data if hasattr(cap_result, "data") else cap_result
+            else:
+                llm_result = await llm_service.complete(
+                    prompt=prompt,
+                    system=_ANALYSIS_SYSTEM,
+                    timeout=20,
+                    purpose="default",
+                )
             if "error" in llm_result:
                 llm_error = llm_result["error"]
                 logger.warning("LLM 摘要生成失败（降级）: %s", llm_error)
@@ -780,12 +796,28 @@ class QueryService:
                 question=message,
                 data_preview=data_preview,
             )
-            llm_result = await llm_service.complete(
-                prompt=prompt,
-                system=_ANALYSIS_SYSTEM,
-                timeout=20,
-                purpose="default",
-            )
+            # T1.3: 通过 wrapper.invoke("llm_complete") 包装（fallback 保持兼容）
+            wrapper = get_wrapper()
+            principal = get_principal() or {"id": 0, "role": "analyst"}
+            if wrapper is not None:
+                cap_result = await wrapper.invoke(
+                    principal=principal,
+                    capability_name="llm_complete",
+                    params={
+                        "prompt": prompt,
+                        "system": _ANALYSIS_SYSTEM,
+                        "timeout": 20,
+                        "purpose": "default",
+                    },
+                )
+                llm_result = cap_result.data if hasattr(cap_result, "data") else cap_result
+            else:
+                llm_result = await llm_service.complete(
+                    prompt=prompt,
+                    system=_ANALYSIS_SYSTEM,
+                    timeout=20,
+                    purpose="default",
+                )
             if "error" in llm_result:
                 llm_error = llm_result["error"]
                 logger.warning("LLM 摘要生成失败（降级）: %s", llm_error)

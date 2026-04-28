@@ -6,17 +6,20 @@
   GET  /api/agent/conversations/{id}/messages — 会话消息
   DELETE /api/agent/conversations/{id} — 归档会话
   POST /api/agent/feedback      — 提交反馈（thumbs up/down）
+  GET  /api/agent/mode          — 获取 HOMEPAGE_AGENT_MODE（Spec 36 §15）
+  POST /api/agent/mode          — 设置 HOMEPAGE_AGENT_MODE（admin only）
 """
 
 import asyncio
 import json
 import logging
 import uuid as uuid_lib
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -35,6 +38,15 @@ from services.data_agent.session import SessionManager, AgentSession
 from services.data_agent.tool_base import ToolContext, ToolRegistry
 from services.data_agent.context import build_session_context
 from services.datasources.models import DataSource
+
+# Spec 36 §15: Agent 驱动首页相关导入
+from services.agent.dual_write import (
+    HomepageAgentMode,
+    execute_dual_write,
+    get_homepage_agent_mode,
+    check_and_trigger_auto_rollback,
+)
+from services.data_agent.intent import IntentRecognizer
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["Data Agent"])
@@ -56,6 +68,7 @@ class ConversationItem(BaseModel):
     title: Optional[str]
     connection_id: Optional[int]
     status: str
+    message_count: int = 0
     created_at: str
     updated_at: str
 
@@ -76,6 +89,22 @@ class FeedbackRequest(BaseModel):
     run_id: str = Field(..., description="Agent 运行 ID")
     rating: str = Field(..., pattern="^(up|down)$", description="up 或 down")
     comment: Optional[str] = Field(None, max_length=1000, description="可选文字反馈")
+
+
+# Spec 36 §15: HOMEPAGE_AGENT_MODE 端点 Schema
+class ModeStatusResponse(BaseModel):
+    mode: str  # "legacy_only" | "agent_with_fallback" | "agent_only" | "dual_write"
+    description: str
+    can_rollback: bool  # 是否可以触发自动回滚
+    failure_tracker_active: bool  # 失败率跟踪器是否启用
+
+
+class ModeUpdateRequest(BaseModel):
+    mode: str = Field(..., description="HOMEPAGE_AGENT_MODE 四态之一")
+    user_override: Optional[Dict[int, str]] = Field(
+        None,
+        description="单用户 override 映射 {user_id: mode}",
+    )
 
 
 # ============================================================================
@@ -257,12 +286,25 @@ def list_conversations(
         status="active",
         limit=20,
     )
+    message_counts = {
+        str(row._mapping["conversation_id"]): row._mapping["count"]
+        for row in (
+            db.query(
+                AgentConversationMessage.conversation_id,
+                func.count(AgentConversationMessage.id).label("count"),
+            )
+            .filter(AgentConversationMessage.conversation_id.in_([c.id for c in convs]))
+            .group_by(AgentConversationMessage.conversation_id)
+            .all()
+        )
+    } if convs else {}
     return [
         ConversationItem(
             id=str(c.id),
             title=c.title,
             connection_id=c.connection_id,
             status=c.status,
+            message_count=message_counts.get(str(c.id), 0),
             created_at=c.created_at.isoformat() if c.created_at else "",
             updated_at=c.updated_at.isoformat() if c.updated_at else "",
         )
@@ -407,3 +449,107 @@ def submit_feedback(
     db.commit()
     db.refresh(feedback)
     return {"status": "created", "feedback_id": feedback.id}
+
+
+# ============================================================================
+# Spec 36 §15: HOMEPAGE_AGENT_MODE 端点（GET/POST /api/agent/mode）
+# ============================================================================
+
+
+@router.get("/mode", response_model=ModeStatusResponse)
+def get_agent_mode(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    GET /api/agent/mode — 获取当前 HOMEPAGE_AGENT_MODE 状态。
+
+    认证：analyst+ 角色可读。
+    返回当前模式和描述。
+    """
+    _require_agent_role(current_user.get("role", "user"))
+
+    mode = get_homepage_agent_mode(db, user_id=current_user.get("id"))
+
+    descriptions = {
+        "legacy_only": "仅 NLQ 直连（/api/search/query）",
+        "agent_with_fallback": "Agent 优先，失败 fallback NLQ（默认）",
+        "agent_only": "仅 Agent，NLQ 入口下线",
+        "dual_write": "Agent + NLQ 并发，以 Agent 结果为准",
+    }
+
+    return ModeStatusResponse(
+        mode=mode.value,
+        description=descriptions.get(mode.value, "未知模式"),
+        can_rollback=True,
+        failure_tracker_active=True,
+    )
+
+
+@router.post("/mode", response_model=ModeStatusResponse)
+def update_agent_mode(
+    req: ModeUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    POST /api/agent/mode — 设置 HOMEPAGE_AGENT_MODE（admin only）。
+
+    Spec 36 §15 约束：
+    - 仅 admin 可修改模式
+    - 修改自动写入 audit log（actor=system）
+    """
+    if current_user.get("role") != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail={"error_code": "AGENT_006", "message": "仅 admin 可修改 Agent 模式"},
+        )
+
+    if not HomepageAgentMode.is_valid(req.mode):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "AGENT_007",
+                "message": f"无效模式: {req.mode}，有效值: legacy_only, agent_with_fallback, agent_only, dual_write",
+            },
+        )
+
+    from services.platform_settings import PlatformSettingsService
+    svc = PlatformSettingsService(db)
+
+    # 更新全局模式
+    svc.set("homepage_agent_mode", req.mode)
+
+    # 更新单用户 override（若有）
+    if req.user_override:
+        import json
+        svc.set("homepage_agent_mode_user_override", json.dumps(req.user_override))
+
+    # 写审计日志
+    from services.agent.dual_write import write_system_audit_log
+    write_system_audit_log(
+        db,
+        event_type="mode_change",
+        detail=f" HOMEPAGE_AGENT_MODE changed to {req.mode} by admin {current_user['id']}",
+        actor="system",
+    )
+
+    logger.warning(
+        "HOMEPAGE_AGENT_MODE changed to %s by admin %s",
+        req.mode, current_user["id"],
+    )
+
+    mode = HomepageAgentMode(req.mode)
+    descriptions = {
+        "legacy_only": "仅 NLQ 直连（/api/search/query）",
+        "agent_with_fallback": "Agent 优先，失败 fallback NLQ（默认）",
+        "agent_only": "仅 Agent，NLQ 入口下线",
+        "dual_write": "Agent + NLQ 并发，以 Agent 结果为准",
+    }
+
+    return ModeStatusResponse(
+        mode=mode.value,
+        description=descriptions.get(mode.value, "未知模式"),
+        can_rollback=True,
+        failure_tracker_active=True,
+    )

@@ -67,6 +67,12 @@ await expect(page.locator('text=答案是 42')).toBeVisible();
 
 > 共 **35 个** `.spec.ts` 文件，覆盖前端所有已开发页面。`npm run smoke` 运行全部。
 
+#### 回归冒烟单元测试（Vitest）
+| 文件 | 覆盖链路 | 关键断言 |
+|------|---------|---------|
+| `frontend/tests/unit/regression/ConversationBar.smoke.test.tsx` | 首页侧边栏对话列表 | 点击“新对话”不写库；`message_count=0` 或旧缓存无消息的“新对话”占位不展示；有消息/有标题的真实对话仍展示 |
+| `frontend/tests/unit/regression/HomeLayout.smoke.test.tsx` | 首页快捷键 | `⌘N` / `Ctrl+N` 只导航到 `/`，不创建空对话 |
+
 #### 认证模块（2 个）
 | 文件 | 覆盖链路 | 关键断言 |
 |------|---------|---------|

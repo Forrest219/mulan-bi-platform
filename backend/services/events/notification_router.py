@@ -10,6 +10,7 @@ from .constants import (
     HEALTH_SCAN_COMPLETED, HEALTH_SCAN_FAILED, HEALTH_SCORE_DROPPED,
     AUTH_USER_ROLE_CHANGED, SYSTEM_MAINTENANCE, SYSTEM_ERROR,
     METRIC_PUBLISHED, METRIC_ANOMALY_DETECTED, METRIC_CONSISTENCY_FAILED,
+    ANOMALY_DETECTED,
     DQC_CYCLE_STARTED, DQC_CYCLE_COMPLETED,
     DQC_ASSET_SIGNAL_CHANGED, DQC_ASSET_P0_TRIGGERED,
     DQC_ASSET_P1_TRIGGERED, DQC_ASSET_RECOVERED,
@@ -132,6 +133,74 @@ def route_semantic_publish_failed(db: Session, event_type: str, payload: dict, a
     return list(set(target_ids))
 
 
+# === Semantic Table 语义状态流转事件路由（Spec 9 → Spec 16） ===
+
+@register_route("semantic_table.created")
+def route_semantic_table_created(db: Session, event_type: str, payload: dict, actor_id: int = None) -> List[int]:
+    """语义表创建：通知创建者"""
+    creator_id = payload.get("creator_id") or actor_id
+    if creator_id:
+        return [int(creator_id)]
+    return []
+
+
+@register_route("semantic_table.submitted")
+def route_semantic_table_submitted(db: Session, event_type: str, payload: dict, actor_id: int = None) -> List[int]:
+    """语义表提交审核（under_review）：通知所有 admin + data_admin"""
+    admin_ids = _get_users_by_role(db, "admin")
+    data_admin_ids = _get_users_by_role(db, "data_admin")
+    return list(set(admin_ids + data_admin_ids))
+
+
+@register_route("semantic_table.published")
+def route_semantic_table_published(db: Session, event_type: str, payload: dict, actor_id: int = None) -> List[int]:
+    """语义表发布成功（published）：通知 author + 订阅该表的用户（Spec 9 §4）"""
+    target_ids = []
+
+    # 1. 通知 author（创建者）
+    author_id = payload.get("author_id") or payload.get("creator_id")
+    if author_id:
+        target_ids.append(int(author_id))
+
+    # 2. 通知订阅该表的所有用户
+    semantic_table_id = payload.get("semantic_table_id")
+    if semantic_table_id:
+        from services.events.models import BiEventSubscription
+        subscribed_user_ids = db.query(BiEventSubscription.user_id).filter(
+            BiEventSubscription.event_type == event_type,
+            BiEventSubscription.target_id == str(semantic_table_id),
+            BiEventSubscription.is_active == True,
+        ).all()
+        target_ids.extend([uid for (uid,) in subscribed_user_ids])
+
+    # 3. 通知所有 admin
+    admin_ids = _get_users_by_role(db, "admin")
+    target_ids.extend(admin_ids)
+
+    return list(set(target_ids))
+
+
+@register_route("semantic_table.deprecated")
+def route_semantic_table_deprecated(db: Session, event_type: str, payload: dict, actor_id: int = None) -> List[int]:
+    """语义表废弃（deprecated）：通知 author + 所有 admin"""
+    target_ids = []
+    author_id = payload.get("author_id") or payload.get("creator_id")
+    if author_id:
+        target_ids.append(int(author_id))
+    admin_ids = _get_users_by_role(db, "admin")
+    target_ids.extend(admin_ids)
+    return list(set(target_ids))
+
+
+@register_route("field_sync.completed")
+def route_field_sync_completed(db: Session, event_type: str, payload: dict, actor_id: int = None) -> List[int]:
+    """字段同步完成：通知触发者"""
+    triggered_by = payload.get("triggered_by") or actor_id
+    if triggered_by:
+        return [int(triggered_by)]
+    return []
+
+
 # === Health 模块路由 ===
 
 @register_route(HEALTH_SCAN_COMPLETED)
@@ -206,6 +275,22 @@ def route_metric_anomaly_detected(db: Session, event_type: str, payload: dict, a
     admin_ids = _get_users_by_role(db, "admin")
     data_admin_ids = _get_users_by_role(db, "data_admin")
     return list(set(admin_ids + data_admin_ids))
+
+
+@register_route(ANOMALY_DETECTED)
+def route_anomaly_detected(db: Session, event_type: str, payload: dict, actor_id: int = None) -> List[int]:
+    """anomaly.detected：通知订阅该指标的所有用户（Spec 30）"""
+    from services.events.models import BiEventSubscription
+    metric_id_str = payload.get("metric_id")
+    if not metric_id_str:
+        return []
+    # 查询订阅了 event_type='anomaly.detected' 且订阅了该 metric_id 的用户
+    q = db.query(BiEventSubscription.user_id).filter(
+        BiEventSubscription.event_type == ANOMALY_DETECTED,
+        BiEventSubscription.target_id == metric_id_str,
+        BiEventSubscription.is_active == True,
+    )
+    return [uid for (uid,) in q.all()]
 
 
 @register_route(METRIC_CONSISTENCY_FAILED)

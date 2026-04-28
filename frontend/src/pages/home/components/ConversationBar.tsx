@@ -51,6 +51,13 @@ function getTimeGroup(isoString: string): TimeGroup {
 
 const GROUP_ORDER: TimeGroup[] = ['今天', '昨天', '过去 7 天', '更早'];
 
+function shouldShowConversation(conv: Conversation): boolean {
+  if (typeof conv.message_count === 'number') {
+    return conv.message_count > 0;
+  }
+  return !(conv.messages.length === 0 && conv.title.trim() === '新对话');
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function ConversationBar({ collapsed, onToggleCollapse: _onToggleCollapse }: ConversationBarProps) {
@@ -76,9 +83,10 @@ export function ConversationBar({ collapsed, onToggleCollapse: _onToggleCollapse
   }, [navigate]);
 
   const filtered = useMemo(() => {
+    const displayable = conversations.filter(shouldShowConversation);
     const q = search.trim().toLowerCase();
-    if (!q) return conversations;
-    return conversations.filter(
+    if (!q) return displayable;
+    return displayable.filter(
       (c) =>
         c.title.toLowerCase().includes(q) ||
         c.messages.some((m) => m.content.toLowerCase().includes(q))

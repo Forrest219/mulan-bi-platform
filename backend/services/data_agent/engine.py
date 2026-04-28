@@ -107,6 +107,7 @@ class ReActEngine:
         total_timeout: int = DEFAULT_TOTAL_TIMEOUT,
         max_tool_retries: int = DEFAULT_MAX_TOOL_RETRIES,
         max_history_tokens: int = DEFAULT_MAX_HISTORY_TOKENS,
+        wrapper=None,
     ):
         self.registry = registry
         self.llm = llm_service
@@ -115,6 +116,7 @@ class ReActEngine:
         self.total_timeout = total_timeout
         self.max_tool_retries = max_tool_retries
         self.max_history_tokens = max_history_tokens
+        self._wrapper = wrapper
 
     async def run(
         self,
@@ -282,30 +284,55 @@ class ReActEngine:
 
         # 调用 LLM
         try:
-            # purpose 优先用 "agent"，若无则 fallback 到 "general"
-            try:
-                result = await self.llm.complete(
-                    prompt=prompt,
-                    system=system_prompt,
-                    timeout=self.step_timeout,
-                    purpose="agent",
-                )
-            except Exception as e:
-                logger.warning("LLM purpose='agent' failed, falling back to 'general': %s", e)
-                result = await self.llm.complete(
-                    prompt=prompt,
-                    system=system_prompt,
-                    timeout=self.step_timeout,
-                    purpose="general",
-                )
+            # 优先通过 wrapper.invoke(llm_complete) 调用，fallback 到 self.llm.complete
+            if self._wrapper is not None:
+                try:
+                    result = await self._wrapper.invoke(
+                        principal={"id": context.user_id, "role": "analyst"},
+                        capability_name="llm_complete",
+                        params={
+                            "prompt": prompt,
+                            "system": system_prompt,
+                            "timeout": self.step_timeout,
+                            "purpose": "agent",
+                        },
+                        trace_id=context.trace_id or None,
+                    )
+                    # wrapper 返回 CapabilityResult，取 .data
+                    result_data = result.data if hasattr(result, "data") else result
+                except Exception as e:
+                    logger.warning("wrapper.invoke(llm_complete) failed, falling back to llm.complete: %s", e)
+                    result_data = await self.llm.complete(
+                        prompt=prompt,
+                        system=system_prompt,
+                        timeout=self.step_timeout,
+                        purpose="agent",
+                    )
+            else:
+                # purpose 优先用 "agent"，若无则 fallback 到 "general"
+                try:
+                    result_data = await self.llm.complete(
+                        prompt=prompt,
+                        system=system_prompt,
+                        timeout=self.step_timeout,
+                        purpose="agent",
+                    )
+                except Exception as e:
+                    logger.warning("LLM purpose='agent' failed, falling back to 'general': %s", e)
+                    result_data = await self.llm.complete(
+                        prompt=prompt,
+                        system=system_prompt,
+                        timeout=self.step_timeout,
+                        purpose="general",
+                    )
         except Exception as e:
             logger.exception("LLM 调用失败")
             return {"error": "LLM 服务暂时不可用", "error_code": "AGENT_006"}
 
-        if "error" in result:
-            return {"error": result["error"], "error_code": "AGENT_006"}
+        if "error" in result_data:
+            return {"error": result_data["error"], "error_code": "AGENT_006"}
 
-        content = result.get("content", "")
+        content = result_data.get("content", "")
         if not content.strip():
             return {"error": "无法理解用户意图", "error_code": "AGENT_002"}
         return self._parse_llm_response(content)

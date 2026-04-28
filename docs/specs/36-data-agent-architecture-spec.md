@@ -1,6 +1,10 @@
 # Data Agent 架构技术规格书
 
-> 版本：v0.1 | 状态：草稿 | 日期：2026-04-24 | 关联 PRD：待定
+> 版本：v0.2 | 状态：Engineering Spec — minimax 可开发（首页 Agent 灰度迁移已设计于 §15） | 日期：2026-04-28 | 关联 PRD：批次 0 T0.3 待 PM 决策（不阻塞 T2.3 启动）
+>
+> **变更记录**
+> - v0.2（2026-04-28）— 0.5d.1 补丁：§15 首页 Agent 灰度迁移与回滚（4 态 feature flag / 双写规约 / 自动回滚阈值 / 3 意图策略决策树 / `bi_agent_dual_write_audit` + `bi_agent_intent_log` 两张新表 / 5 P0 + 2 P1 测试 / 红线 + 强制清单 + grep + 正错示范）
+> - v0.1（2026-04-24）— 初版草稿
 
 ---
 
@@ -728,3 +732,174 @@ for step in range(self.max_steps):
 else:
     return self._summarize_partial(observations)
 ```
+
+---
+
+## 15. 首页 Agent 灰度迁移与回滚
+
+> 本节为 v2 plan 批次 0.5d.1 增量补章，覆盖模板符合度审计中识别的"首页 Agent 驱动迁移开关 / 双写 / 回滚未列；意图识别仅给策略名"两项缺口。下游阻塞 T2.3 首页 Agent 驱动验证。
+>
+> 范围：仅约束 **首页 AskBar → Agent / NLQ** 这一对入口的迁移行为。其他链路（chat / ask-data）按 §11 Phase 1b 单独转发，不在本节灰度模型内。
+
+### 15.A 灰度开关（Feature Flag）
+
+| 项 | 值 |
+|----|----|
+| 名称 | `HOMEPAGE_AGENT_MODE` |
+| 存储位置（首选） | `platform_settings` 表（见 Spec 37 §平台设置）键 `homepage_agent_mode` |
+| 兜底 | 进程启动时若 `platform_settings` 不可读，回退到环境变量 `HOMEPAGE_AGENT_MODE_FALLBACK`（仅供本机故障兜底，禁止业务代码直接读） |
+| 切换粒度 | 全局值 + 单用户 override（`platform_settings` 中 key=`homepage_agent_mode_user_override`，value=`{user_id: mode}`） |
+| 切换生效 | 30 秒内热更（settings 缓存 TTL=30s），无需重启 |
+| 默认值 | `agent_with_fallback` |
+
+**取值定义**：
+
+| 取值 | 行为 | 入口端点 |
+|------|------|---------|
+| `legacy_only` | 仅旧 NLQ 直连路径（`/api/search/query`）；Agent 入口对前端隐藏 | `/api/search/query` |
+| `dual_write` | 同一请求双路并发：Agent + NLQ；以 Agent 结果为准呈现给前端，NLQ 结果仅落审计表用于差异比对 | `/api/agent/stream`（前台）+ `/api/search/query`（影子） |
+| `agent_only` | 仅 Agent 路径；NLQ 入口下线（保留为 QueryTool 内部调用对象） | `/api/agent/stream` |
+| `agent_with_fallback`（默认） | Agent 优先；触发 §15.C 软降级条件时单请求级 fallback NLQ | `/api/agent/stream`，失败时内部代理到 `/api/search/query` |
+
+**优先级**：单用户 override > 全局值。Override 仅 admin 可写（走 audit log，actor=admin）。
+
+### 15.B 双写规约（`dual_write` 模式专用）
+
+1. **trace_id 单源**：API 入口生成 1 个 `trace_id`，同时下发给 Agent 路径与 NLQ 路径；任一路径自行生成 trace_id 视为违规（见 §15.G 红线 2）。
+2. **并发执行**：两路通过 `asyncio.gather(return_exceptions=True)` 并发；单路超时 30s，任一路超时不阻塞另一路。
+3. **结果取舍**：前端只收到 Agent 路径的 SSE 流；NLQ 结果到达后只写 `bi_agent_dual_write_audit`，不影响前台。
+4. **结果对比落表**（见 §15.E `bi_agent_dual_write_audit`）：
+   - `result_hash` 算法统一在 `services/agent/dual_write/hashing.py`：对 NLQ / Agent 的最终回答规范化（去空白、统一数字精度到 4 位、按列排序的 JSON）后 SHA256。
+   - `divergence_kind` 取值：`match` / `partial`（数值差 < 1%）/ `mismatch` / `one_failed` / `both_failed`。
+5. **聚合报表**：admin 平台域 Agent 监控页（§11 Phase 3）每日聚合：分歧率、Agent 失败率、Agent 相对 NLQ 的 P50 / P95 延迟差。
+6. **自动降级阈值**：Agent 失败率（`one_failed` 中 Agent 侧失败 + `both_failed` 计入分子）连续 2 小时滚动窗口 > 5% → 自动切 `legacy_only`（仅人工可解除，见 §15.C）。
+
+### 15.C 回滚路径
+
+| 触发条件 | 行为 | RTO |
+|----------|------|-----|
+| Agent 失败率告警（§15.B 阈值） | 自动写 `platform_settings.homepage_agent_mode = legacy_only` + 站内通知 admin（复用 Spec 16 通知通道） | < 60 秒 |
+| Agent 引擎健康探针 3 次连续失败 | 先自动 `agent_with_fallback`，仍失败则 `legacy_only` | < 90 秒 |
+| 主动回滚（admin 操作） | admin UI 提交 → `platform_settings` 改写 → 30s 内生效 | 立即（生效 ≤ 30s） |
+| 前端 SSE 断流 ≥ 5 次/分钟 | 不切模式，仅写 `bi_events`（type=`agent_sse_drop`），由 admin 决定 | — |
+
+> 自动回滚必须写 audit log（actor=`system`，原因=阈值告警 + 触发指标快照），见 §15.G 红线 4。
+> 自动切 `legacy_only` 后**仅允许 admin 在 UI 上手动解除**，禁止再次自动恢复，避免抖动。
+
+### 15.D 意图识别策略（替代 §7.2 "仅 LLM 推理"陈述，作为 Phase 1b 起的正式实现）
+
+> 替换原"仅给策略名"的描述，每种策略给出判定输入 / 输出 / 决策方式。Phase 1a 仍可走 §7.2 的 LLM 内置推理，Phase 1b 起切换到本节的策略链。
+
+| 策略 | 输入 | 输出意图集合 | 判定方式 |
+|------|------|-------------|---------|
+| `keyword_match` | `user_message`（仅当前一轮） | `attribution` / `report` / `lookup` / `chat` / `unknown` | 关键词正则白名单（配置于 `services/data_agent/intent/keywords.yaml`） + 优先级：attribution > report > lookup > chat |
+| `llm_classify` | `user_message` + 最近 N=5 轮对话上下文 | 同上 | LLM 单次调用，prompt 模板 `INTENT_CLASSIFY_TEMPLATE`，`response_format=json`，`temperature=0.1`，输出 `{intent, confidence}` |
+| `context_aware` | `user_message` + 上一轮工具调用 metadata | 同上 + `continuation` | 若上轮主调用是 `report` 且本轮 `len(user_message) < 10`，直接判定 `continuation`；否则透传给下一级策略 |
+
+**组合规则（fallback 链）**：
+
+```
+context_aware → keyword_match → llm_classify → fallback("chat")
+```
+
+- 任一级策略输出 `unknown` 或置信度 < 0.6 → 进入下一级。
+- `llm_classify` 调用失败（超时 / 配额）→ 直接 fallback `chat`，不再重试。
+- 置信度 < 0.6 时即使有意图也强制走 `chat`，不调归因 / 报告引擎，避免误触发高成本工具链。
+- **冷启动**（首条消息，无上下文）：跳过 `context_aware`，从 `keyword_match` 开始。
+
+**审计**：每次意图识别（含每一级 fallback）写一条 `bi_agent_intent_log`（见 §15.E），`fallback_chain` 字段以 `→` 连接（如 `context_aware→keyword→llm→chat`）。
+
+**策略注册**：所有策略实现 `IntentStrategy` 抽象类，通过 `IntentStrategyRegistry.register()` 注册；新增策略必须同步补本节表格（见 §15.G 强制检查清单）。
+
+### 15.E 新增数据表
+
+#### `bi_agent_dual_write_audit`
+
+| 列 | 类型 | 约束 | 说明 |
+|----|------|------|------|
+| id | BIGINT | PK, IDENTITY | |
+| trace_id | VARCHAR(64) | UNIQUE, INDEX | 与 Agent / NLQ 两路共享 |
+| user_id | INTEGER | NOT NULL, FK→auth_users.id, INDEX | |
+| nlq_result_hash | VARCHAR(64) | NULL | NLQ 路径失败时为 NULL |
+| agent_result_hash | VARCHAR(64) | NULL | Agent 路径失败时为 NULL |
+| nlq_latency_ms | INT | NULL | |
+| agent_latency_ms | INT | NULL | |
+| divergence_kind | VARCHAR(16) | NOT NULL, INDEX | match / partial / mismatch / one_failed / both_failed |
+| created_at | TIMESTAMP | NOT NULL DEFAULT now() | |
+
+- 按月分区，遵循 Spec 16 §2.1 分区约定（`PARTITION BY RANGE (created_at)`）。
+- 保留期 30 天；分区清理脚本与 `bi_events` 复用同一 Beat 任务（见 §15.G 强制检查清单）。
+
+#### `bi_agent_intent_log`
+
+| 列 | 类型 | 约束 | 说明 |
+|----|------|------|------|
+| id | BIGINT | PK, IDENTITY | |
+| trace_id | VARCHAR(64) | INDEX | 与首页请求 trace_id 一致 |
+| strategy | VARCHAR(16) | NOT NULL | keyword_match / llm_classify / context_aware |
+| input_excerpt | VARCHAR(256) | NULL | 输入 user_message 截断到 256 字符（含中英文） |
+| output_intent | VARCHAR(32) | INDEX | 见 §15.D 意图集合 |
+| confidence | NUMERIC(4,3) | NULL | `keyword_match` 无置信度时为 NULL |
+| fallback_chain | VARCHAR(64) | NULL | 形如 `keyword→llm→chat` |
+| created_at | TIMESTAMP | NOT NULL DEFAULT now(), INDEX | |
+
+- 不分区（增长可控）；保留期 90 天，由独立 Beat 任务清理。
+
+### 15.F 测试 P0 / P1
+
+| # | 优先级 | 场景 | 预期 |
+|---|--------|------|------|
+| 15F-1 | P0 | 灰度模式四态切换 | 每种模式下首页问数路径符合 §15.A 表（端到端 e2e，覆盖 SSE） |
+| 15F-2 | P0 | `dual_write` 下 Agent 失败 NLQ 成功 | 前端展示 Agent 错误（不静默偷换为 NLQ 结果），审计表 `divergence_kind=one_failed` |
+| 15F-3 | P0 | 阈值告警自动回滚 | 注入 Agent 失败率 6%，60 秒内 `platform_settings` 自动改为 `legacy_only`，audit log 写入 |
+| 15F-4 | P0 | 意图三级 fallback 链路日志 | `keyword_match → llm_classify → chat`，三条 `bi_agent_intent_log` 记录，`fallback_chain` 正确 |
+| 15F-5 | P0 | trace_id 单源贯穿 | 双路 + 意图识别 + step run 共用同一 `trace_id`，所有日志可关联 |
+| 15F-6 | P1 | 单用户 override | admin 给 user_X 切 `agent_only`，user_X 走 Agent，user_Y 仍按全局值 |
+| 15F-7 | P1 | SSE 断流计数不切模式 | 5 次/分钟 SSE 断流写入 `bi_events`，全局 `homepage_agent_mode` 不变 |
+
+### 15.G 开发交付约束
+
+> 复用 §14 的通用约束，本节为首页 Agent 迁移特有约束。
+
+#### 架构红线（违反 = PR 拒绝）
+
+1. `HOMEPAGE_AGENT_MODE` 唯一读取入口为 `services/platform_settings.get('homepage_agent_mode')`；业务代码（含 `app/api/agent.py`、`services/data_agent/**`）禁止直接读 `os.environ['HOMEPAGE_AGENT_MODE*']`
+2. 双写路径必须共用一个 `trace_id`，由 API 入口生成；Agent / NLQ 任一路径生成新 trace_id 视为违规
+3. 双写结果对比的 `result_hash` 算法在 `services/agent/dual_write/hashing.py` **唯一**实现；其他位置出现等价算法（独立 SHA256 + 自定义规范化）视为违规
+4. 自动回滚操作必须写 audit log（actor=`system`，原因=阈值告警 + 指标快照 JSON）
+5. 意图识别 `fallback_chain` 必须落 `bi_agent_intent_log`；禁止只在内存中转或仅打 logger.info
+
+#### 强制检查清单
+
+- [ ] 灰度开关四态（`legacy_only` / `dual_write` / `agent_only` / `agent_with_fallback`）有 e2e 测试
+- [ ] 自动回滚路径有混沌测试（注入 Agent 失败率超阈值）
+- [ ] `bi_agent_dual_write_audit` 分区脚本与 `bi_events` 同步加入 Beat 任务（不引入第二份调度）
+- [ ] 新增意图策略必须在 `IntentStrategyRegistry` 注册，并补本 spec §15.D 表
+- [ ] `platform_settings.homepage_agent_mode` 写操作有 admin 角色校验
+
+#### 验证命令
+
+```bash
+cd backend && pytest tests/services/test_homepage_agent_mode.py -x
+cd backend && pytest tests/services/test_agent_intent.py -x
+cd backend && pytest tests/integration/test_dual_write_audit.py -x
+
+# 红线 1：禁止业务代码直接读 env 中的 HOMEPAGE_AGENT_MODE
+! grep -rE "os\.environ.*HOMEPAGE_AGENT_MODE" backend/app backend/services/data_agent backend/services/agent
+
+# 红线 2：双写路径不得自行生成 trace_id
+! grep -rE "uuid\.uuid4|secrets\.token_hex" backend/services/agent/dual_write
+
+# 红线 3：result_hash 实现唯一
+test "$(grep -rl 'def result_hash' backend/services backend/app | wc -l | tr -d ' ')" = "1"
+```
+
+### 15.H 开放问题
+
+| # | 问题 | 优先级 | 备注 |
+|---|------|--------|------|
+| HA-A | `dual_write` 阶段持续多久 | P1 | 建议 2 周；视 §15.B 分歧率收敛情况调整 |
+| HA-B | divergence > 30% 时是否阻塞 `agent_only` 切换 | P1 | 倾向阻塞，但需要 admin 一键 override |
+| HA-C | 多用户并发 override 与全局开关冲突解决 | P2 | 当前规则：用户 override > 全局；冲突仅在 admin 误操作时出现 |
+| HA-D | 意图识别 LLM 调用成本归因 | P2 | 依赖 Spec 20 OI-D（capability wrapper 计费维度） |
+
