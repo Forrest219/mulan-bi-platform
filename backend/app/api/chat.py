@@ -25,7 +25,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 # 内部 API base URL — still needed for Phase 1 fallback (_resolve_answer)
-_INTERNAL_BASE = os.environ.get("INTERNAL_API_BASE", "http://localhost:8000")
+from app.core.config import get_settings as _get_settings
+_INTERNAL_BASE = _get_settings().INTERNAL_API_BASE
 
 
 async def _stream_via_agent_direct(
@@ -56,6 +57,7 @@ async def _stream_via_agent_direct(
         user_id=current_user["id"],
         connection_id=connection_id,
         trace_id=trace_id,
+        tenant_id=str(current_user["tenant_id"]) if current_user.get("tenant_id") else None,
     )
 
     engine, _registry = create_engine()
@@ -229,8 +231,44 @@ async def _stream_llm_response(
         yield f"data: {payload}\n\n"
 
 
+@router.post("/stream")
+async def chat_stream_post(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    POST /api/chat/stream — Phase 1b 内部转发到 Data Agent
+
+    兼容现有前端，同时暴露新架构能力。
+    内部转发到 /api/agent/stream，使用 httpx 直连（不走 HTTP）。
+    """
+    body = await request.json()
+    question = body.get("q", body.get("question", ""))
+
+    if not question:
+        return StreamingResponse(
+            iter([f"data: {json.dumps({'error': '问题不能为空'}, ensure_ascii=False)}\n\n"]),
+            media_type="text/event-stream",
+        )
+
+    return StreamingResponse(
+        _stream_via_agent_direct(
+            question=question,
+            connection_id=body.get("connection_id"),
+            current_user=current_user,
+            db=db,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/stream")
-async def chat_stream(
+async def chat_stream_get(
     request: Request,
     q: str = Query(..., description="用户问题"),
     connection_id: Optional[int] = Query(None, description="连接 ID"),

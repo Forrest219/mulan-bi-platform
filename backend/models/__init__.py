@@ -1,5 +1,5 @@
 """
-Metrics Agent ORM Models
+Mulan BI Platform ORM Models
 """
 
 from models.metrics import (  # noqa: F401
@@ -8,4 +8,20 @@ from models.metrics import (  # noqa: F401
     BiMetricVersion,
     BiMetricAnomaly,
     BiMetricConsistencyCheck,
+)
+
+from models.governance import (  # noqa: F401
+    BiQualityRule,
+    BiQualityResult,
+    BiQualityScore,
+)
+
+from models.dqc import (  # noqa: F401
+    DqcMonitoredAsset,
+    DqcQualityRule,
+    DqcCycle,
+    DqcDimensionScore,
+    DqcAssetSnapshot,
+    DqcRuleResult,
+    DqcLlmAnalysis,
 )

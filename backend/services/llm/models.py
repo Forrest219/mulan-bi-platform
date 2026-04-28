@@ -1,7 +1,10 @@
 """LLM 配置数据模型"""
 from __future__ import annotations
 
+import logging
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, JSON, Index
 from app.core.database import Base, JSONB, sa_func, sa_text # 导入中央配置的 Base, JSONB, func, text
@@ -120,6 +123,11 @@ class LLMConfigDatabase:
 
             # Step 2: fallback 到 'default' purpose（仅当 purpose 本身不是 'default'）
             if purpose != "default":
+                logger.warning(
+                    "LLM purpose '%s' 无匹配配置，降级至 'default'。"
+                    "请检查 ai_llm_configs 表是否缺少 purpose='%s' 的有效记录",
+                    purpose, purpose,
+                )
                 config = (
                     session.query(LLMConfig)
                     .filter(LLMConfig.purpose == "default", LLMConfig.is_active == True)

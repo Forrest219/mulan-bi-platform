@@ -97,7 +97,7 @@ class TestConversationPersistence:
         mock_conv.status = "active"
         mock_db.query.return_value.filter.return_value.first.return_value = mock_conv
 
-        session_mgr.archive_session(mock_conv.id)
+        session_mgr.archive_session(mock_conv.id, user_id=1)
         assert mock_conv.status == "archived"
         mock_db.commit.assert_called()
 
@@ -105,4 +105,4 @@ class TestConversationPersistence:
         """TC-API-011b: 不存在的会话不抛异常"""
         mock_db.query.return_value.filter.return_value.first.return_value = None
         # 不应抛异常
-        session_mgr.archive_session(uuid.uuid4())
+        session_mgr.archive_session(uuid.uuid4(), user_id=1)

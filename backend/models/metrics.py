@@ -45,7 +45,7 @@ class BiMetricDefinition(Base):
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())
 
     lineage_records: Mapped[list["BiMetricLineage"]] = relationship(back_populates="metric", cascade="all, delete-orphan")
-    versions: Mapped[list["BiMetricVersion"]] = relationship(back_populates="metric", cascade="all, delete-orphan")
+    versions: Mapped[list["BiMetricVersion"]] = relationship(back_populates="metric", cascade="save-update, merge")
     anomalies: Mapped[list["BiMetricAnomaly"]] = relationship(back_populates="metric", cascade="all, delete-orphan")
     consistency_checks: Mapped[list["BiMetricConsistencyCheck"]] = relationship(back_populates="metric", cascade="all, delete-orphan")
 

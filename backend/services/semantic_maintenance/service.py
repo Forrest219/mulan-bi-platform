@@ -296,20 +296,8 @@ class SemanticMaintenanceService:
         if not chunk_text.strip():
             return
         try:
-            # 兼容 async / sync 上下文
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-            if loop is None:
-                embedding = asyncio.run(embedding_service.embed_text(chunk_text))
-            else:
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(
-                        lambda: asyncio.run(embedding_service.embed_text(chunk_text))
-                    )
-                    embedding = future.result()
+            from services.common.async_compat import run_async_safely
+            embedding = run_async_safely(embedding_service.embed_text(chunk_text))
             self.db.upsert_field_embedding(
                 field_semantic_id=field_semantic_id,
                 chunk_text=chunk_text,
@@ -558,8 +546,8 @@ class SemanticMaintenanceService:
         try:
             llm = LLMService()
             # v1.2 §4.2: 强制 temperature=0.1，OpenAI 启用 json_object 响应格式
-            # 使用 asyncio.run() 桥接异步 LLM 调用（service 层保持同步接口）
-            result = asyncio.run(llm.complete_for_semantic(prompt, system=system, timeout=30))
+            from services.common.async_compat import run_async_safely
+            result = run_async_safely(llm.complete_for_semantic(prompt, system=system, timeout=30))
         except Exception as e:
             return False, f"LLM 调用失败: {e}"
 
@@ -576,7 +564,7 @@ class SemanticMaintenanceService:
                 f"[修正要求] 你上次生成的格式有误，JSON 解析报错信息为：{first_err.msg}。"
                 f"请严格按照 JSON 规范重新生成，不要包含任何 Markdown 标记（如 ```json），只输出纯 JSON。"
             )
-            result_retry = asyncio.run(llm.complete_for_semantic(retry_prompt, system=system, timeout=30))
+            result_retry = run_async_safely(llm.complete_for_semantic(retry_prompt, system=system, timeout=30))
             if "error" in result_retry:
                 return False, result_retry["error"]
             try:
@@ -648,7 +636,8 @@ class SemanticMaintenanceService:
         try:
             llm = LLMService()
             # v1.2 §4.2: 强制 temperature=0.1，OpenAI 启用 json_object 响应格式
-            result = asyncio.run(llm.complete_for_semantic(prompt, system=system, timeout=30))
+            from services.common.async_compat import run_async_safely
+            result = run_async_safely(llm.complete_for_semantic(prompt, system=system, timeout=30))
         except Exception as e:
             return False, f"LLM 调用失败: {e}"
 
@@ -665,7 +654,7 @@ class SemanticMaintenanceService:
                 f"[修正要求] 你上次生成的格式有误，JSON 解析报错信息为：{first_err.msg}。"
                 f"请严格按照 JSON 规范重新生成，不要包含任何 Markdown 标记（如 ```json），只输出纯 JSON。"
             )
-            result_retry = asyncio.run(llm.complete_for_semantic(retry_prompt, system=system, timeout=30))
+            result_retry = run_async_safely(llm.complete_for_semantic(retry_prompt, system=system, timeout=30))
             if "error" in result_retry:
                 return False, result_retry["error"]
             try:
@@ -844,20 +833,8 @@ class SemanticMaintenanceService:
 
         from services.knowledge_base.embedding_service import embedding_service
         try:
-            import asyncio
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-            if loop is None:
-                query_embedding = asyncio.run(embedding_service.embed_text(fuzzy_name))
-            else:
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(
-                        lambda: asyncio.run(embedding_service.embed_text(fuzzy_name))
-                    )
-                    query_embedding = future.result()
+            from services.common.async_compat import run_async_safely
+            query_embedding = run_async_safely(embedding_service.embed_text(fuzzy_name))
         except Exception as e:
             logger.warning("resolve_field_by_embedding: embed_text 失败，fallback 到空列表: %s", e)
             return [], None

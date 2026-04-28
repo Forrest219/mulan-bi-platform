@@ -9,6 +9,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Session
 
 from app.core.database import Base, JSONB, sa_func, sa_text
+from pgvector.sqlalchemy import Vector
 
 
 # === kb_glossary ===
@@ -179,7 +180,7 @@ class KbEmbedding(Base):
     source_id = Column(Integer, nullable=False)
     chunk_index = Column(Integer, nullable=False, server_default="0")
     chunk_text = Column(Text, nullable=False)
-    embedding = Column(JSONB, nullable=False)
+    embedding = Column(Vector(1024), nullable=False)
     model_name = Column(String(128), nullable=False)
     token_count = Column(Integer, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now())

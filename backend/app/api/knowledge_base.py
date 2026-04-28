@@ -32,7 +32,7 @@ def _require_role(user, min_role: str) -> None:
     if user_rank < min_rank:
         raise HTTPException(
             status_code=403,
-            detail=kb_error_response(KBErrorCode.TERM_NOT_FOUND, 403)  # 复用，无专门权限错误码
+            detail={"error_code": "KB_011", "message": "权限不足"}
         )
 
 
@@ -98,9 +98,9 @@ async def list_glossary(
     category: Optional[str] = None,
     keyword: Optional[str] = None,
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """术语列表（PRD §7.1）GET /api/knowledge-base/glossary — analyst+"""
-    user = get_current_user(request=None, db=db)
     _require_role(user, "analyst")
 
     result = glossary_service.search_terms(
@@ -120,9 +120,9 @@ async def create_glossary(
     related_fields: str = "",
     source: str = "manual",
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """创建术语（PRD §7.2）POST /api/knowledge-base/glossary — data_admin+"""
-    user = get_current_user(request=None, db=db)
     _require_role(user, "data_admin")
 
     if not definition or not definition.strip():
@@ -154,9 +154,8 @@ async def create_glossary(
 
 
 @router.get("/glossary/{glossary_id}")
-async def get_glossary(glossary_id: int, db: Session = Depends(get_db)):
+async def get_glossary(glossary_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
     """术语详情（PRD §7.3）GET /api/knowledge-base/glossary/{id} — analyst+"""
-    user = get_current_user(request=None, db=db)
     _require_role(user, "analyst")
 
     result = glossary_service.get_term(db, glossary_id)
@@ -177,9 +176,9 @@ async def update_glossary(
     related_fields: Optional[str] = None,
     status: Optional[str] = None,
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """更新术语（PRD §7.4）PUT /api/knowledge-base/glossary/{id} — data_admin+"""
-    user = get_current_user(request=None, db=db)
     _require_role(user, "data_admin")
 
     import json
@@ -214,12 +213,12 @@ async def delete_glossary(
     glossary_id: int,
     hard: bool = Query(False, description="硬删除（仅 admin）"),
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """删除术语（PRD §7.5）DELETE /api/knowledge-base/glossary/{id}
     - hard=false（默认）：软删除（data_admin+），status → deprecated
     - hard=true：硬删除（admin 专属），同时清理 kb_embeddings
     """
-    user = get_current_user(request=None, db=db)
 
     if hard:
         _require_role(user, "admin")
@@ -241,9 +240,9 @@ async def list_documents(
     page_size: int = Query(20, ge=1, le=100),
     category: Optional[str] = None,
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """文档列表（PRD §7.6）GET /api/knowledge-base/documents — analyst+"""
-    user = get_current_user(request=None, db=db)
     _require_role(user, "analyst")
 
     return document_service.list_documents(db, page=page, page_size=page_size, category=category)
@@ -257,11 +256,11 @@ async def create_document(
     category: str = "general",
     tags: str = "",
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """创建文档（PRD §7.7）POST /api/knowledge-base/documents — data_admin+
     副作用：Celery Worker 异步生成 Embedding（不等候完成，立即返回 201）。
     """
-    user = get_current_user(request=None, db=db)
     _require_role(user, "data_admin")
 
     if not content or not content.strip():
@@ -287,9 +286,8 @@ async def create_document(
 
 
 @router.get("/documents/{doc_id}")
-async def get_document(doc_id: int, db: Session = Depends(get_db)):
+async def get_document(doc_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
     """获取文档详情（PRD §7.x）GET /api/knowledge-base/documents/{id} — analyst+"""
-    user = get_current_user(request=None, db=db)
     _require_role(user, "analyst")
 
     result = document_service.get_document(db, doc_id)
@@ -308,9 +306,9 @@ async def update_document(
     tags: Optional[str] = None,
     status: Optional[str] = None,
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """更新文档（PRD §7.x）PUT /api/knowledge-base/documents/{id} — data_admin+"""
-    user = get_current_user(request=None, db=db)
     _require_role(user, "data_admin")
 
     if content is not None and not content.strip():
@@ -346,11 +344,11 @@ async def update_document(
 async def embed_document(
     doc_id: int,
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """手动触发文档向量化（PRD §7.8）POST /api/knowledge-base/documents/{id}/embed — data_admin+
     仅当自动嵌入失败时使用，正常创建文档后由 Celery 自动处理。
     """
-    user = get_current_user(request=None, db=db)
     _require_role(user, "data_admin")
 
     # 同步调用（Celery Worker 内部也用此路径）
@@ -365,12 +363,12 @@ async def delete_document(
     doc_id: int,
     hard: bool = Query(False, description="硬删除（仅 admin）"),
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """删除文档（PRD §7.9 + §9.1）DELETE /api/knowledge-base/documents/{id}
     - hard=false（默认）：软删除（admin 专属，PRD §9.1）
     - hard=true：硬删除（admin 专属），同时清理 kb_embeddings
     """
-    user = get_current_user(request=None, db=db)
     _require_role(user, "admin")
 
     success = document_service.delete_document(db, doc_id, hard=hard)
@@ -388,11 +386,11 @@ async def search_knowledge(
     source_types: Optional[str] = None,
     threshold: float = Query(0.50, ge=0.0, le=1.0),
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """知识库语义搜索（PRD §7.10）POST /api/knowledge-base/search — analyst+
     请求体参数：query, top_k, source_types[], threshold
     """
-    user = get_current_user(request=None, db=db)
     _require_role(user, "analyst")
 
     if not q or not q.strip():
@@ -432,11 +430,11 @@ async def search_knowledge(
 async def rag_enrich(
     body: RagEnrichRequest,
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """RAG 上下文增强（PRD §7.11）POST /api/knowledge-base/rag/enrich — analyst+
     请求体：{ "question": str, "scenario": str }
     """
-    user = get_current_user(request=None, db=db)
     _require_role(user, "analyst")
 
     result = await rag_service.enrich_context(db, body.question, body.scenario)

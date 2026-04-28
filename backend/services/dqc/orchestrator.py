@@ -76,16 +76,15 @@ class _RedisLock:
     def try_acquire(self) -> bool:
         client = self._client_or_none()
         if client is None:
-            self._acquired = True
-            return True
+            logger.error("Redis 不可用，拒绝获取锁 key=%s，中止 cycle 以避免并发写入", self.key)
+            return False
         try:
             ok = client.set(self.key, self.token, nx=True, ex=self.ttl)
             self._acquired = bool(ok)
             return self._acquired
         except Exception as exc:
-            logger.warning("redis lock acquire failed: %s", exc)
-            self._acquired = True
-            return True
+            logger.error("Redis 锁获取异常 key=%s，拒绝无锁执行: %s", self.key, exc)
+            return False
 
     def release(self) -> None:
         if not self._acquired:

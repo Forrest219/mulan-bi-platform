@@ -480,10 +480,10 @@ export default function SemanticFieldListPage() {
                   className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
                 >
                   <option value="">未设置</option>
-                  <option value="public">公开</option>
-                  <option value="internal">内部</option>
+                  <option value="low">低</option>
+                  <option value="medium">中</option>
+                  <option value="high">高</option>
                   <option value="confidential">机密</option>
-                  <option value="high">高度机密</option>
                 </select>
               </div>
             </div>

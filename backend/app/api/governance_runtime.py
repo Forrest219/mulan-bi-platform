@@ -413,7 +413,7 @@ async def trigger_governance_scan(
         return GovernanceScanResponse(
             cycle_id=None,
             task_ids=task_ids,
-            message=f"DQC scan triggered for {len(task_ids)} asset(s)",
+            message=f"已触发 {len(task_ids)} 个资产的 DQC 扫描",
         )
 
     if body.scope == "hourly_light":
@@ -425,7 +425,7 @@ async def trigger_governance_scan(
     return GovernanceScanResponse(
         cycle_id=None,
         task_ids=task_ids,
-        message=f"DQC {body.scope} cycle triggered",
+        message=f"已触发 DQC {body.scope} 周期扫描",
     )
 
 
@@ -551,7 +551,7 @@ async def get_asset_signal(
             "signal": None,
             "confidence_score": None,
             "dimension_signals": {},
-            "message": "No scan results yet",
+            "message": "暂无扫描结果",
         }
 
     thresholds = asset.signal_thresholds or DEFAULT_SIGNAL_THRESHOLDS

@@ -41,6 +41,9 @@ from models.metrics import (  # noqa: F401
     BiMetricDefinition, BiMetricLineage, BiMetricVersion,
     BiMetricAnomaly, BiMetricConsistencyCheck,
 )
+from models.governance import (  # noqa: F401
+    BiQualityRule, BiQualityResult, BiQualityScore,
+)
 
 config = context.config
 

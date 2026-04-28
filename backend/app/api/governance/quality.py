@@ -9,6 +9,10 @@
 - /api/governance/quality/dashboard - 质量看板
 
 认证：规则管理（admin/data_admin）；查询（已认证 analyst 及以上）
+
+架构说明：
+- 规则 CRUD 委托给 RuleService（services/governance/rule_service.py）
+- 其他操作（执行/结果/评分/看板）仍使用 QualityDatabase 直接访问
 """
 import logging
 from datetime import datetime
@@ -22,6 +26,7 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_roles
 from services.datasources.models import DataSourceDatabase
 from services.governance.database import QualityDatabase
+from services.governance.rule_service import RuleService
 from services.tasks.quality_tasks import execute_quality_rules_task
 
 logger = logging.getLogger(__name__)
@@ -81,27 +86,12 @@ async def create_rule(
     db: Session = Depends(get_db),
 ):
     """创建质量规则 - admin/data_admin"""
+    svc = RuleService()
 
-    qdb = QualityDatabase()
-
-    # 验证数据源存在且活跃
-    ds_db = DataSourceDatabase()
-    ds = ds_db.get(db, body.datasource_id)
-    if not ds or not ds.is_active:
-        raise HTTPException(status_code=400, detail="GOV_010: 数据源不存在或未激活")
-
-    # 验证规则类型
-    valid_rule_types = [
-        "null_rate", "not_null", "row_count", "duplicate_rate", "unique_count",
-        "referential", "cross_field", "value_range", "freshness", "latency",
-        "format_regex", "enum_check", "custom_sql",
-    ]
-    if body.rule_type not in valid_rule_types:
-        raise HTTPException(status_code=400, detail=f"GOV_003: 不支持的规则类型 {body.rule_type}")
-
-    # 验证 cron 表达式（basic validation）
-    if body.execution_mode == "scheduled" and body.cron:
-        _validate_cron(body.cron)
+    # IDOR 保护：非 admin 只能为自己的数据源创建规则
+    if current_user["role"] != "admin":
+        if not svc.check_datasource_ownership(db, body.datasource_id, current_user["id"], current_user["role"]):
+            raise HTTPException(status_code=403, detail="GOV_001: 无权为此数据源创建规则")
 
     # 验证自定义 SQL
     if body.rule_type == "custom_sql" and body.custom_sql:
@@ -109,33 +99,7 @@ async def create_rule(
         if not validate_custom_sql(body.custom_sql):
             raise HTTPException(status_code=400, detail="GOV_005: 自定义 SQL 必须为 SELECT 语句且不包含禁止关键字")
 
-    # 检查重复规则
-    if qdb.rule_exists(db, body.datasource_id, body.table_name, body.field_name, body.rule_type):
-        raise HTTPException(status_code=409, detail="GOV_006: 同一数据源+表+字段+规则类型已存在相同规则")
-
-    # 非 admin 只能为自己的数据源创建规则
-    if current_user["role"] != "admin" and ds.owner_id != current_user["id"]:
-        raise HTTPException(status_code=403, detail="GOV_001: 无权为此数据源创建规则")
-
-    rule = qdb.create_rule(
-        db,
-        name=body.name,
-        description=body.description,
-        datasource_id=body.datasource_id,
-        table_name=body.table_name,
-        field_name=body.field_name,
-        rule_type=body.rule_type,
-        operator=body.operator,
-        threshold=body.threshold,
-        severity=body.severity,
-        execution_mode=body.execution_mode,
-        cron=body.cron,
-        custom_sql=body.custom_sql,
-        enabled=True,
-        tags_json=body.tags_json,
-        created_by=current_user["id"],
-    )
-
+    rule = svc.create_rule(body, current_user["id"], db)
     return {"rule": rule.to_dict(), "message": "质量规则创建成功"}
 
 
@@ -143,7 +107,6 @@ async def create_rule(
 async def list_rules(
     request: Request,
     datasource_id: Optional[int] = None,
-    table_name: Optional[str] = None,
     enabled: Optional[bool] = None,
     page: int = 1,
     page_size: int = 20,
@@ -151,23 +114,17 @@ async def list_rules(
 ):
     """规则列表（支持筛选）- 已认证"""
     get_current_user(request)
-    qdb = QualityDatabase()
-    return qdb.list_rules(
-        db,
-        datasource_id=datasource_id,
-        table_name=table_name,
-        enabled=enabled,
-        page=page,
-        page_size=page_size,
-    )
+    svc = RuleService()
+    rules, total = svc.list_rules(db, datasource_id=datasource_id, enabled=enabled, page=page, page_size=page_size)
+    return {"rules": [r.to_dict() for r in rules], "total": total, "page": page, "page_size": page_size}
 
 
 @router.get("/rules/{rule_id}")
 async def get_rule(rule_id: int, request: Request, db: Session = Depends(get_db)):
     """规则详情 - 已认证"""
     get_current_user(request)
-    qdb = QualityDatabase()
-    rule = qdb.get_rule(db, rule_id)
+    svc = RuleService()
+    rule = svc.get_rule(rule_id, db)
     if not rule:
         raise HTTPException(status_code=404, detail="GOV_001: 质量规则不存在")
     return rule.to_dict()
@@ -181,28 +138,15 @@ async def update_rule(
     db: Session = Depends(get_db),
 ):
     """更新规则 - admin/data_admin"""
-    qdb = QualityDatabase()
-    rule = qdb.get_rule(db, rule_id)
-    if not rule:
-        raise HTTPException(status_code=404, detail="GOV_001: 质量规则不存在")
-
-    # 验证 cron
-    if body.cron:
-        _validate_cron(body.cron)
-
     # 验证自定义 SQL
     if body.custom_sql:
         from services.governance.engine import validate_custom_sql
         if not validate_custom_sql(body.custom_sql):
             raise HTTPException(status_code=400, detail="GOV_005: 自定义 SQL 必须为 SELECT 语句")
 
-    # 禁止修改的字段
-    update_fields = body.model_dump(exclude_unset=True, exclude={"id", "created_by", "datasource_id", "table_name", "field_name", "rule_type"})
-    update_fields["updated_by"] = current_user["id"]
-
-    qdb.update_rule(db, rule_id, **update_fields)
-    updated_rule = qdb.get_rule(db, rule_id)
-    return {"rule": updated_rule.to_dict(), "message": "质量规则更新成功"}
+    svc = RuleService()
+    rule = svc.update_rule(rule_id, body, current_user["id"], db)
+    return {"rule": rule.to_dict(), "message": "质量规则更新成功"}
 
 
 @router.delete("/rules/{rule_id}")
@@ -212,27 +156,22 @@ async def delete_rule(
     db: Session = Depends(get_db),
 ):
     """删除规则 - admin/data_admin"""
-    qdb = QualityDatabase()
-    if not qdb.get_rule(db, rule_id):
-        raise HTTPException(status_code=404, detail="GOV_001: 质量规则不存在")
-
-    qdb.delete_rule(db, rule_id)
+    svc = RuleService()
+    svc.delete_rule(rule_id, db)
     return {"message": "质量规则删除成功"}
 
 
 @router.put("/rules/{rule_id}/toggle")
 async def toggle_rule(
     rule_id: int,
+    enabled: bool,
     current_user: dict = Depends(require_roles(["admin", "data_admin"])),
     db: Session = Depends(get_db),
 ):
     """启用/禁用规则 - admin/data_admin"""
-    qdb = QualityDatabase()
-    new_state = qdb.toggle_rule(db, rule_id)
-    if new_state is None:
-        raise HTTPException(status_code=404, detail="GOV_001: 质量规则不存在")
-
-    return {"rule_id": rule_id, "enabled": new_state, "message": f"规则已{'启用' if new_state else '禁用'}"}
+    svc = RuleService()
+    rule = svc.toggle_rule(rule_id, enabled, db)
+    return {"rule": rule.to_dict(), "message": f"规则已{'启用' if enabled else '禁用'}"}
 
 
 # ==================== 检测执行 ====================
@@ -457,13 +396,3 @@ async def get_dashboard(request: Request, db: Session = Depends(get_db)):
         }
     finally:
         s.close()
-
-
-# ==================== 工具函数 ====================
-
-def _validate_cron(cron: str):
-    """验证 Cron 表达式基本格式"""
-    import re
-    pattern = r'^(\S+\s+){4}\S+$'  # 5 字段
-    if not re.match(pattern, cron.strip()):
-        raise HTTPException(status_code=400, detail="GOV_004: Cron 表达式格式无效")

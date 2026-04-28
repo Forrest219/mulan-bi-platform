@@ -108,6 +108,14 @@ def _build_daily_sql(metric: BiMetricDefinition, window_days: int) -> str:
     _validate_identifier(metric.column_name, "column_name")
 
     formula = metric.formula or f"COUNT({metric.column_name})"
+
+    # P0-1：formula 安全校验（拦截 SQL 注入）
+    from services.metrics_agent.formula_validator import validate_formula
+    try:
+        validate_formula(formula)
+    except ValueError as e:
+        raise ValueError(f"异常检测 formula 安全校验失败：{e}")
+
     table_name = metric.table_name
 
     where_clauses = [f"created_at >= NOW() - INTERVAL '{window_days} days'"]

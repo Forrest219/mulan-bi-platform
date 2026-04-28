@@ -750,8 +750,8 @@ async def _reset_consent(credentials: dict) -> dict:
 
 # ── P3 新增工具实现函数 ────────────────────────────────────────────────────────
 
-# 用于调用内部 Mulan API 的 base URL，优先从环境变量读取
-_MULAN_INTERNAL_BASE_URL: str = os.environ.get("MULAN_INTERNAL_API_BASE_URL", "http://localhost:8000")
+from app.core.config import get_settings as _get_settings
+_MULAN_INTERNAL_BASE_URL: str = _get_settings().INTERNAL_API_BASE
 
 # GraphQL 查询：完整字段 schema（含 formula 等大字段）
 _GQL_FULL_FIELDS = """

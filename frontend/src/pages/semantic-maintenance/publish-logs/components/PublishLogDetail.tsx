@@ -144,7 +144,7 @@ export function PublishLogDetailDrawer({
                     : 'border-transparent text-slate-400 hover:text-slate-600'
                 }`}
               >
-                发布 Payload
+                发布数据
               </button>
             </div>
           </div>
@@ -177,7 +177,7 @@ export function PublishLogDetailDrawer({
                   </pre>
                 ) : (
                   <div className="text-center py-8 text-slate-400 text-sm">
-                    无 Payload 记录
+                    无发布数据记录
                   </div>
                 )}
               </div>

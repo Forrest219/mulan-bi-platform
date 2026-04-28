@@ -141,19 +141,21 @@ class SessionManager:
             status=conversation.status,
         )
 
-    def update_title(self, conversation_id: uuid.UUID, title: str) -> None:
-        """Update conversation title"""
+    def update_title(self, conversation_id: uuid.UUID, title: str, user_id: int) -> None:
+        """Update conversation title (ownership-enforced)"""
         conversation = self.db.query(AgentConversation).filter(
-            AgentConversation.id == conversation_id
+            AgentConversation.id == conversation_id,
+            AgentConversation.user_id == user_id,
         ).first()
         if conversation:
             conversation.title = title
             self.db.commit()
 
-    def archive_session(self, conversation_id: uuid.UUID) -> None:
-        """Archive a session (soft delete)"""
+    def archive_session(self, conversation_id: uuid.UUID, user_id: int) -> None:
+        """Archive a session (soft delete, ownership-enforced)"""
         conversation = self.db.query(AgentConversation).filter(
-            AgentConversation.id == conversation_id
+            AgentConversation.id == conversation_id,
+            AgentConversation.user_id == user_id,
         ).first()
         if conversation:
             conversation.status = "archived"
@@ -215,10 +217,17 @@ class SessionManager:
     def get_conversation_messages(
         self,
         conversation_id: uuid.UUID,
+        user_id: int,
         limit: int = 50,
         offset: int = 0,
     ) -> list[AgentConversationMessage]:
-        """Get messages for a conversation"""
+        """Get messages for a conversation (ownership-enforced)"""
+        ownership = self.db.query(AgentConversation).filter(
+            AgentConversation.id == conversation_id,
+            AgentConversation.user_id == user_id,
+        ).first()
+        if not ownership:
+            return []
         return (
             self.db.query(AgentConversationMessage)
             .filter(AgentConversationMessage.conversation_id == conversation_id)

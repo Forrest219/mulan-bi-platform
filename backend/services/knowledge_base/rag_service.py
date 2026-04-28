@@ -300,7 +300,7 @@ class RAGService:
         if knowledge_items:
             know_lines = []
             for r in knowledge_items:
-                src_tag = "知识" if r["source_type"] == "document" else "知识"
+                src_tag = "知识" if r["source_type"] == "document" else "术语"
                 line = f"[{src_tag}] {r['chunk_text']}"
                 know_lines.append(line)
             sections.append("[知识]\n" + "\n".join(know_lines))

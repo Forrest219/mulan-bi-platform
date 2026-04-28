@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 # P2-1：哨兵时间常量（与 registry.py 中保持一致）
 _PENDING_SENTINEL_DT = datetime(1970, 1, 1, 0, 0, 0)
@@ -67,9 +67,17 @@ class MetricCreate(BaseModel):
     metric_type: MetricType = Field(..., description="指标类型：atomic / derived / ratio")
     business_domain: Optional[str] = Field(None, max_length=64, description="业务域")
     description: Optional[str] = Field(None, description="指标描述")
-    formula: Optional[str] = Field(None, description="计算公式（derived/ratio 必填）")
+    formula: Optional[str] = Field(None, max_length=512, description="计算公式（derived/ratio 必填）")
     formula_template: Optional[str] = Field(None, max_length=256, description="公式模板")
     aggregation_type: Optional[AggregationType] = Field(None, description="聚合方式")
+
+    @field_validator("formula")
+    @classmethod
+    def validate_formula_safety(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        from services.metrics_agent.formula_validator import validate_formula
+        return validate_formula(v)
     result_type: Optional[ResultType] = Field(None, description="结果数值类型")
     unit: Optional[str] = Field(None, max_length=32, description="单位，如 元 / 次 / %")
     precision: int = Field(
@@ -99,9 +107,17 @@ class MetricUpdate(BaseModel):
     metric_type: Optional[MetricType] = None
     business_domain: Optional[str] = Field(None, max_length=64)
     description: Optional[str] = None
-    formula: Optional[str] = None
+    formula: Optional[str] = Field(None, max_length=512)
     formula_template: Optional[str] = Field(None, max_length=256)
     aggregation_type: Optional[AggregationType] = None
+
+    @field_validator("formula")
+    @classmethod
+    def validate_formula_safety(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        from services.metrics_agent.formula_validator import validate_formula
+        return validate_formula(v)
     result_type: Optional[ResultType] = None
     unit: Optional[str] = Field(None, max_length=32)
     precision: Optional[int] = Field(

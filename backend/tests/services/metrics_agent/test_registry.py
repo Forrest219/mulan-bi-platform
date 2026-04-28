@@ -297,3 +297,96 @@ def test_lookup_excludes_non_published_metrics(db_session, valid_datasource, val
     # 三个均不应出现在结果中（lookup 只返回 is_active=True 的指标）
     assert result["metrics"] == []
     assert set(result["not_found"]) == set(names_to_query)
+
+
+# ---------------------------------------------------------------------------
+# Case 8: MetricCreate name 格式校验 — ^[a-z][a-z0-9_]{1,127}$
+# ---------------------------------------------------------------------------
+
+def test_name_format_rejects_digit_prefix():
+    """数字开头 → ValueError"""
+    with pytest.raises(ValueError):
+        MetricCreate(
+            name="123abc",
+            metric_type="atomic",
+            datasource_id=1,
+            table_name="t",
+            column_name="c",
+        )
+
+
+def test_name_format_rejects_uppercase():
+    """含大写字母 → ValueError"""
+    with pytest.raises(ValueError):
+        MetricCreate(
+            name="GMV_total",
+            metric_type="atomic",
+            datasource_id=1,
+            table_name="t",
+            column_name="c",
+        )
+
+
+def test_name_format_rejects_special_chars():
+    """含特殊字符 → ValueError"""
+    with pytest.raises(ValueError):
+        MetricCreate(
+            name="metric-name",
+            metric_type="atomic",
+            datasource_id=1,
+            table_name="t",
+            column_name="c",
+        )
+
+
+def test_name_format_accepts_valid_name(db_session, valid_datasource, valid_user):
+    """合法 name（小写字母开头）应正常创建"""
+    data = _make_create_data(name="valid_metric_name_123")
+    metric = registry.create_metric(db_session, data, user_id=USER_A, tenant_id=TENANT_ID)
+    assert metric.name == "valid_metric_name_123"
+
+
+def test_name_too_short():
+    """name 长度 < 2 → ValueError"""
+    with pytest.raises(ValueError):
+        MetricCreate(
+            name="a",  # 长度 1，pattern 要求 2-128
+            metric_type="atomic",
+            datasource_id=1,
+            table_name="t",
+            column_name="c",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Case 9: MetricCreate metric_type 枚举校验
+# ---------------------------------------------------------------------------
+
+def test_metric_type_rejects_invalid():
+    """无效的 metric_type → ValueError"""
+    with pytest.raises(ValueError):
+        MetricCreate(
+            name="test_metric_type",
+            metric_type="invalid_type",
+            datasource_id=1,
+            table_name="t",
+            column_name="c",
+        )
+
+
+def test_metric_type_accepts_atomic(db_session, valid_datasource, valid_user):
+    data = _make_create_data(name=f"atomic_{uuid.uuid4().hex[:6]}", metric_type="atomic")
+    metric = registry.create_metric(db_session, data, user_id=USER_A, tenant_id=TENANT_ID)
+    assert metric.metric_type == "atomic"
+
+
+def test_metric_type_accepts_derived(db_session, valid_datasource, valid_user):
+    data = _make_create_data(name=f"derived_{uuid.uuid4().hex[:6]}", metric_type="derived")
+    metric = registry.create_metric(db_session, data, user_id=USER_A, tenant_id=TENANT_ID)
+    assert metric.metric_type == "derived"
+
+
+def test_metric_type_accepts_ratio(db_session, valid_datasource, valid_user):
+    data = _make_create_data(name=f"ratio_{uuid.uuid4().hex[:6]}", metric_type="ratio")
+    metric = registry.create_metric(db_session, data, user_id=USER_A, tenant_id=TENANT_ID)
+    assert metric.metric_type == "ratio"

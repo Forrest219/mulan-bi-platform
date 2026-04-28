@@ -46,8 +46,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # META 路径经由后端代理（维护 MCP session），不直连 MCP server
-import os as _os
-_MCP_PROXY_URL = _os.environ.get("INTERNAL_API_BASE", "http://localhost:8000") + "/tableau-mcp"
+from app.core.config import get_settings as _get_settings
+_MCP_PROXY_URL = _get_settings().INTERNAL_API_BASE + "/tableau-mcp"
 
 
 # Spec 22 P0: Multi-Site MCP Query Helper

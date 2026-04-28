@@ -96,7 +96,8 @@ class DocumentService:
                 chunks=[{"chunk_index": i, "chunk_text": c} for i, c in enumerate(chunks)],
             )
 
-        count = asyncio.run(_batch_embed())
+        from services.common.async_compat import run_async_safely
+        count = run_async_safely(_batch_embed())
 
         # 更新文档元数据
         self._db.update_embedding_meta(db, doc.id, chunk_count=count)

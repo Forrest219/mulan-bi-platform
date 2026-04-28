@@ -169,6 +169,7 @@ async def agent_stream(
         user_id=current_user["id"],
         connection_id=req.connection_id,
         trace_id=trace_id,
+        tenant_id=str(current_user["tenant_id"]) if current_user.get("tenant_id") else None,
     )
 
     # 构建丰富的会话上下文（工具可通过此获取用户信息、数据源列表等）
@@ -289,7 +290,7 @@ def get_conversation_messages(
     if not session:
         raise HTTPException(status_code=404, detail={"error_code": "AGENT_004", "message": "会话不存在"})
 
-    msgs = session_mgr.get_conversation_messages(conv_uuid, limit=50, offset=0)
+    msgs = session_mgr.get_conversation_messages(conv_uuid, user_id=current_user["id"], limit=50, offset=0)
     return [
         MessageItem(
             id=m.id,
@@ -326,7 +327,7 @@ def archive_conversation(
     if not session:
         raise HTTPException(status_code=404, detail={"error_code": "AGENT_004", "message": "会话不存在"})
 
-    session_mgr.archive_session(conv_uuid)
+    session_mgr.archive_session(conv_uuid, user_id=current_user["id"])
     return {"status": "archived", "conversation_id": conversation_id}
 
 

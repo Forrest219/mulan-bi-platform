@@ -45,7 +45,8 @@ except ImportError:
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ask-data", tags=["智能问数"])
 
-_INTERNAL_BASE = os.environ.get("INTERNAL_API_BASE", "http://localhost:8000")
+from app.core.config import get_settings as _get_settings
+_INTERNAL_BASE = _get_settings().INTERNAL_API_BASE
 
 # NLQ error code → (Spec 01 error_code, 面向用户中文消息)
 _MCP_CODE_MAP: dict = {
@@ -130,6 +131,7 @@ async def _stream_via_agent_direct(
         user_id=current_user["id"],
         connection_id=connection_id,
         trace_id=trace_id,
+        tenant_id=str(current_user["tenant_id"]) if current_user.get("tenant_id") else None,
     )
 
     engine, _registry = create_engine()
@@ -340,8 +342,7 @@ async def _generate_events(
 ) -> AsyncGenerator[str, None]:
     trace_id = str(uuid.uuid4())
 
-    # Phase 2: 优先走 Agent 直连（需要 current_user 和 db）
-    agent_success = False
+    # Phase 1b: 优先走 Agent 转发（需要 current_user 和 db）
     if current_user is not None and db is not None:
         try:
             async for event in _stream_via_agent_direct(
@@ -349,11 +350,9 @@ async def _generate_events(
                 current_user, db,
             ):
                 yield event
-                agent_success = True
-            if agent_success:
-                return  # Agent stream succeeded
+            return  # Agent stream succeeded
         except Exception as agent_exc:
-            logger.debug("Agent direct call failed for ask-data (%s), falling back to search", agent_exc)
+            logger.debug("Agent forward failed for ask-data (%s), falling back to search", agent_exc)
 
     # Phase 1 fallback: 走 search/query + word-chunk pseudo-stream
     try:
@@ -391,6 +390,77 @@ async def _generate_events(
     except Exception as exc:
         logger.warning("ask-data stream error: %s", exc, exc_info=True)
         yield _sse({"type": "error", "code": "SYS_001", "message": "服务器内部错误，请稍后重试"})
+
+
+async def _stream_via_agent_forward(
+    question: str,
+    connection_id: Optional[int],
+    conversation_id: Optional[str],
+    current_user: dict,
+    db: Session,
+) -> AsyncGenerator[str, None]:
+    """
+    Phase 1b: 内部转发到 Data Agent /api/agent/stream via httpx.
+    将 agent SSE 格式转换为 ask-data SSE 格式。
+    """
+    import uuid as uuid_lib
+
+    trace_id = f"t-{uuid_lib.uuid4().hex[:8]}"
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        # 内部转发到 Data Agent
+        response = await client.post(
+            f"{_INTERNAL_BASE}/api/agent/stream",
+            json={
+                "question": question,
+                "conversation_id": conversation_id,
+                "connection_id": connection_id,
+            },
+            headers={
+                "Cookie": f"session_id={current_user.get('session_id', '')}",
+            },
+        )
+
+        async for line in response.aiter_lines():
+            if line.startswith("data: "):
+                data_str = line[6:]  # Remove "data: " prefix
+                try:
+                    event = json.loads(data_str)
+                    event_type = event.get("type", "")
+
+                    # 转换 agent SSE -> ask-data SSE
+                    if event_type == "token":
+                        # Agent sends {'type': 'token', 'content': char}
+                        # Ask-data expects {'type': 'token', 'content': '...'}
+                        payload = json.dumps({"type": "token", "content": event.get("content", "")}, ensure_ascii=False)
+                        yield f"data: {payload}\n\n"
+                    elif event_type == "done":
+                        # Agent sends many fields, ask-data only needs answer + trace_id
+                        payload = json.dumps({
+                            "type": "done",
+                            "answer": event.get("answer", ""),
+                            "trace_id": event.get("trace_id", trace_id),
+                        }, ensure_ascii=False)
+                        yield f"data: {payload}\n\n"
+                    elif event_type == "metadata":
+                        # Pass through metadata
+                        payload = json.dumps({
+                            "type": "metadata",
+                            "sources_count": 0,
+                            "top_sources": [],
+                            "conversation_id": event.get("conversation_id", ""),
+                        }, ensure_ascii=False)
+                        yield f"data: {payload}\n\n"
+                    elif event_type == "error":
+                        payload = json.dumps({
+                            "type": "error",
+                            "code": event.get("error_code", "SYS_001"),
+                            "message": event.get("message", "未知错误"),
+                        }, ensure_ascii=False)
+                        yield f"data: {payload}\n\n"
+                    # Skip thinking, tool_call, tool_result (ask-data doesn't use them)
+                except json.JSONDecodeError:
+                    pass
 
 
 @router.post("")

@@ -151,3 +151,75 @@ def get_score_grade(score: float) -> Dict[str, str]:
         return {"grade": "一般", "color": "yellow"}
     else:
         return {"grade": "较差", "color": "red"}
+
+
+# ==================== Spec 11 & Spec 06 集成 ====================
+
+
+def get_latest_health_scan_score(datasource_id: int) -> Optional[float]:
+    """
+    从 bi_health_scan_records 读取最新健康扫描评分（Spec 11）
+
+    Args:
+        datasource_id: 数据源 ID
+
+    Returns:
+        float: 健康扫描评分（0-100），无数据时返回 None
+    """
+    from app.core.database import SessionLocal
+    from services.health_scan.models import HealthScanRecord
+
+    db = SessionLocal()
+    try:
+        record = (
+            db.query(HealthScanRecord)
+            .filter(
+                HealthScanRecord.datasource_id == datasource_id,
+                HealthScanRecord.status == "success",
+            )
+            .order_by(HealthScanRecord.id.desc())
+            .first()
+        )
+        return record.health_score if record else None
+    finally:
+        db.close()
+
+
+def get_latest_ddl_compliance_score(datasource_id: int) -> Optional[float]:
+    """
+    从 bi_scan_logs 读取最新 DDL 合规评分（Spec 06）
+
+    评分公式：100 - (error_count * 20 + warning_count * 5 + info_count * 1)
+
+    Args:
+        datasource_id: 数据源 ID
+
+    Returns:
+        float: DDL 合规评分（0-100），无数据时返回 None
+    """
+    from app.core.database import SessionLocal
+    from services.logs.models import ScanLog
+
+    db = SessionLocal()
+    try:
+        record = (
+            db.query(ScanLog)
+            .filter(
+                ScanLog.datasource_id == datasource_id,
+                ScanLog.status == "completed",
+            )
+            .order_by(ScanLog.id.desc())
+            .first()
+        )
+        if not record:
+            return None
+        ddl_score = max(
+            0.0,
+            100.0
+            - (record.error_count or 0) * 20
+            - (record.warning_count or 0) * 5
+            - (record.info_count or 0) * 1,
+        )
+        return round(ddl_score, 1)
+    finally:
+        db.close()

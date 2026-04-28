@@ -7,6 +7,7 @@
 import asyncio
 import logging
 import re
+import signal
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -18,6 +19,141 @@ from models.metrics import BiMetricConsistencyCheck, BiMetricDefinition
 from services.metrics_agent.events import emit_consistency_failed
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# 超时异常（P0-1 MC_429）
+# ---------------------------------------------------------------------------
+
+class TimeoutError(Exception):
+    """查询执行超时"""
+    pass
+
+
+# ---------------------------------------------------------------------------
+# ConsistencyChecker — 一致性校验引擎类
+# ---------------------------------------------------------------------------
+
+class ConsistencyChecker:
+    """
+    跨数据源指标一致性校验。
+    调用 sql_agent/executor.py 向两个数据源执行同一指标的聚合查询，对比差值。
+
+    用法：
+        checker = ConsistencyChecker()
+        result = checker.run_check(
+            metric_id=...,
+            datasource_id_a=...,
+            datasource_id_b=...,
+            tolerance_pct=5.0,
+            tenant_id=...,
+        )
+    """
+
+    def run_check(
+        self,
+        db: Session,
+        metric_id: uuid.UUID,
+        datasource_id_a: int,
+        datasource_id_b: int,
+        tolerance_pct: float = 5.0,
+        tenant_id: Optional[uuid.UUID] = None,
+    ) -> dict:
+        """
+        执行一致性校验（同步封装，供 API 层直接调用）。
+
+        1. 从 bi_metric_definitions 获取指标定义
+        2. 向两个数据源分别执行聚合查询
+        3. 计算差值和差值百分比
+        4. 写入 bi_metric_consistency_checks
+
+        返回：{
+          "id": uuid,
+          "metric_id": uuid,
+          "metric_name": str,
+          "value_a": float,
+          "value_b": float,
+          "difference": float,
+          "difference_pct": float,
+          "check_status": "pass" | "warning" | "fail",
+          "checked_at": datetime
+        }
+        """
+        # 复用 async 核心逻辑
+        return asyncio.get_event_loop().run_until_complete(
+            _run_consistency_check_async(
+                db=db,
+                metric_id=metric_id,
+                tenant_id=tenant_id,
+                datasource_id_a=datasource_id_a,
+                datasource_id_b=datasource_id_b,
+                tolerance_pct=tolerance_pct,
+            )
+        )
+
+    def _build_metric_sql(self, metric: BiMetricDefinition, datasource_id: int) -> str:
+        """
+        根据 metric.formula 构建聚合 SQL。
+        公式: {aggregation}({column}) 或 {aggregation}({column}) WHERE {filters}
+        """
+        return _build_scalar_sql(metric)
+
+    def _execute_on_datasource(
+        self, sql: str, datasource_id: int, db: Session, timeout: int = 30
+    ) -> Optional[float]:
+        """
+        通过 sql_agent/executor 向指定数据源执行 SQL。
+        返回第一行第一列的标量值（MC_429 超时保护）。
+        """
+        # Unix signal-based timeout for sync execution
+        if hasattr(signal, "SIGALRM"):
+            return _execute_with_timeout_sync(sql, datasource_id, db, timeout)
+        # Fallback: use asyncio-based timeout
+        return asyncio.get_event_loop().run_until_complete(
+            _fetch_metric_value(datasource_id, sql, db, timeout=timeout)
+        )
+
+    def _calculate_difference(
+        self, value_a: Optional[float], value_b: Optional[float], tolerance_pct: float
+    ) -> dict:
+        """
+        计算差值和状态。
+
+        - 两值均为 None → pass
+        - 一值为 None → fail
+        - |diff_pct| <= tolerance_pct → pass
+        - tolerance_pct < |diff_pct| <= tolerance_pct*2 → warning
+        - |diff_pct| > tolerance_pct*2 → fail
+        """
+        difference: Optional[float] = None
+        difference_pct: Optional[float] = None
+
+        if value_a is not None and value_b is not None:
+            difference = value_a - value_b
+            if value_b != 0:
+                difference_pct = (difference / value_b) * 100
+
+        abs_pct = abs(difference_pct) if difference_pct is not None else 0.0
+
+        if value_a is None and value_b is None:
+            check_status = "pass"
+        elif value_a is None or value_b is None:
+            check_status = "fail"
+        elif difference_pct is None and difference is not None and difference != 0:
+            # value_b=0 但 value_a != 0 视为 fail
+            check_status = "fail"
+        elif abs_pct <= tolerance_pct:
+            check_status = "pass"
+        elif abs_pct <= tolerance_pct * 2:
+            check_status = "warning"
+        else:
+            check_status = "fail"
+
+        return {
+            "difference": difference,
+            "difference_pct": difference_pct,
+            "check_status": check_status,
+        }
 
 # ---------------------------------------------------------------------------
 # 标识符白名单校验（P0-1）
@@ -51,6 +187,14 @@ def _build_scalar_sql(metric: BiMetricDefinition) -> str:
     _validate_identifier(metric.column_name, "column_name")
 
     formula = metric.formula or f"COUNT({metric.column_name})"
+
+    # P0-1：formula 安全校验（拦截 SQL 注入）
+    from services.metrics_agent.formula_validator import validate_formula
+    try:
+        validate_formula(formula)
+    except ValueError as e:
+        raise ValueError(f"一致性校验 formula 安全校验失败：{e}")
+
     table_name = metric.table_name
 
     where_clauses: list[str] = []
@@ -132,13 +276,13 @@ async def _fetch_metric_value(
 
 
 # ---------------------------------------------------------------------------
-# 核心业务函数
+# 核心业务函数（内部 async 实现）
 # ---------------------------------------------------------------------------
 
-async def run_consistency_check(
+async def _run_consistency_check_async(
     db: Session,
     metric_id: uuid.UUID,
-    tenant_id: uuid.UUID,
+    tenant_id: Optional[uuid.UUID],
     datasource_id_a: int,
     datasource_id_b: int,
     tolerance_pct: float = 5.0,
@@ -279,3 +423,60 @@ async def run_consistency_check(
         "checked_at": check.checked_at.isoformat() if check.checked_at else None,
         "created_at": check.created_at.isoformat() if check.created_at else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# 兼容性别名（供 app/api/metrics.py 直接 import）
+# ---------------------------------------------------------------------------
+
+async def run_consistency_check(
+    db: Session,
+    metric_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    datasource_id_a: int,
+    datasource_id_b: int,
+    tolerance_pct: float = 5.0,
+) -> dict:
+    """兼容性别名 — 直接导入时仍可用，透传到新的 async 实现。"""
+    return await _run_consistency_check_async(
+        db=db,
+        metric_id=metric_id,
+        tenant_id=tenant_id,
+        datasource_id_a=datasource_id_a,
+        datasource_id_b=datasource_id_b,
+        tolerance_pct=tolerance_pct,
+    )
+
+
+# ---------------------------------------------------------------------------
+# MC_429 超时保护（Unix signal）
+# ---------------------------------------------------------------------------
+
+def _execute_with_timeout_sync(
+    sql: str, datasource_id: int, db: Session, timeout: int = 30
+) -> Optional[float]:
+    """
+    使用 Unix signal SIGALRM 实现同步超时保护。
+    仅在 Unix 平台有效；Windows 回退到 asyncio 实现。
+    """
+    def _handler(signum, frame):
+        raise TimeoutError(f"查询超时（{timeout}s）")
+
+    old_handler = signal.signal(signal.SIGALRM, _handler)
+    signal.alarm(timeout)
+    try:
+        # 直接复用 _fetch_metric_value 的 asyncio 实现
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(_fetch_metric_value(datasource_id, sql, db, timeout=timeout))
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
+
+
+# ---------------------------------------------------------------------------
+# 辅助：构建指标 SQL（公开供 ConsistencyChecker._build_metric_sql 使用）
+# ---------------------------------------------------------------------------
+
+def build_metric_sql(metric: BiMetricDefinition) -> str:
+    """对外暴露的 SQL 构建接口（供 ConsistencyChecker 测试）"""
+    return _build_scalar_sql(metric)

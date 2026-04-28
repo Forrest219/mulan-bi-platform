@@ -34,6 +34,9 @@ class Settings:
     ADMIN_USERNAME: Optional[str] = os.environ.get("ADMIN_USERNAME")
     ADMIN_PASSWORD: Optional[str] = os.environ.get("ADMIN_PASSWORD")
 
+    # Internal API
+    INTERNAL_API_BASE: str = os.environ.get("INTERNAL_API_BASE", "http://localhost:8000")
+
     # Celery
     CELERY_BROKER_URL: str = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
     CELERY_RESULT_BACKEND: str = os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")

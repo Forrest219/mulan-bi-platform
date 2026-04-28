@@ -467,8 +467,8 @@ class DqcRuleEngine:
 
         return passed, round(diff_pct, 6), None
 
-    def _get_table_count(self, conn, schema: str, table: str) -> Optional[int]:
-        tbl = table(table, schema=schema)
+    def _get_table_count(self, conn, schema: str, table_name: str) -> Optional[int]:
+        tbl = table(table_name, schema=schema)
         stmt = select(func.count()).select_from(tbl)
         result = conn.execute(stmt)
         row = result.fetchone()

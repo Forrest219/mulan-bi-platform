@@ -10,7 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 from app.core.errors import MulanError
-from models.metrics import BiMetricDefinition, BiMetricVersion
+from models.metrics import BiMetricDefinition, BiMetricLineage, BiMetricVersion
 from .schemas import MetricCreate, MetricUpdate
 from .events import emit_metric_published
 
@@ -475,6 +475,88 @@ def reject_metric(
     return metric
 
 
+def _sensitivity_rank(level: str) -> int:
+    """
+    返回敏感级别的排序权重（数值越高代表越高密级）。
+    用于判断上游字段是否比指标标注级别更高。
+    """
+    ranking = {
+        "public": 0,
+        "internal": 1,
+        "confidential": 2,
+        "restricted": 3,
+    }
+    return ranking.get(level.lower(), 0)
+
+
+def _check_sensitivity_level_upgrade(db, metric: BiMetricDefinition) -> tuple[str, Optional[str]]:
+    """
+    MC_004：检查上游血缘字段的 sensitivity_level 是否高于指标当前标注值。
+
+    流程：
+    1. 从 bi_metric_lineage 查出该指标的所有上游字段（同一 datasource_id）
+    2. 字段的 sensitivity_level 存储在语义层（bi_field_semantics），通过 datasource_id+table_name+column_name 查找
+    3. 取上游 max sensitivity_level 与指标的 sensitivity_level 比较
+    4. 若指标级别 < 上游最高级别 → 自动升级到上游最高级别，返回警告信息
+
+    Returns:
+        (actual_sensitivity_level, warning_message or None)
+    """
+    from services.semantic_maintenance.models import FieldSemantics
+
+    lineage_records = (
+        db.query(BiMetricLineage)
+        .filter(BiMetricLineage.metric_id == metric.id)
+        .all()
+    )
+    if not lineage_records:
+        return metric.sensitivity_level, None
+
+    # 收集上游字段 sensitivity_level
+    upstream_levels: list[str] = []
+    for rec in lineage_records:
+        # 通过 datasource_id + table_name + column_name 查语义层
+        field_sem = (
+            db.query(FieldSemantics)
+            .filter(
+                FieldSemantics.datasource_id == rec.datasource_id,
+                FieldSemantics.table_name == rec.table_name,
+                FieldSemantics.column_name == rec.column_name,
+            )
+            .first()
+        )
+        if field_sem and field_sem.sensitivity_level:
+            upstream_levels.append(field_sem.sensitivity_level)
+
+    if not upstream_levels:
+        return metric.sensitivity_level, None
+
+    upstream_max_rank = max(_sensitivity_rank(l) for l in upstream_levels)
+    metric_rank = _sensitivity_rank(metric.sensitivity_level)
+
+    if metric_rank < upstream_max_rank:
+        # 反查上游最高级别对应的字符串
+        rank_to_level = {v: k for k, v in {
+            "public": 0, "internal": 1, "confidential": 2, "restricted": 3
+        }.items()}
+        upgraded_level = rank_to_level.get(upstream_max_rank, metric.sensitivity_level)
+
+        warning = (
+            f"MC_004：上游字段敏感级别（{upstream_max_rank} 级）高于指标当前标注（{metric_rank} 级），"
+            f"自动升级指标 sensitivity_level 为 {upgraded_level}"
+        )
+        logger.warning(
+            "MC_004 sensitivity_level upgrade: metric_id=%s, old=%s, new=%s, upstream_max=%s",
+            metric.id,
+            metric.sensitivity_level,
+            upgraded_level,
+            max(upstream_levels),
+        )
+        return upgraded_level, warning
+
+    return metric.sensitivity_level, None
+
+
 def publish_metric(db, metric_id: uuid.UUID, user_id: int, tenant_id: uuid.UUID) -> BiMetricDefinition:
     """
     发布指标（approved → published）。
@@ -482,6 +564,7 @@ def publish_metric(db, metric_id: uuid.UUID, user_id: int, tenant_id: uuid.UUID)
     额外校验：
     - lineage_status in ("resolved", "manual")  → 否则 400 MC_002
     - formula_template 参数均有对应 filters key  → 否则 400 MC_003
+    - MC_004：上游字段 sensitivity_level 高于指标标注值时自动升级
     """
     metric = _get_metric_or_404(db, metric_id, tenant_id)
     current_status = _get_metric_status(metric)
@@ -503,16 +586,22 @@ def publish_metric(db, metric_id: uuid.UUID, user_id: int, tenant_id: uuid.UUID)
 
     _validate_formula_template(metric.formula_template, metric.filters)
 
+    # MC_004：敏感级别自动升级检查
+    actual_sensitivity, mc004_warning = _check_sensitivity_level_upgrade(db, metric)
+    if mc004_warning:
+        metric.sensitivity_level = actual_sensitivity
+
     now = _now()
     metric.is_active = True
     metric.published_at = now
     metric.updated_at = now
 
+    changes = {"published_at": now.isoformat(), "is_active": True, "sensitivity_level": actual_sensitivity}
     _write_version(
         db,
         metric,
         change_type="created",
-        changes={"published_at": now.isoformat(), "is_active": True},
+        changes=changes,
         changed_by=user_id,
     )
 

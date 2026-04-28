@@ -32,6 +32,7 @@ class ToolContext:
     user_id: int
     connection_id: Optional[int] = None
     trace_id: str = ""
+    tenant_id: Optional[str] = None
 
 
 @dataclass

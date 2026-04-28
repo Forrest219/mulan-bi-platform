@@ -18,7 +18,7 @@ class EmbeddingService:
 
     async def generate_and_store(
         self, db: Session, source_type: str, source_id: int,
-        chunk_index: int, chunk_text: str, model: str = "text-embedding-3-small"
+        chunk_index: int, chunk_text: str, model: str = "embo-01"
     ) -> KbEmbedding:
         """
         生成单条 Embedding 并存储（PRD §5.1）。
@@ -45,7 +45,7 @@ class EmbeddingService:
 
     async def batch_generate_and_store(
         self, db: Session, source_type: str, source_id: int,
-        chunks: List[Dict[str, Any]], model: str = "text-embedding-3-small"
+        chunks: List[Dict[str, Any]], model: str = "embo-01"
     ) -> int:
         """
         批量生成并存储 Embedding（PRD §5.2）。
@@ -94,7 +94,7 @@ class EmbeddingService:
             source_type=source_type,
         )
 
-    async def embed_text(self, text: str, model: str = "text-embedding-3-small") -> List[float]:
+    async def embed_text(self, text: str, model: str = "embo-01") -> List[float]:
         """对外暴露的 Embedding 生成接口（供 RAG 服务调用）"""
         result = await llm_service.generate_embedding(text=text, model=model)
         if "error" in result:
