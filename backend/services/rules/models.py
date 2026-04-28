@@ -170,3 +170,29 @@ class RuleConfigDatabase:
             raise
         finally:
             db.close()
+
+    def mark_modified(self, rule_id: str) -> bool:
+        """
+        B15: 标记规则已被用户修改，防止 seed 覆盖。
+
+        Args:
+            rule_id: 规则 ID
+
+        Returns:
+            True=标记成功, False=规则不存在
+        """
+        db = self._get_db()
+        try:
+            rule = db.query(RuleConfig).filter(
+                RuleConfig.rule_id == rule_id
+            ).first()
+            if rule:
+                rule.is_modified_by_user = True
+                db.commit()
+                return True
+            return False
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()

@@ -11,6 +11,7 @@ import {
   ProjectNode,
 } from '../../api/tableau';
 import { ASSET_TYPE_LABELS } from '../../config';
+import { ENABLE_OPS_WORKBENCH } from '../../config/index';
 
 const ASSET_TYPE_ICONS: Record<string, string> = {
   workbook: 'ri-file-chart-line',

@@ -29,8 +29,9 @@ class Logger:
         duration_seconds: float,
         status: str = "completed",
         error_message: str = None,
-        results: Dict[str, Any] = None
+        results_masked: Dict[str, Any] = None
     ):
+        # B13: results_masked 仅含脱敏后数据，存入 results_json_masked
         log = ScanLog(
             scan_time=datetime.now(),
             database_name=database_name,
@@ -43,7 +44,7 @@ class Logger:
             duration_seconds=f"{duration_seconds:.2f}",
             status=status,
             error_message=error_message,
-            results_json=json.dumps(results, ensure_ascii=False) if results else None
+            results_json_masked=json.dumps(results_masked, ensure_ascii=False) if results_masked else None
         )
         self._db.add_scan_log(log)
 

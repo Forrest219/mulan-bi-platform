@@ -1797,14 +1797,13 @@ async def query(
 
         # 写查询日志
         log_nlq_query(
-            db=db,
             user_id=user_id,
             question=question,
+            intent=intent.intent_type if intent else "unknown",
             datasource_luid=ds_luid,
-            intent_type=intent.intent_type if intent else "unknown",
-            confidence=llm_result.get("confidence", 0),
+            vizql_json=llm_result.get("vizql_json"),
             response_type=response_type,
-            latency_ms=audit_record.latency_ms,
+            execution_time_ms=audit_record.latency_ms,
         )
 
         # Spec 24 P0: 响应头透传 trace_id

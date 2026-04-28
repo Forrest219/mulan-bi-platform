@@ -231,6 +231,7 @@ async def toggle_rule(
     """切换规则启用/禁用状态。
 
     关键变更（disable）使用同一 DB 事务同步写入审计日志。
+    B15: 用户修改规则时标记 is_modified_by_user=True，防止 seed 覆盖。
     """
     rule_db = RuleConfigDatabase()
 
@@ -247,6 +248,8 @@ async def toggle_rule(
 
     # 切换状态
     rule_db.toggle(rule_id, new_enabled)
+    # B15: 用户修改后标记为已修改，防止 seed 覆盖
+    rule_db.mark_modified(rule_id)
     new_status = "enabled" if new_enabled else "disabled"
 
     # 失效缓存

@@ -592,6 +592,7 @@ async def _retry_field_consistency(
         prompt=retry_prompt,
         system=system_prompt,
         timeout=30,
+        purpose="nlq",
     )
 
     if "error" in result:
@@ -807,6 +808,7 @@ async def _retry_with_feedback(
         prompt=retry_prompt,
         system=system_prompt,
         timeout=30,
+        purpose="nlq",
     )
 
     if "error" in result:

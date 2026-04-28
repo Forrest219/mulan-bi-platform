@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_admin
+from app.core.errors import MulanError
 from services.query.jwt_service import ConnectedAppSecretsDatabase
 from services.query.query_service import QueryErrorEvent
 
@@ -156,7 +157,7 @@ def upsert_connected_app(
             "upsert_connected_app 失败 connection_id=%s operator=%s error=%s",
             body.connection_id, user["username"], exc,
         )
-        raise HTTPException(status_code=500, detail="密钥保存失败，请稍后重试") from exc
+        raise MulanError("Q_001", "密钥保存失败，请稍后重试", 500) from exc
 
     try:
         from services.logs import logger as audit_logger
@@ -204,10 +205,10 @@ def deactivate_connected_app(
             "deactivate_connected_app 失败 connection_id=%s operator=%s error=%s",
             connection_id, user["username"], exc,
         )
-        raise HTTPException(status_code=500, detail="停用操作失败，请稍后重试") from exc
+        raise MulanError("Q_001", "停用操作失败，请稍后重试", 500) from exc
 
     if affected == 0:
-        raise HTTPException(status_code=404, detail="未找到激活的 Connected App 配置")
+        raise MulanError("Q_002", "未找到激活的 Connected App 配置", 404)
 
     try:
         from services.logs import logger as audit_logger
@@ -294,10 +295,7 @@ def list_query_errors(
 
     # 校验 error_code 参数
     if error_code is not None and error_code not in _VALID_ERROR_CODES:
-        raise HTTPException(
-            status_code=422,
-            detail=f"无效的 error_code，允许值：{sorted(_VALID_ERROR_CODES)}",
-        )
+        raise MulanError("Q_005", f"无效的 error_code，允许值：{sorted(_VALID_ERROR_CODES)}", 422)
 
     # 构造基础查询
     q = db.query(QueryErrorEvent).filter(QueryErrorEvent.resolved == resolved)
@@ -363,10 +361,10 @@ def resolve_query_error(
 
     event = db.query(QueryErrorEvent).filter(QueryErrorEvent.id == event_id).first()
     if event is None:
-        raise HTTPException(status_code=404, detail=f"告警事件 {event_id} 不存在")
+        raise MulanError("Q_003", f"告警事件 {event_id} 不存在", 404)
 
     if event.resolved:
-        raise HTTPException(status_code=409, detail="该告警事件已经是已解决状态")
+        raise MulanError("Q_004", "该告警事件已经是已解决状态", 409)
 
     try:
         event.resolved = True
@@ -382,7 +380,7 @@ def resolve_query_error(
             "resolve_query_error 失败 event_id=%s operator=%s error=%s",
             event_id, user["username"], exc,
         )
-        raise HTTPException(status_code=500, detail="标记已解决失败，请稍后重试") from exc
+        raise MulanError("Q_001", "标记已解决失败，请稍后重试", 500) from exc
 
     resolved_at_val = getattr(event, "resolved_at", None)
     return {

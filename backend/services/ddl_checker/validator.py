@@ -91,6 +91,9 @@ class DatabaseRulesAdapter:
         # 按 db_type 过滤：仅加载当前数据库类型和通用规则
         enabled_rules = [r for r in enabled_rules
                          if r.db_type.lower() in (self.db_type.lower(), "all")]
+        # B14: 按 scene_type 过滤：仅加载当前场景和 ALL 场景的规则
+        enabled_rules = [r for r in enabled_rules
+                         if r.scene_type in (self.scene_type, "ALL")]
 
         # 转换为 dict 列表（避免 ORM 对象序列化问题）
         rules_list = []
@@ -232,6 +235,8 @@ class TableValidator:
             violations.extend(self._check_sr_comment(table))
         if self.rules._find_sr_rules_by_category("sr_field_naming"):
             violations.extend(self._check_sr_field_naming(table))
+        if self.rules._find_sr_rules_by_category("sr_view_naming"):
+            violations.extend(self._check_sr_view_naming(table))
 
         return violations
 
@@ -415,7 +420,7 @@ class TableValidator:
             if pattern and not re.match(pattern, table_name):
                 violations.append(Violation(
                     level=level,
-                    rule_name=rule["rule_id"],
+                    rule_name=rule["category"],
                     message=f"表 '{table_name}' (库: {db_name}) 不符合命名规范: {rule['name']}",
                     table_name=table_name,
                     suggestion=rule.get("suggestion", f"表名应匹配模式: {pattern}"),
@@ -426,7 +431,7 @@ class TableValidator:
                     if table_name.startswith(prefix):
                         violations.append(Violation(
                             level=level,
-                            rule_name=rule["rule_id"],
+                            rule_name=rule["category"],
                             message=f"表 '{table_name}' (库: {db_name}) 使用了禁止的前缀 '{prefix}': {rule['name']}",
                             table_name=table_name,
                             suggestion=rule.get("suggestion", f"DIM 表不应使用业务域前缀"),
@@ -461,7 +466,7 @@ class TableValidator:
                 if field_name not in column_names:
                     violations.append(Violation(
                         level=level,
-                        rule_name=rule["rule_id"],
+                        rule_name=rule["category"],
                         message=f"表 '{table.name}' (库: {db_name}) 缺少公共字段 '{field['name']}'",
                         table_name=table.name,
                         suggestion=rule.get("suggestion", f"添加 {field['name']} {field_type} 字段"),
@@ -469,7 +474,7 @@ class TableValidator:
                 elif field_type and field_type not in column_types.get(field_name, ""):
                     violations.append(Violation(
                         level=ViolationLevel.WARNING,
-                        rule_name=rule["rule_id"],
+                        rule_name=rule["category"],
                         message=f"表 '{table.name}' 公共字段 '{field['name']}' 类型不匹配，期望含 {field_type}，实际为 {column_types.get(field_name)}",
                         table_name=table.name,
                         column_name=field["name"],
@@ -496,7 +501,7 @@ class TableValidator:
             if re.search(pattern_forbidden, table_name):
                 violations.append(Violation(
                     level=level,
-                    rule_name=rule["rule_id"],
+                    rule_name=rule["category"],
                     message=f"表 '{table_name}' 命名不合规: {rule['name']}",
                     table_name=table_name,
                     suggestion=rule.get("suggestion", ""),
@@ -518,7 +523,7 @@ class TableValidator:
                 if not table.comment:
                     violations.append(Violation(
                         level=level,
-                        rule_name=rule["rule_id"],
+                        rule_name=rule["category"],
                         message=f"表 '{table.name}' 缺少表注释",
                         table_name=table.name,
                         suggestion=rule.get("suggestion", "为表添加 COMMENT"),
@@ -535,7 +540,7 @@ class TableValidator:
                 if coverage < min_coverage:
                     violations.append(Violation(
                         level=level,
-                        rule_name=rule["rule_id"],
+                        rule_name=rule["category"],
                         message=f"表 '{table.name}' 字段注释覆盖率 {coverage:.0%}，要求 {min_coverage:.0%}",
                         table_name=table.name,
                         suggestion=rule.get("suggestion", "为所有字段添加注释"),
@@ -558,7 +563,7 @@ class TableValidator:
                 if not re.match(pattern, col.name):
                     violations.append(Violation(
                         level=level,
-                        rule_name=rule["rule_id"],
+                        rule_name=rule["category"],
                         message=f"字段 '{col.name}' 不符合 snake_case 命名规范",
                         table_name=table.name,
                         column_name=col.name,
@@ -567,7 +572,7 @@ class TableValidator:
                 if len(col.name) > max_length:
                     violations.append(Violation(
                         level=ViolationLevel.WARNING,
-                        rule_name=rule["rule_id"],
+                        rule_name=rule["category"],
                         message=f"字段 '{col.name}' 长度 {len(col.name)} 超过限制 {max_length}",
                         table_name=table.name,
                         column_name=col.name,
@@ -591,7 +596,7 @@ class TableValidator:
                 if forbidden and db_name.lower() in [f.lower() for f in forbidden]:
                     violations.append(Violation(
                         level=level,
-                        rule_name=rule["rule_id"],
+                        rule_name=rule["category"],
                         message=f"检测到禁止的数据库 '{db_name}': {rule['name']}",
                         suggestion=rule.get("suggestion", f"删除或迁移数据库 '{db_name}'"),
                     ))
@@ -599,7 +604,7 @@ class TableValidator:
                 if allowed and db_name.lower() not in [a.lower() for a in allowed]:
                     violations.append(Violation(
                         level=level,
-                        rule_name=rule["rule_id"],
+                        rule_name=rule["category"],
                         message=f"数据库 '{db_name}' 不在允许列表中: {rule['name']}",
                         suggestion=rule.get("suggestion", "联系管理员确认此数据库是否合规"),
                     ))
@@ -619,7 +624,7 @@ class TableValidator:
             if pattern and not re.search(pattern, table.name):
                 violations.append(Violation(
                     level=level,
-                    rule_name=rule["rule_id"],
+                    rule_name=rule["category"],
                     message=f"视图 '{table.name}' 缺少 _vw 后缀",
                     table_name=table.name,
                     suggestion=rule.get("suggestion", "视图命名应以 _vw 结尾"),
@@ -785,7 +790,7 @@ class ColumnValidator:
                 if ft.upper() in col_type:
                     violations.append(Violation(
                         level=level,
-                        rule_name=rule["rule_id"],
+                        rule_name=rule["category"],
                         message=f"字段 '{column.name}' 使用了禁止的类型 {col_type}，{rule['name']}",
                         table_name=table.name,
                         column_name=column.name,
@@ -797,7 +802,7 @@ class ColumnValidator:
             if required_types and not any(rt.upper() in col_type for rt in required_types):
                 violations.append(Violation(
                     level=level,
-                    rule_name=rule["rule_id"],
+                    rule_name=rule["category"],
                     message=f"字段 '{column.name}' 类型 {col_type} 不符合要求，{rule['name']}",
                     table_name=table.name,
                     column_name=column.name,

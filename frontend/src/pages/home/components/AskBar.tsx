@@ -16,7 +16,7 @@
  * - mockStreamAskData 流式接入
  */
 import { useState, useEffect, useRef, forwardRef, memo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import type { SearchAnswer } from '../../../api/search';
 import { listConnections, type TableauConnection } from '../../../api/tableau';
 import { useScope } from '../context/ScopeContext';
@@ -73,9 +73,20 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
     const [noConnectionHint, setNoConnectionHint] = useState(false);
     const [files, setFiles] = useState<File[]>([]);
     const [isDragging, setIsDragging] = useState(false);
+    const [searchParams] = useSearchParams();
 
     const { connections: scopeConnections, connectionsLoading } = useScope();
     const noConnection = !connectionsLoading && scopeConnections.length === 0;
+
+    // B24: Support ?prefill= URL parameter to pre-fill the question input
+    useEffect(() => {
+      const prefill = searchParams.get('prefill');
+      if (prefill) {
+        const decoded = decodeURIComponent(prefill);
+        setInput(decoded);
+        onQuestionChange?.(decoded);
+      }
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const useExternalConnection = externalConnectionId != null;
 

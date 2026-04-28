@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.crypto import get_datasource_crypto
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_roles
+from app.core.errors import MulanError
 from services.datasources.models import DataSourceDatabase
 from services.health_scan.models import HealthScanDatabase
 
@@ -34,11 +35,11 @@ async def trigger_scan(
     ds_db = DataSourceDatabase()
     ds = ds_db.get(db, body.datasource_id)
     if not ds:
-        raise HTTPException(status_code=404, detail="数据源不存在")
+        raise MulanError("HS_001", "数据源不存在", 404)
 
     # 非管理员只能扫描自己的数据源
     if user["role"] not in ("admin",) and ds.owner_id != user["id"]:
-        raise HTTPException(status_code=403, detail="无权操作此数据源")
+        raise MulanError("AUTH_003", "无权操作此数据源", 403)
 
     scan_db = HealthScanDatabase()
     record = scan_db.create_scan(
@@ -84,7 +85,7 @@ async def get_scan(scan_id: int, request: Request):
     scan_db = HealthScanDatabase()
     record = scan_db.get_scan(scan_id)
     if not record:
-        raise HTTPException(status_code=404, detail="扫描记录不存在")
+        raise MulanError("HS_001", "扫描记录不存在", 404)
     return record.to_dict()
 
 
@@ -97,7 +98,7 @@ async def get_scan_issues(scan_id: int, request: Request,
     scan_db = HealthScanDatabase()
     record = scan_db.get_scan(scan_id)
     if not record:
-        raise HTTPException(status_code=404, detail="扫描记录不存在")
+        raise MulanError("HS_001", "扫描记录不存在", 404)
     return scan_db.get_scan_issues(scan_id, severity=severity, page=page, page_size=page_size)
 
 
@@ -108,9 +109,9 @@ async def get_scan_report(scan_id: int, request: Request):
     scan_db = HealthScanDatabase()
     record = scan_db.get_scan(scan_id)
     if not record:
-        raise HTTPException(status_code=404, detail="扫描记录不存在")
+        raise MulanError("HS_001", "扫描记录不存在", 404)
     if record.status != "success":
-        raise HTTPException(status_code=400, detail="扫描未完成，无法导出报告")
+        raise MulanError("HS_002", "扫描未完成，无法导出报告", 400)
 
     all_issues = scan_db.get_scan_issues(scan_id, page=1, page_size=9999)
     issues = all_issues["issues"]

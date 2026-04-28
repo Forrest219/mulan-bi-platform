@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.crypto import get_datasource_crypto
 from app.core.database import get_db  # 导入中央数据库依赖
 from app.core.dependencies import get_current_user, require_roles
+from app.core.errors import MulanError, DSError
 from services.datasources.models import DataSourceDatabase
 
 router = APIRouter()
@@ -99,11 +100,11 @@ async def get_datasource(ds_id: int, request: Request, db: Session = Depends(get
 
     ds = _db.get(db, ds_id)
     if not ds:
-        raise HTTPException(status_code=404, detail="数据源不存在")
+        raise DSError.not_found()
 
     # 非管理员只能看自己的
     if user["role"] != "admin" and ds.owner_id != user["id"]:
-        raise HTTPException(status_code=403, detail="无权访问该数据源")
+        raise DSError.not_owner()
 
     return ds.to_dict()
 
@@ -120,10 +121,10 @@ async def update_datasource(
 
     ds = _db.get(db, ds_id)
     if not ds:
-        raise HTTPException(status_code=404, detail="数据源不存在")
+        raise DSError.not_found()
 
     if current_user["role"] != "admin" and ds.owner_id != current_user["id"]:
-        raise HTTPException(status_code=403, detail="无权修改该数据源")
+        raise DSError.not_owner()
 
     update_data = request.model_dump(exclude_unset=True)
     if "password" in update_data:
@@ -146,10 +147,10 @@ async def delete_datasource(
 
     ds = _db.get(db, ds_id)
     if not ds:
-        raise HTTPException(status_code=404, detail="数据源不存在")
+        raise DSError.not_found()
 
     if current_user["role"] != "admin" and ds.owner_id != current_user["id"]:
-        raise HTTPException(status_code=403, detail="无权删除该数据源")
+        raise DSError.not_owner()
 
     _db.delete(db, ds_id)
     return {"message": "数据源已删除"}
@@ -168,10 +169,10 @@ async def test_connection(
 
     ds = _db.get(db, ds_id)
     if not ds:
-        raise HTTPException(status_code=404, detail="数据源不存在")
+        raise DSError.not_found()
 
     if current_user["role"] != "admin" and ds.owner_id != current_user["id"]:
-        raise HTTPException(status_code=403, detail="无权操作该数据源")
+        raise DSError.not_owner()
 
     try:
         password = _decrypt(ds.password_encrypted)

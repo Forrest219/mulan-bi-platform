@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.core.dependencies import get_current_user, require_roles
+from app.core.errors import MulanError
 from services.requirements import requirement_service
 
 router = APIRouter()
@@ -98,7 +99,7 @@ async def approve_requirement(
     approver = current_user["username"]
     success = requirement_service.approve_requirement(req_id, approver=approver, comment=comment, approved=True)
     if not success:
-        raise HTTPException(status_code=404, detail="需求不存在")
+        raise MulanError("REQ_001", "需求不存在", 404)
     return {"message": "已通过审批"}
 
 
@@ -112,7 +113,7 @@ async def reject_requirement(
     approver = current_user["username"]
     success = requirement_service.approve_requirement(req_id, approver=approver, comment=comment, approved=False)
     if not success:
-        raise HTTPException(status_code=404, detail="需求不存在")
+        raise MulanError("REQ_001", "需求不存在", 404)
     return {"message": "已拒绝"}
 
 
@@ -124,7 +125,7 @@ async def mark_done(
     """标记完成"""
     success = requirement_service.mark_as_done(req_id)
     if not success:
-        raise HTTPException(status_code=404, detail="需求不存在")
+        raise MulanError("REQ_001", "需求不存在", 404)
     return {"message": "已标记完成"}
 
 
@@ -136,5 +137,5 @@ async def delete_requirement(
     """删除需求"""
     success = requirement_service.delete_requirement(req_id)
     if not success:
-        raise HTTPException(status_code=404, detail="需求不存在")
+        raise MulanError("REQ_001", "需求不存在", 404)
     return {"message": "已删除"}

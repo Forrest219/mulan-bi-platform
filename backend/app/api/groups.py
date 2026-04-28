@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.core.dependencies import get_current_admin
+from app.core.errors import MulanError
 from services.auth import auth_service
 
 router = APIRouter(tags=["用户组管理"])
@@ -50,7 +51,7 @@ async def get_group(group_id: int):
     """获取用户组详情"""
     group = auth_service.get_group(group_id)
     if not group:
-        raise HTTPException(status_code=404, detail="用户组不存在")
+        raise MulanError("AUTH_007", "用户组不存在", 404)
 
     return group
 
@@ -61,7 +62,7 @@ async def create_group(request: CreateGroupRequest):
     # 验证权限
     for perm in request.permissions:
         if perm not in auth_service.ALL_PERMISSIONS:
-            raise HTTPException(status_code=400, detail=f"无效的权限: {perm}")
+            raise MulanError("SYS_004", f"无效的权限: {perm}", 400)
 
     group = auth_service.create_group(
         name=request.name,
@@ -70,7 +71,7 @@ async def create_group(request: CreateGroupRequest):
     )
 
     if not group:
-        raise HTTPException(status_code=400, detail="用户组名称已存在")
+        raise MulanError("AUTH_005", "用户组名称已存在", 409)
 
     return {"group": group, "message": "用户组创建成功"}
 
@@ -85,7 +86,7 @@ async def update_group(group_id: int, request: UpdateGroupRequest):
     )
 
     if not success:
-        raise HTTPException(status_code=404, detail="用户组不存在")
+        raise MulanError("AUTH_007", "用户组不存在", 404)
 
     return {"message": "用户组更新成功"}
 
@@ -95,7 +96,7 @@ async def delete_group(group_id: int):
     """删除用户组（管理员）"""
     success = auth_service.delete_group(group_id)
     if not success:
-        raise HTTPException(status_code=404, detail="用户组不存在")
+        raise MulanError("AUTH_007", "用户组不存在", 404)
 
     return {"message": "用户组已删除"}
 
@@ -122,7 +123,7 @@ async def remove_group_member(group_id: int, user_id: int):
     """从组移除成员（管理员）"""
     success = auth_service.remove_user_from_group(user_id, group_id)
     if not success:
-        raise HTTPException(status_code=404, detail="用户或用户组不存在")
+        raise MulanError("AUTH_007", "用户或用户组不存在", 404)
 
     return {"message": "成员已移除"}
 
@@ -140,10 +141,10 @@ async def set_group_permissions(group_id: int, request: SetPermissionsRequest):
     # 验证权限
     for perm in request.permissions:
         if perm not in auth_service.ALL_PERMISSIONS:
-            raise HTTPException(status_code=400, detail=f"无效的权限: {perm}")
+            raise MulanError("SYS_004", f"无效的权限: {perm}", 400)
 
     success = auth_service.set_group_permissions(group_id, request.permissions)
     if not success:
-        raise HTTPException(status_code=404, detail="用户组不存在")
+        raise MulanError("AUTH_007", "用户组不存在", 404)
 
     return {"message": "权限已更新"}

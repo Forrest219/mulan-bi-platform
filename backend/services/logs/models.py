@@ -21,7 +21,8 @@ class ScanLog(Base):
     duration_seconds = Column(Text, nullable=True)
     status = Column(String(32), default="completed", server_default=sa_text("'completed'"))
     error_message = Column(Text, nullable=True)
-    results_json = Column(JSONB, nullable=True)
+    # B13: 脱敏后的结果，仅存储 results_masked
+    results_json_masked = Column(JSONB, nullable=True)
 
     def to_dict(self) -> Dict[str, Any]:
         return {

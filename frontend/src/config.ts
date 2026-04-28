@@ -23,3 +23,6 @@ export const ASSET_TYPE_LABELS: Record<string, string> = {
   view: '视图',
   datasource: '数据源',
 };
+
+/** 启用运维工作台（Ops Workbench）完整功能 */
+export const ENABLE_OPS_WORKBENCH = true;

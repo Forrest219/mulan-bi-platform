@@ -79,8 +79,9 @@ class DDLScanner:
         start_time = time.time()
 
         try:
-            # 初始化验证器
-            self.validator = DDLValidator()
+            # 初始化验证器（注入 db_type 以便正确加载 StarRocks 规则）
+            db_type = self._db_config.get("db_type", "mysql") if self._db_config else "mysql"
+            self.validator = DDLValidator(db_type=db_type.title())
 
             # 获取所有表
             table_names = self.connector.get_table_names()
@@ -119,12 +120,9 @@ class DDLScanner:
             database_name = self._db_config.get("database", "unknown") if self._db_config else "unknown"
             db_type = self._db_config.get("db_type", "mysql") if self._db_config else "mysql"
 
-            results = None
-            if report:
-                results = {
-                    table_name: [v.to_dict() for v in violations]
-                    for table_name, violations in report.table_results.items()
-                }
+            # B13: 同时传递 results（原始）和 results_masked（脱敏后）
+            # report.table_results 已经过 mask=True 处理（ReportGenerator.generate）
+            results_masked = report.table_results if report else None
 
             logger.log_scan(
                 database_name=database_name,
@@ -137,7 +135,7 @@ class DDLScanner:
                 duration_seconds=duration,
                 status=status,
                 error_message=error_message,
-                results=results
+                results_masked=results_masked
             )
         except Exception as e:
             logger.warning("记录扫描日志失败: %s", e)
@@ -156,7 +154,8 @@ class DDLScanner:
             return DDLScanResult(success=False, error="请先连接数据库")
 
         try:
-            self.validator = DDLValidator()
+            db_type = self._db_config.get("db_type", "mysql") if self._db_config else "mysql"
+            self.validator = DDLValidator(db_type=db_type.title())
 
             table_info = self._read_table_info(table_name)
             if not table_info:

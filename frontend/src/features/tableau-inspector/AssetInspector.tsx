@@ -209,6 +209,8 @@ export function AssetInspector({ assetId, layout = 'page', onClose }: AssetInspe
                 healthLoading={healthLoading}
                 healthError={healthError}
                 onLoad={loadHealth}
+                assetName={asset.name}
+                assetId={String(asset.id)}
               />
             )}
 

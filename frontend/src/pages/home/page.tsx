@@ -20,7 +20,7 @@ import { useConversations } from '../../store/conversationStore';
 import type { SearchAnswer } from '../../api/search';
 import { ScopeProvider, useScope } from './context/ScopeContext';
 import { ScopePicker } from './components/ScopePicker';
-import { AssetInspectorDrawer } from './components/AssetInspectorDrawer';
+import { OpsWorkbench } from '../../features/ops-workbench/OpsWorkbench';
 import { useHomeUrlState } from './hooks/useHomeUrlState';
 import { agentConversationsApi } from '../../api/agent';
 // Gap-05: SSE streaming hook — state 与 AskBar 完全隔离（§11 陷阱6）
@@ -42,10 +42,10 @@ function HomePageInner() {
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [historyMessages, setHistoryMessages] = useState<Array<{role: 'user'|'assistant'; content: string}>>([]);
 
-  const { user, hasPermission } = useAuth();
+  const { user } = useAuth();
   const { settings } = usePlatformSettings();
   const { addConversation, appendMessage } = useConversations();
-  const { assetId, tab, connectionId, closeAsset, selectedConvId } = useHomeUrlState();
+  const { connectionId, selectedConvId } = useHomeUrlState();
   const { connections: scopeConnections, connectionsLoading } = useScope();
   const noConnection = !connectionsLoading && scopeConnections.length === 0;
 
@@ -263,129 +263,94 @@ function HomePageInner() {
   };
 
   // ── 渲染 ──────────────────────────────────────────────────────────────────
-  return (
-    <div className="relative flex flex-col min-h-screen bg-white">
-
-      {/* ScopePicker：所有非 offline 态显示 */}
-      {homeState !== 'HOME_OFFLINE' && (
-        <div className={[
-          'w-full px-6',
-          homeState === 'HOME_IDLE'
-            ? 'pt-4 pb-2'
-            : 'pt-4 pb-2 border-b border-slate-100',
-        ].join(' ')}>
-          <div className="max-w-3xl mx-auto">
-            <ScopePicker variant={homeState === 'HOME_IDLE' ? 'idle' : 'default'} />
-          </div>
+  const idleContent = (
+    <>
+      {/* WelcomeHero */}
+      <WelcomeHero />
+      {/* 离线提示 */}
+      {homeState === 'HOME_OFFLINE' && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          当前网络不可用，恢复后将继续显示上次状态。
         </div>
       )}
-
-      {/* 主内容区：idle 态垂直居中，其他态顶部对齐 */}
-      <main
-        className={[
-          'flex-1 flex flex-col w-full',
-          homeState === 'HOME_IDLE' ? 'items-center justify-center' : '',
-          'pb-40',
-        ].join(' ')}
-      >
-        <div
-          className={[
-            'w-full max-w-4xl mx-auto px-6',
-            homeState === 'HOME_IDLE' ? 'space-y-8' : 'pt-6 space-y-6',
-          ].join(' ')}
-        >
-
-          {/* WelcomeHero：仅 idle 态展示 */}
-          {homeState === 'HOME_IDLE' && <WelcomeHero />}
-
-          {/* 离线提示 */}
-          {homeState === 'HOME_OFFLINE' && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-              当前网络不可用，恢复后将继续显示上次状态。
-            </div>
-          )}
-
-          {/* Gap-05: 消息展示区（真实 SSE 路径 + Mock 路径 + 历史恢复 统一由 MessageList 渲染） */}
-          {(streamingMessages.length > 0 || isMockStreaming || mockStreamingContent || historyMessages.length > 0) && (
-            <div className="flex-1 overflow-y-auto">
-              <MessageList
-                messages={streamingMessages}
-                mockContent={mockStreamingContent}
-                isMockStreaming={isMockStreaming}
-                lastQuestion={lastQuestion}
-                onRegenerate={handleRegenerate}
-                historyMessages={historyMessages}
-              />
-            </div>
-          )}
-
-          {/* SearchResult（非流式路径，流式激活后完全隐藏） */}
-          {homeState === 'HOME_RESULT' && result && !isStreaming && streamingMessages.length === 0 && !USE_MOCK && (
-            <SearchResult
-              result={result}
-              onRetry={() => { if (lastQuestion) handleExamplePick(lastQuestion); }}
-            />
-          )}
-          {homeState === 'HOME_ERROR' && error && !isStreaming && streamingMessages.length === 0 && (
-            <SearchResult
-              result={{
-                type: 'error',
-                answer: '',
-                reason: error.code,
-                detail: error.message,
-              }}
-              onRetry={() => { if (lastQuestion) handleExamplePick(lastQuestion); }}
-            />
-          )}
-
-          {/* SuggestionGrid：仅 idle 态 */}
-          {homeState === 'HOME_IDLE' && (
-            <SuggestionGrid onPick={handleExamplePick} />
-          )}
-
+      {/* 消息展示区 */}
+      {(streamingMessages.length > 0 || isMockStreaming || mockStreamingContent || historyMessages.length > 0) && (
+        <div className="flex-1 overflow-y-auto">
+          <MessageList
+            messages={streamingMessages}
+            mockContent={mockStreamingContent}
+            isMockStreaming={isMockStreaming}
+            lastQuestion={lastQuestion}
+            onRegenerate={handleRegenerate}
+            historyMessages={historyMessages}
+          />
         </div>
-      </main>
+      )}
+      {/* SuggestionGrid */}
+      <SuggestionGrid onPick={handleExamplePick} />
+    </>
+  );
 
-      {/* AskBar 固定底部容器 */}
-      <div
-        className="fixed bottom-0 right-0 z-20 pointer-events-none"
-        style={{ left: 'var(--sidebar-width)', transition: 'left 300ms' }}
-      >
-        {/* 上缘渐变过渡条（纯装饰） */}
-        <div className="h-3 w-full bg-gradient-to-t from-white to-white/0" aria-hidden="true" />
-        {/* AskBar 实际容器 */}
-        <div className="bg-white pt-2 pb-5 pointer-events-auto">
-          <div className="max-w-3xl mx-auto px-6">
-            <AskBar
-              onResult={handleAskBarResult}
-              onError={handleError}
-              onLoading={(loading) => { handleLoading(loading); }}
-              onQuestionChange={(q) => { setLastQuestion(q); lastQuestionRef.current = q; }}
-              conversationId={currentConversationId ?? undefined}
-              connectionId={connectionId}
-              isStreaming={USE_MOCK ? isMockStreaming : isStreaming}
-              onAbort={USE_MOCK ? () => { setIsMockStreaming(false); } : abort}
-              useMock={USE_MOCK}
-              onStreamToken={(token) => {
-                setMockStreamingContent((prev) => prev + token);
-              }}
-            />
-            <p className="mt-2 text-center text-[11px] text-slate-400">
-              回答由 AI 生成，请核对关键数据后使用
-            </p>
-          </div>
+  const resultContent = (
+    <>
+      {/* 消息展示区 */}
+      {(streamingMessages.length > 0 || isMockStreaming || mockStreamingContent || historyMessages.length > 0) && (
+        <div className="flex-1 overflow-y-auto">
+          <MessageList
+            messages={streamingMessages}
+            mockContent={mockStreamingContent}
+            isMockStreaming={isMockStreaming}
+            lastQuestion={lastQuestion}
+            onRegenerate={handleRegenerate}
+            historyMessages={historyMessages}
+          />
         </div>
-      </div>
-
-      {/* 资产检查器抽屉 */}
-      {hasPermission('tableau') && (
-        <AssetInspectorDrawer
-          assetId={assetId}
-          tab={tab}
-          onClose={closeAsset}
+      )}
+      {/* SearchResult */}
+      {result && !isStreaming && streamingMessages.length === 0 && !USE_MOCK && (
+        <SearchResult
+          result={result}
+          onRetry={() => { if (lastQuestion) handleExamplePick(lastQuestion); }}
         />
       )}
-    </div>
+      {error && !isStreaming && streamingMessages.length === 0 && (
+        <SearchResult
+          result={{
+            type: 'error',
+            answer: '',
+            reason: error.code,
+            detail: error.message,
+          }}
+          onRetry={() => { if (lastQuestion) handleExamplePick(lastQuestion); }}
+        />
+      )}
+    </>
+  );
+
+  const submittingContent = (
+    <>
+      {(streamingMessages.length > 0 || isMockStreaming || mockStreamingContent || historyMessages.length > 0) && (
+        <div className="flex-1 overflow-y-auto">
+          <MessageList
+            messages={streamingMessages}
+            mockContent={mockStreamingContent}
+            isMockStreaming={isMockStreaming}
+            lastQuestion={lastQuestion}
+            onRegenerate={handleRegenerate}
+            historyMessages={historyMessages}
+          />
+        </div>
+      )}
+    </>
+  );
+
+  return (
+    <OpsWorkbench
+      homeState={homeState}
+      idleContent={idleContent}
+      resultContent={resultContent}
+      submittingContent={submittingContent}
+    />
   );
 }
 

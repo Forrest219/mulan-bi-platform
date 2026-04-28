@@ -10,6 +10,7 @@ const severityConfig = {
 };
 
 const issueTypeLabels: Record<string, string> = {
+  // MySQL / 通用规则
   naming: '命名规范',
   comment: '缺少注释',
   primary_key: '缺失主键',
@@ -21,6 +22,44 @@ const issueTypeLabels: Record<string, string> = {
   column_comment: '字段缺少注释',
   missing_pk: '缺失主键',
   missing_update_time: '缺失更新字段',
+  // StarRocks 规则分类 (rule.category → 友好名称)
+  sr_layer_naming: '分层命名规范',
+  sr_type_alignment: '类型对齐',
+  sr_public_fields: '公共字段',
+  sr_field_naming: '字段命名规范',
+  sr_comment: '注释规范',
+  sr_database_whitelist: '数据库白名单',
+  sr_table_naming: '表命名规范',
+  sr_view_naming: '视图命名规范',
+};
+
+// rule_id → 友好名称（用于 rule_name 为 rule_id 格式的情况）
+const ruleIdLabels: Record<string, string> = {
+  RULE_SR_001: 'ODS 双下划线命名',
+  RULE_SR_002: 'DWD 业务域+粒度后缀',
+  RULE_SR_003: 'DIM 无业务域前缀',
+  RULE_SR_004: 'DWS 粒度后缀',
+  RULE_SR_005: 'ADS 场景前缀',
+  RULE_SR_006: '金额字段必须 DECIMAL',
+  RULE_SR_007: '日期字段禁止 VARCHAR',
+  RULE_SR_008: '公共字段 etl_time',
+  RULE_SR_009: '公共字段 dt',
+  RULE_SR_010: 'ODS 全套公共字段',
+  RULE_SR_011: 'ODS_DB CDC 字段',
+  RULE_SR_012: '字段 snake_case',
+  RULE_SR_013: '字段注释覆盖率',
+  RULE_SR_014: '表注释存在',
+  RULE_SR_015: '禁止额外数据库',
+  RULE_SR_016: 'Feature 表命名',
+  RULE_SR_017: 'AI 表前缀',
+  RULE_SR_018: 'Backup 命名含日期',
+  RULE_SR_019: '数量字段类型',
+  RULE_SR_020: '比率字段类型',
+  RULE_SR_021: '无 ods_hive 库',
+  RULE_SR_022: '表名无中文',
+  RULE_SR_023: '表名无版本号',
+  RULE_SR_024: 'DM 部门前缀',
+  RULE_SR_025: '视图命名 _vw 后缀',
 };
 
 function ScoreBar({ score }: { score: number }) {
@@ -376,7 +415,7 @@ export default function DataHealthPage() {
                             {issue.object_type === 'table' ? '表' : '字段'}
                           </td>
                           <td className="px-4 py-3 text-[12px] font-medium text-slate-700 font-mono">{issue.object_name}</td>
-                          <td className="px-4 py-3 text-[12px] text-slate-600">{issueTypeLabels[issue.issue_type] || issue.issue_type}</td>
+                          <td className="px-4 py-3 text-[12px] text-slate-600">{issueTypeLabels[issue.issue_type] || ruleIdLabels[issue.issue_type] || issue.issue_type}</td>
                           <td className="px-4 py-3 text-[12px] text-slate-600 max-w-xs truncate">{issue.description}</td>
                           <td className="px-4 py-3 text-[12px] text-slate-500 max-w-xs truncate">{issue.suggestion}</td>
                         </tr>

@@ -20,6 +20,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { ScopeProvider, useScope } from '../../home/context/ScopeContext';
 import { ScopePicker } from '../../home/components/ScopePicker';
 import { AssetInspectorDrawer } from '../../home/components/AssetInspectorDrawer';
+import { useDrawerUrlState } from '../../../features/ops-workbench/useDrawerUrlState';
 
 // Lazy load panels
 const QueryPanel = lazy(() =>
@@ -62,11 +63,12 @@ function OpsWorkbenchInner() {
   const { user, hasPermission } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // URL 状态
+// URL 状态
   const modeParam = searchParams.get('mode') as WorkbenchMode | null;
   const activeMode: WorkbenchMode = modeParam && VALID_MODES.has(modeParam) ? modeParam : DEFAULT_MODE;
-  const assetId = searchParams.get('asset');
-  const assetTab = searchParams.get('tab') ?? undefined;
+
+  // B22: 抽屉状态由 useDrawerUrlState 管理，支持浏览器前进/后退
+  const { assetId, tab: assetTab, openAsset: openAssetDrawer, closeAsset: closeAssetDrawer } = useDrawerUrlState();
 
   // 侧边栏宽度（持久化到 localStorage）
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -124,21 +126,7 @@ function OpsWorkbenchInner() {
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams]);
 
-  // ── 资产抽屉 ──────────────────────────────────────────────────
-  const openAsset = useCallback((id: string, tab?: string) => {
-    const next = new URLSearchParams(searchParams);
-    next.set('asset', id);
-    if (tab) next.set('tab', tab);
-    else next.delete('tab');
-    setSearchParams(next, { replace: false });
-  }, [searchParams, setSearchParams]);
-
-  const closeAsset = useCallback(() => {
-    const next = new URLSearchParams(searchParams);
-    next.delete('asset');
-    next.delete('tab');
-    setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams]);
+// ── 资产抽屉（B22: 使用 hook 管理的 URL 状态）
 
   // ── 键盘快捷键 ───────────────────────────────────────────────
   useEffect(() => {
@@ -267,10 +255,10 @@ function OpsWorkbenchInner() {
           >
             {activeMode === 'query' && <QueryPanel />}
             {activeMode === 'assets' && (
-              <AssetPanel onSelectAsset={(id) => openAsset(id)} />
+              <AssetPanel onSelectAsset={(id) => openAssetDrawer(id)} />
             )}
             {activeMode === 'health' && (
-              <HealthPanel onOpenAsset={openAsset} />
+              <HealthPanel onOpenAsset={openAssetDrawer} />
             )}
           </Suspense>
         </main>
@@ -281,7 +269,7 @@ function OpsWorkbenchInner() {
         <AssetInspectorDrawer
           assetId={assetId}
           tab={assetTab}
-          onClose={closeAsset}
+          onClose={closeAssetDrawer}
         />
       )}
     </div>

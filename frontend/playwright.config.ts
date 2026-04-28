@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 // 前端开发服务器地址
-const BASE_URL = process.env.BASE_URL || 'http://localhost:3001';
+const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 
 export default defineConfig({
   testDir: './tests/smoke',
