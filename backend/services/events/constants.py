@@ -51,6 +51,16 @@ DQC_ASSET_P0_TRIGGERED = "dqc.asset.p0_triggered"
 DQC_ASSET_P1_TRIGGERED = "dqc.asset.p1_triggered"
 DQC_ASSET_RECOVERED = "dqc.asset.recovered"
 
+# === MCP→Tableau 反向同步事件 (Spec 32 v1.1) ===
+MCP_SERVER_CHANGED = "mcp.server.changed"
+MCP_SERVER_DELETED = "mcp.server.deleted"
+
+# === 反向同步结果事件 ===
+TABLEAU_CONNECTION_SYNCED_FROM_MCP = "tableau.connection.synced_from_mcp"
+TABLEAU_CONNECTION_SYNC_SKIPPED = "tableau.connection.sync_skipped"
+TABLEAU_CONNECTION_DEACTIVATED_BY_MCP_DELETE = "tableau.connection.deactivated_by_mcp_delete"
+TABLEAU_CONNECTION_RENAMED = "tableau.connection.renamed"
+
 # === 所有事件类型列表 ===
 ALL_EVENT_TYPES = [
     TABLEAU_SYNC_COMPLETED,
@@ -86,6 +96,13 @@ ALL_EVENT_TYPES = [
     DQC_ASSET_P0_TRIGGERED,
     DQC_ASSET_P1_TRIGGERED,
     DQC_ASSET_RECOVERED,
+    # MCP→Tableau 反向同步事件 (Spec 32 v1.1)
+    MCP_SERVER_CHANGED,
+    MCP_SERVER_DELETED,
+    TABLEAU_CONNECTION_SYNCED_FROM_MCP,
+    TABLEAU_CONNECTION_SYNC_SKIPPED,
+    TABLEAU_CONNECTION_DEACTIVATED_BY_MCP_DELETE,
+    TABLEAU_CONNECTION_RENAMED,
 ]
 
 # 来源模块枚举
@@ -96,6 +113,7 @@ SOURCE_MODULE_AUTH = "auth"
 SOURCE_MODULE_SYSTEM = "system"
 SOURCE_MODULE_METRICS = "metrics"
 SOURCE_MODULE_DQC = "dqc"
+SOURCE_MODULE_MCP = "mcp"  # Spec 32 v1.1
 
 # 严重级别枚举
 SEVERITY_INFO = "info"
@@ -120,4 +138,21 @@ EVT_ERROR_MESSAGES = {
     EvtErrorCode.PAYLOAD_VALIDATION_FAILED: "事件载荷校验失败",
     EvtErrorCode.NOTIFICATION_CREATE_FAILED: "通知创建失败",
     EvtErrorCode.ADMIN_REQUIRED: "需要管理员角色",
+}
+
+
+# === MCP→Tableau 桥接错误码（BRG 前缀，Spec 32 v1.1）===
+class BrgErrorCode:
+    """MCP→Tableau 桥接错误码"""
+    REVERSE_SYNC_NOT_FOUND = "BRG_004"   # 反向同步找不到对应连接（不报错，事件标记）
+    REVERSE_SYNC_FERNET_FAILED = "BRG_005"  # 反向同步 Fernet 加密失败
+    REVERSE_SYNC_OCC_CONFLICT = "BRG_006"   # 反向同步 OCC 冲突重试耗尽
+    REVERSE_SYNC_NOT_SUBSCRIBED = "BRG_007"  # ReverseSyncHandler 未订阅启动检查失败
+
+
+BRG_ERROR_MESSAGES = {
+    BrgErrorCode.REVERSE_SYNC_NOT_FOUND: "反向同步找不到对应连接",
+    BrgErrorCode.REVERSE_SYNC_FERNET_FAILED: "反向同步 Fernet 加密失败",
+    BrgErrorCode.REVERSE_SYNC_OCC_CONFLICT: "反向同步 OCC 冲突重试耗尽",
+    BrgErrorCode.REVERSE_SYNC_NOT_SUBSCRIBED: "ReverseSyncHandler 未订阅启动检查失败",
 }

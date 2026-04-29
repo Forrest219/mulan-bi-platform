@@ -10,16 +10,42 @@ Priority Levels（Spec 12 §3.4）：
     P3: 普通维度字段（role=dimension）
     P4: 计算字段（有 formula）
     P5: 其他字段
+
+v1.3 Phase A（Spec 12 §18.9 / §18.10 T1.6）：
+    内部使用 TokenBudget + BudgetEnforcer 实现截断逻辑，
+    外部 API 保持不变，回归测试覆盖 §3.4 P0/P1 字段保留。
+
+    新增：
+    - BudgetAwareContextAssembler：集成 BudgetEnforcer 的高级封装
+    - build_field_context_with_budget()：返回 (context, BudgetReport)
+    - 熔断/超限日志记录
 """
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
+
+from services.token_budget import (
+    TokenCounter,
+    BudgetItem,
+    BudgetEnforcer,
+    BudgetReport,
+    get_registry,
+    BudgetRegistry,
+)
 
 logger = logging.getLogger(__name__)
 
-# Token 预算常量（Spec 12 §3.2）
-SYSTEM_PROMPT_TOKENS = 200   # System Prompt 预留
-USER_INSTRUCTION_TOKENS = 300  # User Instruction 预留
-MAX_CONTEXT_TOKENS = 3000     # 单次调用上下文上限
+# 从 TokenBudget 配置获取默认值（Phase A，保持向后兼容）
+try:
+    _default_registry = get_registry()
+    _semantic_field_budget = _default_registry.get("semantic_field", "openai")
+    SYSTEM_PROMPT_TOKENS = _semantic_field_budget.system_reserved
+    USER_INSTRUCTION_TOKENS = _semantic_field_budget.instruction_reserved
+    MAX_CONTEXT_TOKENS = _semantic_field_budget.total_tokens
+except Exception:
+    # 配置加载失败时使用 Spec 12 §3.2 硬编码值（降级保护）
+    SYSTEM_PROMPT_TOKENS = 200
+    USER_INSTRUCTION_TOKENS = 300
+    MAX_CONTEXT_TOKENS = 3000
 
 # Blocked sensitivity levels for AI processing (Spec 12 §9.1)
 BLOCKED_FOR_LLM = {"high", "confidential"}
@@ -41,16 +67,15 @@ def _get_token_estimator():
 
     优先使用 tiktoken（OpenAI 官方），若无则回退到保守字符截断。
     Spec 12 §3.2 OI-02 要求精确估算，此处引入 tiktoken。
+
+    v1.3: 委托给 services.token_budget.TokenCounter（全局缓存编码器）。
     """
     try:
-        import tiktoken
-        # 默认使用 cl100k_base（GPT-4/3.5 同款）
-        enc = tiktoken.get_encoding("cl100k_base")
-        return enc
-    except ImportError:
+        counter = TokenCounter.for_model("gpt-4o")
+        return counter
+    except Exception:
         logger.warning(
-            "tiktoken 未安装，Token 估算将使用保守字符截断策略（可能比实际 token 多估算约 20%%）。"
-            "建议安装：pip install tiktoken"
+            "TokenCounter 初始化失败，Token 估算将使用保守字符截断策略（可能比实际 token 多估算约 20%%）。"
         )
         return None
 
@@ -59,20 +84,24 @@ def estimate_tokens(text: str, encoder=None) -> int:
     """
     估算文本的 token 数量。
 
-    - 有 tiktoken 时：用 encoder.encode() 长度（精确）
+    - 有 TokenCounter/tiktoken 时：用 encoder.encode() 长度（精确）
     - 无 tiktoken 时：按 Spec 12 §3.2 规则估算
       - 中文字符：约 1.5 token/字
       - 英文单词：约 1.3 token/word
       - JSON 结构符号：按字符数 * 1.0
+
+    v1.3: encoder 参数现在接受 TokenCounter 或 tiktoken.Encoding。
     """
     if not text:
         return 0
 
     if encoder is not None:
+        # encoder 可能是 TokenCounter 或 tiktoken.Encoding
+        if hasattr(encoder, "count"):
+            return encoder.count(text)
         return len(encoder.encode(text))
 
-    # 保守估算（Spec v1.2 §3.2 废弃声明）：无 tiktoken 时使用 2.0 token/字
-    # 原 1.5/1.3 估算已被废弃，禁止使用
+    # 保守估算（无 tiktoken 时）
     chinese_chars = sum(1 for c in text if ord(c) > 127)
     english_chars = len(text) - chinese_chars
     return int(chinese_chars * 2.0 + english_chars * 1.3)
@@ -240,6 +269,35 @@ def truncate_context(
     return result
 
 
+def _fields_to_budget_items(fields: List[Dict[str, Any]]) -> List[BudgetItem]:
+    """
+    将字段列表转换为 BudgetItem 列表（用于 BudgetEnforcer.fit()）。
+
+    Args:
+        fields: 字段元数据列表
+
+    Returns:
+        BudgetItem 列表，priority 映射自 P0-P5 → 0-5
+    """
+    items = []
+    for f in fields:
+        priority_label = _classify_priority(f)
+        priority_num = _PRIORITY_RANK.get(priority_label, 5)
+
+        # 序列化字段为内容字符串
+        content = serialize_field(f)
+
+        items.append(BudgetItem(
+            content=content,
+            priority=priority_num,
+            droppable=True,  # 所有字段都可以丢弃
+            truncatable=False,  # 字段不进行部分截断
+            metadata={"original_field": f},  # 保留原始字段引用
+        ))
+
+    return items
+
+
 class ContextAssembler:
     """
     上下文组装器（Spec 12 §2.1/§3）。
@@ -363,3 +421,146 @@ class ContextAssembler:
         sanitized = self.sanitize_fields(field_context)
         max_tokens = MAX_CONTEXT_TOKENS - SYSTEM_PROMPT_TOKENS - USER_INSTRUCTION_TOKENS
         return self.build_field_context(sanitized, max_tokens)
+
+
+class BudgetAwareContextAssembler:
+    """
+    集成 BudgetEnforcer 的上下文组装器（Spec 12 §18.10 T1.6）。
+
+    相比 ContextAssembler，新增：
+    - 返回 BudgetReport（包含 truncated_items、used_tokens 等）
+    - 支持 truncate / error / circuit_break 三种模式
+    - 记录计费埋点到日志或 metrics
+
+    使用方式：
+        assembler = BudgetAwareContextAssembler()
+        context, report = assembler.build_field_context_with_budget(fields, scenario="semantic_field")
+        if report.truncated_items > 0:
+            logger.warning("截断了 %d 个字段", report.truncated_items)
+    """
+
+    def __init__(
+        self,
+        registry: Optional[BudgetRegistry] = None,
+        mode: str = "truncate",
+    ):
+        """
+        Args:
+            registry: BudgetRegistry 实例，默认使用全局注册表
+            mode: 截断模式，"truncate" | "error" | "circuit_break"
+        """
+        self.registry = registry or get_registry()
+        self.mode = mode
+
+    def _get_enforcer(self, scenario: str, provider: str = "openai") -> BudgetEnforcer:
+        """获取指定场景的 BudgetEnforcer"""
+        budget = self.registry.get(scenario, provider)
+        return BudgetEnforcer(budget, mode=self.mode)
+
+    def build_field_context_with_budget(
+        self,
+        fields: List[Dict[str, Any]],
+        scenario: str = "semantic_field",
+        provider: str = "openai",
+    ) -> Tuple[str, BudgetReport]:
+        """
+        构建字段上下文并返回 BudgetReport（Spec 12 §18.10 T1.6）。
+
+        流程：
+        1. 清洗敏感字段
+        2. 转换为 BudgetItem 列表
+        3. 调用 BudgetEnforcer.fit() 截断
+        4. 返回 (context_str, BudgetReport)
+
+        Args:
+            fields: 字段元数据列表
+            scenario: 场景名，默认 "semantic_field"
+            provider: 供应商，默认 "openai"
+
+        Returns:
+            (context_str, BudgetReport) 元组
+
+        Raises:
+            BudgetExceeded: error 模式下超限
+            TBD_005: circuit_break 模式熔断触发
+        """
+        # 1. 敏感字段清洗
+        sanitized = sanitize_fields_for_llm(fields)
+
+        if not sanitized:
+            # 空列表直接返回
+            empty_report = BudgetReport(
+                scenario=scenario,
+                used_tokens=0,
+                truncated_items=0,
+                elapsed_ms=0,
+            )
+            return "无字段信息", empty_report
+
+        # 2. 转换为 BudgetItem
+        items = _fields_to_budget_items(sanitized)
+
+        # 3. 获取 enforcer 并执行截断
+        enforcer = self._get_enforcer(scenario, provider)
+        kept_items, report = enforcer.fit(items)
+
+        # 4. 从 kept_items 恢复原始字段并序列化
+        # 由于 BudgetItem.metadata["original_field"] 保留了原始引用，直接使用
+        kept_fields = [item.metadata.get("original_field", {}) for item in kept_items]
+
+        # 5. 序列化
+        lines = [serialize_field(f) for f in kept_fields]
+        context = "\n".join(lines) if lines else "无字段信息"
+
+        # 6. 记录计费日志
+        if report.truncated_items > 0:
+            logger.info(
+                "[TokenBudget] scenario=%s 截断了 %d 个字段，"
+                "used_tokens=%d, elapsed_ms=%d",
+                scenario,
+                report.truncated_items,
+                report.used_tokens,
+                report.elapsed_ms,
+            )
+
+        return context, report
+
+    def build_datasource_context_with_budget(
+        self,
+        ds_name: str,
+        description: str,
+        existing_semantic_name: str,
+        existing_semantic_name_zh: str,
+        fields: List[Dict[str, Any]],
+        scenario: str = "semantic_ds",
+        provider: str = "openai",
+    ) -> Tuple[str, BudgetReport]:
+        """
+        构建数据源上下文并返回 BudgetReport（Spec 12 §18.10 T1.6）。
+
+        Args:
+            ds_name: 数据源名称
+            description: 数据源描述
+            existing_semantic_name: 现有英文语义名
+            existing_semantic_name_zh: 现有中文语义名
+            fields: 字段元数据列表
+            scenario: 场景名，默认 "semantic_ds"
+            provider: 供应商，默认 "openai"
+
+        Returns:
+            (context_str, BudgetReport) 元组
+        """
+        field_text, report = self.build_field_context_with_budget(
+            fields, scenario=scenario, provider=provider
+        )
+
+        context = f"""## 数据源信息
+名称：{ds_name}
+描述：{description or '无'}
+现有语义名：{existing_semantic_name or '无'}
+现有中文名：{existing_semantic_name_zh or '无'}
+
+## 字段列表
+{field_text}"""
+
+        return context, report

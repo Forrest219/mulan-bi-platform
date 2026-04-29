@@ -1,0 +1,12 @@
+{{ notification.title }}
+
+{{ notification.content }}
+
+{% if payload %}
+事件类型：{{ event_type }}
+{% if event_id %}事件 ID：{{ event_id }}{% endif %}
+{% endif %}
+
+---
+此邮件由木兰 BI 平台自动发出，请勿直接回复。
+如有疑问，请联系系统管理员。

@@ -12,6 +12,12 @@ from app.core.database import SessionLocal
 from app.core.dependencies import get_current_admin
 from services.mcp.models import McpServer
 from services.llm.service import llm_service
+from services.events import emit_event
+from services.events.constants import (
+    MCP_SERVER_CHANGED,
+    MCP_SERVER_DELETED,
+    SOURCE_MODULE_MCP,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -197,11 +203,18 @@ async def update_mcp_server(id: int, req: McpServerUpdateRequest, request: Reque
             raise HTTPException(status_code=404, detail="MCP server not found")
 
         old_name = record.name
+        old_is_active = record.is_active
+        old_credentials = record.credentials
+
+        # 收集变更字段列表（用于反向同步事件）
+        fields_changed = []
 
         if req.name is not None:
             if not req.name.strip():
                 raise HTTPException(status_code=422, detail="name 不能为空")
-            record.name = req.name.strip()
+            if record.name != req.name.strip():
+                fields_changed.append("name")
+                record.name = req.name.strip()
         if req.type is not None:
             if req.type not in MCP_TYPE_VALUES:
                 raise HTTPException(status_code=422, detail=f"type 必须为 {MCP_TYPE_VALUES} 之一")
@@ -213,12 +226,50 @@ async def update_mcp_server(id: int, req: McpServerUpdateRequest, request: Reque
         if req.description is not None:
             record.description = req.description
         if req.is_active is not None:
+            if record.is_active != req.is_active:
+                fields_changed.append("is_active")
             record.is_active = req.is_active
         if req.credentials is not None:
+            # 检查 credentials 中的特定字段是否变更
+            old_creds = old_credentials or {}
+            new_creds = req.credentials
+            if old_creds.get("pat_value") != new_creds.get("pat_value"):
+                fields_changed.append("pat_value")
+            if old_creds.get("tableau_server") != new_creds.get("tableau_server"):
+                fields_changed.append("tableau_server")
+            if old_creds.get("site_name") != new_creds.get("site_name"):
+                fields_changed.append("site_name")
+            if old_creds.get("pat_name") != new_creds.get("pat_name"):
+                fields_changed.append("pat_name")
             record.credentials = req.credentials
+
+        # 如果 name 变更，记录 old_name 在快照中
+        mcp_snapshot = {
+            "id": record.id,
+            "name": record.name,
+            "old_name": old_name if "name" in fields_changed else None,
+            "is_active": record.is_active,
+            "credentials": record.credentials,
+        }
 
         db.commit()
         db.refresh(record)
+
+        # 发射 mcp.server.changed 事件（commit 之后）
+        if record.type == "tableau" and fields_changed:
+            emit_event(
+                db=db,
+                event_type=MCP_SERVER_CHANGED,
+                source_module=SOURCE_MODULE_MCP,
+                payload={
+                    "mcp_id": record.id,
+                    "change_type": "update",
+                    "fields_changed": fields_changed,
+                    "mcp_name": record.name,
+                    "mcp_snapshot": mcp_snapshot,
+                },
+                actor_id=user["id"],
+            )
 
         if record.type == "tableau":
             try:
@@ -246,18 +297,40 @@ async def update_mcp_server(id: int, req: McpServerUpdateRequest, request: Reque
 @router.delete("/{id}")
 async def delete_mcp_server(id: int, request: Request):
     """删除 MCP 服务器配置"""
-    get_current_admin(request)
+    user = get_current_admin(request)
     db = SessionLocal()
     try:
         record = db.query(McpServer).filter(McpServer.id == id).first()
         if not record:
             raise HTTPException(status_code=404, detail="MCP server not found")
+
+        # 保存删除前快照
+        mcp_snapshot = {
+            "id": record.id,
+            "name": record.name,
+            "type": record.type,
+            "is_active": record.is_active,
+            "credentials": record.credentials,
+        }
         mcp_name = record.name
         mcp_type = record.type
+
         db.delete(record)
         db.commit()
 
+        # 发射 mcp.server.deleted 事件（commit 之后）
         if mcp_type == "tableau":
+            emit_event(
+                db=db,
+                event_type=MCP_SERVER_DELETED,
+                source_module=SOURCE_MODULE_MCP,
+                payload={
+                    "mcp_id": id,
+                    "snapshot": mcp_snapshot,
+                },
+                actor_id=user["id"],
+            )
+
             try:
                 from services.tableau.models import TableauDatabase
                 tab_db = TableauDatabase()

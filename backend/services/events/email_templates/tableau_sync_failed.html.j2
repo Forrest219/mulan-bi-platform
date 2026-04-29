@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ notification.title }}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333; }
+    .header { border-left: 4px solid #ff4d4f; padding-left: 12px; margin-bottom: 20px; }
+    .title { font-size: 18px; font-weight: 600; margin: 0 0 8px 0; color: #1a1a1a; }
+    .content { font-size: 14px; line-height: 1.6; color: #666; background: #fff2f0; border-radius: 8px; padding: 16px; margin: 16px 0; border: 1px solid #ffccc7; }
+    .error-box { background: #fff1e8; border-radius: 8px; padding: 12px 16px; margin: 12px 0; font-family: monospace; font-size: 13px; color: #d46b28; }
+    .footer { font-size: 12px; color: #999; margin-top: 24px; border-top: 1px solid #eee; padding-top: 12px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1 class="title">{{ notification.title }}</h1>
+  </div>
+  <div class="content">{{ notification.content }}</div>
+  {% if payload.get('error_message') %}
+  <div class="error-box">
+    错误详情：{{ payload.get('error_message') }}
+    {% if payload.get('error_code') %}（错误码：{{ payload.get('error_code') }}）{% endif %}
+  </div>
+  {% endif %}
+  {% if payload.get('connection_name') %}
+  <p>连接名称：{{ payload.get('connection_name') }}</p>
+  {% endif %}
+  <div class="footer">
+    此邮件由木兰 BI 平台自动发出，请勿直接回复。<br>
+    如需帮助，请联系系统管理员。
+  </div>
+</body>
+</html>

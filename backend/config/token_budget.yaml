@@ -1,0 +1,98 @@
+# TokenBudget 场景配置（Spec 12 §18.4）
+#
+# 字段格式：total / system_reserved / instruction_reserved / response_reserved
+# 各字段含义：
+#   total:           单次调用上下文上限（tokens）
+#   system_reserved: System Prompt 预留空间（tokens）
+#   instruction_reserved: User Instruction 预留空间（tokens）
+#   response_reserved: 响应预留（影响 max_tokens）
+#
+# context_available = total - system_reserved - instruction_reserved - response_reserved
+#
+# 场景说明：
+#   semantic_field: 字段语义 AI 生成
+#   semantic_ds:   数据源语义 AI 生成
+#   nlq:           自然语言转 VizQL 查询
+#   agent_step:    Agent 单步工具调用上下文
+#   rag_context:   RAG 检索上下文
+
+defaults:
+  system_reserved: 200
+  instruction_reserved: 300
+  response_reserved: 512
+
+scenarios:
+  # 字段语义 AI 生成（Spec 12 §3.2）
+  semantic_field:
+    openai:
+      model: gpt-4o
+      total: 3000
+      response_reserved: 512
+    anthropic:
+      model: claude-sonnet-4
+      total: 4096
+      response_reserved: 1024
+    deepseek:
+      model: deepseek-v3
+      total: 8192
+      response_reserved: 1024
+
+  # 数据源语义 AI 生成（Spec 12 §3.2）
+  semantic_ds:
+    openai:
+      model: gpt-4o
+      total: 3000
+      response_reserved: 512
+    anthropic:
+      model: claude-sonnet-4
+      total: 4096
+      response_reserved: 1024
+    deepseek:
+      model: deepseek-v3
+      total: 8192
+      response_reserved: 1024
+
+  # 自然语言转 VizQL（Spec 14）
+  nlq:
+    openai:
+      model: gpt-4o
+      total: 4096
+      response_reserved: 1024
+    anthropic:
+      model: claude-sonnet-4
+      total: 8192
+      response_reserved: 2048
+    deepseek:
+      model: deepseek-v3
+      total: 16384
+      response_reserved: 2048
+
+  # Agent 单步上下文（Spec 28/36）
+  agent_step:
+    openai:
+      model: gpt-4o
+      total: 8192
+      response_reserved: 2048
+    anthropic:
+      model: claude-sonnet-4
+      total: 16384
+      response_reserved: 4096
+    deepseek:
+      model: deepseek-v3
+      total: 32768
+      response_reserved: 4096
+
+  # RAG 检索上下文（Spec 17）
+  rag_context:
+    openai:
+      model: gpt-4o
+      total: 6144
+      response_reserved: 1024
+    anthropic:
+      model: claude-sonnet-4
+      total: 12288
+      response_reserved: 2048
+    deepseek:
+      model: deepseek-v3
+      total: 24576
+      response_reserved: 2048

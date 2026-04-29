@@ -48,7 +48,7 @@
 | # | 文档 | 说明 | 状态 |
 |---|------|------|------|
 | 14 | [NL-to-Query](14-nl-to-query-pipeline-spec.md) | 自然语言查询全链路 | :white_check_mark: |
-| 15 | [数据质量监控](15-data-governance-quality-spec.md) | 规则引擎 + 定时执行 | :white_check_mark: |
+| 15 | [数据质量监控](15-data-governance-quality-spec.md) | 规则定义层（规则引擎 + CRUD） | :white_check_mark: |
 | 16 | [事件/通知系统](16-notification-events-spec.md) | 统一事件总线 + 通知 | :white_check_mark: |
 | 17 | [知识库](17-knowledge-base-spec.md) | 术语表 + Schema + RAG | :white_check_mark: |
 | 18 | [菜单重构](18-menu-restructure-spec.md) | 5 域导航布局 | :white_check_mark: |
@@ -59,12 +59,13 @@
 | 28 | [Data Agent](28-data-agent-spec.md) | 归因分析 + 自动报告生成 + 主动洞察（ReAct 框架） | :next_track_button: Next（第 2 批） |
 | 29 | [SQL Agent](29-sql-agent-spec.md) | 多方言 SQL 执行 + 安全校验 + 查询日志 | :white_check_mark: |
 | 30 | [Metrics Agent](30-metrics-agent-spec.md) | 指标注册 + 血缘追踪 + 一致性校验 + 异常检测 | :next_track_button: Next（第 1 批） |
-| 31 | [DQC Pipeline](31-governance-dqc-pipeline-spec.md) | 数据质量核心流水线 + 评分 + 通知 | :white_check_mark: |
+| 31 | [DQC Pipeline](31-governance-dqc-pipeline-spec.md) | 执行层（流水线调度 + 执行 + 结果存储） | :white_check_mark: |
 | 32 | [MCP-Tableau Bridge](32-mcp-tableau-connection-bridge-spec.md) | MCP→Tableau 连接自动桥接 | :white_check_mark: |
 | 33 | [任务管理](33-task-management-spec.md) | Celery 任务调度与监控 | :white_check_mark: |
 | 34 | [连接管理整合](34-connection-management-spec.md) | 恢复 CRUD 路由 + 汉化 + 冒烟测试 + 导航修复 | :clipboard: 待实施 |
 | 35 | [StarRocks 数仓合规巡检](35-starrocks-compliance-inspection-spec.md) | 扩展健康扫描引擎，25 条 StarRocks 规则 + 数仓合规 Tab | :construction: |
 | 36 | [Data Agent 架构](36-data-agent-architecture-spec.md) | Agent 框架（ReAct 引擎 + 工具注册 + 首页接入），Spec 28 的实施基座 | :construction: |
+| 38 | [问数界面](38-query-interface-spec.md) | Connected Apps JWT 用户模拟 + 内建问数前端 | :white_check_mark: |
 
 ## 附录 — 独立 Spec
 

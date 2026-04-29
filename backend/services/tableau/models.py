@@ -377,6 +377,100 @@ class TableauDatabase:
         self.session.commit()
         return True
 
+    def update_connection_from_mcp(
+        self,
+        db,
+        *,
+        name: str,
+        fields: Dict[str, Any],
+        actor_id: Optional[int] = None,
+    ) -> tuple[bool, Optional["TableauConnection"]]:
+        """
+        按 name + connection_type='mcp' 定位记录，仅更新允许字段。
+
+        Spec 32 v1.1 反向同步核心方法。
+
+        Args:
+            db: SQLAlchemy Session
+            name: 连接名称（作为关联键）
+            fields: 待更新字段字典，支持：
+                - token_encrypted: 加密后的 token
+                - server_url: Tableau 服务器 URL
+                - site: Tableau 站点
+                - token_name: PAT 名称
+                - is_active: 是否启用
+            actor_id: 操作者 ID（用于审计）
+
+        Returns:
+            (changed, connection): 更新是否发生 + 连接对象；
+            找不到记录返回 (False, None)。
+
+        Note:
+            - 禁止更新 name 字段（作为关联键）
+            - 只更新 connection_type='mcp' 的记录
+            - 使用 SQL UPDATE WHERE 避免 ORM 对象并发覆盖
+        """
+        # 允许更新的字段白名单
+        ALLOWED_FIELDS = {
+            "token_encrypted",
+            "server_url",
+            "site",
+            "token_name",
+            "is_active",
+        }
+
+        # 过滤掉不在白名单中的字段（特别是禁止更新 name）
+        update_fields = {k: v for k, v in fields.items() if k in ALLOWED_FIELDS}
+
+        if not update_fields:
+            return False, None
+
+        # 按 name + connection_type='mcp' 定位记录
+        conn = (
+            db.query(TableauConnection)
+            .filter(
+                TableauConnection.name == name,
+                TableauConnection.connection_type == "mcp",
+            )
+            .first()
+        )
+
+        if not conn:
+            return False, None
+
+        # 检查是否有实际变更（OCC 优化）
+        changed = False
+        for key, new_value in update_fields.items():
+            current_value = getattr(conn, key, None)
+            if current_value != new_value:
+                changed = True
+                break
+
+        if not changed:
+            return False, conn
+
+        # 执行更新
+        for key, value in update_fields.items():
+            setattr(conn, key, value)
+
+        db.commit()
+        db.refresh(conn)
+
+        return True, conn
+
+    def get_connection_by_name_and_type(
+        self, name: str, connection_type: str = "mcp"
+    ) -> Optional[TableauConnection]:
+        """按名称和连接类型查找连接"""
+        return (
+            self.session.query(TableauConnection)
+            .filter(
+                TableauConnection.name == name,
+                TableauConnection.connection_type == connection_type,
+            )
+            .first()
+        )
+
     def create_connection(self, name: str, server_url: str, site: str,
                           token_name: str, token_encrypted: str,
                           owner_id: int, api_version: str = "3.21",
