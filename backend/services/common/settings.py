@@ -131,3 +131,24 @@ def get_admin_username() -> str:
 
 def get_admin_password() -> Optional[str]:
     return os.environ.get("ADMIN_PASSWORD")
+
+
+# =============================================================================
+# SMTP 配置（Spec 16 §5.2.2）
+# =============================================================================
+
+def get_smtp_config() -> dict:
+    """获取 SMTP 配置字典（用于邮件出站）"""
+    return {
+        "host": os.environ.get("SMTP_HOST"),
+        "port": int(os.environ.get("SMTP_PORT", "465")),
+        "user": os.environ.get("SMTP_USER"),
+        "password": os.environ.get("SMTP_PASSWORD"),
+        "use_tls": os.environ.get("SMTP_USE_TLS", "true").lower() == "true",
+        "from_addr": os.environ.get("SMTP_FROM_ADDR"),
+    }
+
+
+def get_fernet_master_key() -> Optional[str]:
+    """获取 Fernet 主密钥（用于 Webhook secret 加密，Spec 16 §5.3.8）"""
+    return os.environ.get("FERNET_MASTER_KEY")

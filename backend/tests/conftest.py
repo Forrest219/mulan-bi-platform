@@ -120,9 +120,24 @@ def _ensure_admin():
         session.close()
 
 
+# 注册自定义 markers
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "skip_db: skip database setup for this test module"
+    )
+
+
 @pytest.fixture(scope="session", autouse=True)
-def setup_database():
-    """session-scope: 只运行一次，为所有测试准备数据库"""
+def setup_database(request):
+    """session-scope: 只运行一次，为所有测试准备数据库
+
+    跳过标记了 skip_db 的测试模块（纯单元测试不需要数据库）
+    """
+    # 检查是否所有测试都被标记为 skip_db
+    if request.node.get_closest_marker("skip_db") is not None:
+        yield
+        return
+
     _run_alembic_migrations()
     _ensure_admin()
 

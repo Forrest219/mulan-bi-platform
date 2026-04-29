@@ -13,12 +13,15 @@ from app.core.database import SessionLocal
 
 
 @shared_task
-def cleanup_expired_quality_results():
+def cleanup_expired_quality_results(dry_run: bool = False):
     """
     清理超过 90 天的 bi_quality_results 历史数据。
 
     PostgreSQL 分区表：DROP 过期的分区（Metadata 操作，性能影响极小）。
     对于非分区表或未建立分区的表，执行 DELETE WHERE executed_at < cutoff。
+
+    Args:
+        dry_run: 若为 True，仅返回待清理记录数，不执行删除（冒烟测试用）
 
     Returns:
         dict: 清理结果摘要
@@ -27,32 +30,22 @@ def cleanup_expired_quality_results():
     cutoff_date = datetime.utcnow() - timedelta(days=90)
 
     try:
-        # 尝试使用分区表 DROP 分区的方式（更高效）
-        # 注意：这需要表确实是按月分区的
-        cleanup_sql = """
-        DO $$
-        DECLARE
-            partition_name TEXT;
-            cutoff_date DATE := :cutoff_date;
-        BEGIN
-            -- 查找并删除过期的月度分区
-            FOR partition_name IN
-                SELECT inhrelid::regclass::text
-                FROM pg_inherits
-                WHERE inhparent = 'bi_quality_results'::regclass
-            LOOP
-                -- 提取分区日期（假设分区命名格式为 bi_quality_results_YYYYMM）
-                IF partition_name ~ 'bi_quality_results_\\d{6}' THEN
-                    -- 分区日期早于 cutoff 的处理（通过外部逻辑判断）
-                    RAISE NOTICE 'Found partition: %', partition_name;
-                END IF;
-            END LOOP;
-        END $$;
-        """
-
-        # 对于普通表（非分区）或补充清理，执行 DELETE
-        # 注意：这应该在分区策略不适用时使用
         from services.governance.models import QualityResult
+
+        # T3.4: dry_run 模式 — 仅计数，不删除
+        if dry_run:
+            count = (
+                session.query(QualityResult)
+                .filter(QualityResult.executed_at < cutoff_date)
+                .count()
+            )
+            return {
+                "task": "cleanup_expired_quality_results",
+                "cutoff_date": cutoff_date.isoformat(),
+                "dry_run": True,
+                "pending_delete_count": count,
+                "status": "dry_run_completed",
+            }
 
         deleted_count = (
             session.query(QualityResult)
@@ -81,12 +74,15 @@ def cleanup_expired_quality_results():
 
 
 @shared_task
-def cleanup_expired_quality_scores():
+def cleanup_expired_quality_scores(dry_run: bool = False):
     """
     清理超过 90 天的 bi_quality_scores 历史数据。
 
     注意：趋势 API 需要保留 90 天数据，向后兼容。
     此任务仅清理超过 90 天的评分记录。
+
+    Args:
+        dry_run: 若为 True，仅返回待清理记录数，不执行删除（冒烟测试用）
 
     Returns:
         dict: 清理结果摘要
@@ -96,6 +92,21 @@ def cleanup_expired_quality_scores():
 
     try:
         from services.governance.models import QualityScore
+
+        # T3.4: dry_run 模式 — 仅计数，不删除
+        if dry_run:
+            count = (
+                session.query(QualityScore)
+                .filter(QualityScore.calculated_at < cutoff_date)
+                .count()
+            )
+            return {
+                "task": "cleanup_expired_quality_scores",
+                "cutoff_date": cutoff_date.isoformat(),
+                "dry_run": True,
+                "pending_delete_count": count,
+                "status": "dry_run_completed",
+            }
 
         deleted_count = (
             session.query(QualityScore)

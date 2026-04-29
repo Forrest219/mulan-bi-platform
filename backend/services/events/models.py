@@ -3,7 +3,7 @@ from typing import Optional, List, Dict, Any
 
 from sqlalchemy import (
     Column, BigInteger, String, DateTime,
-    Boolean, Text, ForeignKey, Index
+    Boolean, Text, ForeignKey, Index, Integer
 )
 from sqlalchemy.orm import Session
 
@@ -397,3 +397,116 @@ class EventDatabase:
         if existing:
             return existing
         return self.create_subscription(db, user_id, event_type, target_id)
+
+
+# =============================================================================
+# 出站相关模型（Spec 16 v1.1）
+# =============================================================================
+
+class BiWebhookEndpoint(Base):
+    """Webhook 端点配置表（bi_webhook_endpoints）"""
+    __tablename__ = "bi_webhook_endpoints"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    name = Column(String(128), nullable=False)
+    url = Column(String(1024), nullable=False)
+    # secret_encrypted: Fernet 加密存储的 HMAC 签名密钥
+    secret_encrypted = Column(Text, nullable=False)
+    event_type_pattern = Column(String(128), nullable=False, index=True)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"))
+    owner_id = Column(Integer, ForeignKey("auth_users.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=sa_func.now(), onupdate=sa_func.now())
+
+    __table_args__ = (
+        Index("ix_webhook_active_pattern", "is_active", "event_type_pattern"),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "url": self.url,
+            "event_type_pattern": self.event_type_pattern,
+            "is_active": self.is_active,
+            "owner_id": self.owner_id,
+            "created_at": self.created_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.updated_at else None,
+        }
+
+
+class BiNotificationOutbox(Base):
+    """出站请求队列（bi_notification_outbox）"""
+    __tablename__ = "bi_notification_outbox"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    # notification_id 可为空（webhook 独立入站）
+    notification_id = Column(BigInteger, ForeignKey("bi_notifications.id", ondelete="SET NULL"), nullable=True, index=True)
+    channel = Column(String(16), nullable=False)  # 'email' / 'webhook'
+    target = Column(String(512), nullable=False)   # 邮箱地址或 Webhook URL
+    status = Column(String(16), nullable=False, server_default=sa_text("'pending'"))  # 'pending' / 'sent' / 'dead'
+    attempt_count = Column(Integer, nullable=False, server_default=sa_text("0"))
+    next_attempt_at = Column(DateTime, nullable=False, server_default=sa_func.now())
+    last_error = Column(Text, nullable=True)
+    # payload 已脱敏，仅存 SHA-256 摘要用于审计
+    signature_payload_hash = Column(String(64), nullable=True)
+    # 原始事件类型（用于路由匹配）
+    event_type = Column(String(64), nullable=True)
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=sa_func.now())
+
+    __table_args__ = (
+        Index("ix_outbox_status_next", "status", "next_attempt_at"),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "notification_id": self.notification_id,
+            "channel": self.channel,
+            "target": self.target,
+            "status": self.status,
+            "attempt_count": self.attempt_count,
+            "next_attempt_at": self.next_attempt_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.next_attempt_at else None,
+            "last_error": self.last_error,
+            "signature_payload_hash": self.signature_payload_hash,
+            "event_type": self.event_type,
+            "created_at": self.created_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.updated_at else None,
+        }
+
+
+class BiNotificationDeadLetter(Base):
+    """死信表（bi_notification_dead_letters）"""
+    __tablename__ = "bi_notification_dead_letters"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    outbox_id = Column(BigInteger, ForeignKey("bi_notification_outbox.id", ondelete="CASCADE"), nullable=False)
+    channel = Column(String(16), nullable=False)  # 'email' / 'webhook'
+    target = Column(String(512), nullable=False)
+    event_type = Column(String(64), nullable=False)
+    # payload_json 已脱敏
+    payload_json = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"))
+    failure_reason = Column(Text, nullable=False)
+    attempts = Column(Integer, nullable=False)
+    first_failed_at = Column(DateTime, nullable=False, server_default=sa_func.now())
+    last_failed_at = Column(DateTime, nullable=False, server_default=sa_func.now())
+
+    __table_args__ = (
+        Index("ix_deadletter_event", "event_type"),
+        Index("ix_deadletter_last_failed", "last_failed_at"),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "outbox_id": self.outbox_id,
+            "channel": self.channel,
+            "target": self.target,
+            "event_type": self.event_type,
+            "payload_json": self.payload_json,
+            "failure_reason": self.failure_reason,
+            "attempts": self.attempts,
+            "first_failed_at": self.first_failed_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.first_failed_at else None,
+            "last_failed_at": self.last_failed_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.last_failed_at else None,
+        }

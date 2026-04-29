@@ -13,6 +13,14 @@ from app.utils.auth import verify_connection_access
 # 导入语义维护服务和模型
 from services.semantic_maintenance.service import SemanticMaintenanceService
 
+# 导入事件服务（Spec 09 + 16 语义接入通知总线）
+from services.events import emit_event
+from services.events.constants import (
+    SEMANTIC_SUBMITTED, SEMANTIC_APPROVED, SEMANTIC_REJECTED,
+    SOURCE_MODULE_SEMANTIC,
+    SEVERITY_INFO, SEVERITY_WARNING, SEVERITY_ERROR,
+)
+
 router = APIRouter()
 
 
@@ -58,6 +66,28 @@ async def submit_datasource_for_review(ds_id: int, request: Request, db: Session
     if not success:
         raise HTTPException(status_code=400, detail=err)
     updated = sm.db.get_datasource_semantics_by_id(ds_id)
+
+    # T3.1: 一次发布触发一次站内通知（Spec 09 + 16）
+    # submit_review 触发 semantic.submitted 事件
+    try:
+        emit_event(
+            db=db,
+            event_type=SEMANTIC_SUBMITTED,
+            source_module=SOURCE_MODULE_SEMANTIC,
+            payload={
+                "object_type": "datasource",
+                "object_id": ds_id,
+                "object_name": updated.semantic_name or updated.tableau_datasource_id,
+                "connection_id": updated.connection_id,
+                "actor_id": user["id"],
+            },
+            source_id=f"ds:{ds_id}",
+            severity=SEVERITY_INFO,
+            actor_id=user["id"],
+        )
+    except Exception:
+        pass  # 通知失败不阻断主流程
+
     return {"item": updated.to_dict(), "message": "已提交审核"}
 
 
@@ -77,6 +107,28 @@ async def approve_datasource(ds_id: int, request: Request, db: Session = Depends
     if not success:
         raise HTTPException(status_code=400, detail=err)
     updated = sm.db.get_datasource_semantics_by_id(ds_id)
+
+    # T3.1: 审核通过触发 semantic.approved 事件
+    try:
+        emit_event(
+            db=db,
+            event_type=SEMANTIC_APPROVED,
+            source_module=SOURCE_MODULE_SEMANTIC,
+            payload={
+                "object_type": "datasource",
+                "object_id": ds_id,
+                "object_name": updated.semantic_name or updated.tableau_datasource_id,
+                "reviewer_id": user["id"],
+                "reviewer_name": user.get("username", ""),
+                "actor_id": user["id"],
+            },
+            source_id=f"ds:{ds_id}",
+            severity=SEVERITY_INFO,
+            actor_id=user["id"],
+        )
+    except Exception:
+        pass
+
     return {"item": updated.to_dict(), "message": "审核通过"}
 
 
@@ -96,6 +148,28 @@ async def reject_datasource(ds_id: int, request: Request, db: Session = Depends(
     if not success:
         raise HTTPException(status_code=400, detail=err)
     updated = sm.db.get_datasource_semantics_by_id(ds_id)
+
+    # T3.1: 驳回触发 semantic.rejected 事件
+    try:
+        emit_event(
+            db=db,
+            event_type=SEMANTIC_REJECTED,
+            source_module=SOURCE_MODULE_SEMANTIC,
+            payload={
+                "object_type": "datasource",
+                "object_id": ds_id,
+                "object_name": updated.semantic_name or updated.tableau_datasource_id,
+                "reviewer_id": user["id"],
+                "reviewer_name": user.get("username", ""),
+                "actor_id": user["id"],
+            },
+            source_id=f"ds:{ds_id}",
+            severity=SEVERITY_WARNING,
+            actor_id=user["id"],
+        )
+    except Exception:
+        pass
+
     return {"item": updated.to_dict(), "message": "已驳回"}
 
 

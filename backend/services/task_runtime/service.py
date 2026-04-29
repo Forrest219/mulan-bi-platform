@@ -11,7 +11,7 @@ from typing import Optional, Tuple
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import DBAPIError, PendingRollbackError
+from sqlalchemy.exc import DBAPIError, PendingRollbackError, OperationalError
 
 from app.core.errors import TRError
 from services.task_runtime.models_db import BiTaskRun

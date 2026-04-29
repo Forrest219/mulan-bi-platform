@@ -8,23 +8,32 @@ from .models import TaskRunStatus, TaskRun, InvalidStateTransitionError
 class TaskRunStateMachine:
     """TaskRun 状态机
 
-    合法流转规则：
-    - PENDING → RUNNING（启动执行）
-    - PENDING → CANCELLED（取消）
-    - RUNNING → SUCCEEDED（成功完成）
-    - RUNNING → FAILED（执行失败）
-    - RUNNING → CANCELLED（取消）
+    合法流转规则（Spec 24 §4.1）：
+    - queued → running（启动执行）
+    - queued → failed（校验失败）
+    - running → succeeded（成功完成）
+    - running → failed（执行失败）
+    - running → cancelling（取消中）
+    - cancelling → cancelled（取消完成）
+    - cancelling → failed（取消失败）
+
+    终态：succeeded, failed, cancelled（无后续转移）
     """
 
     VALID_TRANSITIONS: dict[TaskRunStatus, set[TaskRunStatus]] = {
-        TaskRunStatus.PENDING: {
+        TaskRunStatus.QUEUED: {
             TaskRunStatus.RUNNING,
+            TaskRunStatus.FAILED,
             TaskRunStatus.CANCELLED,
         },
         TaskRunStatus.RUNNING: {
             TaskRunStatus.SUCCEEDED,
             TaskRunStatus.FAILED,
+            TaskRunStatus.CANCELLING,
+        },
+        TaskRunStatus.CANCELLING: {
             TaskRunStatus.CANCELLED,
+            TaskRunStatus.FAILED,
         },
         # terminal states: no further transitions allowed
         TaskRunStatus.SUCCEEDED: set(),

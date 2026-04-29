@@ -39,6 +39,12 @@ celery_app.conf.update(
             "schedule": 86400.0,  # 每天凌晨 3:00 执行（实际时间由 worker 启动参数控制）
             "options": {"expires": 3600},
         },
+        # 出站队列重试调度（Celery Beat 每 30s 扫描）
+        "events-outbox-retry": {
+            "task": "services.tasks.event_tasks.process_outbox",
+            "schedule": 30.0,  # 每 30s 执行一次
+            "options": {"expires": 300},
+        },
         # HNSW 索引维护（Spec 14 v1.1 §5.4）
         # ⚠️ pgvector 0.5 不支持 REINDEX CONCURRENTLY，须在低峰维护窗口执行
         "hnsw-reindex": {

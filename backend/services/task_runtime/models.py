@@ -13,17 +13,16 @@ class InvalidStateTransitionError(Exception):
 class TaskRunStatus(str, Enum):
     """TaskRun 状态枚举
 
-    合法流转：
-    - PENDING → RUNNING
-    - PENDING → CANCELLED
-    - RUNNING → SUCCEEDED
-    - RUNNING → FAILED
-    - RUNNING → CANCELLED
+    合法流转（Spec 24 §4.1）：
+    - queued → running
+    - running → succeeded / failed / cancelling
+    - cancelling → cancelled / failed
     """
-    PENDING = "pending"
+    QUEUED = "queued"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    CANCELLING = "cancelling"
     CANCELLED = "cancelled"
 
 
@@ -77,7 +76,7 @@ class TaskRun:
     Attributes:
         id: TaskRun 唯一 ID（UUID）
         trace_id: 全链路追踪 ID
-        status: 当前状态
+        status: 当前状态（queued/running/succeeded/failed/cancelling/cancelled）
         created_at: 创建时间
         updated_at: 最后更新时间
         steps: Step 列表
@@ -87,7 +86,7 @@ class TaskRun:
     """
     id: str
     trace_id: str
-    status: TaskRunStatus = TaskRunStatus.PENDING
+    status: TaskRunStatus = TaskRunStatus.QUEUED
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
     steps: list[TaskStepRun] = field(default_factory=list)
