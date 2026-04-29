@@ -21,6 +21,8 @@ SEED_DATA = [
      "DQC 分区维护（表分区管理）", "每月 1 日 03:10"),
     ("dqc-cleanup-old-analyses", "services.tasks.dqc_tasks.cleanup_old_analyses",
      "清理过期 DQC 分析记录与 Cycle", "每日 03:30"),
+    ("task-runs-cleanup", "services.tasks.cleanup_tasks.cleanup_old_task_runs",
+     "清理 90 天前的任务运行记录", "每 24 小时"),
 ]
 
 

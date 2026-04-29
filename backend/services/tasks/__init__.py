@@ -77,6 +77,12 @@ celery_app.conf.update(
             "schedule": crontab(minute=30, hour=3),
             "options": {"expires": 3600},
         },
+        # Spec 33 §3.4: bi_task_runs 90天清理（每24小时）
+        "task-runs-cleanup": {
+            "task": "services.tasks.cleanup_tasks.cleanup_old_task_runs",
+            "schedule": 86400.0,
+            "options": {"expires": 3600},
+        },
     },
 )
 
@@ -89,6 +95,7 @@ celery_app.conf.include = [
     "services.tasks.ddl_tasks",
     "services.tasks.knowledge_base_tasks",
     "services.tasks.api_contract_tasks",
+    "services.tasks.cleanup_tasks",
 ]
 
 from services.tasks import signals  # noqa: F401

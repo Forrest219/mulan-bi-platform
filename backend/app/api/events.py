@@ -8,10 +8,10 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from services.events import (
-    ANOMALY_DETECTED,
     EVT_ERROR_MESSAGES,
     EvtErrorCode,
 )
+from services.events.constants import ANOMALY_DETECTED
 from services.events.models import EventDatabase
 
 router = APIRouter()
@@ -26,6 +26,20 @@ class AnomalySubscriptionCreate(BaseModel):
 class AnomalySubscriptionDelete(BaseModel):
     """DELETE /api/events/anomaly-subscriptions 请求体"""
     subscription_id: int
+
+
+class SubscriptionCreate(BaseModel):
+    """POST /api/events/subscriptions 请求体（支持按事件类型订阅）"""
+    event_type: str
+    target_id: Optional[str] = None  # 如 semantic_table_id
+
+
+class SubscriptionResponse(BaseModel):
+    """订阅响应"""
+    subscription_id: int
+    event_type: str
+    target_id: Optional[str] = None
+    is_active: bool = True
 
 
 @router.get("")
@@ -172,6 +186,106 @@ def unsubscribe_anomaly(
     deleted = event_db.delete_subscription(
         db=db,
         subscription_id=body.subscription_id,
+        user_id=user["id"],
+    )
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": EvtErrorCode.NOTIFICATION_NOT_FOUND,
+                "message": "订阅不存在或无权删除",
+            },
+        )
+    return {"ok": True}
+
+
+# =============================================================================
+# 通用事件订阅管理（Spec 9 → Spec 16）
+# =============================================================================
+
+@router.get(
+    "/subscriptions",
+    summary="查询当前用户的事件订阅列表",
+)
+def list_subscriptions(
+    request: Request,
+    event_type: Optional[str] = Query(default=None, description="事件类型过滤"),
+    target_id: Optional[str] = Query(default=None, description="目标 ID 过滤（如 semantic_table_id）"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """GET /api/events/subscriptions — 查询当前用户的订阅列表"""
+    user = get_current_user(request, db)
+    event_db = EventDatabase()
+
+    result = event_db.list_subscriptions(
+        db=db,
+        user_id=user["id"],
+        event_type=event_type,
+        target_id=target_id,
+        page=page,
+        page_size=page_size,
+    )
+    return result
+
+
+@router.post(
+    "/subscriptions",
+    status_code=201,
+    summary="订阅特定事件类型",
+)
+def create_subscription(
+    request: Request,
+    body: SubscriptionCreate,
+    db: Session = Depends(get_db),
+):
+    """POST /api/events/subscriptions — 订阅指定事件类型（analyst+）"""
+    from services.events.constants import ALL_EVENT_TYPES
+
+    user = get_current_user(request, db)
+    event_db = EventDatabase()
+
+    # 校验事件类型是否注册
+    if body.event_type not in ALL_EVENT_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": EvtErrorCode.INVALID_EVENT_TYPE,
+                "message": f"无效的事件类型：{body.event_type}",
+            },
+        )
+
+    sub = event_db.upsert_subscription(
+        db=db,
+        user_id=user["id"],
+        event_type=body.event_type,
+        target_id=body.target_id,
+    )
+    return SubscriptionResponse(
+        subscription_id=sub.id,
+        event_type=sub.event_type,
+        target_id=sub.target_id,
+        is_active=sub.is_active,
+    )
+
+
+@router.delete(
+    "/subscriptions/{subscription_id}",
+    summary="取消事件订阅",
+)
+def delete_subscription(
+    request: Request,
+    subscription_id: int,
+    db: Session = Depends(get_db),
+):
+    """DELETE /api/events/subscriptions/{id} — 取消订阅（仅所有者可删除）"""
+    user = get_current_user(request, db)
+    event_db = EventDatabase()
+
+    deleted = event_db.delete_subscription(
+        db=db,
+        subscription_id=subscription_id,
         user_id=user["id"],
     )
     if not deleted:

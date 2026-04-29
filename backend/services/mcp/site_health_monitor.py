@@ -323,6 +323,82 @@ class SiteHealthMonitor:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._send_heartbeat, site.site_url)
 
+    # ── Spec 13 §3.4: MCP Offline Degradation ──────────────────────────────────
+
+    def check_mcp_health(self, server_url: str) -> dict:
+        """
+        同步检查 MCP Server 健康状态（Spec 13 §3.4 T1）。
+        
+        定期 ping MCP server，连续 N 次失败后标记为 degraded。
+        
+        Returns:
+            dict with keys:
+                - is_healthy: bool
+                - consecutive_failures: int
+                - status: 'healthy' | 'degraded' | 'unhealthy'
+        """
+        is_ok = self._send_heartbeat(server_url)
+        if is_ok:
+            return {"is_healthy": True, "consecutive_failures": 0, "status": "healthy"}
+        return {"is_healthy": False, "consecutive_failures": 1, "status": "degraded"}
+
+    def check_mcp_health_with_failures(
+        self, server_url: str, current_failures: int = 0
+    ) -> dict:
+        """
+        带失败计数累积的 MCP 健康检查（Spec 13 §3.4 T1）。
+        
+        Args:
+            server_url: MCP server URL
+            current_failures: 当前已累积的失败次数
+        
+        Returns:
+            dict with keys:
+                - is_healthy: bool
+                - consecutive_failures: int
+                - status: 'healthy' | 'degraded' | 'unhealthy'
+        """
+        is_ok = self._send_heartbeat(server_url)
+        if is_ok:
+            return {"is_healthy": True, "consecutive_failures": 0, "status": "healthy"}
+        
+        new_failures = current_failures + 1
+        if new_failures >= self.max_consecutive_failures:
+            status = "unhealthy"
+        else:
+            status = "degraded"
+        return {"is_healthy": False, "consecutive_failures": new_failures, "status": status}
+
+    def get_mcp_degraded_connections(self) -> list:
+        """
+        返回所有处于 degraded/unhealthy 状态的 MCP 连接（Spec 13 §3.4 T2）。
+        
+        Returns:
+            List of (connection_id, server_url, health_status) tuples
+        """
+        from app.core.database import SessionLocal
+        from services.tableau.models import TableauConnection
+        
+        degraded = []
+        session = SessionLocal()
+        try:
+            connections = session.query(TableauConnection).filter(
+                TableauConnection.is_active == True,
+            ).all()
+            for conn in connections:
+                mcp_url = getattr(conn, 'mcp_server_url', None) or conn.server_url
+                health = self.check_mcp_health(mcp_url)
+                if not health["is_healthy"]:
+                    degraded.append({
+                        "connection_id": conn.id,
+                        "connection_name": conn.name,
+                        "server_url": mcp_url,
+                        "health_status": health["status"],
+                    })
+        finally:
+            session.close()
+        return degraded
+
 
 # Module-level singleton
 site_health_monitor = SiteHealthMonitor()

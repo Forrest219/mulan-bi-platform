@@ -212,6 +212,45 @@ class ApiToken(Base):
     )
 
 
+class SharedResourcePermission(Base):
+    """共享资源权限表 — 用户/组对语义表/datasource 的分享权限（Spec 11 §4.2）"""
+    __tablename__ = "auth_shared_resource_permissions"
+    __table_args__ = (
+        Index("ix_shared_perm_grantee", "grantee_type", "grantee_id"),
+        Index("ix_shared_perm_resource", "resource_type", "resource_id"),
+        CheckConstraint("grantee_type IN ('user', 'group')", name="ck_shared_perm_grantee_type"),
+        CheckConstraint("permission_level IN ('read', 'write', 'admin')", name="ck_shared_perm_level"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    grantee_type = Column(String(16), nullable=False)  # 'user' or 'group'
+    grantee_id = Column(Integer, nullable=False)  # auth_users.id or auth_user_groups.id
+    resource_type = Column(String(32), nullable=False)  # 'semantic_table', 'datasource', 'workbook', etc.
+    resource_id = Column(String(128), nullable=False)  # 资源标识符
+    resource_name = Column(String(256), nullable=False)  # 资源显示名称
+    permission_level = Column(String(16), nullable=False, default="read")  # read/write/admin
+    granted_by = Column(Integer, ForeignKey('auth_users.id'), nullable=False)  # 授权用户 ID
+    granted_at = Column(DateTime, nullable=False, server_default=sa_func.now())
+    expires_at = Column(DateTime, nullable=True)  # null 表示永不过期
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "grantee_type": self.grantee_type,
+            "grantee_id": self.grantee_id,
+            "grantee_name": None,  # 由 service 层填充
+            "resource_type": self.resource_type,
+            "resource_id": self.resource_id,
+            "resource_name": self.resource_name,
+            "permission_level": self.permission_level,
+            "granted_by": self.granted_by,
+            "granted_by_name": None,  # 由 service 层填充
+            "granted_at": self.granted_at.strftime("%Y-%m-%d %H:%M:%S") if self.granted_at else None,
+            "expires_at": self.expires_at.strftime("%Y-%m-%d %H:%M:%S") if self.expires_at else None,
+            "is_expired": self.expires_at is not None and self.expires_at < datetime.utcnow(),
+        }
+
+
 # 从中央配置导入 SessionLocal
 from app.core.database import SessionLocal
 from sqlalchemy.orm import Session

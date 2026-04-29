@@ -150,15 +150,32 @@ class SQLSecurityValidator:
 
     def _check_ddl(self, statement) -> ValidationResult:
         """拦截 DDL 和危险语句"""
+        # 危险关键词集合（node type name 上限 → 实际 sqlglot 类型名）
+        blocked_types = {"DROP", "TRUNCATETABLE", "ALTER", "CREATE", "GRANT", "REVOKE"}
+        # 解析失败时降级为 Command 节点的 SQL 关键词
+        blocked_command_keywords = {"GRANT", "REVOKE", "TRUNCATE", "LOAD DATA", "INTO OUTFILE", "COPY TO"}
+
         for node in statement.walk():
             node_type = type(node).__name__.upper()
-            if node_type in {"DROP", "TRUNCATE", "ALTER", "CREATE", "GRANT", "REVOKE"}:
+            if node_type in blocked_types:
                 return ValidationResult(
                     ok=False,
                     action_type="REJECTED",
                     reason=f"危险语句被拦截：{node_type}",
                     error_code="SQLA_001",
                 )
+            # 捕获解析器降级的 Command 节点
+            if isinstance(node, exp.Command):
+                cmd_name = node.args.get("this")
+                if isinstance(cmd_name, str):
+                    for kw in blocked_command_keywords:
+                        if kw.upper() in cmd_name.upper():
+                            return ValidationResult(
+                                ok=False,
+                                action_type="REJECTED",
+                                reason=f"危险语句被拦截：{cmd_name.strip().upper()}",
+                                error_code="SQLA_001",
+                            )
             if isinstance(node, exp.LoadData):
                 return ValidationResult(
                     ok=False,

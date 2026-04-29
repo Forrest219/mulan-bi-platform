@@ -312,27 +312,7 @@ async def test_connection(
         return {"success": False, "message": f"测试失败: {error_msg}"}
 
 
-@router.post("/connections/{conn_id}/sync")
-async def sync_connection(
-    conn_id: int,
-    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
-    db: Session = Depends(get_db),
-):
-    """触发 Tableau 资产同步（Celery 异步任务）"""
-    _db = TableauDatabase(session=db)
-
-    verify_connection_access(conn_id, current_user, db)
-
-    conn = _db.get_connection(conn_id)
-    if not conn:
-        raise HTTPException(status_code=404, detail="连接不存在")
-
-    if conn.sync_status == "running":
-        return {"message": "同步正在进行中", "status": "running"}
-
-    from services.tasks.tableau_tasks import sync_connection_task
-    task = sync_connection_task.delay(conn_id)
-    return {"task_id": task.id, "message": "同步任务已提交", "status": "pending"}
+# @router.post("/connections/{conn_id}/sync")  # Moved to ~line 540 with degraded check (Spec 13 §3.4 T2)
 
 
 @router.get("/assets")
@@ -524,6 +504,75 @@ async def get_sync_status(conn_id: int, request: Request, db: Session = Depends(
         "sync_interval_hours": conn.sync_interval_hours,
         "next_sync_at": next_sync_at,
     }
+
+
+# ── Spec 13 §3.4: MCP Offline Degradation ────────────────────────────────────
+
+from services.tableau.connection_health import (
+    build_connection_status_response,
+    get_mcp_health,
+    is_mcp_degraded,
+)
+
+
+@router.get("/connections/{conn_id}/status")
+async def get_connection_status(conn_id: int, request: Request, db: Session = Depends(get_db)):
+    """
+    Spec 13 §3.4 T3: 获取连接 MCP 健康状态 + 数据新鲜度。
+    
+    Returns:
+        - mcp_health: 'healthy' | 'degraded' | 'unhealthy'
+        - data_freshness: {status, hours_since_sync, description}
+        - connection metadata
+    """
+    user = get_current_user(request, db)
+    _db = TableauDatabase(session=db)
+    verify_connection_access(conn_id, user, db)
+
+    conn = _db.get_connection(conn_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="连接不存在")
+
+    return build_connection_status_response(conn)
+
+
+@router.post("/connections/{conn_id}/sync")
+async def sync_connection(
+    conn_id: int,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
+):
+    """
+    Spec 13 §3.4 T2: 触发 Tableau 资产同步（Celery 异步任务）。
+    
+    degraded 状态下返回 503 Service Unavailable。
+    """
+    _db = TableauDatabase(session=db)
+
+    verify_connection_access(conn_id, current_user, db)
+
+    conn = _db.get_connection(conn_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="连接不存在")
+
+    # Spec 13 §3.4 T2: 检查 MCP 是否 degraded
+    mcp_url = getattr(conn, 'mcp_server_url', None) or conn.server_url
+    if is_mcp_degraded(mcp_url):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "MCP_003",
+                "message": "MCP 服务不可用（degraded 状态），同步操作暂停。请等待服务恢复。",
+                "mcp_health": get_mcp_health(mcp_url).value,
+            },
+        )
+
+    if conn.sync_status == "running":
+        return {"message": "同步正在进行中", "status": "running"}
+
+    from services.tasks.tableau_tasks import sync_connection_task
+    task = sync_connection_task.delay(conn_id)
+    return {"task_id": task.id, "message": "同步任务已提交", "status": "pending"}
 
 
 # --- Asset Hierarchy (Phase 2a) ---

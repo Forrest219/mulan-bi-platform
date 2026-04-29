@@ -63,6 +63,7 @@ def _create_tables():
     import services.health_scan.models  # noqa: F401
     import services.semantic_maintenance.models  # noqa: F401
     import services.data_agent.models  # noqa: F401 — registers agent/bi_agent/analysis tables
+    import services.task_runtime.models_db  # noqa: F401 — registers bi_taskrun_* tables
     Base.metadata.create_all(bind=engine)
 
 

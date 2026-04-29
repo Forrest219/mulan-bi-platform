@@ -25,6 +25,7 @@ ALLOWED_MANUAL_TASKS = [
     "services.tasks.api_contract_tasks.sample_asset",
     "services.tasks.api_contract_tasks.run_cycle",
     "services.tasks.api_contract_tasks.compare_snapshots",
+    "services.tasks.cleanup_tasks.cleanup_old_task_runs",
 ]
 
 
@@ -199,6 +200,19 @@ async def get_stats(request: Request, date: str = None):
 
     with SessionLocal() as db:
         return TaskManager().get_stats(db, parsed_date)
+
+
+# ─── Spec 33 §3.4: 90天清理 dry-run ─────────────────────────────────
+
+@router.get("/cleanup-dry-run")
+async def cleanup_dry_run(request: Request):
+    """返回待清理的 bi_task_runs 记录数（admin 专用，dry-run 不删除）"""
+    _require_admin(request)
+
+    from services.tasks.cleanup_tasks import cleanup_old_task_runs
+
+    result = cleanup_old_task_runs(dry_run=True)
+    return result
 
 
 # ─── 临时接口：初始化表结构 & 种子数据 ──────────────────────

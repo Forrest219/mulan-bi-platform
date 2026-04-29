@@ -5,7 +5,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -14,8 +15,12 @@ from app.core.database import get_db  # 导入中央数据库依赖
 from app.core.dependencies import get_current_user, require_roles
 from app.core.errors import MulanError, DSError
 from services.datasources.models import DataSourceDatabase
+from services.datasources.upload_service import UploadService
 
 router = APIRouter()
+
+# 文件上传服务实例
+_upload_service = UploadService()
 
 _crypto = get_datasource_crypto()
 _encrypt = _crypto.encrypt
@@ -204,3 +209,81 @@ async def test_connection(
             error_msg = "数据库连接失败，请检查配置（详细信息已隐藏）"
         logging.getLogger(__name__).error("数据源连接测试失败: %s", error_msg)
         return {"success": False, "message": "连接失败，请检查配置"}
+
+
+# -------------------------------------------------------------------------
+# 文件上传 (Spec 37 §3)
+# -------------------------------------------------------------------------
+
+@router.post("/upload")
+async def upload_datasource_file(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
+):
+    """
+    上传 CSV/Excel 文件作为数据源
+
+    - 支持格式: CSV, Excel (.xlsx, .xls)
+    - 文件大小限制: 50MB
+    - 上传后自动触发数据预览
+
+    返回: {file_id, filename, row_count, columns, preview_url}
+    """
+    # 读取文件内容
+    content = await file.read()
+    file_size = len(content)
+
+    # 检查文件大小 (50MB limit)
+    if file_size > 50 * 1024 * 1024:
+        return JSONResponse(
+            status_code=413,
+            content={
+                "error_code": "FILE_TOO_LARGE",
+                "message": f"文件大小超过限制 (50MB)，当前大小: {file_size / (1024*1024):.1f}MB",
+            },
+        )
+
+    # 验证文件类型
+    filename = file.filename or "unknown"
+    ext = Path(filename).suffix.lower()
+    allowed_exts = {".csv", ".xlsx", ".xls"}
+    if ext not in allowed_exts:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error_code": "INVALID_FILE_TYPE",
+                "message": f"不支持的文件类型: {ext}，支持的类型: CSV, Excel (.xlsx, .xls)",
+            },
+        )
+
+    try:
+        # 处理上传: 验证 -> 保存 -> 解析
+        result = _upload_service.process_upload(filename, content)
+
+        return {
+            "file_id": result["file_id"],
+            "filename": result["filename"],
+            "row_count": result["row_count"],
+            "columns": result["columns"],
+            "preview_url": result["preview_url"],
+        }
+    except ValueError as e:
+        # 文件验证或解析失败
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error_code": "UPLOAD_FAILED",
+                "message": str(e),
+            },
+        )
+    except Exception as e:
+        logging.getLogger(__name__).error("文件上传处理失败: %s", str(e))
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error_code": "UPLOAD_ERROR",
+                "message": "文件上传处理失败",
+            },
+        )
