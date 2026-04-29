@@ -14,6 +14,7 @@ from app.core.crypto import get_tableau_crypto
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.utils.auth import verify_connection_access
+from services.semantic_maintenance.rollback_service import RollbackService
 from services.semantic_maintenance.publish_service import PublishService
 from services.semantic_maintenance.service import SemanticMaintenanceService
 
@@ -145,6 +146,35 @@ async def publish_datasource(req: PublishDatasourceRequest, request: Request, db
 
     if err:
         raise HTTPException(status_code=400, detail=err)
+
+    # Spec 9 → Spec 16: 发布成功发布事件 semantic_table.published
+    try:
+        from services.events import emit_event
+        from services.events.constants import SEMANTIC_TABLE_PUBLISHED, SOURCE_MODULE_SEMANTIC
+        ds = sm.db.get_datasource_semantics_by_id(req.ds_id)
+        if ds:
+            emit_event(
+                db=db,
+                event_type=SEMANTIC_TABLE_PUBLISHED,
+                source_module=SOURCE_MODULE_SEMANTIC,
+                payload={
+                    "ds_id": req.ds_id,
+                    "tableau_datasource_id": ds.tableau_datasource_id,
+                    "semantic_name": ds.semantic_name or "",
+                    "status": ds.status,
+                    "author_id": ds.created_by or user["id"],
+                    "actor_id": user["id"],
+                },
+                actor_id=user["id"],
+                extra_data={
+                    "semantic_table_id": req.ds_id,
+                    "table_name": ds.semantic_name or ds.tableau_datasource_id,
+                    "connection_id": req.connection_id,
+                },
+            )
+    except Exception:
+        pass  # 事件发布失败不影响主流程
+
     return result
 
 
@@ -329,3 +359,60 @@ async def get_publish_log_detail(
             raise HTTPException(status_code=403, detail={"error_code": "SM_021"})
 
     return detail
+
+
+# --- Rollback by log_id (Spec 19) ---
+
+
+class RollbackByLogRequest(BaseModel):
+    connection_id: Optional[int] = None
+
+
+@router.post("/publish-logs/{log_id}/rollback")
+async def rollback_publish_log(
+    log_id: int,
+    request: Request,
+    body: Optional[RollbackByLogRequest] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    回滚指定发布日志（Spec 19）。
+
+    - 给定 sm_publish_log_id，还原到发布前状态
+    - 回滚操作类型：field_mapping变更 → 恢复旧映射 / metric定义变更 → 恢复旧定义 / status变更 → 恢复旧status
+    - 回滚前需验证：当前状态允许回滚（非 deprecated 等 terminal 状态）
+    - 回滚后记录：sm_publish_log.action='rollback' + previous_version_snapshot
+
+    仅 admin 可执行此操作。
+    """
+    user = get_current_user(request, db)
+
+    # 仅 admin 可回滚
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail={"error_code": "SM_025"})
+
+    connection_id = body.connection_id if body else None
+
+    # 权限校验（如果提供了 connection_id）
+    if connection_id is not None:
+        verify_connection_access(connection_id, user, db)
+
+    rollback_svc = RollbackService()
+    result, err = rollback_svc.execute_rollback(
+        log_id=log_id,
+        operator=user["id"],
+        connection_id=connection_id,
+    )
+
+    if err:
+        # 根据错误类型返回不同状态码
+        if "不存在" in err:
+            raise HTTPException(status_code=404, detail={"error_code": "SM_020", "message": err})
+        elif "不匹配" in err:
+            raise HTTPException(status_code=400, detail={"error_code": "SM_026", "message": err})
+        elif "只能回滚 success" in err or "已回滚" in err:
+            raise HTTPException(status_code=409, detail={"error_code": "SM_027", "message": err})
+        else:
+            raise HTTPException(status_code=400, detail={"error_code": "SM_028", "message": err})
+
+    return result

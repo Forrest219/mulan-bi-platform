@@ -112,6 +112,31 @@ async def sync_datasource_fields(
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, job.run)
 
+    # Spec 9 → Spec 16: 字段同步完成发布事件 field_sync.completed
+    try:
+        from services.events import emit_event
+        from services.events.constants import FIELD_SYNC_COMPLETED, SOURCE_MODULE_SEMANTIC
+        emit_event(
+            db=db,
+            event_type=FIELD_SYNC_COMPLETED,
+            source_module=SOURCE_MODULE_SEMANTIC,
+            payload={
+                "connection_id": conn_id,
+                "asset_id": asset_id,
+                "tableau_datasource_id": req.tableau_datasource_id,
+                "synced_count": result.get("synced", 0),
+                "skipped_count": result.get("skipped", 0),
+                "triggered_by": user["id"],
+            },
+            actor_id=user["id"],
+            extra_data={
+                "semantic_table_id": None,  # 字段同步按 connection/datasource 维度
+                "connection_id": conn_id,
+            },
+        )
+    except Exception:
+        pass  # 事件发布失败不影响主流程
+
     return {
         "message": f"字段同步完成：更新 {result.get('synced', 0)} 个字段，跳过 {result.get('skipped', 0)} 个无变更",
         "connection_id": conn_id,

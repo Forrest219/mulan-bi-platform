@@ -267,6 +267,9 @@ class TableauPublishLog(Base):
     status = Column(String(16), default=PublishStatus.PENDING, server_default=sa_text(f"'{PublishStatus.PENDING}'"))
     response_summary = Column(Text, nullable=True)
     operator = Column(Integer, nullable=True)
+    # Spec 19: 回滚相关字段
+    action = Column(String(32), nullable=True)  # 'rollback' / None
+    previous_version_snapshot = Column(JSONB, nullable=True, server_default=sa_text("'{}'::jsonb"))  # 回滚前的快照
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
 
     def to_dict(self) -> Dict[str, Any]:
@@ -282,6 +285,8 @@ class TableauPublishLog(Base):
             "status": self.status,
             "response_summary": self.response_summary,
             "operator": self.operator,
+            "action": self.action,
+            "previous_version_snapshot": self.previous_version_snapshot, # JSONB 字段直接是 Python 对象
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
         }
 

@@ -140,6 +140,32 @@ async def create_datasource_semantics(req: CreateDatasourceSemanticsRequest, req
         user_id=user["id"],
         initial_data=data,
     )
+
+    # Spec 9 → Spec 16: 创建成功发布事件 semantic_table.created
+    try:
+        from services.events import emit_event
+        from services.events.constants import SEMANTIC_TABLE_CREATED, SOURCE_MODULE_SEMANTIC
+        emit_event(
+            db=db,
+            event_type=SEMANTIC_TABLE_CREATED,
+            source_module=SOURCE_MODULE_SEMANTIC,
+            payload={
+                "ds_id": obj.id,
+                "tableau_datasource_id": req.tableau_datasource_id,
+                "semantic_name": obj.semantic_name or "",
+                "creator_id": user["id"],
+                "actor_id": user["id"],
+            },
+            actor_id=user["id"],
+            extra_data={
+                "semantic_table_id": obj.id,
+                "table_name": obj.semantic_name or req.tableau_datasource_id,
+                "connection_id": req.connection_id,
+            },
+        )
+    except Exception:
+        pass  # 事件发布失败不影响主流程
+
     return {"item": obj.to_dict(), "message": "创建成功"} # 确保返回 dict
 
 
