@@ -1,9 +1,13 @@
 import { test, expect } from '@playwright/test';
 
-// 使用 config_mulan.md 的真实 MiniMax Token 测试 LLM 配置创建
-// MiniMax API Token: sk-cp-VWSWUGyNtyy4vZtpBPeM:7d7d9b45d8ee4e6dad29efee0b6e965a
-const ADMIN_USER = 'admin';
-const ADMIN_PASS = 'admin123';
+// LLM 真实 Token 从环境变量读取（不得硬编码）
+// 运行前需设置：export MINIMAX_API_TOKEN="sk-cp-..."
+const MINIMAX_API_TOKEN = process.env.MINIMAX_API_TOKEN;
+const ADMIN_USER = process.env.SMOKE_ADMIN_USERNAME ?? 'admin';
+const ADMIN_PASS = process.env.SMOKE_ADMIN_PASSWORD ?? 'admin123';
+
+// Token 未配置时跳过整个测试
+test.skip(!MINIMAX_API_TOKEN, 'MINIMAX_API_TOKEN 环境变量未设置，跳过此测试');
 
 test.describe('LLM 配置管理 - 使用真实 MiniMax Token', () => {
   test('使用真实 MiniMax Token 创建 LLM 配置并保存', async ({ page }) => {
@@ -31,8 +35,8 @@ test.describe('LLM 配置管理 - 使用真实 MiniMax Token', () => {
     // 显示名称 (placeholder="GPT-4o Mini (General)")
     await page.getByPlaceholder('GPT-4o Mini (General)').fill(`MiniMax-Test-${Date.now()}`);
 
-    // API Key (placeholder="sk-...")
-    await page.getByPlaceholder('sk-...').fill('sk-cp-VWSWUGyNtyy4vZtpBPeM:7d7d9b45d8ee4e6dad29efee0b6e965a');
+    // API Key（从环境变量注入，不得硬编码）
+    await page.getByPlaceholder('sk-...').fill(MINIMAX_API_TOKEN);
 
     // 6. 点击创建配置按钮
     await page.getByRole('button', { name: '创建配置' }).click();

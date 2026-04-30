@@ -28,6 +28,14 @@ interface SettingsForm {
 
 const LOGO_URL_RE = /^https?:\/\/.+/i;
 
+// 禁止将随机/占位图片服务设为 Logo（每次请求返回不同图片）
+const FORBIDDEN_LOGO_PATTERNS = [
+  'httpbin.org/image',
+  'picsum.photos',
+  'via.placeholder.com',
+  'img.shields.io',
+];
+
 function validateForm(form: SettingsForm): Record<string, string> {
   const errors: Record<string, string> = {};
   if (!form.platform_name.trim()) {
@@ -41,6 +49,8 @@ function validateForm(form: SettingsForm): Record<string, string> {
     errors.logo_url = 'Logo URL 必须是有效的 HTTP(S) URL';
   } else if (form.logo_url.length > 512) {
     errors.logo_url = 'Logo URL 不能超过 512 字符';
+  } else if (FORBIDDEN_LOGO_PATTERNS.some(p => form.logo_url.includes(p))) {
+    errors.logo_url = 'Logo URL 不能使用随机/占位图片服务（如 httpbin.org/image、picsum.photos 等）';
   }
   if (form.platform_subtitle.length > 256) {
     errors.platform_subtitle = '平台副标题不能超过 256 字符';

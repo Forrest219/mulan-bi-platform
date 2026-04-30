@@ -25,6 +25,9 @@ htmlcov/
 # Logs
 *.log
 
+# Local config (contains real credentials)
+config_mulan.md
+
 # Database
 *.db
 *.sqlite
