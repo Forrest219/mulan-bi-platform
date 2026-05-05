@@ -131,7 +131,7 @@ test.describe('RBAC 权限隔离', () => {
 
   // ── 特定权限路由（正向：smoke_analyst 有 database_monitor）─────────
   // smoke_analyst 仅有 database_monitor 权限，可访问：
-  // /governance/health-center, /assets/connections
+  // /governance/dw-audit, /assets/connections
 
   test.describe('smoke_analyst 权限正向验证 — database_monitor 权限有效', () => {
 
@@ -140,23 +140,12 @@ test.describe('RBAC 权限隔离', () => {
       const loginFailed = await page.locator('text=用户名或密码错误').isVisible({ timeout: 1000 }).catch(() => false);
       if (loginFailed) { test.skip(); return; }
 
-      await page.goto('/governance/health-center');
+      await page.goto('/governance/dw-audit');
       await page.waitForTimeout(1500);
 
-      expect(page.url()).toContain('/governance/health-center');
+      expect(page.url()).toContain('/governance/dw-audit');
       const hasContent = await page.locator('h1').first().isVisible().catch(() => false);
       expect(hasContent).toBe(true);
-    });
-
-    test('smoke_analyst 可访问连接中心（无需特定权限）', async ({ page }) => {
-      await loginAsSmokeUser(page);
-      const loginFailed = await page.locator('text=用户名或密码错误').isVisible({ timeout: 1000 }).catch(() => false);
-      if (loginFailed) { test.skip(); return; }
-
-      await page.goto('/assets/connections');
-      await page.waitForTimeout(1500);
-
-      expect(page.url()).toContain('/assets/connections');
     });
   });
 

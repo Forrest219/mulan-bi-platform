@@ -23,6 +23,9 @@ class ScanLog(Base):
     error_message = Column(Text, nullable=True)
     # B13: 脱敏后的结果，仅存储 results_masked
     results_json_masked = Column(JSONB, nullable=True)
+    # 追踪 ID 和脱敏结果（TEXT）
+    trace_id = Column(String(64), nullable=True)
+    results_masked = Column(Text, nullable=True)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -38,6 +41,8 @@ class ScanLog(Base):
             "duration_seconds": self.duration_seconds,
             "status": self.status,
             "error_message": self.error_message,
+            "trace_id": self.trace_id,
+            "results_masked": self.results_masked,
         }
 
 

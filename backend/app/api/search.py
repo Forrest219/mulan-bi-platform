@@ -4,6 +4,7 @@ Spec 24 P0 改动：
 - trace_id 响应头透传：优先继承 X-Trace-ID 请求头，无则生成新的 UUID v4
 - task_run_id 可空字段：响应中补充此字段，向后兼容
 """
+import json
 import logging
 from typing import Any, Dict, Optional
 
@@ -1529,16 +1530,89 @@ async def _execute_nlq_pipeline(
     elif not asset:
         raise _nlq_error_response("NLQ_009", "数据源不存在")
     else:
-        raw_fields = recall_fields(asset.id)
-        fields = [f for f in raw_fields if f.get("field_caption") or f.get("field_name")]
-        sanitized_fields = sanitize_fields_for_llm(fields)
-        assembler = ContextAssembler()
-        fields_with_types = assembler.assemble_field_list(sanitized_fields)
-        glossary_terms = glossary_service.get_glossary_terms(asset.id) or []
-        term_mappings = (
-            "\n".join(f"{t.get('source_term', t.get('term',''))} -> {t.get('mapped_term', t.get('definition',''))}" for t in glossary_terms)
-            if glossary_terms else "无"
-        )
+        # 通过 MCP get-datasource-fields-summary 获取字段元数据（无 embedding 依赖）
+        try:
+            import httpx
+            from app.core.config import get_settings
+            from services.tableau.models import TableauConnection
+            from app.core.database import SessionLocal as _SessionLocal
+
+            # 优先用用户明确指定的 connection_id，否则用资产绑定的 connection_id
+            _lookup_conn_id = connection_id if connection_id else asset.connection_id
+
+            _db = _SessionLocal()
+            try:
+                conn_record = _db.query(TableauConnection).filter(
+                    TableauConnection.id == _lookup_conn_id,
+                ).first()
+            finally:
+                _db.close()
+
+            if not conn_record:
+                raise RuntimeError(f"连接 {_lookup_conn_id} 不存在")
+
+            settings = get_settings()
+            mcp_base_url = conn_record.mcp_server_url or settings.TABLEAU_MCP_SERVER_URL
+
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "get-datasource-fields-summary",
+                    "arguments": {
+                        "datasource_luid": ds_luid,
+                        "include_hidden": False,
+                    },
+                },
+            }
+            init_payload = {
+                "jsonrpc": "2.0", "id": 0,
+                "method": "initialize",
+                "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "mulan-nlq", "version": "1.0"}},
+            }
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                await client.post(mcp_base_url, json=init_payload)
+                resp = await client.post(mcp_base_url, json=payload)
+                result = resp.json()
+
+            if result.get("error"):
+                raise RuntimeError(f"MCP 错误: {result['error']}")
+
+            content = result.get("result", {}).get("content", [])
+            text = content[0].get("text", "") if content else "{}"
+            summary = json.loads(text) if isinstance(text, str) else text
+
+            # 合并 dimensions + measures + other_fields
+            all_fields = []
+            for f in (summary.get("dimensions", []) + summary.get("measures", []) + summary.get("other_fields", [])):
+                fname = f.get("name", "")
+                if not fname:
+                    continue
+                role = "measure" if "default_aggregation" in f else "dimension"
+                all_fields.append({
+                    "field_caption": fname,
+                    "field_name": fname,
+                    "role": role,
+                    "data_type": f.get("data_type") or "string",
+                    "formula": None,
+                    "sensitivity_level": "low",
+                })
+
+            if all_fields:
+                sanitized_fields = sanitize_fields_for_llm(all_fields)
+                fields_with_types = _build_fields_with_types(sanitized_fields)
+                logger.info("MCP fields summary 获取成功: %d 个字段", len(all_fields))
+            else:
+                sanitized_fields = []
+                fields_with_types = "无可用字段"
+                logger.warning("MCP fields summary 为空")
+        except Exception as mcp_err:
+            logger.warning("MCP 字段获取失败: %s", mcp_err)
+            fields_with_types = ""
+            sanitized_fields = []
+        glossary_terms = []
+        term_mappings = "无"
 
     # ── 意图分类 + VizQL 生成（One-Pass LLM）───────────────────
     llm_result = await one_pass_llm(
@@ -1616,6 +1690,8 @@ async def query(
     datasource_luid = body.datasource_luid
     # connection_id >= 10000 是 MCP 虚拟连接 ID，后端不存在对应 tableau_connections 记录，视为全局路由
     connection_id = body.connection_id if (body.connection_id is None or body.connection_id < 10000) else None
+    conversation_id = body.conversation_id
+    use_conversation_context = body.use_conversation_context
     target_sites = body.target_sites  # Spec 22 P0: 多站点并发查询目标
     options = body.options or {}
 

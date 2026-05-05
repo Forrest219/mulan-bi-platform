@@ -1,6 +1,8 @@
 """数据源管理 API
 """
+import json
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -16,6 +18,7 @@ from app.core.dependencies import get_current_user, require_roles
 from app.core.errors import MulanError, DSError
 from services.datasources.models import DataSourceDatabase
 from services.datasources.upload_service import UploadService
+from services.llm.service import llm_service
 
 router = APIRouter()
 
@@ -34,7 +37,7 @@ class CreateDataSourceRequest(BaseModel):
     db_type: str
     host: str
     port: int
-    database_name: str
+    database_name: Optional[str] = ""
     username: str
     password: str
     extra_config: Optional[dict] = None
@@ -52,6 +55,106 @@ class UpdateDataSourceRequest(BaseModel):
     password: Optional[str] = None
     extra_config: Optional[dict] = None
     is_active: Optional[bool] = None
+
+
+_PARSE_SYSTEM_PROMPT = """你是数据库连接配置解析助手。用户会粘贴任意格式的数据库连接信息（JSON、.env、JDBC URL、连接字符串、自然语言）。
+请提取以下字段并以 JSON 返回，不存在的字段返回 null：
+{
+  "name": "连接名称（若未提供则根据 host 和 db_type 生成）",
+  "db_type": "mysql | postgresql | sqlserver | hive | starrocks | doris",
+  "host": "主机地址",
+  "port": 端口号(整数),
+  "database_name": "数据库名",
+  "username": "用户名",
+  "password": "密码"
+}
+规则：
+- db_type 必须是以上 6 种之一，根据上下文推断
+- port 为整数，若未提供则按类型推断默认端口
+- JDBC URL 格式如 jdbc:mysql://host:port/db?params
+- 环境变量格式如 STARROCKS_HOST=x 或 DB_HOST: x
+- 只返回 JSON，不要解释"""
+
+
+def _strip_code_fence(text: str) -> str:
+    text = text.strip()
+    match = re.match(r"^```(?:json)?\s*([\s\S]*?)```\s*$", text, re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    return text
+
+
+@router.post("/parse")
+async def parse_datasource_config(body: dict, request: Request, db: Session = Depends(get_db)):
+    """AI 解析任意格式的数据库连接配置文本"""
+    get_current_user(request, db)
+    raw_text = body.get("text", "").strip()
+    if not raw_text:
+        raise HTTPException(status_code=400, detail="text 不能为空")
+
+    result = await llm_service.complete_with_temp(
+        prompt=raw_text,
+        system=_PARSE_SYSTEM_PROMPT,
+        timeout=30,
+        temperature=0.0,
+        purpose="default",
+    )
+
+    if "error" in result:
+        return {"error": result["error"]}
+
+    try:
+        parsed = json.loads(_strip_code_fence(result["content"]))
+    except (json.JSONDecodeError, ValueError):
+        return {"error": "解析失败，请检查输入内容"}
+
+    port = parsed.get("port")
+    if port is not None:
+        try:
+            port = int(port)
+        except (TypeError, ValueError):
+            port = None
+
+    return {
+        "name": parsed.get("name") or None,
+        "db_type": parsed.get("db_type") or None,
+        "host": parsed.get("host") or None,
+        "port": port,
+        "database_name": parsed.get("database_name") or None,
+        "username": parsed.get("username") or None,
+        "password": parsed.get("password") or None,
+    }
+
+
+@router.post("/test-draft")
+async def test_draft_connection(
+    body: dict,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+):
+    """测试未保存的数据源配置（10秒超时）"""
+    import asyncio
+    from services.ddl_checker.connector import DatabaseConnector
+
+    db_config = {
+        "db_type": body.get("db_type", "mysql"),
+        "host": body.get("host", ""),
+        "port": body.get("port", 3306),
+        "database": body.get("database_name", ""),
+        "user": body.get("username", ""),
+        "password": body.get("password", ""),
+    }
+
+    def _do_connect():
+        connector = DatabaseConnector(db_config)
+        return connector.connect()
+
+    try:
+        connected = await asyncio.wait_for(asyncio.to_thread(_do_connect), timeout=10.0)
+        return {"success": connected, "message": "连接成功" if connected else "连接失败，请检查配置"}
+    except asyncio.TimeoutError:
+        return {"success": False, "message": "连接超时（10秒），请检查主机和网络"}
+    except Exception:
+        return {"success": False, "message": "连接失败，请检查配置"}
 
 
 @router.get("/")
@@ -77,6 +180,9 @@ async def create_datasource(
 ):
     """创建数据源"""
     _db = DataSourceDatabase()
+
+    if _db.get_by_name(db, request.name):
+        raise HTTPException(status_code=409, detail="数据源名称已存在，请使用其他名称")
 
     encrypted_password = _encrypt(request.password)
     extra_config = request.extra_config if request.extra_config else None
@@ -132,6 +238,10 @@ async def update_datasource(
         raise DSError.not_owner()
 
     update_data = request.model_dump(exclude_unset=True)
+    if "name" in update_data and update_data["name"] != ds.name:
+        existing = _db.get_by_name(db, update_data["name"])
+        if existing and existing.id != ds_id:
+            raise HTTPException(status_code=409, detail="数据源名称已存在，请使用其他名称")
     if "password" in update_data:
         update_data["password_encrypted"] = _encrypt(update_data.pop("password"))
     if "extra_config" in update_data and update_data["extra_config"] is not None:
@@ -190,8 +300,7 @@ async def test_connection(
             "password": password,
         }
 
-        sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "modules" / "ddl_check_engine"))
-        from ddl_check_engine.connector import DatabaseConnector
+        from services.ddl_checker.connector import DatabaseConnector
 
         def _do_connect():
             connector = DatabaseConnector(db_config)

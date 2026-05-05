@@ -69,10 +69,10 @@ export function AssetInspector({ assetId, layout = 'page', defaultTab, onClose }
   return (
     <div className="min-h-screen bg-slate-50">
       {layout === 'page' && (
-        <div className="bg-white border-b border-slate-200 px-8 py-5">
-          <div className="max-w-5xl mx-auto">
+        <div className="bg-white border-b border-slate-200 px-6 py-5">
+          <div className="max-w-6xl mx-auto">
             {/* Breadcrumb */}
-            <div className="flex items-center gap-2 text-sm text-slate-500 mb-4">
+            <div className="flex items-center gap-2 text-xs text-slate-500 mb-4">
               <button onClick={() => navigate(-1)} className="hover:text-slate-700 flex items-center gap-1">
                 <i className="ri-arrow-left-line" /> 返回
               </button>
@@ -102,8 +102,8 @@ export function AssetInspector({ assetId, layout = 'page', defaultTab, onClose }
 
             <div className="flex items-start justify-between">
               <div>
-                <h1 className="text-xl font-semibold text-slate-800">{asset.name}</h1>
-                <div className="flex items-center gap-3 mt-2">
+                <h1 className="text-sm font-semibold text-slate-800">{asset.name}</h1>
+                <div className="flex items-center gap-3 mt-1.5">
                   <span className={`px-2 py-0.5 rounded text-xs ${
                     asset.asset_type === 'workbook' ? 'bg-blue-50 text-blue-600' :
                     asset.asset_type === 'dashboard' ? 'bg-purple-50 text-purple-600' :
@@ -112,7 +112,7 @@ export function AssetInspector({ assetId, layout = 'page', defaultTab, onClose }
                   }`}>
                     {ASSET_TYPE_LABELS[asset.asset_type] || asset.asset_type}
                   </span>
-                  <span className="text-sm text-slate-400">{asset.project_name || '未分类'}</span>
+                  <span className="text-xs text-slate-400">{asset.project_name || '未分类'}</span>
                   {Array.isArray(asset.tags) && asset.tags.length > 0 && (
                     <div className="flex items-center gap-1">
                       {asset.tags.map(tag => (
@@ -158,30 +158,31 @@ export function AssetInspector({ assetId, layout = 'page', defaultTab, onClose }
         </div>
       )}
 
-      <div className="max-w-5xl mx-auto px-8 py-6">
+      <div className="max-w-6xl mx-auto px-6 py-8">
+        {/* Tabs */}
+        <div className="flex items-center gap-1 px-1 py-1 bg-slate-100 rounded-lg w-fit mb-6">
+          {tabs.map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => {
+                setActiveTab(tab.key as typeof activeTab);
+                if (tab.key === 'ai' && !aiContent && !aiLoading) {
+                  loadAIExplain();
+                }
+              }}
+              className={`px-4 py-1.5 rounded-md text-[12px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                activeTab === tab.key ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              {(tab as any).warn && <span className="mr-1 text-orange-400">!</span>}
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
         <div className="flex gap-6">
           {/* Main Content */}
           <div className="flex-1">
-            {/* Tabs */}
-            <div className="flex items-center gap-1 px-1 py-1 bg-slate-100 rounded-lg w-fit mb-6">
-              {tabs.map(tab => (
-                <button
-                  key={tab.key}
-                  onClick={() => {
-                    setActiveTab(tab.key as typeof activeTab);
-                    if (tab.key === 'ai' && !aiContent && !aiLoading) {
-                      loadAIExplain();
-                    }
-                  }}
-                  className={`px-4 py-1.5 rounded-md text-[12px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
-                    activeTab === tab.key ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  {(tab as any).warn && <span className="mr-1 text-orange-400">!</span>}
-                  {tab.label}
-                </button>
-              ))}
-            </div>
 
             {/* Tab: Info */}
             {activeTab === 'info' && (
@@ -233,7 +234,7 @@ export function AssetInspector({ assetId, layout = 'page', defaultTab, onClose }
           <aside className="w-64 shrink-0 space-y-4">
             {/* Link */}
             <div className="bg-white border border-slate-200 rounded-xl p-5">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">链接信息</h3>
+              <h3 className="text-xs font-semibold text-slate-700 mb-3">链接信息</h3>
               {asset.content_url && asset.server_url ? (
                 <a
                   href={`${asset.server_url}/#${asset.site ? `/site/${asset.site}` : ''}${asset.content_url}`}
@@ -254,17 +255,17 @@ export function AssetInspector({ assetId, layout = 'page', defaultTab, onClose }
             {/* Parent Workbook */}
             {hasParent && (parent || asset.parent_workbook_name) && (
               <div className="bg-white border border-slate-200 rounded-xl p-5">
-                <h3 className="text-sm font-semibold text-slate-700 mb-3">所属工作簿</h3>
+                <h3 className="text-xs font-semibold text-slate-700 mb-3">所属工作簿</h3>
                 {parent ? (
                   <Link to={`/assets/tableau/${parent.id}`}
                     className="flex items-center gap-2 p-2 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors">
                     <i className="ri-file-chart-line text-blue-500" />
-                    <span className="text-sm text-blue-700 font-medium truncate">{parent.name}</span>
+                    <span className="text-xs text-blue-700 font-medium truncate">{parent.name}</span>
                   </Link>
                 ) : (
                   <div className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg">
                     <i className="ri-file-chart-line text-slate-400" />
-                    <span className="text-sm text-slate-600 truncate">{asset.parent_workbook_name}</span>
+                    <span className="text-xs text-slate-600 truncate">{asset.parent_workbook_name}</span>
                   </div>
                 )}
               </div>
@@ -272,7 +273,7 @@ export function AssetInspector({ assetId, layout = 'page', defaultTab, onClose }
 
             {/* MCP 调试 */}
             <div className="bg-white border border-slate-200 rounded-xl p-5">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">MCP 调试</h3>
+              <h3 className="text-xs font-semibold text-slate-700 mb-3">MCP 调试</h3>
               {asset.asset_type === 'workbook' && (
                 <button
                   onClick={() => navigate(`/system/mcp-debugger?view=debugger&tool=get-workbook&arg_workbook_id=${asset.tableau_id}`)}
@@ -308,39 +309,6 @@ export function AssetInspector({ assetId, layout = 'page', defaultTab, onClose }
                 </>
               )}
             </div>
-
-            {/* Quick Stats */}
-            {(asset.view_count != null || asset.field_count != null || asset.health_score != null) && (
-              <div className="bg-white border border-slate-200 rounded-xl p-5">
-                <h3 className="text-sm font-semibold text-slate-700 mb-3">统计概览</h3>
-                <div className="space-y-3">
-                  {asset.view_count != null && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-slate-400">浏览次数</span>
-                      <span className="text-sm font-medium text-slate-700">{asset.view_count.toLocaleString()}</span>
-                    </div>
-                  )}
-                  {asset.field_count != null && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-slate-400">字段数</span>
-                      <span className="text-sm font-medium text-slate-700">{asset.field_count}</span>
-                    </div>
-                  )}
-                  {asset.health_score != null && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-slate-400">健康度</span>
-                      <span className={`text-sm font-medium ${
-                        asset.health_score >= 80 ? 'text-emerald-600' :
-                        asset.health_score >= 50 ? 'text-yellow-600' :
-                        'text-red-600'
-                      }`}>
-                        {asset.health_score}/100
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
           </aside>
         </div>
       </div>

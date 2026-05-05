@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { listConnections, getConnectionHealthOverview } from '@/api/tableau';
+import { listConnections, getConnectionHealthOverview, syncConnection, getSyncStatus } from '@/api/tableau';
 import type { HealthOverview, TableauConnection } from '@/api/tableau';
 import { ASSET_TYPE_LABELS } from '@/config';
 
@@ -33,6 +33,19 @@ function formatDateTime(iso: string): { date: string; time: string } | null {
     date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
     time: `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`,
   };
+}
+
+const SCAN_ERROR_HINTS: Record<string, string> = {
+  '后台任务服务不可用': '排查：Celery worker 未运行。请在 backend 目录执行 celery -A services.tasks.celery_app worker --loglevel=info',
+  'MCP': '排查：Tableau MCP 服务异常，请检查 MCP 连接状态或稍后重试',
+  '连接不存在': '排查：Tableau 连接已被删除，请刷新页面或重新配置连接',
+};
+
+function formatScanError(msg: string): string {
+  for (const [keyword, hint] of Object.entries(SCAN_ERROR_HINTS)) {
+    if (msg.includes(keyword)) return `${msg}（${hint}）`;
+  }
+  return msg;
 }
 
 function mergeOverviews(overviews: HealthOverview[]): HealthOverview | null {
@@ -90,10 +103,15 @@ export default function TableauHealthPage() {
   const [overview, setOverview] = useState<HealthOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [overviewLoading, setOverviewLoading] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState(0);
+  const [scanDone, setScanDone] = useState(false);
   const [error, setError] = useState('');
   const [levelFilters, setLevelFilters] = useState<string[]>([]);
   const [issueFilters, setIssueFilters] = useState<string[]>([]);
   const [typeFilters, setTypeFilters] = useState<string[]>([]);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const progressRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     listConnections()
@@ -119,6 +137,91 @@ export default function TableauHealthPage() {
     } finally {
       setOverviewLoading(false);
     }
+  }, []);
+
+  const handleScan = useCallback(async () => {
+    const conns = selectedConn === ALL_CONNECTIONS
+      ? connections
+      : connections.filter(c => String(c.id) === selectedConn);
+    if (conns.length === 0) return;
+
+    setScanning(true);
+    setScanProgress(0);
+    setScanDone(false);
+    setError('');
+
+    const startTime = Date.now();
+    const MIN_DURATION = 5000;
+
+    // 进度条动画：前 80% 在 MIN_DURATION 内匀速推进
+    progressRef.current = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const ratio = Math.min(elapsed / MIN_DURATION, 1);
+      setScanProgress(Math.min(Math.round(ratio * 80), 80));
+    }, 200);
+
+    try {
+      // 触发所有连接的同步
+      const syncResults = await Promise.allSettled(conns.map(c => syncConnection(c.id)));
+      const failures = syncResults.filter(r => r.status === 'rejected');
+      if (failures.length === syncResults.length) {
+        const reason = (failures[0] as PromiseRejectedResult).reason;
+        throw new Error(reason?.message || '后台任务服务不可用，请联系管理员');
+      }
+      const succeededConns = conns.filter((_, i) => syncResults[i].status === 'fulfilled');
+
+      // 轮询同步状态直到全部完成
+      if (succeededConns.length > 0) {
+        await new Promise<void>((resolve) => {
+          pollRef.current = setInterval(async () => {
+            try {
+              const statuses = await Promise.all(succeededConns.map(c => getSyncStatus(c.id)));
+              const allDone = statuses.every(s => s.status !== 'running');
+              if (allDone) {
+                if (pollRef.current) clearInterval(pollRef.current);
+                pollRef.current = null;
+                resolve();
+              }
+            } catch {
+              // 忽略轮询错误
+            }
+          }, 2000);
+        });
+      }
+
+      // 确保最低持续时间
+      const elapsed = Date.now() - startTime;
+      if (elapsed < MIN_DURATION) {
+        await new Promise(r => setTimeout(r, MIN_DURATION - elapsed));
+      }
+
+      if (progressRef.current) clearInterval(progressRef.current);
+      progressRef.current = null;
+      setScanProgress(100);
+
+      // 刷新健康数据
+      await loadOverview(selectedConn, connections);
+
+      setScanDone(true);
+      setTimeout(() => setScanDone(false), 2000);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '扫描失败';
+      setError(formatScanError(msg));
+    } finally {
+      if (progressRef.current) clearInterval(progressRef.current);
+      if (pollRef.current) clearInterval(pollRef.current);
+      progressRef.current = null;
+      pollRef.current = null;
+      setScanning(false);
+      setTimeout(() => setScanProgress(0), 2500);
+    }
+  }, [selectedConn, connections, loadOverview]);
+
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (progressRef.current) clearInterval(progressRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -179,7 +282,7 @@ export default function TableauHealthPage() {
               <i className="ri-heart-pulse-line text-slate-500" />
               <h1 className="text-lg font-semibold text-slate-800">Tableau 巡检</h1>
             </div>
-            <p className="text-[13px] text-slate-400 ml-7">元数据完整性检查 · 资产质量评分</p>
+            <p className="text-[13px] text-slate-400 ml-7">资产健康度评分 · 元数据治理问题定位</p>
           </div>
           <div className="flex items-center gap-2">
             <select
@@ -193,18 +296,44 @@ export default function TableauHealthPage() {
               ))}
             </select>
             <button
-              onClick={() => loadOverview(selectedConn, connections)}
-              disabled={overviewLoading || connections.length === 0}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-lg text-slate-600 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors"
+              onClick={handleScan}
+              disabled={scanning || connections.length === 0}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-900 text-white text-[12px] font-medium rounded-lg hover:bg-slate-700 transition-colors disabled:opacity-50"
             >
-              <i className={`ri-refresh-line ${overviewLoading ? 'animate-spin' : ''}`} />
-              刷新巡检
+              {scanning ? (
+                <><i className="ri-refresh-line animate-spin" /> 扫描中...</>
+              ) : scanDone ? (
+                <><i className="ri-check-line" /> 扫描完成</>
+              ) : (
+                <><i className="ri-play-line" /> 发起扫描</>
+              )}
             </button>
           </div>
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-8 py-7">
+      {/* 扫描进度条 */}
+      {scanProgress > 0 && (
+        <div className="bg-white border-b border-slate-200 px-8 py-3">
+          <div className="max-w-6xl mx-auto">
+            <div className="flex items-center gap-3">
+              <span className="text-[12px] text-slate-500 shrink-0">
+                {scanDone ? '扫描完成' : '正在同步 Tableau 数据...'}
+              </span>
+              <div className="flex-1 bg-slate-100 rounded-full h-2">
+                <div
+                  className={`h-2 rounded-full transition-all duration-300 ${scanDone ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                  style={{ width: `${scanProgress}%` }}
+                />
+              </div>
+              <span className="text-[12px] font-medium text-slate-600 w-10 text-right">{scanProgress}%</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="px-8 py-7">
+        <div className="max-w-6xl mx-auto">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-lg px-4 py-2 mb-4">
             {error}
@@ -468,6 +597,7 @@ export default function TableauHealthPage() {
             </div>
           </>
         )}
+        </div>
       </div>
     </div>
   );

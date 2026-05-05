@@ -40,7 +40,7 @@ export function AiExplainTab({
       <div className="bg-white border border-slate-200 rounded-xl p-5">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h3 className="text-sm font-semibold text-slate-700">AI 深度解读</h3>
+            <h3 className="text-xs font-semibold text-slate-700">AI 深度解读</h3>
             <p className="text-xs text-slate-400 mt-0.5">基于元数据、数据源字段和层级关系的深度分析</p>
           </div>
           <button
@@ -57,29 +57,29 @@ export function AiExplainTab({
           <div className="flex items-center justify-center py-12">
             <div className="flex flex-col items-center gap-3 text-slate-400">
               <i className="ri-loader-2-line animate-spin text-2xl" />
-              <span className="text-sm">正在调用 LLM 深度分析...</span>
+              <span className="text-xs">正在调用 LLM 深度分析...</span>
               <span className="text-xs text-slate-300">将分析元数据、数据源字段和关联关系</span>
             </div>
           </div>
         ) : !llmConfigured ? (
           <div className="text-center py-8">
-            <div className="text-orange-500 text-sm mb-2">LLM 未配置</div>
+            <div className="text-orange-500 text-xs mb-2">LLM 未配置</div>
             <p className="text-slate-500 text-xs mb-3">请联系管理员配置 LLM 后再试</p>
-            <Link to="/system/llm-configs" className="text-sm text-blue-500 hover:underline">
+            <Link to="/system/llm-configs" className="text-xs text-blue-500 hover:underline">
               去配置 LLM
             </Link>
           </div>
         ) : aiError ? (
           <div className="text-center py-8">
-            <div className="text-red-500 text-sm mb-2">{aiError}</div>
-            <button onClick={handleLoad} className="text-sm text-blue-500 hover:underline">
+            <div className="text-red-500 text-xs mb-2">{aiError}</div>
+            <button onClick={handleLoad} className="text-xs text-blue-500 hover:underline">
               重试
             </button>
           </div>
         ) : aiContent ? (
           <div>
             <div
-              className="prose prose-sm prose-slate max-w-none bg-slate-50 rounded-lg p-5 text-sm text-slate-700 leading-relaxed"
+              className="prose prose-sm prose-slate max-w-none bg-slate-50 rounded-lg p-5 text-xs text-slate-700 leading-relaxed"
               dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(renderMarkdown(aiContent)) }}
             />
             {aiCached && (
@@ -92,10 +92,10 @@ export function AiExplainTab({
         ) : (
           <div className="text-center py-12">
             <i className="ri-sparkling-line text-3xl text-slate-300 mb-3 block" />
-            <div className="text-slate-400 text-sm mb-4">点击生成 AI 深度解读</div>
+            <div className="text-slate-400 text-xs mb-4">点击生成 AI 深度解读</div>
             <button
               onClick={handleLoad}
-              className="px-5 py-2.5 text-sm bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors"
+              className="px-5 py-2.5 text-xs bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors"
             >
               <i className="ri-sparkling-line mr-1" />
               生成深度解读

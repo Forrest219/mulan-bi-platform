@@ -173,25 +173,31 @@ def _get_or_create_session_state(site_key: str, _max_sites: int = 50) -> _MCPSes
         _max_sites: 最大站点数，达到上限时驱逐最久未访问的站点（默认 50）
 
     线程安全：全部操作在 _mcp_session_states_lock 内进行。
+
+    严格上限强制（Gap 4）：无论 site_key 是否已存在，创建新 entry 前必须检查。
+    若超出上限则先驱逐最旧 session 再创建。
     """
     with _mcp_session_states_lock:
         now = time.monotonic()
 
-        # LRU 驱逐：当字典 size >= _max_sites 且 site_key 不在字典中时，驱逐最久未访问的站点
-        if _max_sites > 0 and site_key not in _mcp_session_states and len(_mcp_session_states) >= _max_sites:
-            # 找到 last_used 最小的（最久未访问）
-            lru_key = min(_mcp_session_states, key=lambda k: _mcp_session_states[k].last_used)
-            lru_state = _mcp_session_states.pop(lru_key)
-            logger.info(
-                "_get_or_create_session_state: LRU 驱逐 site_key=%s (last_used=%.1fs ago)",
-                lru_key,
-                now - lru_state.last_used,
+        # 严格上限检查：当 site_key 不在字典中且池已满时，立即驱逐最旧 session
+        if site_key not in _mcp_session_states and len(_mcp_session_states) >= _max_sites:
+            oldest_key = min(
+                _mcp_session_states.keys(),
+                key=lambda k: _mcp_session_states[k].last_used
             )
-            # 释放 MCP session（非阻塞，驱逐过程中不持有 lru_state.lock）
+            oldest_state = _mcp_session_states.pop(oldest_key)
+            logger.info(
+                "MCP session pool: evicted %s (last_used=%.1fs ago, pool_size=%d)",
+                oldest_key,
+                now - oldest_state.last_used,
+                len(_mcp_session_states) + 1,
+            )
+            # 释放 MCP session（非阻塞，驱逐过程中不持有 oldest_state.lock）
             try:
-                _invalidate_session(session_state=lru_state)
+                _invalidate_session(session_state=oldest_state)
             except Exception as e:
-                logger.warning("LRU 驱逐时释放 session 失败（忽略）: %s", e)
+                logger.warning("MCP session pool evict warning: %s", e)
 
         if site_key not in _mcp_session_states:
             _mcp_session_states[site_key] = _MCPSessionState()

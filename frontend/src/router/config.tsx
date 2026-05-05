@@ -18,7 +18,6 @@ import RegisterPage from '../pages/register/page';
 import ForbiddenPage from '../pages/ForbiddenPage';
 import ProtectedRoute from '../components/auth/ProtectedRoute';
 import AppShellLayout from '../components/layout/AppShellLayout';
-import HomeLayout from '../components/layout/HomeLayout';
 import { ConversationProvider } from '../store/conversationStore';
 
 // ──────────────────────────────────────────────────────────────
@@ -31,11 +30,11 @@ const McpDebuggerPage     = lazy(() => import('../pages/system/mcp-debugger/page
 const DDLValidatorPage    = lazy(() => import('../pages/ddl-validator/page'));
 const RuleConfigPage      = lazy(() => import('../pages/rule-config/page'));
 const DataHealthPage      = lazy(() => import('../pages/data-governance/health/page'));
-const HealthCenterPage    = lazy(() => import('../pages/data-governance/health-center/page'));
+const DwAuditPage         = lazy(() => import('../pages/data-governance/dw-audit/page'));
 const TableauAssetBrowserPage = lazy(() => import('../pages/tableau/assets/page'));
 const TableauAssetDetailPage  = lazy(() => import('../pages/tableau/asset-detail/page'));
-const ConnectionCenterPage = lazy(() => import('../pages/assets/connection-center/page'));
 const SyncLogsPage        = lazy(() => import('../pages/tableau/sync-logs/page'));
+const SyncLogsAllPage     = lazy(() => import('../pages/tableau/sync-logs-all/page'));
 const DatasourcesPage     = lazy(() => import('../pages/assets/datasources/page'));
 const TableauConnectionsPage = lazy(() => import('../pages/tableau/connections/page'));
 const SemanticDatasourceListPage  = lazy(() => import('../pages/semantic-maintenance/datasource-list/page'));
@@ -44,6 +43,7 @@ const SemanticFieldListPage = lazy(() => import('../pages/semantic-maintenance/f
 const SemanticPublishLogsPage = lazy(() => import('../pages/semantic-maintenance/publish-logs/page'));
 const MetricsPage = lazy(() => import('../pages/data-governance/metrics/page'));
 const MetricDetailPage = lazy(() => import('../pages/data-governance/metrics/detail'));
+const MaintenanceWindowsPage = lazy(() => import('../pages/data-governance/metrics/maintenance-windows/page'));
 const KnowledgePage        = lazy(() => import('../pages/knowledge/page'));
 const UsersAdminPage       = lazy(() => import('../pages/admin/user-management/page'));
 const GroupsAdminPage      = lazy(() => import('../pages/admin/groups/page'));
@@ -57,8 +57,27 @@ const ForgotPasswordPage    = lazy(() => import('../pages/forgot-password/page')
 const EmptyStatePage        = lazy(() => import('../pages/empty/EmptyStatePage'));
 const AgentMonitorPage      = lazy(() => import('../pages/admin/agent-monitor/page'));
 const QueryPage             = lazy(() => import('../pages/query/page'));
-const OpsWorkbenchPage      = lazy(() => import('../pages/ops/workbench/page'));
 const AccountSecurityPage   = lazy(() => import('../pages/account/security/page'));
+
+// DQC 模块
+const DqcOverviewPage = lazy(() => import('../pages/data-governance/dqc/overview/page'));
+const DqcMonitorPage = lazy(() => import('../pages/data-governance/dqc/monitor/page'));
+const DqcSignalsPage = lazy(() => import('../pages/data-governance/dqc/signals/page'));
+const DqcAnalysesPage = lazy(() => import('../pages/data-governance/dqc/analyses/page'));
+const DqcAssetDetailPage = lazy(() => import('../pages/data-governance/dqc/detail/page'));
+const DqcTemplatesPage = lazy(() => import('../pages/data-governance/dqc/templates/page'));
+
+// Agent 模块
+const DataWorkbenchPage = lazy(() => import('../pages/agents/data-workbench/page'));
+const DataWorkbenchHistoryPage = lazy(() => import('../pages/agents/data-workbench/history/page'));
+const SqlAgentPage = lazy(() => import('../pages/agents/sql-agent/page'));
+const MetricsAgentPage = lazy(() => import('../pages/agents/metrics-agent/page'));
+
+// Tableau 巡检
+const TableauHealthPage = lazy(() => import('../pages/tableau/health/page'));
+
+// 资产模块
+const StarRocksInspectionPage = lazy(() => import('../pages/assets/starrocks-inspection/page'));
 
 // ──────────────────────────────────────────────────────────────
 // 路由定义
@@ -66,25 +85,14 @@ const AccountSecurityPage   = lazy(() => import('../pages/account/security/page'
 const routes: RouteObject[] = [
 
   // =====================
-  // 公开路由（HomeLayout + ConversationProvider）
+  // 公开路由（认证页面，无需登录）
   // =====================
-  {
-    element: (
-      <ConversationProvider>
-        <HomeLayout />
-      </ConversationProvider>
-    ),
-    children: [
-      { path: '/', element: <Home /> },
-      { path: '/chat/:id', element: <ChatPage /> },
-    ],
-  },
   { path: '/login',          element: <LoginPage /> },
   { path: '/register',       element: <RegisterPage /> },
   { path: '/forgot-password', element: <ForgotPasswordPage /> },
 
   // =====================
-  // 问数模块（独立布局，与运维路由完全隔离）
+  // 问数模块（独立布局，Spec 38、Spec 14）
   // =====================
   {
     path: '/query',
@@ -94,25 +102,39 @@ const routes: RouteObject[] = [
       </ProtectedRoute>
     ),
   },
-
-  // =====================
-  // 运维工作台（独立布局，Split-Pane，Spec 20）
-  // =====================
   {
-    path: '/ops/workbench',
+    path: '/query/nl',
     element: (
-      <ProtectedRoute>
-        <OpsWorkbenchPage />
+      <ProtectedRoute requiredPermission="database_monitor">
+        <EmptyStatePage />
       </ProtectedRoute>
     ),
   },
 
   // =====================
-  // 统一侧边栏布局（5 域，Spec 18 §4.2）
+  // 统一侧边栏布局（7 域，Spec 18 v0.3 §4.2）
   // =====================
   {
     element: <AppShellLayout />,
     children: [
+
+      // ── 首页 + 对话（无 ProtectedRoute，页面自身处理未登录状态）──
+      {
+        path: '/',
+        element: (
+          <ConversationProvider>
+            <Home />
+          </ConversationProvider>
+        ),
+      },
+      {
+        path: '/chat/:id',
+        element: (
+          <ConversationProvider>
+            <ChatPage />
+          </ConversationProvider>
+        ),
+      },
 
       // ── 域 1：数据开发 /dev ──
       {
@@ -151,20 +173,28 @@ const routes: RouteObject[] = [
         path: '/governance',
         children: [
           {
-            path: 'health-center',
+            path: 'dw-audit',
             element: (
               <ProtectedRoute requiredPermission="database_monitor">
-                <HealthCenterPage />
+                <DwAuditPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'tableau-audit',
+            element: (
+              <ProtectedRoute requiredPermission="tableau">
+                <TableauHealthPage />
               </ProtectedRoute>
             ),
           },
           {
             path: 'health',
-            element: <Navigate to="/governance/health-center?tab=warehouse" replace />,
+            element: <Navigate to="/governance/dw-audit?tab=warehouse" replace />,
           },
           {
             path: 'quality',
-            element: <Navigate to="/governance/health-center?tab=quality" replace />,
+            element: <Navigate to="/governance/dqc" replace />,
           },
           {
             path: 'semantic/datasources',
@@ -214,10 +244,67 @@ const routes: RouteObject[] = [
               </ProtectedRoute>
             ),
           },
+          {
+            path: 'metrics/maintenance-windows',
+            element: (
+              <ProtectedRoute>
+                <MaintenanceWindowsPage />
+              </ProtectedRoute>
+            ),
+          },
+          // DQC 子路由（Spec 31）
+          {
+            path: 'dqc',
+            element: (
+              <ProtectedRoute>
+                <DqcOverviewPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'dqc/monitor',
+            element: (
+              <ProtectedRoute>
+                <DqcMonitorPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'dqc/signals',
+            element: (
+              <ProtectedRoute>
+                <DqcSignalsPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'dqc/analyses',
+            element: (
+              <ProtectedRoute>
+                <DqcAnalysesPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'dqc/templates',
+            element: (
+              <ProtectedRoute>
+                <DqcTemplatesPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'dqc/assets/:assetId',
+            element: (
+              <ProtectedRoute>
+                <DqcAssetDetailPage />
+              </ProtectedRoute>
+            ),
+          },
         ],
       },
 
-      // ── 域 3：数据资产 /assets ──
+      // ── 域：数据资产 /assets ──
       {
         path: '/assets',
         children: [
@@ -239,25 +326,13 @@ const routes: RouteObject[] = [
           },
           {
             path: 'tableau-health',
-            element: <Navigate to="/governance/health-center?tab=tableau" replace />,
+            element: <Navigate to="/governance/tableau-audit" replace />,
           },
           {
-            path: 'connections',
+            path: 'sync-logs',
             element: (
-              <ProtectedRoute>
-                <ConnectionCenterPage />
-              </ProtectedRoute>
-            ),
-          },
-          {
-            path: 'connection-center',
-            element: <Navigate to="/assets/connections" replace />,
-          },
-          {
-            path: 'datasources',
-            element: (
-              <ProtectedRoute requiredPermission="database_monitor">
-                <DatasourcesPage />
+              <ProtectedRoute requiredPermission="tableau">
+                <SyncLogsAllPage />
               </ProtectedRoute>
             ),
           },
@@ -274,6 +349,14 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute requiredPermission="tableau">
                 <SyncLogsPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'starrocks-inspection',
+            element: (
+              <ProtectedRoute requiredPermission="database_monitor">
+                <StarRocksInspectionPage />
               </ProtectedRoute>
             ),
           },
@@ -313,6 +396,53 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute>
                 <AccountSecurityPage />
+              </ProtectedRoute>
+            ),
+          },
+        ],
+      },
+
+      // ── 域：智能体 /agents（Spec 28、29、30） ──
+      {
+        path: '/agents',
+        children: [
+          {
+            path: 'data',
+            element: (
+              <ProtectedRoute>
+                <DataWorkbenchPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'data/history',
+            element: (
+              <ProtectedRoute>
+                <DataWorkbenchHistoryPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'sql',
+            element: (
+              <ProtectedRoute>
+                <SqlAgentPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'metrics',
+            element: (
+              <ProtectedRoute>
+                <MetricsAgentPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'agent-monitor',
+            element: (
+              <ProtectedRoute adminOnly>
+                <AgentMonitorPage />
               </ProtectedRoute>
             ),
           },
@@ -399,6 +529,14 @@ const routes: RouteObject[] = [
             ),
           },
           {
+            path: 'datasources',
+            element: (
+              <ProtectedRoute requiredPermission="database_monitor">
+                <DatasourcesPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
             path: 'mcp-debugger',
             element: (
               <ProtectedRoute adminOnly>
@@ -442,14 +580,14 @@ const routes: RouteObject[] = [
   // =====================
   { path: '/ddl-validator',                    element: <Navigate to="/dev/ddl-validator" replace /> },
   { path: '/rule-config',                      element: <Navigate to="/dev/rule-config" replace /> },
-  { path: '/data-governance/health',           element: <Navigate to="/governance/health-center?tab=warehouse" replace /> },
-  { path: '/data-governance/quality',           element: <Navigate to="/governance/health-center?tab=quality" replace /> },
+  { path: '/data-governance/health',           element: <Navigate to="/governance/dw-audit?tab=warehouse" replace /> },
+  { path: '/data-governance/quality',           element: <Navigate to="/governance/dqc" replace /> },
   { path: '/semantic-maintenance/datasources', element: <Navigate to="/governance/semantic/datasources" replace /> },
   { path: '/semantic-maintenance/datasources/:id', element: <Navigate to="/governance/semantic/datasources/:id" replace /> },
   { path: '/semantic-maintenance/fields',       element: <Navigate to="/governance/semantic/fields" replace /> },
   { path: '/tableau/assets',                   element: <Navigate to="/assets/tableau" replace /> },
   { path: '/tableau/assets/:id',               element: <Navigate to="/assets/tableau/:id" replace /> },
-  { path: '/tableau/health',                   element: <Navigate to="/governance/health-center?tab=tableau" replace /> },
+  { path: '/tableau/health',                   element: <Navigate to="/governance/dw-audit?tab=tableau" replace /> },
   { path: '/admin/users',                      element: <Navigate to="/system/users" replace /> },
   { path: '/admin/groups',                     element: <Navigate to="/system/groups" replace /> },
   { path: '/admin/permissions',                element: <Navigate to="/system/permissions" replace /> },
@@ -459,7 +597,8 @@ const routes: RouteObject[] = [
   { path: '/admin/tasks',                      element: <Navigate to="/system/tasks" replace /> },
   { path: '/admin/activity',                    element: <Navigate to="/system/activity" replace /> },
   { path: '/admin/platform-settings',           element: <Navigate to="/system/platform-settings" replace /> },
-  { path: '/admin/datasources',                element: <Navigate to="/assets/datasources" replace /> },
+  { path: '/admin/datasources',                element: <Navigate to="/system/datasources" replace /> },
+  { path: '/assets/datasources',               element: <Navigate to="/system/datasources" replace /> },
   { path: '/admin/tableau/connections',         element: <Navigate to="/assets/tableau-connections" replace /> },
   { path: '/knowledge/:sub',                   element: <Navigate to="/analytics/knowledge" replace /> },
   { path: '/knowledge',                        element: <Navigate to="/analytics/knowledge" replace /> },
@@ -467,10 +606,17 @@ const routes: RouteObject[] = [
   // =====================
   // 遗留兼容（原有杂项 redirect）
   // =====================
-  { path: '/database-monitor', element: <Navigate to="/governance/health-center?tab=warehouse" replace /> },
+  { path: '/database-monitor', element: <Navigate to="/governance/dw-audit?tab=warehouse" replace /> },
+  { path: '/governance/health-center', element: <Navigate to="/governance/dw-audit" replace /> },
 
-  // /ops → 运维工作台首页（别名）
-  { path: '/ops', element: <Navigate to="/ops/workbench" replace /> },
+  // /ops/workbench → 首页（Spec 20: 原型路由已废弃，重定向到 /）
+  { path: '/ops/workbench', element: <Navigate to="/" replace /> },
+
+  // /ops → 首页（Spec 20: 工作台已合并到 /）
+  { path: '/ops', element: <Navigate to="/" replace /> },
+
+  // Gap-08: /system → / 重定向（无需 admin 权限，回归普通用户视图）
+  { path: '/system', element: <Navigate to="/" replace /> },
 
   // =====================
   // 403 / 404

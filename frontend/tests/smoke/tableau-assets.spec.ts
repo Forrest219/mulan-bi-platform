@@ -64,7 +64,7 @@ test.describe('Tableau 资产浏览', () => {
       })
     );
 
-    await page.goto('/assets/tableau?connection_id=1');
+    await page.goto('/assets/tableau');
 
     // 空状态提示文案
     await expect(page.locator('text=未找到资产')).toBeVisible({ timeout: 5000 });
@@ -112,7 +112,7 @@ test.describe('Tableau 资产浏览', () => {
       });
     });
 
-    await page.goto('/assets/tableau?connection_id=99');
+    await page.goto('/assets/tableau');
     await expect(page.locator('[data-testid="empty-sync-btn"]')).toBeVisible({ timeout: 5000 });
     await page.locator('[data-testid="empty-sync-btn"]').click();
 
@@ -157,7 +157,7 @@ test.describe('Tableau 资产浏览', () => {
       })
     );
 
-    await page.goto('/assets/tableau?connection_id=1');
+    await page.goto('/assets/tableau');
     await page.locator('[data-testid="empty-sync-btn"]').click();
 
     // 必须显示结构化错误中的中文 message，不能显示 [object Object]
@@ -198,7 +198,7 @@ test.describe('Tableau 资产浏览', () => {
       })
     );
 
-    await page.goto('/assets/tableau?connection_id=1');
+    await page.goto('/assets/tableau');
     await page.locator('[data-testid="empty-sync-btn"]').click();
 
     await expect(page.locator('text=连接不存在')).toBeVisible({ timeout: 5000 });
@@ -235,7 +235,7 @@ test.describe('Tableau 资产浏览', () => {
       })
     );
 
-    await page.goto('/assets/tableau?connection_id=1');
+    await page.goto('/assets/tableau');
 
     // 资产卡片中显示 mock 数据
     await expect(page.locator('text=销售分析看板').first()).toBeVisible({ timeout: 5000 });

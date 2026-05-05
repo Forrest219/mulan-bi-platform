@@ -31,6 +31,11 @@ def get_trace_id() -> Optional[str]:
     return _trace_id_var.get()
 
 
+def set_trace_id(trace_id: str) -> None:
+    """设置当前 context 的 trace_id"""
+    _trace_id_var.set(trace_id)
+
+
 def set_principal(principal: dict) -> None:
     """设置当前请求的 principal 到 context（供下游调用链路获取）"""
     _principal_var.set(principal)

@@ -34,6 +34,7 @@ class RuleConfig(Base):
             "level": self.level,
             "category": self.category,
             "db_type": self.db_type,
+            "scene_type": self.scene_type,
             "suggestion": self.suggestion,
             "status": "enabled" if self.enabled else "disabled",
             "built_in": not self.is_custom,
@@ -165,6 +166,29 @@ class RuleConfigDatabase:
                 return False
             else:
                 return None
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def update_rule(self, rule_id: str, **kwargs) -> Optional[RuleConfig]:
+        """
+        更新规则字段，自动标记 is_modified_by_user=True 防止种子覆盖。
+        """
+        ALLOWED_FIELDS = {"name", "description", "level", "category", "suggestion", "scene_type", "config_json"}
+        db = self._get_db()
+        try:
+            rule = db.query(RuleConfig).filter(RuleConfig.rule_id == rule_id).first()
+            if not rule:
+                return None
+            for key, value in kwargs.items():
+                if key in ALLOWED_FIELDS and value is not None:
+                    setattr(rule, key, value)
+            rule.is_modified_by_user = True
+            db.commit()
+            db.refresh(rule)
+            return rule
         except Exception:
             db.rollback()
             raise

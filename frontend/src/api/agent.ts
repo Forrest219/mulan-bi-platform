@@ -41,7 +41,7 @@ export type AgentStreamEvent =
   | { type: 'tool_call'; tool: string; params: Record<string, unknown> }
   | { type: 'tool_result'; tool: string; summary: string }
   | { type: 'token'; content: string }
-  | { type: 'done'; answer: string; trace_id: string; run_id: string; tools_used: string[]; response_type: string; response_data: unknown; steps_count: number; execution_time_ms: number }
+  | { type: 'done'; answer: string; trace_id: string; run_id: string; tools_used: string[]; response_type: string; response_data: unknown; steps_count: number; execution_time_ms: number; sources_count: number; top_sources: string[] }
   | { type: 'error'; error_code: string; message: string };
 
 // ─── SSE Stream ──────────────────────────────────────────────────────────────
@@ -140,6 +140,8 @@ export function streamAgent(
                   response_data: raw['response_data'] as unknown,
                   steps_count: (raw['steps_count'] as number) ?? 0,
                   execution_time_ms: (raw['execution_time_ms'] as number) ?? 0,
+                  sources_count: (raw['sources_count'] as number) ?? 0,
+                  top_sources: (raw['top_sources'] as string[]) ?? [],
                 });
               } else if (raw['type'] === 'error') {
                 controller.enqueue({

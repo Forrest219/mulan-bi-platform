@@ -4,7 +4,7 @@ const ADMIN_USERNAME = 'admin';
 const ADMIN_PASSWORD = 'admin123';
 
 /**
- * Smoke Test: 添加 MiniMax LLM 配置
+ * Smoke Test: 添加 LLM 配置
  * 路径：/system/llm-configs
  */
 test.describe('LLM 配置管理 - 添加配置', () => {
@@ -19,36 +19,26 @@ test.describe('LLM 配置管理 - 添加配置', () => {
 
   test('添加 MiniMax API 配置', async ({ page }) => {
     await page.goto('/system/llm-configs');
-
-    // 点击新增配置
     await page.getByRole('button', { name: /新增配置/i }).click();
+    await expect(page.getByRole('heading', { name: '新增 LLM 配置' })).toBeVisible({ timeout: 5000 });
 
-    // 等待表单出现
-    await page.waitForTimeout(500);
+    // 填写显示名称（精确 placeholder）
+    const nameInput = page.locator('input[placeholder="GPT-4o Mini (General)"]');
+    await expect(nameInput).toBeVisible();
+    await nameInput.fill(`MiniMax-Test-${Date.now()}`);
 
-    // 填写显示名称（查找可见的 text input）
-    const nameInput = page.locator('input[placeholder*="GPT"]').first();
-    await nameInput.fill('MiniMax General');
+    // 填写 API Key（精确 placeholder="sk-..."）
+    const apiKeyInput = page.locator('input[placeholder="sk-..."]');
+    await expect(apiKeyInput).toBeVisible();
+    await apiKeyInput.fill('sk-test-add-minimax-key-123456789');
 
-    // 填写 API Key（如果有可见的 password/input 字段）
-    const apiKeyInput = page.locator('input[placeholder*="sk-"]').first();
-    if (await apiKeyInput.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await apiKeyInput.fill('test-minimax-api-key-for-smoke');
-    }
+    // 等待 API Key 输入完成后再点击保存
+    await page.waitForTimeout(200);
 
     // 保存
-    const saveBtn = page.getByRole('button', { name: /创建配置/i });
-    await expect(saveBtn).toBeVisible({ timeout: 3000 });
-    await saveBtn.click();
+    await page.getByRole('button', { name: /创建配置/i }).click();
 
-    // 等待返回列表页
-    await expect(page.locator('h1')).toContainText('LLM 多配置管理', { timeout: 5000 });
-
-    // 验证新增的配置出现在列表中（可能需要等待）
-    await page.waitForTimeout(1000);
-    const hasNewConfig = await page.locator('table').locator('text=MiniMax General').isVisible({ timeout: 3000 }).catch(() => false);
-    if (hasNewConfig) {
-      await expect(page.locator('table')).toContainText('MiniMax General');
-    }
+    // 等待返回列表页（标题变为"LLM 多配置管理"）
+    await expect(page.locator('h1')).toContainText('LLM 多配置管理', { timeout: 8000 });
   });
 });

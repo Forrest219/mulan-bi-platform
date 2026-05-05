@@ -18,6 +18,7 @@ from .models import (
     DqcMonitoredAsset,
     DqcQualityRule,
     DqcRuleResult,
+    DqcRuleTemplate,
 )
 
 
@@ -614,3 +615,155 @@ class DqcDatabase:
                 }
             )
         return out
+
+    # ==================== RuleTemplate ====================
+
+    def create_template(self, db: Session, **kwargs) -> DqcRuleTemplate:
+        tmpl = DqcRuleTemplate(**kwargs)
+        db.add(tmpl)
+        db.flush()
+        db.refresh(tmpl)
+        return tmpl
+
+    def get_template(self, db: Session, template_id: int) -> Optional[DqcRuleTemplate]:
+        return db.query(DqcRuleTemplate).filter(DqcRuleTemplate.id == template_id).first()
+
+    def list_templates(
+        self,
+        db: Session,
+        enabled: Optional[bool] = None,
+        dimension: Optional[str] = None,
+    ) -> List[DqcRuleTemplate]:
+        q = db.query(DqcRuleTemplate)
+        if enabled is not None:
+            q = q.filter(DqcRuleTemplate.enabled == enabled)
+        if dimension:
+            q = q.filter(DqcRuleTemplate.dimension == dimension)
+        return q.order_by(DqcRuleTemplate.id.asc()).all()
+
+    def update_template(self, db: Session, template_id: int, **fields) -> bool:
+        tmpl = self.get_template(db, template_id)
+        if not tmpl:
+            return False
+        protected = {"id", "is_builtin", "created_at"}
+        for key, value in fields.items():
+            if key in protected or value is None:
+                continue
+            if hasattr(tmpl, key):
+                setattr(tmpl, key, value)
+        if tmpl.is_builtin:
+            tmpl.is_modified_by_user = True
+        db.flush()
+        return True
+
+    def delete_template(self, db: Session, template_id: int) -> bool:
+        tmpl = self.get_template(db, template_id)
+        if not tmpl:
+            return False
+        db.delete(tmpl)
+        db.flush()
+        return True
+
+    def count_derived_rules(self, db: Session, template_id: int, only_unmodified: bool = False) -> int:
+        q = db.query(func.count(DqcQualityRule.id)).filter(DqcQualityRule.template_id == template_id)
+        if only_unmodified:
+            q = q.filter(DqcQualityRule.is_modified_by_user == False)
+        return q.scalar() or 0
+
+    def propagate_template(self, db: Session, template_id: int) -> int:
+        """将模板的 default_config 传播到未被用户修改的派生规则，返回更新行数。"""
+        tmpl = self.get_template(db, template_id)
+        if not tmpl:
+            return 0
+        count = (
+            db.query(DqcQualityRule)
+            .filter(
+                DqcQualityRule.template_id == template_id,
+                DqcQualityRule.is_modified_by_user == False,
+            )
+            .update({"rule_config": tmpl.default_config}, synchronize_session=False)
+        )
+        db.flush()
+        return count
+
+    def seed_default_templates(self, db: Session) -> List[DqcRuleTemplate]:
+        """插入内置模板。已存在且被用户修改过的不覆盖。"""
+        from .constants import Dimension, RuleType
+
+        builtins = [
+            {
+                "name": "空值率监控",
+                "dimension": Dimension.COMPLETENESS.value,
+                "rule_type": RuleType.NULL_RATE.value,
+                "default_config": {"max_rate": 0.05},
+                "match_condition": {"scope": "column", "column_filter": {"has_nulls": True}},
+                "severity": "HIGH",
+            },
+            {
+                "name": "唯一性监控",
+                "dimension": Dimension.UNIQUENESS.value,
+                "rule_type": RuleType.UNIQUENESS.value,
+                "default_config": {"max_duplicate_rate": 0},
+                "match_condition": {"scope": "column", "column_filter": {"is_candidate_id": True}},
+                "severity": "HIGH",
+            },
+            {
+                "name": "新鲜度监控",
+                "dimension": Dimension.TIMELINESS.value,
+                "rule_type": RuleType.FRESHNESS.value,
+                "default_config": {"max_age_hours": 24},
+                "match_condition": {"scope": "column", "column_filter": {"data_type_contains": ["timestamp", "date"]}},
+                "severity": "MEDIUM",
+            },
+            {
+                "name": "值域监控",
+                "dimension": Dimension.ACCURACY.value,
+                "rule_type": RuleType.RANGE_CHECK.value,
+                "default_config": {"check_mode": "min_max_all"},
+                "match_condition": {"scope": "column", "column_filter": {"has_numeric_range": True}},
+                "severity": "LOW",
+            },
+            {
+                "name": "表行数异常监控",
+                "dimension": Dimension.COMPLETENESS.value,
+                "rule_type": RuleType.VOLUME_ANOMALY.value,
+                "default_config": {"direction": "both", "threshold_pct": 0.05, "min_row_count": 10},
+                "match_condition": {"scope": "table"},
+                "severity": "MEDIUM",
+            },
+        ]
+
+        created = []
+        for spec in builtins:
+            existing = (
+                db.query(DqcRuleTemplate)
+                .filter(
+                    DqcRuleTemplate.name == spec["name"],
+                    DqcRuleTemplate.is_builtin == True,
+                )
+                .first()
+            )
+            if existing:
+                if not existing.is_modified_by_user:
+                    existing.default_config = spec["default_config"]
+                    existing.match_condition = spec["match_condition"]
+                    existing.severity = spec["severity"]
+                created.append(existing)
+                continue
+
+            tmpl = DqcRuleTemplate(
+                name=spec["name"],
+                dimension=spec["dimension"],
+                rule_type=spec["rule_type"],
+                default_config=spec["default_config"],
+                match_condition=spec["match_condition"],
+                severity=spec["severity"],
+                enabled=True,
+                is_builtin=True,
+            )
+            db.add(tmpl)
+            db.flush()
+            created.append(tmpl)
+
+        db.flush()
+        return created

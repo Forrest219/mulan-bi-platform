@@ -156,7 +156,14 @@ async def test_llm_connection(req: LLMTestRequest, request: Request):
             if not cfg:
                 return {"success": False, "message": "未找到配置"}
 
-            api_key = _decrypt(cfg.api_key_encrypted)
+            try:
+                api_key = _decrypt(cfg.api_key_encrypted)
+            except Exception:
+                return {
+                    "success": False,
+                    "message": "API Key 无法解密，可能已被更换加密密钥。请重新保存此配置。",
+                    "error_code": "LLM_002",
+                }
             result = await llm_service.test_connection_adhoc(
                 base_url=cfg.base_url,
                 api_key=api_key,

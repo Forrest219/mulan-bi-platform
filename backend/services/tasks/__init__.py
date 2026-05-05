@@ -28,7 +28,7 @@ celery_app.conf.update(
     beat_schedule={
         "tableau-auto-sync": {
             "task": "services.tasks.tableau_tasks.scheduled_sync_all",
-            "schedule": 60.0,
+            "schedule": crontab(minute=0, hour='0,12'),
         },
         "quality-cleanup-old-results": {
             "task": "services.tasks.quality_tasks.cleanup_old_quality_results",

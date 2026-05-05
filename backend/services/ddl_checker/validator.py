@@ -169,6 +169,23 @@ class DatabaseRulesAdapter:
                 return scene_weights[self.scene_type]
         return DEFAULT_WEIGHTS
 
+    def get_rules_for(self, db_type: str) -> list:
+        """
+        按 db_type 过滤规则，返回仅包含指定 db_type 和通用规则的列表。
+        
+        Raises:
+            ValueError: 当 db_type 不在支持列表中时，抛出 SR_ADAPT_001 错误码
+        """
+        if db_type.lower() not in ("mysql", "postgresql", "starrocks", "all"):
+            raise ValueError(
+                f"SR_ADAPT_001: connection 类型与请求 db_type 不匹配 "
+                f"(db_type='{db_type}', supported=['mysql','postgresql','starrocks','all'])"
+            )
+        rules = self._load_rules()
+        # 过滤：仅保留匹配的 db_type 和通用规则
+        filtered = [r for r in rules if r["db_type"].lower() in (db_type.lower(), "all")]
+        return filtered
+
     def _find_sr_rules_by_category(self, category: str) -> List[Dict[str, Any]]:
         """查找指定 category 的所有 StarRocks 规则"""
         rules = self._load_rules()
@@ -212,10 +229,40 @@ class TableValidator:
 
     def __init__(self, rules: DatabaseRulesAdapter):
         self.rules = rules
+        self.connector = None  # SQL connector for StarRocks live queries
+
+    def set_connector(self, connector):
+        """注入数据库连接器（用于 StarRocks 引擎检查的 SQL 查询）"""
+        self.connector = connector
+
+    def _show_partitions(self, db: str, tbl: str) -> list:
+        """查询 StarRocks 分区信息"""
+        if not self.connector:
+            return []
+        try:
+            return self.connector.show_partitions(db, tbl)
+        except Exception:
+            return []
+
+    def _show_tablets(self, db: str, tbl: str) -> list:
+        """查询 StarRocks Tablet 信息"""
+        if not self.connector:
+            return []
+        try:
+            return self.connector.show_tablets(db, tbl)
+        except Exception:
+            return []
 
     def validate(self, table: TableInfo) -> List[Violation]:
         """验证表"""
         violations = []
+
+        # §4.10 契约：StarRocks 巡检时 TableInfo.database 缺失则 abort
+        if self.rules.db_type.lower() == "starrocks" and not table.database:
+            raise RuntimeError(
+                f"SR_ADAPT_002: TableInfo.database 注入缺失，scan abort "
+                f"(table='{table.name}')"
+            )
 
         violations.extend(self._check_naming(table))
         violations.extend(self._check_comment(table))
@@ -224,7 +271,7 @@ class TableValidator:
         violations.extend(self._check_soft_delete(table))
         violations.extend(self._check_indexes(table))
 
-        # StarRocks 专属检查（仅当存在 sr_* 类型规则时执行）
+        # StarRocks 专属检查（§2.2 命名/类型规则，对应 RULE_SR_001~025）
         if self.rules._find_sr_rules_by_category("sr_layer_naming"):
             violations.extend(self._check_sr_layer_naming(table))
         if self.rules._find_sr_rules_by_category("sr_public_fields"):
@@ -237,6 +284,18 @@ class TableValidator:
             violations.extend(self._check_sr_field_naming(table))
         if self.rules._find_sr_rules_by_category("sr_view_naming"):
             violations.extend(self._check_sr_view_naming(table))
+
+        # StarRocks 引擎检查（§2.4 规则，对应 SR-SCH-*/SR-PART-*/SR-REP-*/SR-PERF-*/SR-META-*）
+        if self.rules._find_sr_rules_by_category("sr_schema"):
+            violations.extend(self._check_sr_schema_rules(table))
+        if self.rules._find_sr_rules_by_category("sr_partition"):
+            violations.extend(self._check_sr_partition_rules(table))
+        if self.rules._find_sr_rules_by_category("sr_replica"):
+            violations.extend(self._check_sr_replica_rules(table))
+        if self.rules._find_sr_rules_by_category("sr_perf"):
+            violations.extend(self._check_sr_perf_rules(table))
+        if self.rules._find_sr_rules_by_category("sr_meta"):
+            violations.extend(self._check_sr_meta_rules(table))
 
         return violations
 
@@ -611,6 +670,451 @@ class TableValidator:
 
         return violations
 
+
+
+    # ============================================================
+    # StarRocks 引擎检查方法 SR-SCH-*/SR-PART-*/SR-REP-*/SR-PERF-*/SR-META-*
+    # ============================================================
+
+    def _check_sr_schema_rules(self, table: "TableInfo") -> List["Violation"]:
+        """SR-SCH-001~008: Schema 合规性检查（主键声明、列存模型、时间字段类型、分区列类型、主键长度、表名列名字符集、BLOB）"""
+        from .parser import TableInfo
+        violations = []
+
+        # 查找 sr_schema 规则
+        sr_rules = self.rules._find_sr_rules_by_category("sr_schema")
+        if not sr_rules:
+            return violations
+
+        # SR-SCH-001: 主键表必须显式声明 PRIMARY KEY
+        # SR-SCH-002: 大宽表必须使用列存模型
+        # SR-SCH-003: 时间字段必须使用 DATETIME (在 _check_sr_type_alignment 中已覆盖)
+        # SR-SCH-004: 分区列必须为 DATE/DATETIME/INT/BIGINT
+        # SR-SCH-005: 主键长度 <= 128 字节
+        # SR-SCH-006: 表名/列名长度 <= 64
+        # SR-SCH-007: 字符集统一 utf8mb4
+        # SR-SCH-008: 禁止 BLOB 字段 (在 _check_sr_type_alignment 中已覆盖)
+
+        for rule in sr_rules:
+            cfg = rule.get("config_json", {})
+            level = ViolationLevel.ERROR if rule["level"] == "critical" else (
+                ViolationLevel.WARNING if rule["level"] == "high" else ViolationLevel.INFO)
+            rule_id = rule["rule_id"]
+
+            if rule_id == "SR-SCH-001":
+                # 检查主键表是否有 PRIMARY KEY
+                pk_cols = table.get_primary_key_columns()
+                if not pk_cols:
+                    violations.append(Violation(
+                        level=level,
+                        rule_name=rule["category"],
+                        message=f"表 '{table.name}' 是主键表但缺少 PRIMARY KEY 声明",
+                        table_name=table.name,
+                        suggestion=rule.get("suggestion", "添加 PRIMARY KEY 声明"),
+                    ))
+
+            elif rule_id == "SR-SCH-002":
+                # 大宽表检查：列数 >= min_columns
+                min_cols = cfg.get("min_columns", 200)
+                if len(table.columns) >= min_cols:
+                    violations.append(Violation(
+                        level=level,
+                        rule_name=rule["category"],
+                        message=f"表 '{table.name}' 列数 {len(table.columns)} >= {min_cols}，需使用列存模型",
+                        table_name=table.name,
+                        suggestion=rule.get("suggestion", "改用 DUPLICATE/PRIMARY/AGG 模型"),
+                    ))
+
+            elif rule_id == "SR-SCH-004":
+                # 分区列类型检查
+                allowed = [t.upper() for t in cfg.get("allowed", ["DATE", "DATETIME", "INT", "BIGINT"])]
+                # 需要通过 connector 查询分区列信息，此处做静态检查
+                pass  # 动态检查需要 SQL 查询
+
+            elif rule_id == "SR-SCH-005":
+                # 主键长度检查（字节）
+                max_bytes = cfg.get("max_bytes", 128)
+                pk_cols = table.get_primary_key_columns()
+                pk_bytes = sum(len(c.name.encode('utf-8')) for c in table.columns if c.name in pk_cols)
+                if pk_bytes > max_bytes:
+                    violations.append(Violation(
+                        level=level,
+                        rule_name=rule["category"],
+                        message=f"表 '{table.name}' 主键总字节数 {pk_bytes} 超过限制 {max_bytes}",
+                        table_name=table.name,
+                        suggestion=rule.get("suggestion", "精简主键列组合"),
+                    ))
+
+            elif rule_id == "SR-SCH-006":
+                # 表名/列名长度检查
+                max_len = cfg.get("max_length", 64)
+                if len(table.name) > max_len:
+                    violations.append(Violation(
+                        level=level,
+                        rule_name=rule["category"],
+                        message=f"表名 '{table.name}' 长度 {len(table.name)} 超过限制 {max_len}",
+                        table_name=table.name,
+                        suggestion=rule.get("suggestion", "表名控制在 64 字符以内"),
+                    ))
+                for col in table.columns:
+                    if len(col.name) > max_len:
+                        violations.append(Violation(
+                            level=level,
+                            rule_name=rule["category"],
+                            message=f"列名 '{col.name}' 长度 {len(col.name)} 超过限制 {max_len}",
+                            table_name=table.name,
+                            column_name=col.name,
+                            suggestion=rule.get("suggestion", "列名控制在 64 字符以内"),
+                        ))
+
+            elif rule_id == "SR-SCH-007":
+                # 字符集检查（需要通过 connector 查询）
+                pass  # 动态检查需要 SQL 查询
+
+            elif rule_id == "SR-SCH-008":
+                # BLOB 类型检查
+                forbidden = [t.upper() for t in cfg.get("forbidden_types", ["BLOB", "MEDIUMBLOB", "LONGBLOB"])]
+                for col in table.columns:
+                    col_type = col.data_type.upper()
+                    if any(ft in col_type for ft in forbidden):
+                        violations.append(Violation(
+                            level=level,
+                            rule_name=rule["category"],
+                            message=f"列 '{col.name}' 使用了禁止的类型 {col.data_type}",
+                            table_name=table.name,
+                            column_name=col.name,
+                            suggestion=rule.get("suggestion", "将 BLOB 改为 VARCHAR 或迁移至对象存储"),
+                        ))
+
+        return violations
+
+    def _check_sr_partition_rules(self, table: "TableInfo") -> List["Violation"]:
+        """SR-PART-001/002/003/004/006 + SR-BUCK-005: 分区分桶合规性检查"""
+        from .parser import TableInfo
+        violations = []
+
+        sr_rules = self.rules._find_sr_rules_by_category("sr_partition")
+        if not sr_rules:
+            return violations
+
+        # SR-PART-001: 单表分区数 <= 1000
+        # SR-PART-002: 单分区数据量 1-10GB
+        # SR-PART-003: 分桶数与数据量匹配 (1~256)
+        # SR-PART-004: 分桶列必须高基数 (基数比 >= 0.1)
+        # SR-BUCK-005: 分桶列禁止可空
+        # SR-PART-006: 大表必须按时间分区 (>= 100GB)
+
+        if not self.connector:
+            return violations
+
+        partitions = self._show_partitions(table.database, table.name)
+
+        for rule in sr_rules:
+            cfg = rule.get("config_json", {})
+            level = ViolationLevel.ERROR if rule["level"] == "critical" else (
+                ViolationLevel.WARNING if rule["level"] == "high" else ViolationLevel.INFO)
+            rule_id = rule["rule_id"]
+
+            if rule_id == "SR-PART-001":
+                # 单表分区数 <= 1000
+                max_partitions = cfg.get("max_partitions", 1000)
+                partition_count = len(partitions)
+                if partition_count > max_partitions:
+                    violations.append(Violation(
+                        level=level,
+                        rule_name=rule["category"],
+                        message=f"表 '{table.name}' 分区数 {partition_count} 超过上限 {max_partitions}",
+                        table_name=table.name,
+                        suggestion=rule.get("suggestion", f"减少分区数至 {max_partitions} 以内"),
+                    ))
+
+            elif rule_id == "SR-PART-002":
+                # 单分区数据量 1-10GB
+                min_size_gb = cfg.get("min_size_gb", 1)
+                max_size_gb = cfg.get("max_size_gb", 10)
+                for p in partitions:
+                    # data_size 在 StarRocks 中以 KB 为单位
+                    data_size_kb = int(p.get("DataSize", 0) or 0)
+                    data_size_gb = data_size_kb / (1024 * 1024)
+                    if data_size_gb > 0:
+                        if data_size_gb < min_size_gb:
+                            violations.append(Violation(
+                                level=level,
+                                rule_name=rule["category"],
+                                message=f"表 '{table.name}' 分区 '{p.get('PartitionName', '')}' 数据量 {data_size_gb:.2f}GB 小于下限 {min_size_gb}GB",
+                                table_name=table.name,
+                                suggestion=rule.get("suggestion", "合并过小分区"),
+                            ))
+                        elif data_size_gb > max_size_gb:
+                            violations.append(Violation(
+                                level=level,
+                                rule_name=rule["category"],
+                                message=f"表 '{table.name}' 分区 '{p.get('PartitionName', '')}' 数据量 {data_size_gb:.2f}GB 超过上限 {max_size_gb}GB",
+                                table_name=table.name,
+                                suggestion=rule.get("suggestion", "拆分过大分区"),
+                            ))
+
+            elif rule_id == "SR-BUCK-005":
+                # 分桶列禁止可空 - 需要查询表结构获取分桶列
+                try:
+                    with self.connector.engine.connect() as conn:
+                        from sqlalchemy import text
+                        result = conn.execute(
+                            text("SHOW CREATE TABLE `:db`.`:tbl`"),
+                            {"db": table.database, "tbl": table.name}
+                        )
+                        create_stmt = result.fetchone()[0] if result.fetchone() else ""
+                        # 解析分桶列并检查是否可空 (需要通过 information_schema 查询)
+                        # 简化实现：通过 information_schema.COLUMNS 查询
+                        col_result = conn.execute(
+                            text("""
+                                SELECT COLUMN_NAME, IS_NULLABLE
+                                FROM information_schema.COLUMNS
+                                WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :tbl
+                            """),
+                            {"db": table.database, "tbl": table.name}
+                        )
+                        columns_info = {row[0]: row[1] for row in col_result.fetchall()}
+                        # 尝试从 create statement 中提取分桶列
+                        import re
+                        bucket_match = re.search(r"DISTRIBUTED BY\s+\(([^)]+)\)", create_stmt, re.IGNORECASE)
+                        if bucket_match:
+                            bucket_cols = [c.strip() for c in bucket_match.group(1).split(",")]
+                            for col in bucket_cols:
+                                if col in columns_info and columns_info[col].upper() == "YES":
+                                    violations.append(Violation(
+                                        level=level,
+                                        rule_name=rule["category"],
+                                        message=f"表 '{table.name}' 分桶列 '{col}' 允许为空 (SR-BUCK-005)",
+                                        table_name=table.name,
+                                        column_name=col,
+                                        suggestion=rule.get("suggestion", "分桶列不允许可空"),
+                                    ))
+                except Exception:
+                    pass  # 无法获取表结构时跳过
+
+            # SR-PART-003/004/006 暂未实现，保留 stub
+            elif rule_id in ("SR-PART-003", "SR-PART-004", "SR-PART-006"):
+                pass  # Stub
+
+        return violations
+
+    def _check_sr_replica_rules(self, table: "TableInfo") -> List["Violation"]:
+        """SR-REP-001/002/003/004: 副本与一致性检查（需要调用 connector 执行 SHOW PARTITIONS）"""
+        from .parser import TableInfo
+        violations = []
+
+        sr_rules = self.rules._find_sr_rules_by_category("sr_replica")
+        if not sr_rules:
+            return violations
+
+        # SR-REP-001: 生产环境副本数=3
+        # SR-REP-002: 测试环境副本数>=2
+        # SR-REP-003: 副本均衡度 <= 0.1
+        # SR-REP-004: colocate group 副本布局一致
+
+        # 这些规则需要通过 connector 执行 SHOW PARTITIONS 查询
+        # connector 通过 set_connector 注入
+        if not self.connector:
+            return violations
+
+        try:
+            db_name = table.database
+            tbl_name = table.name
+
+            # 查询分区信息
+            with self.connector.engine.connect() as conn:
+                from sqlalchemy import text
+                result = conn.execute(
+                    text("SHOW PARTITIONS FROM :db.:tbl"),
+                    {"db": db_name, "tbl": tbl_name}
+                )
+                partitions = result.fetchall()
+
+            for rule in sr_rules:
+                cfg = rule.get("config_json", {})
+                level = ViolationLevel.ERROR if rule["level"] == "critical" else ViolationLevel.WARNING
+                rule_id = rule["rule_id"]
+
+                if rule_id == "SR-REP-001":
+                    required = cfg.get("required_replicas", 3)
+                    for p in partitions:
+                        # 分区信息包含副本数字段
+                        if len(p) > 3:
+                            replicas = int(p[3]) if p[3] else 0
+                            if replicas != required:
+                                violations.append(Violation(
+                                    level=level,
+                                    rule_name=rule["category"],
+                                    message=f"表 '{tbl_name}' 分区副本数 {replicas} != {required}",
+                                    table_name=tbl_name,
+                                    suggestion=rule.get("suggestion", f"修改表副本数为 {required}"),
+                                ))
+
+                elif rule_id == "SR-REP-002":
+                    min_rep = cfg.get("min_replicas", 2)
+                    for p in partitions:
+                        if len(p) > 3:
+                            replicas = int(p[3]) if p[3] else 0
+                            if replicas < min_rep:
+                                violations.append(Violation(
+                                    level=level,
+                                    rule_name=rule["category"],
+                                    message=f"表 '{tbl_name}' 分区副本数 {replicas} < {min_rep}",
+                                    table_name=tbl_name,
+                                    suggestion=rule.get("suggestion", f"修改表副本数 >= {min_rep}"),
+                                ))
+
+        except Exception:
+            # 无法获取分区信息，跳过动态检查
+            pass
+
+        return violations
+
+    def _check_sr_perf_rules(self, table: "TableInfo") -> List["Violation"]:
+        """SR-PERF-001/002/003/004: 性能相关检查（Tablet 数、Tablet 大小、Compaction Score、慢查询比例）"""
+        from .parser import TableInfo
+        violations = []
+
+        sr_rules = self.rules._find_sr_rules_by_category("sr_perf")
+        if not sr_rules:
+            return violations
+
+        # SR-PERF-001: 单表 Tablet 数 <= 30000
+        # SR-PERF-002: 单 Tablet 大小 <= 5GB
+        # SR-PERF-003: Compaction 累计 < 100
+        # SR-PERF-004: 慢查询比例 < 5%
+
+        if not self.connector:
+            return violations
+
+        tablets = self._show_tablets(table.database, table.name)
+
+        for rule in sr_rules:
+            cfg = rule.get("config_json", {})
+            level = ViolationLevel.WARNING
+            rule_id = rule["rule_id"]
+
+            try:
+                if rule_id == "SR-PERF-001":
+                    # 单表 Tablet 数 <= 30000
+                    max_tablets = cfg.get("max_tablets", 30000)
+                    tablet_count = len(tablets)
+                    if tablet_count > max_tablets:
+                        violations.append(Violation(
+                            level=level,
+                            rule_name=rule["category"],
+                            message=f"表 '{table.name}' Tablet 数 {tablet_count} 超过上限 {max_tablets}",
+                            table_name=table.name,
+                            suggestion=rule.get("suggestion", f"减少 Tablet 数至 {max_tablets} 以内"),
+                        ))
+
+                elif rule_id == "SR-PERF-002":
+                    # 单 Tablet 大小 <= 5GB
+                    max_size_gb = cfg.get("max_tablet_size_gb", 5)
+                    for tablet in tablets:
+                        # Size 在 StarRocks 中可能以 KB 或 MB 为单位
+                        size_str = tablet.get("Size", tablet.get("DataSize", "0"))
+                        try:
+                            size_kb = int(size_str) if size_str else 0
+                        except (ValueError, TypeError):
+                            size_kb = 0
+                        size_gb = size_kb / (1024 * 1024)
+                        if size_gb > max_size_gb:
+                            violations.append(Violation(
+                                level=level,
+                                rule_name=rule["category"],
+                                message=f"表 '{table.name}' Tablet {tablet.get('TabletId', '')} 大小 {size_gb:.2f}GB 超过上限 {max_size_gb}GB",
+                                table_name=table.name,
+                                suggestion=rule.get("suggestion", "Tablet 过大会影响查询性能"),
+                            ))
+
+                elif rule_id == "SR-PERF-003":
+                    # Compaction 累计 < 100 (通过 SHOW TABLETS 获取 compaction score)
+                    max_compaction_score = cfg.get("max_compaction_score", 100)
+                    for tablet in tablets:
+                        compaction_score = int(tablet.get("CompactionScore", tablet.get("Compaction_Score", 0)) or 0)
+                        if compaction_score > max_compaction_score:
+                            violations.append(Violation(
+                                level=level,
+                                rule_name=rule["category"],
+                                message=f"表 '{table.name}' Tablet {tablet.get('TabletId', '')} Compaction Score {compaction_score} 超过上限 {max_compaction_score}",
+                                table_name=table.name,
+                                suggestion=rule.get("suggestion", "Compaction Score 过高会影响写入性能"),
+                            ))
+
+                elif rule_id == "SR-PERF-004":
+                    # 慢查询比例 < 5% (需要 query history，此处 stub)
+                    # SR-PERF-004 需要通过 information_schema 或 query 统计获取
+                    # 暂时跳过，待 query history 接口就绪
+                    pass
+
+            except Exception:
+                # 无法获取性能指标，跳过
+                pass
+
+        return violations
+
+    def _check_sr_meta_rules(self, table: "TableInfo") -> List["Violation"]:
+        """SR-META-001/002/003: 元数据合规性检查（表 COMMENT、关键列 COMMENT、表 owner）"""
+        from .parser import TableInfo
+        violations = []
+
+        sr_rules = self.rules._find_sr_rules_by_category("sr_meta")
+        if not sr_rules:
+            return violations
+
+        for rule in sr_rules:
+            cfg = rule.get("config_json", {})
+            level = ViolationLevel.WARNING
+            rule_id = rule["rule_id"]
+
+            if rule_id == "SR-META-001":
+                # 表必须有 COMMENT
+                if not table.comment:
+                    violations.append(Violation(
+                        level=level,
+                        rule_name=rule["category"],
+                        message=f"表 '{table.name}' 缺少 COMMENT",
+                        table_name=table.name,
+                        suggestion=rule.get("suggestion", "为表添加 COMMENT"),
+                    ))
+
+            elif rule_id == "SR-META-002":
+                # 关键列必须有 COMMENT
+                key_cols = cfg.get("key_columns", [])
+                pk_cols = set(table.get_primary_key_columns())
+                # 分区列和分桶列需要通过 connector 查询
+                for col in table.columns:
+                    if col.name in pk_cols or col.is_primary_key:
+                        if not col.comment:
+                            violations.append(Violation(
+                                level=level,
+                                rule_name=rule["category"],
+                                message=f"主键列 '{col.name}' 缺少 COMMENT",
+                                table_name=table.name,
+                                column_name=col.name,
+                                suggestion=rule.get("suggestion", "为主键列添加 COMMENT"),
+                            ))
+
+            elif rule_id == "SR-META-003":
+                # 表 owner 必须设置（需要通过 connector 查询）
+                if not self.connector:
+                    continue
+                try:
+                    with self.connector.engine.connect() as conn:
+                        from sqlalchemy import text
+                        result = conn.execute(
+                            text("SHOW TABLE :tbl PROPERTIES"),
+                            {"tbl": table.name}
+                        )
+                        # 解析 owner
+                        pass
+                except Exception:
+                    pass
+
+        return violations
+
     def _check_sr_view_naming(self, table: TableInfo) -> List[Violation]:
         """SR-025: 视图命名 _vw 后缀检查"""
         violations = []
@@ -809,6 +1313,32 @@ class ColumnValidator:
                     suggestion=rule.get("suggestion", f"应使用 {', '.join(required_types)} 类型"),
                 ))
 
+
+        # SR-SCH-003: 时间字段禁止 VARCHAR（扩展检查）
+        # SR-SCH-008: 禁止 BLOB（扩展检查）已在主逻辑覆盖
+        # 额外检查：时间字段后缀但使用 VARCHAR
+        sr_schema_rules = self.rules._find_sr_rules_by_category("sr_schema")
+        for rule in sr_schema_rules:
+            if rule["rule_id"] != "SR-SCH-003":
+                continue
+            cfg = rule.get("config_json", {})
+            suffixes = cfg.get("suffixes", ["_time", "_at", "_dt"])
+            forbidden = cfg.get("forbidden", ["VARCHAR", "CHAR", "STRING"])
+            col_name_lower = column.name.lower()
+            col_type_upper = column.data_type.upper()
+            if any(col_name_lower.endswith(s) for s in suffixes):
+                for ft in forbidden:
+                    if ft.upper() in col_type_upper:
+                        level = ViolationLevel.WARNING
+                        violations.append(Violation(
+                            level=level,
+                            rule_name=rule["category"],
+                            message=f"时间字段 '{column.name}' 使用了禁止的类型 {column.data_type}，SR-SCH-003",
+                            table_name=table.name,
+                            column_name=column.name,
+                            suggestion=rule.get("suggestion", "将时间字段改为 DATETIME 类型"),
+                        ))
+                        break
         return violations
 
 

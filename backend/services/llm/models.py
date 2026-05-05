@@ -48,10 +48,12 @@ class LLMConfig(Base):
         """返回配置，隐藏 api_key，附带掩码预览和更新时间"""
         # 解密仅用于生成 preview，不在返回体中暴露明文
         decrypted: Optional[str] = None
+        decryption_ok: bool = False
         if self.api_key_encrypted:
             try:
                 from services.llm.service import _decrypt
                 decrypted = _decrypt(self.api_key_encrypted)
+                decryption_ok = True
             except Exception:
                 # 密钥轮换等场景解密失败时，降级为固定掩码
                 pass
@@ -71,6 +73,7 @@ class LLMConfig(Base):
             "max_tokens": self.max_tokens,
             "is_active": self.is_active,
             "has_api_key": bool(self.api_key_encrypted),
+            "api_key_decryption_ok": decryption_ok,
             "api_key_preview": api_key_preview,
             "api_key_updated_at": self.api_key_updated_at.isoformat() if self.api_key_updated_at else None,
             "purpose": self.purpose,

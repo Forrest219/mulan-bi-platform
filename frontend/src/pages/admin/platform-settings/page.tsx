@@ -114,6 +114,12 @@ export default function PlatformSettingsPage() {
     }
     // 实时预览：同步更新 Context（不调 API）
     previewSettings({ [field]: value });
+    // 实时校验：即时显示格式错误（不等待提交）
+    const singleFieldForm = { ...form, [field]: value };
+    const singleFieldErrors = validateForm(singleFieldForm);
+    if (singleFieldErrors[field]) {
+      setErrors(prev => ({ ...prev, [field]: singleFieldErrors[field] }));
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

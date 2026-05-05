@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   getMetricDetail,
@@ -6,11 +6,16 @@ import {
   listConsistencyChecks,
   listMetricAnomalies,
   resolveLineage,
+  getActiveMaintenanceWindow,
   MetricDetail,
   LineageRecord,
   ConsistencyCheckResult,
   AnomalyRecord,
 } from '../../../api/metrics';
+
+const FormulaTemplatePreview = lazy(() =>
+  import('./components/FormulaTemplatePreview').then(m => ({ default: m.default }))
+);
 import { useAuth } from '../../../context/AuthContext';
 
 // ---------------------------------------------------------------------------
@@ -78,6 +83,11 @@ const ANOMALY_STATUS_LABEL: Record<string, string> = {
   investigating: '排查中',
   resolved: '已解决',
   false_positive: '误报',
+};
+
+const ALERT_STATUS_BADGE: Record<string, string> = {
+  sent: 'bg-emerald-50 text-emerald-600',
+  pending: 'bg-yellow-50 text-yellow-600',
 };
 
 function formatDate(iso: string | null): string {
@@ -313,7 +323,7 @@ export default function MetricDetailPage() {
           <ConsistencyTab items={consistencyItems} total={consistencyTotal} loading={consistencyLoading} />
         )}
         {activeTab === 'anomalies' && (
-          <AnomaliesTab items={anomalyItems} total={anomalyTotal} loading={anomalyLoading} />
+          <AnomaliesTabWithMw items={anomalyItems} total={anomalyTotal} loading={anomalyLoading} />
         )}
       </div>
     </div>
@@ -388,6 +398,14 @@ function InfoTab({ metric }: { metric: MetricDetail }) {
           </pre>
         </div>
       )}
+
+      {/* Formula Template Preview */}
+      <Suspense fallback={null}>
+        <FormulaTemplatePreview
+          formulaTemplate={metric.formula_template}
+          filters={metric.filters}
+        />
+      </Suspense>
     </div>
   );
 }
@@ -655,7 +673,7 @@ function AnomaliesTab({
         <table className="min-w-full text-sm">
           <thead>
             <tr className="bg-slate-50">
-              {['检测时间', '检测方法', '实际值', '期望值', '偏差分数', '阈值', '状态', '处理备注'].map((h) => (
+              {['检测时间', '检测方法', '实际值', '期望值', '偏差分数', '阈值', '状态', '告警状态', '处理备注'].map((h) => (
                 <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-3 whitespace-nowrap">
                   {h}
                 </th>
@@ -676,6 +694,17 @@ function AnomaliesTab({
                     {ANOMALY_STATUS_LABEL[a.status] || a.status}
                   </span>
                 </td>
+                <td className="px-4 py-3">
+                  {a.alert_sent_at ? (
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ALERT_STATUS_BADGE.sent}`}>
+                      已发送
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-400">
+                      未发送
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-[12px] text-slate-500 max-w-[150px] truncate" title={a.resolution_note || ''}>
                   {a.resolution_note || '—'}
                 </td>
@@ -684,6 +713,49 @@ function AnomaliesTab({
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// AnomaliesTab with Maintenance Window Hint
+// =============================================================================
+
+function AnomaliesTabWithMw({
+  items,
+  total,
+  loading,
+}: {
+  items: AnomalyRecord[];
+  total: number;
+  loading: boolean;
+}) {
+  const [mwActive, setMwActive] = useState(false);
+  const [mwName, setMwName] = useState('');
+
+  useEffect(() => {
+    getActiveMaintenanceWindow()
+      .then((res) => {
+        setMwActive(res.has_active_window);
+        setMwName(res.window?.name || '');
+      })
+      .catch(() => {
+        // 忽略错误，不阻断页面显示
+      });
+  }, []);
+
+  return (
+    <div className="space-y-4">
+      {/* Maintenance window banner */}
+      {mwActive && (
+        <div className="px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg text-sm flex items-center gap-2">
+          <i className="ri-time-line text-blue-600" />
+          <span className="text-blue-700">
+            当前处于维护窗口「{mwName}」，异常检测已暂停
+          </span>
+        </div>
+      )}
+      <AnomaliesTab items={items} total={total} loading={loading} />
     </div>
   );
 }

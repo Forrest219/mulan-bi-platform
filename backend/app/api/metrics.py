@@ -559,6 +559,7 @@ def list_metric_anomalies(
                 "resolved_by": a.resolved_by,
                 "resolved_at": a.resolved_at.isoformat() if a.resolved_at else None,
                 "resolution_note": a.resolution_note,
+                "alert_sent_at": a.alert_sent_at.isoformat() if a.alert_sent_at else None,
                 "created_at": a.created_at.isoformat() if a.created_at else None,
             }
             for a in items

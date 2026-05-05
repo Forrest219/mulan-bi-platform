@@ -99,8 +99,8 @@ class IntentRegistry:
 
         # 所有策略都失败，fallback 到 chat
         fallback_result = IntentResult(
-            intent="chat",
-            confidence=0.5,
+            intent="query",
+            confidence=0.3,
             strategy="fallback",
             params={"fallback_reason": str(last_error) if last_error else "no strategy matched"},
         )

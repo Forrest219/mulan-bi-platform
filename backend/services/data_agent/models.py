@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Column, String, Text, DateTime, Integer, BigInteger, Index, ARRAY, ForeignKey, UniqueConstraint, text as sa_text
+from sqlalchemy import Column, String, Text, DateTime, Integer, BigInteger, Index, ARRAY, ForeignKey, UniqueConstraint, Float, text as sa_text
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
@@ -205,6 +205,54 @@ class BiAgentFeedback(Base):
             "rating": self.rating,
             "comment": self.comment,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+# ============================================================================
+# Spec 36 §15.E — Intent Log table
+# ============================================================================
+
+
+class BiAgentIntentLog(Base):
+    """意图识别日志表 — 记录每条用户消息的意图识别结果（90天保留）"""
+
+    __tablename__ = "bi_agent_intent_log"
+    __table_args__ = (
+        Index("ix_bi_agent_intent_log_user_trace", "user_id", "trace_id"),
+        {"extend_existing": True},
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    question = Column(Text, nullable=False)  # 原始问题（截断至2000字符）
+    intent = Column(String(32), nullable=False)  # chat / query / analysis / report / chart
+    confidence = Column(Float(), nullable=False)
+    strategy = Column(
+        String(64), nullable=False
+    )  # context_aware / keyword_match / llm_classify / fallback
+    # fallback_chain: 完整 fallback 链路，如 context_aware→keyword→llm→chat
+    fallback_chain = Column(String(64), nullable=True)
+    # input_excerpt: 用户消息截断至256字符
+    input_excerpt = Column(String(256), nullable=True)
+    trace_id = Column(String(64), nullable=True, index=True)
+    user_id = Column(Integer, nullable=True, index=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=sa_func.now(), nullable=False, index=True)
+    partition_key = Column(String(6), nullable=False, index=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "question": self.question,
+            "intent": self.intent,
+            "confidence": self.confidence,
+            "strategy": self.strategy,
+            "fallback_chain": self.fallback_chain,
+            "input_excerpt": self.input_excerpt,
+            "trace_id": self.trace_id,
+            "user_id": self.user_id,
+            "error": self.error,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "partition_key": self.partition_key,
         }
 
 

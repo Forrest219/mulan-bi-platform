@@ -9,7 +9,8 @@
  * 对话历史存 localStorage（C2），由 HomeLayout 提供的 ConversationProvider 管理。
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { ConversationBar } from './components/ConversationBar';
 import { useAuth } from '../../context/AuthContext';
 import { usePlatformSettings } from '../../context/PlatformSettingsContext';
 import AskBar from './components/AskBar';
@@ -18,8 +19,7 @@ import { WelcomeHero } from './components/WelcomeHero';
 import { SuggestionGrid } from './components/SuggestionGrid';
 import { useConversations } from '../../store/conversationStore';
 import type { SearchAnswer } from '../../api/search';
-import { ScopeProvider, useScope } from './context/ScopeContext';
-import { ScopePicker } from './components/ScopePicker';
+import { ScopeProvider, useScope } from '../../features/ops-workbench/ScopeContext';
 import { OpsWorkbench } from '../../features/ops-workbench/OpsWorkbench';
 import { useHomeUrlState } from './hooks/useHomeUrlState';
 import { agentConversationsApi } from '../../api/agent';
@@ -33,6 +33,42 @@ type HomeUiState = 'HOME_IDLE' | 'HOME_SUBMITTING' | 'HOME_RESULT' | 'HOME_ERROR
 const USE_MOCK = false;
 
 function HomePageInner() {
+  const navigate = useNavigate();
+
+  const [barCollapsed, setBarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('mulan-home-sidebar-collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('mulan-home-sidebar-collapsed', String(barCollapsed));
+    } catch { /* ignore */ }
+  }, [barCollapsed]);
+
+  const toggleBar = useCallback(() => setBarCollapsed(c => !c), []);
+
+  // Keyboard shortcuts (migrated from HomeLayout)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const isMod = e.metaKey || e.ctrlKey;
+      if (isMod && e.key === 'n') {
+        e.preventDefault();
+        navigate('/');
+      }
+      if (isMod && e.key === 'k') {
+        e.preventDefault();
+        const el = document.querySelector<HTMLTextAreaElement>('[data-askbar-input]');
+        el?.focus();
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [navigate]);
+
   const [homeState, setHomeState] = useState<HomeUiState>('HOME_IDLE');
   const stateBeforeOfflineRef = useRef<HomeUiState>('HOME_IDLE');
   const [result, setResult] = useState<SearchAnswer | null>(null);
@@ -42,12 +78,12 @@ function HomePageInner() {
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [historyMessages, setHistoryMessages] = useState<Array<{role: 'user'|'assistant'; content: string}>>([]);
 
+  const { connectionId: scopeConnectionId } = useScope();
+
   const { user } = useAuth();
   const { settings } = usePlatformSettings();
-  const { addConversation, appendMessage } = useConversations();
+  const { appendMessage, addConversation } = useConversations();
   const { connectionId, selectedConvId } = useHomeUrlState();
-  const { connections: scopeConnections, connectionsLoading } = useScope();
-  const noConnection = !connectionsLoading && scopeConnections.length === 0;
 
   // Gap-05: streaming state 完全独立，不与 AskBar 的 input/loading state 共享
   const { messages: streamingMessages, isStreaming, sendMessage, abort } = useStreamingChat();
@@ -117,14 +153,21 @@ function HomePageInner() {
     }
   }, [isStreaming, streamingMessages.length]);
 
+  // 真实 SSE 路径：从 metadata 事件同步后端 conversation_id（追问必需）
+  useEffect(() => {
+    if (USE_MOCK) return;
+    const latest = [...streamingMessages].reverse().find((m) => m.role === 'assistant' && m.conversationId);
+    if (latest?.conversationId && latest.conversationId !== currentConversationId) {
+      setCurrentConversationId(latest.conversationId);
+    }
+  }, [streamingMessages, currentConversationId]);
+
   // 真实 SSE 路径：流结束后将新消息持久化到 conversationStore
   const savedMessageCountRef = useRef(0);
   const currentConversationIdRef = useRef<string | null>(null);
   currentConversationIdRef.current = currentConversationId;
   const streamingMessagesRef = useRef(streamingMessages);
   streamingMessagesRef.current = streamingMessages;
-  const addConversationRef = useRef(addConversation);
-  addConversationRef.current = addConversation;
   const appendMessageRef = useRef(appendMessage);
   appendMessageRef.current = appendMessage;
 
@@ -132,17 +175,11 @@ function HomePageInner() {
     if (USE_MOCK || isStreaming || streamingMessagesRef.current.length <= savedMessageCountRef.current) return;
     const newMessages = streamingMessagesRef.current.slice(savedMessageCountRef.current);
     savedMessageCountRef.current = streamingMessagesRef.current.length;
-    void (async () => {
-      let convId = currentConversationIdRef.current;
-      if (!convId) {
-        convId = await addConversationRef.current();
-        currentConversationIdRef.current = convId;
-        setCurrentConversationId(convId);
-      }
-      for (const msg of newMessages) {
-        appendMessageRef.current(convId, { role: msg.role, content: msg.content });
-      }
-    })();
+    const convId = currentConversationIdRef.current;
+    if (!convId) return;
+    for (const msg of newMessages) {
+      appendMessageRef.current(convId, { role: msg.role, content: msg.content });
+    }
   }, [isStreaming, streamingMessages.length]);
 
   // ── 未登录态 ─────────────────────────────────────────────────────────────
@@ -217,8 +254,7 @@ function HomePageInner() {
       // Mock 路径由 AskBar 内部的 mockStreamAskData 驱动，不走 sendMessage（后端未就绪）
       // 非 Mock 路径才走 useStreamingChat 的 sendMessage
       if (!USE_MOCK) {
-        const connId = connectionId ? Number(connectionId) : undefined;
-        void sendMessage(lastQuestionRef.current, connId, currentConversationId);
+        void sendMessage(lastQuestionRef.current, scopeConnectionId ? Number(scopeConnectionId) : undefined, currentConversationId);
       } else {
         setMockStreamingContent('');
         setIsMockStreaming(true);
@@ -227,26 +263,12 @@ function HomePageInner() {
   };
 
   const handleExamplePick = (question: string) => {
-    if (noConnection) {
-      handleError({ code: 'NLQ_012', message: '暂无可用数据源，请先配置数据连接' });
-      return;
-    }
     setLastQuestion(question);
     lastQuestionRef.current = question;
     setHomeState('HOME_SUBMITTING');
     setResult(null);
     setError(null);
-    import('../../api/search').then(({ askQuestion }) => {
-      askQuestion({ question })
-        .then((r) => void handleResult(r, question))
-        .catch((err: unknown) => {
-          if (err instanceof Error) {
-            handleError({ code: (err as { code?: string }).code || 'UNKNOWN', message: err.message });
-          } else {
-            handleError({ code: 'UNKNOWN', message: String(err) });
-          }
-        });
-    });
+    void sendMessage(question, scopeConnectionId ? Number(scopeConnectionId) : undefined, currentConversationId);
   };
 
   // AskBar 回调包装：拦截 onResult 注入 lastQuestion
@@ -258,8 +280,7 @@ function HomePageInner() {
   const handleRegenerate = () => {
     const question = lastQuestionRef.current;
     if (!question || isStreaming) return;
-    const connId = connectionId ? Number(connectionId) : undefined;
-    void sendMessage(question, connId, currentConversationId);
+    void sendMessage(question, scopeConnectionId ? Number(scopeConnectionId) : undefined, currentConversationId);
   };
 
   // ── 渲染 ──────────────────────────────────────────────────────────────────
@@ -286,8 +307,21 @@ function HomePageInner() {
           />
         </div>
       )}
+      {/* 连接选择器（懒加载，失败降级为"全数据源"） */}
       {/* SuggestionGrid */}
       <SuggestionGrid onPick={handleExamplePick} />
+      {/* AskBar — idle 态也显示在底部 */}
+      <AskBar
+        onResult={handleAskBarResult}
+        onError={(err) => setError(err)}
+        onLoading={handleLoading}
+        onQuestionChange={(q) => { setLastQuestion(q); lastQuestionRef.current = q; }}
+        conversationId={currentConversationId}
+        useMock={USE_MOCK}
+        onStreamToken={(token) => {
+          setMockStreamingContent((prev) => prev + token);
+        }}
+      />
     </>
   );
 
@@ -324,6 +358,18 @@ function HomePageInner() {
           onRetry={() => { if (lastQuestion) handleExamplePick(lastQuestion); }}
         />
       )}
+      {/* AskBar — 保持在底部，不受结果态影响 */}
+      <AskBar
+        onResult={handleAskBarResult}
+        onError={(err) => setError(err)}
+        onLoading={handleLoading}
+        onQuestionChange={(q) => { setLastQuestion(q); lastQuestionRef.current = q; }}
+        conversationId={currentConversationId}
+        useMock={USE_MOCK}
+        onStreamToken={(token) => {
+          setMockStreamingContent((prev) => prev + token);
+        }}
+      />
     </>
   );
 
@@ -341,16 +387,44 @@ function HomePageInner() {
           />
         </div>
       )}
+      <AskBar
+        onResult={handleAskBarResult}
+        onError={(err) => setError(err)}
+        onLoading={handleLoading}
+        onQuestionChange={(q) => { setLastQuestion(q); lastQuestionRef.current = q; }}
+        conversationId={currentConversationId}
+        useMock={USE_MOCK}
+        isStreaming
+        onAbort={abort}
+        onStreamToken={(token) => {
+          setMockStreamingContent((prev) => prev + token);
+        }}
+      />
     </>
   );
 
   return (
-    <OpsWorkbench
-      homeState={homeState}
-      idleContent={idleContent}
-      resultContent={resultContent}
-      submittingContent={submittingContent}
-    />
+    <div className="flex h-full">
+      <ConversationBar collapsed={barCollapsed} onToggleCollapse={toggleBar} />
+      <div className="flex-1 min-w-0 relative">
+        {barCollapsed && (
+          <button
+            onClick={toggleBar}
+            className="absolute top-4 left-2 z-30 p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+            title="展开侧边栏"
+            aria-label="展开侧边栏"
+          >
+            <i className="ri-sidebar-unfold-line text-lg" />
+          </button>
+        )}
+        <OpsWorkbench
+          homeState={homeState}
+          idleContent={idleContent}
+          resultContent={resultContent}
+          submittingContent={submittingContent}
+        />
+      </div>
+    </div>
   );
 }
 

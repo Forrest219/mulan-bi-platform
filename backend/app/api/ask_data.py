@@ -342,12 +342,12 @@ async def _generate_events(
 ) -> AsyncGenerator[str, None]:
     trace_id = str(uuid.uuid4())
 
-    # Phase 1b: 优先走 Agent 转发（需要 current_user 和 db）
-    if current_user is not None and db is not None:
+    # Phase 1b: 优先走 Agent 转发 via httpx
+    if authorization is not None or cookie is not None:
         try:
-            async for event in _stream_via_agent_direct(
+            async for event in _stream_via_agent_forward(
                 question, connection_id, conversation_id,
-                current_user, db,
+                authorization, cookie,
             ):
                 yield event
             return  # Agent stream succeeded
@@ -396,30 +396,42 @@ async def _stream_via_agent_forward(
     question: str,
     connection_id: Optional[int],
     conversation_id: Optional[str],
-    current_user: dict,
-    db: Session,
+    authorization: Optional[str],
+    cookie: Optional[str],
 ) -> AsyncGenerator[str, None]:
     """
     Phase 1b: 内部转发到 Data Agent /api/agent/stream via httpx.
     将 agent SSE 格式转换为 ask-data SSE 格式。
+    失败时 raise 异常，由调用方处理 fallback。
     """
     import uuid as uuid_lib
 
     trace_id = f"t-{uuid_lib.uuid4().hex[:8]}"
 
+    headers: dict = {"Content-Type": "application/json"}
+    if authorization:
+        headers["Authorization"] = authorization
+    if cookie:
+        headers["Cookie"] = cookie
+
     async with httpx.AsyncClient(timeout=120.0) as client:
-        # 内部转发到 Data Agent
-        response = await client.post(
-            f"{_INTERNAL_BASE}/api/agent/stream",
-            json={
-                "question": question,
-                "conversation_id": conversation_id,
-                "connection_id": connection_id,
-            },
-            headers={
-                "Cookie": f"session_id={current_user.get('session_id', '')}",
-            },
-        )
+        try:
+            response = await client.post(
+                f"{_INTERNAL_BASE}/api/agent/stream",
+                json={
+                    "question": question,
+                    "conversation_id": conversation_id,
+                    "connection_id": connection_id,
+                },
+                headers=headers,
+            )
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
+            logger.debug("Agent forward connection failed (%s), will fallback", exc)
+            raise  # Re-raise to trigger fallback
+
+        if response.status_code >= 400:
+            logger.debug("Agent forward returned %s, will fallback", response.status_code)
+            raise Exception(f"Agent returned {response.status_code}")
 
         async for line in response.aiter_lines():
             if line.startswith("data: "):

@@ -308,7 +308,20 @@ sequenceDiagram
 
 ---
 
-## 10. 开放问题
+## 10. 前端页面结构
+
+"数仓巡检"为 Tab 容器页面，路由 `/governance/dw-audit`，包含两个子 Tab：
+
+| Tab Key | 标签 | 组件 | 说明 |
+|---------|------|------|------|
+| `warehouse` | 数仓体检 | `data-governance/health/page.tsx` | 数据库 DDL 扫描（本 Spec 核心功能） |
+| `compliance` | DDL 合规规则 | `data-governance/compliance/page.tsx` | StarRocks 合规检查规则管理（Spec 35） |
+
+Tableau 相关内容已拆分为独立页面（见 Spec 10），不在本容器内。
+
+---
+
+## 11. 开放问题
 
 | # | 问题 | 状态 |
 |---|------|------|

@@ -343,7 +343,7 @@ class DqcOrchestrator:
         results: List[RuleExecutionResult] = []
         if rules:
             db_config = self._build_target_db_config(db, asset)
-            engine = DqcRuleEngine(db_config=db_config)
+            engine = DqcRuleEngine(db_config=db_config, pg_session=db)
             for rule in rules:
                 rule_result = engine.execute_rule(asset, rule)
                 results.append(rule_result)

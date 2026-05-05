@@ -111,16 +111,21 @@ class BiMetricAnomaly(Base):
     datasource_id: Mapped[int] = mapped_column(Integer, nullable=False)
     detection_method: Mapped[str] = mapped_column(String(32), nullable=False)
     algorithm: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, comment="zscore | quantile")
+    direction: Mapped[Optional[str]] = mapped_column(String(8), nullable=True, comment="up | down")
+    dimension_context_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, comment="SHA256 hash of dimension_context")
+    magnitude_bucket: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, comment="tiny | small | medium | large | extreme")
     metric_value: Mapped[float] = mapped_column(Float, nullable=False)
     expected_value: Mapped[float] = mapped_column(Float, nullable=False)
     deviation_score: Mapped[float] = mapped_column(Float, nullable=False)
     deviation_threshold: Mapped[float] = mapped_column(Float, nullable=False)
     dimension_context: Mapped[Optional[Any]] = mapped_column(JSONB, nullable=True)
     detected_at: Mapped[datetime] = mapped_column(nullable=False)
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="detected")
     resolved_by: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     resolved_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     resolution_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    alert_sent_at: Mapped[Optional[datetime]] = mapped_column(nullable=True, comment="告警发送时间")
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
 
     metric: Mapped["BiMetricDefinition"] = relationship(back_populates="anomalies")
@@ -129,6 +134,7 @@ class BiMetricAnomaly(Base):
         Index("ix_bma_metric", "metric_id", "detected_at"),
         Index("ix_bma_status", "tenant_id", "status", "detected_at"),
         Index("ix_bma_datasource", "datasource_id", "detected_at"),
+        Index("ix_bma_dedup", "metric_id", "algorithm", "direction", "dimension_context_hash", "detected_at"),
     )
 
 

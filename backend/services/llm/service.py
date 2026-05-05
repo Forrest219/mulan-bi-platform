@@ -4,6 +4,7 @@ import time
 from typing import Optional, Tuple
 
 from app.core.config import get_settings
+from app.core.errors import MulanError
 from services.common.crypto import CryptoHelper
 
 from .models import LLMConfigDatabase
@@ -213,9 +214,14 @@ class LLMService:
                     config.priority, config.provider, config.model, e,
                 )
 
-        # 全部失败
-        errors = [a["error"] for a in attempts]
-        return {"error": "; ".join(errors), "attempts": attempts}
+        # 全部失败，抛出 MulanError（Gap 3：同 purpose 多配置失败切备用）
+        logger.error("所有 LLM 配置均不可用，已尝试 %d 个配置", len(attempts))
+        raise MulanError(
+            error_code="LLM_500",
+            message="所有 LLM 配置均不可用",
+            status_code=500,
+            detail={"attempts": attempts},
+        )
 
     async def complete_with_temp(
         self, prompt: str, system: str = None, timeout: int = 15, temperature: float = 0.1, purpose: str = "default"
@@ -285,6 +291,8 @@ class LLMService:
         self, api_key: str, config, prompt: str, system: str, timeout: int
     ) -> dict:
         """OpenAI 语义生成专用路径：temperature=0.1 + response_format=json_object。
+
+        注意：GLM 等国产模型不支持 response_format 参数，需要跳过。
         """
         client = self._get_openai_client(api_key, config.base_url, config.model, timeout)
         messages = []
@@ -292,16 +300,20 @@ class LLMService:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
         logger.info(
-            "LLM 调用（语义生成, temp=0.1, json_object）：model=%s, timeout=%ds",
-            config.model, timeout,
+            "LLM 调用（语义生成, temp=0.1）：model=%s, base_url=%s, timeout=%ds",
+            config.model, config.base_url, timeout,
         )
-        response = await client.chat.completions.create(
-            model=config.model,
-            messages=messages,
-            temperature=0.1,
-            max_tokens=config.max_tokens,
-            response_format={"type": "json_object"},
-        )
+        # GLM 等国产模型不支持 response_format，仅设置 temperature
+        create_kwargs = {
+            "model": config.model,
+            "messages": messages,
+            "temperature": 0.1,
+            "max_tokens": config.max_tokens,
+        }
+        # OpenAI 兼容模型才加 response_format（不适用于 GLM 等）
+        if "openai" in (config.base_url or "").lower() or "gpt" in (config.model or "").lower():
+            create_kwargs["response_format"] = {"type": "json_object"}
+        response = await client.chat.completions.create(**create_kwargs)
         content = response.choices[0].message.content.strip()
         return {"content": content}
 

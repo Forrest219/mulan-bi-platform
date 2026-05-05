@@ -138,7 +138,14 @@ def profile_and_suggest_task(self, asset_id: int):
 
         dao.update_asset(db, asset_id, profile_json=profile_json)
         db.commit()
-        return {"status": "ok", "asset_id": asset_id}
+
+        from services.dqc.template_matcher import TemplateMatcher
+        matcher = TemplateMatcher(dao)
+        asset = dao.get_asset(db, asset_id)
+        rules = matcher.match_and_instantiate(db, asset, created_by=asset.created_by)
+        db.commit()
+        logger.info("profile_and_suggest: asset_id=%s, profiled, %d rules created", asset_id, len(rules))
+        return {"status": "ok", "asset_id": asset_id, "rules_created": len(rules)}
     finally:
         db.close()
 

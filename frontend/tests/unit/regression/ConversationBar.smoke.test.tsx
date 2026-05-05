@@ -104,7 +104,7 @@ describe('ConversationBar 回归：新对话按钮不写库', () => {
     mockConversations = [];
   });
 
-  it('点击"新对话"按钮不调用 addConversation', async () => {
+  it('点击"新建对话"按钮不调用 addConversation', async () => {
     const user = userEvent.setup();
 
     render(
@@ -113,13 +113,13 @@ describe('ConversationBar 回归：新对话按钮不写库', () => {
       </MemoryRouter>
     );
 
-    const newBtn = screen.getByRole('button', { name: '新对话' });
+    const newBtn = screen.getByRole('button', { name: '新建对话' });
     await user.click(newBtn);
 
     expect(mockAddConversation).not.toHaveBeenCalled();
   });
 
-  it('点击"新对话"按钮触发 navigate("/")', async () => {
+  it('点击"新建对话"按钮触发 navigate("/")', async () => {
     const user = userEvent.setup();
 
     render(
@@ -128,7 +128,7 @@ describe('ConversationBar 回归：新对话按钮不写库', () => {
       </MemoryRouter>
     );
 
-    const newBtn = screen.getByRole('button', { name: '新对话' });
+    const newBtn = screen.getByRole('button', { name: '新建对话' });
     await user.click(newBtn);
 
     expect(mockNavigate).toHaveBeenCalledWith('/');

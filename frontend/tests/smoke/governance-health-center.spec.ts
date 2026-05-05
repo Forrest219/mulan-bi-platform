@@ -5,7 +5,7 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'admin123';
 
 /**
  * Smoke Test: 数据健康中心（治理首页）
- * 路径：/governance/health-center
+ * 路径：/governance/dw-audit
  *
  * 包含三个 Tab：数据仓库（warehouse）、数据质量（quality）、Tableau 健康（tableau）
  */
@@ -22,9 +22,9 @@ test.describe('数据健康中心', () => {
   // ── 页面加载 ──────────────────────────────────────────────────
 
   test('健康中心页可访问', async ({ page }) => {
-    await page.goto('/governance/health-center');
+    await page.goto('/governance/dw-audit');
     await page.waitForTimeout(1500);
-    expect(page.url()).toContain('/governance/health-center');
+    expect(page.url()).toContain('/governance/dw-audit');
     const hasContent = await page.locator('h1').first().isVisible().catch(() => false);
     expect(hasContent).toBe(true);
   });
@@ -34,7 +34,7 @@ test.describe('数据健康中心', () => {
     page.on('console', (msg) => {
       if (msg.type() === 'error') errors.push(msg.text());
     });
-    await page.goto('/governance/health-center');
+    await page.goto('/governance/dw-audit');
     await page.waitForTimeout(1500);
     const realErrors = errors.filter(e =>
       !e.includes('401') &&
@@ -51,14 +51,14 @@ test.describe('数据健康中心', () => {
   // ── Tab 切换 ──────────────────────────────────────────────────
 
   test('默认 Tab 为数据仓库（warehouse）', async ({ page }) => {
-    await page.goto('/governance/health-center');
+    await page.goto('/governance/dw-audit');
     await page.waitForTimeout(1000);
     const urlAfterLoad = page.url();
     expect(urlAfterLoad).toMatch(/tab=warehouse/);
   });
 
   test('可切换到数据质量 Tab', async ({ page }) => {
-    await page.goto('/governance/health-center');
+    await page.goto('/governance/dw-audit');
     await page.waitForTimeout(1000);
     const qualityTab = page.locator('button', { hasText: /质量/ }).first();
     if (await qualityTab.isVisible().catch(() => false)) {
@@ -69,7 +69,7 @@ test.describe('数据健康中心', () => {
   });
 
   test('可切换到 Tableau 健康 Tab', async ({ page }) => {
-    await page.goto('/governance/health-center');
+    await page.goto('/governance/dw-audit');
     await page.waitForTimeout(1000);
     const tableauTab = page.locator('button', { hasText: /Tableau/i }).first();
     if (await tableauTab.isVisible().catch(() => false)) {
@@ -82,7 +82,7 @@ test.describe('数据健康中心', () => {
   // ── 数据仓库 Tab ─────────────────────────────────────────────
 
   test('数据仓库 Tab 有扫描按钮或列表', async ({ page }) => {
-    await page.goto('/governance/health-center?tab=warehouse');
+    await page.goto('/governance/dw-audit?tab=warehouse');
     await page.waitForTimeout(2000);
     const hasScanBtn = await page.locator('button').filter({ hasText: /扫描|发起扫描/i }).first().isVisible().catch(() => false);
     const hasTable = await page.locator('table').first().isVisible().catch(() => false);
@@ -92,7 +92,7 @@ test.describe('数据健康中心', () => {
   });
 
   test('数据仓库 Tab 有数据源选择器', async ({ page }) => {
-    await page.goto('/governance/health-center?tab=warehouse');
+    await page.goto('/governance/dw-audit?tab=warehouse');
     await page.waitForTimeout(2000);
     // 数据源选择器可能是 select 或 button
     const hasDsPicker = await page.locator('select').first().isVisible().catch(() => false) ||
@@ -104,7 +104,7 @@ test.describe('数据健康中心', () => {
   // ── 数据质量 Tab ─────────────────────────────────────────────
 
   test('数据质量 Tab 有质量规则相关内容', async ({ page }) => {
-    await page.goto('/governance/health-center?tab=quality');
+    await page.goto('/governance/dw-audit?tab=quality');
     await page.waitForTimeout(2000);
     // 质量 Tab 可能包含：规则、得分、质检等关键词
     const body = await page.locator('body').textContent();
@@ -118,7 +118,7 @@ test.describe('数据健康中心', () => {
   });
 
   test('数据质量 Tab 无英文占位文案残留', async ({ page }) => {
-    await page.goto('/governance/health-center?tab=quality');
+    await page.goto('/governance/dw-audit?tab=quality');
     await page.waitForTimeout(1000);
     const body = await page.locator('body').textContent();
     expect(body).not.toContain('TODO');
@@ -129,7 +129,7 @@ test.describe('数据健康中心', () => {
   // ── Tableau 健康 Tab ────────────────────────────────────────
 
   test('Tableau 健康 Tab 可加载', async ({ page }) => {
-    await page.goto('/governance/health-center?tab=tableau');
+    await page.goto('/governance/dw-audit?tab=tableau');
     await page.waitForTimeout(2000);
     // 验证 URL 正确
     expect(page.url()).toMatch(/tab=tableau/);

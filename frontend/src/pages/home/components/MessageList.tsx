@@ -70,12 +70,10 @@ function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onR
                   isError={msg.isError}
                   thinking={msg.thinking}
                   traceId={msg.traceId}
-                  toolCalls={msg.toolCalls}
-                  toolResults={msg.toolResults}
                 />
                 {msg.role === 'assistant' && !msg.isStreaming && (
                   <>
-                    {msg.metadata && (
+                    {msg.metadata && msg.metadata.sources_count > 0 && (
                       <SourceCard
                         sourcesCount={msg.metadata.sources_count}
                         topSources={msg.metadata.top_sources}

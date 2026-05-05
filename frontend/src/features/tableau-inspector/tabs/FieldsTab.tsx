@@ -2,19 +2,19 @@ import { FieldSemantic } from '../types';
 
 interface FieldsTabProps {
   fieldSemantics: FieldSemantic[];
-  aiLoading: boolean;
+  fieldsLoading: boolean;
 }
 
-export function FieldsTab({ fieldSemantics, aiLoading }: FieldsTabProps) {
+export function FieldsTab({ fieldSemantics, fieldsLoading }: FieldsTabProps) {
   return (
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
       <div className="px-5 py-4 border-b border-slate-100">
-        <h3 className="text-sm font-semibold text-slate-700">字段元数据</h3>
-        <p className="text-xs text-slate-400 mt-0.5">数据源字段信息（需先生成 AI 解读以加载字段）</p>
+        <h3 className="text-xs font-semibold text-slate-700">字段元数据</h3>
+        <p className="text-xs text-slate-400 mt-0.5">数据源字段信息</p>
       </div>
       {fieldSemantics.length === 0 ? (
         <div className="text-center py-10 text-slate-400 text-xs">
-          {aiLoading ? '正在加载字段数据...' : '暂无字段数据，请先在 AI 解读 Tab 生成解读'}
+          {fieldsLoading ? '正在加载字段数据...' : '暂无字段数据'}
         </div>
       ) : (
         <table className="w-full">

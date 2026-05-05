@@ -7,9 +7,13 @@ interface MessageActionsProps {
   question: string;
   traceId?: string;
   onRegenerate?: () => void;
+  /** Callback when user clicks edit */
+  onEdit?: (content: string) => void;
+  /** Callback when user clicks delete */
+  onDelete?: () => void;
 }
 
-export function MessageActions({ content, conversationId, messageIndex, question, traceId, onRegenerate }: MessageActionsProps) {
+export function MessageActions({ content, conversationId, messageIndex, question, traceId, onRegenerate, onEdit, onDelete }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
   const [rated, setRated] = useState<'up' | 'down' | null>(null);
 
@@ -23,17 +27,28 @@ export function MessageActions({ content, conversationId, messageIndex, question
     if (rated) return;
     setRated(rating);
     try {
-      // Spec 36 §5: POST /api/agent/feedback — 使用 run_id + rating
-      // MessageBubble 已通过 traceId 传入 run_id（见 MessageList.tsx）
+      // Spec 25 Gap 1: POST /api/agent/feedback/v2 — 传递完整参数
+      // 优先使用 v2 端点（支持 run_id 映射和 conversation_id 等）
+      const payload: Record<string, unknown> = { rating };
       if (traceId) {
-        await fetch('/api/agent/feedback', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ run_id: traceId, rating }),
-        });
+        payload.run_id = traceId;
       }
-      // Fallback: 如果没有 traceId 则静默忽略（老数据兼容）
+      if (conversationId) {
+        payload.conversation_id = conversationId;
+      }
+      if (messageIndex !== undefined) {
+        payload.message_index = messageIndex;
+      }
+      if (question) {
+        payload.question = question;
+      }
+
+      await fetch('/api/agent/feedback/v2', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      });
     } catch {
       // 埋点失败不影响用户
     }
@@ -75,6 +90,26 @@ export function MessageActions({ content, conversationId, messageIndex, question
         >
           <i className="ri-refresh-line" />
           <span>重新生成</span>
+        </button>
+      )}
+      {onEdit && (
+        <button
+          onClick={() => onEdit(content)}
+          className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+          title="编辑"
+        >
+          <i className="ri-edit-line" />
+          <span>编辑</span>
+        </button>
+      )}
+      {onDelete && (
+        <button
+          onClick={onDelete}
+          className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+          title="删除"
+        >
+          <i className="ri-delete-bin-line" />
+          <span>删除</span>
         </button>
       )}
       <button

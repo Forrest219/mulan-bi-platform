@@ -286,22 +286,36 @@ async def run(
     if wrapper is not None:
         set_wrapper(wrapper)
 
-    # ── 3. 委派给 search.py 的核心查询逻辑执行 ──────────────────
+    # ── 3. 创建独立的 DB session（不依赖 request 生命周期）────────
+    from app.core.database import SessionLocal
     from app.api.search import _execute_nlq_pipeline
-    result = await _execute_nlq_pipeline(
-        question=question,
-        datasource_luid=datasource_luid,
-        connection_id=connection_id,
-        conversation_id=conversation_id,
-        options=options,
-        use_conversation_context=use_conversation_context,
-        target_sites=target_sites,
-        request=request,
-        response=response,
-        user=user,
-        db=db,
-        trace_id=trace_id,
-    )
+
+    # 如果调用方没传 db（独立调用场景），自己创建 session
+    if db is None:
+        db = SessionLocal()
+        own_session = True
+    else:
+        own_session = False
+
+    try:
+        result = await _execute_nlq_pipeline(
+            question=question,
+            datasource_luid=datasource_luid,
+            connection_id=connection_id,
+            conversation_id=conversation_id,
+            options=options,
+            use_conversation_context=use_conversation_context,
+            target_sites=target_sites,
+            request=request,
+            response=response,
+            user=user,
+            db=db,
+            trace_id=trace_id,
+        )
+    finally:
+        if own_session:
+            db.close()
+
     return result
 
 
@@ -613,7 +627,8 @@ _FIELD_CONSISTENCY_RETRY_TEMPLATE = """你生成的 VizQL JSON 中以下 fieldCa
 {available_fields}
 
 请重新生成 JSON，确保 vizql_json.fields 中的所有 fieldCaption 都必须来自上述可用字段列表。
-如果需要使用的度量字段没有对应的可用字段，请使用 SUM(某字段) 格式或选择最接近的字段。
+- function 字段只允许为裸聚合名：SUM、AVG、COUNT、COUNTD、MIN、MAX 等（不允许表达式如 SUM(Sales)）
+- fieldCaption 填写字段英文名（如 Sales）
 不要虚构任何不在可用列表中的 fieldCaption。
 
 直接输出 JSON，不要包含任何解释文字："""
@@ -785,8 +800,12 @@ def validate_one_pass_output(raw: Any) -> Tuple[bool, Optional[str]]:
         if not isinstance(f, dict) or "fieldCaption" not in f:
             return False, f"fields[{i}] 缺少 fieldCaption"
         if "function" in f:
+            func_val = f["function"]
             func_enum = ONE_PASS_OUTPUT_SCHEMA["properties"]["vizql_json"]["properties"]["fields"]["items"]["properties"]["function"]["enum"]
-            if f["function"] not in func_enum:
+            # Tableau MCP 支持表达式如 SUM(Sales)，也支持裸聚合名如 SUM
+            import re
+            is_expression = bool(re.match(r"^(SUM|AVG|MEDIAN|COUNT|COUNTD|MIN|MAX|STDEV|VAR)\([\w\W]+\)$", func_val, re.IGNORECASE))
+            if func_val not in func_enum and not is_expression:
                 return False, f"fields[{i}].function 值不合法：{f['function']}"
 
     return True, None
@@ -1108,14 +1127,20 @@ def route_datasource(question: str, connection_id: int = None) -> Optional[Dict[
     db = TableauDatabase()
     session = db.session
 
-    # C4：connection_id=None 时自动路由到第一个活跃连接
+    # C4：connection_id=None 时按优先级选最优活跃连接
     if connection_id is None:
+        # 优先级：is_default=True > priority 高 > last_test_at 最近
         active_conn = session.query(_TableauConnection).filter(
             _TableauConnection.is_active == True,
-        ).order_by(_TableauConnection.id.asc()).first()
+        ).order_by(
+            _TableauConnection.is_default.desc(),
+            _TableauConnection.priority.desc(),
+            _TableauConnection.last_test_at.desc().nullslast(),
+        ).first()
         if active_conn:
             connection_id = active_conn.id
-            logger.debug("route_datasource: connection_id=None，自动路由到 connection_id=%d", connection_id)
+            logger.debug("route_datasource: connection_id=None，自动路由到 connection_id=%d（is_default=%s, priority=%s）",
+                        connection_id, active_conn.is_default, active_conn.priority)
         else:
             logger.warning("route_datasource: connection_id=None 且无活跃连接，跳过 connection_id 过滤")
 
@@ -1204,8 +1229,12 @@ def calculate_routing_score(user_terms: List[str], field_captions: List[str], ds
 
     # 新鲜度
     freshness = 0.5  # 默认值（无同步时间时）
-    if ds.last_sync_at:
-        hours_since = (ds.last_sync_at.replace(tzinfo=None) if hasattr(ds.last_sync_at, 'tzinfo') else ds.last_sync_at).total_seconds() / 3600
+    if hasattr(ds, 'synced_at') and ds.synced_at:
+        import datetime as dt
+        sync_time = ds.synced_at
+        if hasattr(sync_time, 'tzinfo') and sync_time.tzinfo is not None:
+            sync_time = sync_time.replace(tzinfo=None)
+        hours_since = (dt.datetime.now() - sync_time).total_seconds() / 3600
         freshness = max(0.0, 1.0 - hours_since / 24)
 
     # 字段数量得分

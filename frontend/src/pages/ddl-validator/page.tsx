@@ -1,24 +1,86 @@
 import { useState } from 'react';
-import { mockValidationResult, sampleSql, ValidationResult } from '../../mocks/ddlMockData';
+import { sampleSql, ValidationResult } from '../../mocks/ddlMockData';
 import SeverityBadge from './components/SeverityBadge';
+import { API_BASE } from '../../config';
 
-const DB_TYPES = ['MySQL', 'SQL Server'];
+const DB_TYPES = ['MySQL', 'SQL Server', 'StarRocks'];
+const SCENE_TYPES = ['ODS', 'DWD', 'ADS', 'ALL'];
 
 export default function DDLValidatorPage() {
   const [dbType, setDbType] = useState('MySQL');
+  const [sceneType, setSceneType] = useState('ALL');
   const [sql, setSql] = useState('');
   const [result, setResult] = useState<ValidationResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [severityFilter, setSeverityFilter] = useState<string>('ALL');
+  const [errorMsg, setErrorMsg] = useState('');
 
-  const handleCheck = () => {
+  const handleCheck = async () => {
     if (!sql.trim()) return;
     setLoading(true);
     setResult(null);
-    setTimeout(() => {
-      setResult(mockValidationResult);
+    setErrorMsg('');
+
+    // Map frontend display names to backend API values
+    const dbTypeMap: Record<string, string> = {
+      'MySQL': 'mysql',
+      'SQL Server': 'sqlserver',
+      'StarRocks': 'starrocks',
+    };
+
+    try {
+      const resp = await fetch(`${API_BASE}/api/ddl/check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          ddl_text: sql,
+          db_type: dbTypeMap[dbType] || 'mysql',
+          scene_type: sceneType,
+        }),
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        throw new Error(`检查失败: ${errText || resp.statusText}`);
+      }
+
+      const apiResp = await resp.json();
+
+      if (apiResp.code !== 'DDL_000') {
+        throw new Error(apiResp.message || 'DDL 检查失败');
+      }
+
+      const data = apiResp.data;
+
+      // Map API response to frontend ValidationResult
+      setResult({
+        score: data.score,
+        high: data.summary.High || 0,
+        medium: data.summary.Medium || 0,
+        low: data.summary.Low || 0,
+        allowed: data.executable,
+        issues: (data.issues || []).map((issue: {
+          rule_id: string;
+          risk_level: string;
+          object_type: string;
+          object_name: string;
+          description: string;
+          suggestion: string;
+        }) => ({
+          ruleId: issue.rule_id,
+          // API returns "High"/"Medium"/"Low", normalize to uppercase for frontend
+          severity: issue.risk_level.toUpperCase() as 'HIGH' | 'MEDIUM' | 'LOW',
+          target: `${issue.object_type}: ${issue.object_name}`,
+          message: issue.description,
+          suggestion: issue.suggestion,
+        })),
+      });
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : '检查过程发生错误');
+    } finally {
       setLoading(false);
-    }, 1200);
+    }
   };
 
   const handleLoadSample = () => {
@@ -117,6 +179,28 @@ export default function DDLValidatorPage() {
                 </div>
               </div>
 
+              {/* Scene Type */}
+              <div className="mb-3">
+                <label className="text-[11px] font-medium text-slate-500 uppercase tracking-wide block mb-1.5">
+                  Scene Type
+                </label>
+                <div className="flex gap-2">
+                  {SCENE_TYPES.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setSceneType(s)}
+                      className={`flex-1 py-1.5 rounded-md text-[12px] font-medium border transition-colors cursor-pointer whitespace-nowrap ${
+                        sceneType === s
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* SQL Textarea */}
               <div className="mb-4">
                 <label className="text-[11px] font-medium text-slate-500 uppercase tracking-wide block mb-1.5">
@@ -208,6 +292,18 @@ export default function DDLValidatorPage() {
                     </span>
                   ))}
                   <span className="text-[10px] text-slate-300">...</span>
+                </div>
+              </div>
+            )}
+
+            {errorMsg && (
+              <div className="bg-red-50 border border-red-200 rounded-xl px-5 py-4 flex items-center gap-4">
+                <div className="w-9 h-9 flex items-center justify-center rounded-full bg-red-100">
+                  <i className="ri-error-warning-line text-lg text-red-500" />
+                </div>
+                <div>
+                  <div className="text-[14px] font-bold text-red-600">检查失败</div>
+                  <div className="text-[12px] mt-0.5 text-red-500">{errorMsg}</div>
                 </div>
               </div>
             )}

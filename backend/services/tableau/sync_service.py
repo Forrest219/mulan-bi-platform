@@ -98,6 +98,13 @@ class TableauSyncService:
             logger.warning("Metadata API query failed (%s), falling back to all-view classification", e)
             return set()
 
+    @staticmethod
+    def _safe_total_views(view) -> Optional[int]:
+        try:
+            return view.total_views
+        except Exception:
+            return None
+
     def _parse_server_datetime(self, value) -> Optional[datetime]:
         """安全解析 Tableau Server 返回的时间字段"""
         if value is None:
@@ -111,7 +118,7 @@ class TableauSyncService:
 
     def sync_all_assets(self, db, connection_id: int,
                         trigger_type: str = "manual",
-                        sync_log_id: int | None = None) -> Dict[str, Any]:
+                        sync_log_id: Optional[int] = None) -> Dict[str, Any]:
         """同步所有资产类型到数据库，带日志记录"""
         import tableauserverclient as TSC
 
@@ -173,7 +180,7 @@ class TableauSyncService:
         # --- Views (including Dashboards) ---
         try:
             dashboard_luids = self._get_dashboard_luids()
-            for view in TSC.Pager(self.server.views):
+            for view in TSC.Pager(self.server.views, usage=True):
                 content_url = f"/views/{view.id}"
                 asset_type = "dashboard" if view.id in dashboard_luids else "view"
                 sheet_type = "dashboard" if asset_type == "dashboard" else (getattr(view, 'sheet_type', None) or "")
@@ -209,6 +216,7 @@ class TableauSyncService:
                     parent_workbook_name=workbook_name,
                     created_on_server=self._parse_server_datetime(getattr(view, 'created_at', None)),
                     updated_on_server=self._parse_server_datetime(getattr(view, 'updated_at', None)),
+                    view_count=self._safe_total_views(view),
                 )
                 synced_ids[asset_type].append(view.id)
         except Exception as e:
@@ -433,7 +441,10 @@ class TableauRestSyncService:
         return list(self._get_all_items(f"sites/{self._site_id}/workbooks", page_size=100))
 
     def _get_views(self) -> List[Dict]:
-        return list(self._get_all_items(f"sites/{self._site_id}/views", page_size=100))
+        return list(self._get_all_items(
+            f"sites/{self._site_id}/views?includeUsageStatistics=true",
+            page_size=100,
+        ))
 
     def _get_datasources(self) -> List[Dict]:
         return list(self._get_all_items(f"sites/{self._site_id}/datasources", page_size=100))
@@ -613,7 +624,7 @@ class TableauRestSyncService:
 
     def sync_all_assets(self, db, connection_id: int,
                         trigger_type: str = "manual",
-                        sync_log_id: int | None = None) -> Dict[str, Any]:
+                        sync_log_id: Optional[int] = None) -> Dict[str, Any]:
         """同步所有资产类型到数据库（MCP REST 模式）"""
         if not self._auth_token:
             raise Exception("未连接，请先调用 connect()")
@@ -697,6 +708,7 @@ class TableauRestSyncService:
                     parent_workbook_name=workbook_name,
                     created_on_server=self._parse_iso_datetime(view.get("createdAt")),
                     updated_on_server=self._parse_iso_datetime(view.get("updatedAt")),
+                    view_count=view.get("usage", {}).get("totalViewCount") if isinstance(view.get("usage"), dict) else None,
                 )
                 synced_ids[asset_type].append(view_id)
         except Exception as e:

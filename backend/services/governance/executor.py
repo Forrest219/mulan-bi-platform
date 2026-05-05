@@ -2,9 +2,9 @@
 
 from typing import Any, Optional
 
-from backend.services.governance.engine import QualitySQLEngine, SQLGenerationError
-from backend.services.governance.sql_security import validate_custom_sql
-from backend.services.governance.models import QualityRule
+from services.governance.engine import QualitySQLEngine, SQLGenerationError
+from services.governance.sql_security import validate_custom_sql
+from services.governance.models import QualityRule
 
 
 class RuleExecutor:
@@ -97,7 +97,7 @@ class RuleExecutor:
 
     def _execute_sql(self, sql: str) -> Optional[float]:
         """通过 sql_agent executor 执行 SQL"""
-        from backend.services.sql_agent.executor import get_executor
+        from services.sql_agent.executor import get_executor
 
         executor = get_executor(
             db_type=self.db_type,

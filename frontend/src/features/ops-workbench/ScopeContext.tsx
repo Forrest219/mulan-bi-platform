@@ -30,6 +30,9 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
       .then((res) => {
         const active = res.connections.filter((c) => c.is_active);
         setConnections(active);
+        if (active.length > 0) {
+          setConnectionId(String(active[0].id));
+        }
       })
       .catch(() => {
         setConnections([]);

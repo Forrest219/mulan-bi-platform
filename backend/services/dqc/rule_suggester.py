@@ -333,7 +333,7 @@ class DqcRuleSuggester:
                 dimension=suggestion.dimension,
                 rule_type=suggestion.rule_type,
                 rule_config=suggestion.rule_config,
-                is_active=False,  # 建议规则默认不启用
+                is_active=True,
                 is_system_suggested=True,
                 created_by=created_by,
             )

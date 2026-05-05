@@ -178,7 +178,15 @@ flowchart TD
 
 ---
 
-## 9. 开放问题
+## 9. 前端页面结构
+
+"Tableau 巡检"为独立页面，路由 `/governance/tableau-health`，不嵌套于"数仓巡检"Tab 容器内。
+
+页面组件：`frontend/src/pages/tableau/health/page.tsx`
+
+---
+
+## 10. 开放问题
 
 | # | 问题 | 状态 |
 |---|------|------|

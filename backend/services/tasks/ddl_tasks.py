@@ -21,6 +21,7 @@ from celery import group, chord
 from celery.exceptions import MaxRetriesExceededError
 
 from services.tasks import celery_app
+from services.ddl_checker.task_splitter import TaskSplitter
 
 logger = logging.getLogger(__name__)
 
@@ -187,11 +188,9 @@ def batch_scan_tables(
 
     start = time.time()
 
-    # 分批
-    batches = [
-        table_names[i:i + MAX_CONCURRENT_TABLES]
-        for i in range(0, len(table_names), MAX_CONCURRENT_TABLES)
-    ]
+    # 使用 TaskSplitter 分批
+    splitter = TaskSplitter()
+    batches = splitter.split(table_names, batch_size=MAX_CONCURRENT_TABLES)
     logger.info(
         "batch_scan: scan_id=%d, total_tables=%d, batches=%d",
         scan_id, len(table_names), len(batches),
@@ -216,20 +215,30 @@ def batch_scan_tables(
     summary = _aggregate_results(all_results)
     duration = time.time() - start
 
-    # 生成报告
+    # 生成报告（使用 ReportGenerator 生成真实 Violation 结构）
+    from services.ddl_checker.validator import Violation, ViolationLevel
+    from services.ddl_checker.reporter import ReportGenerator, mask_violation_record
+
     validation_results = {}
     for r in all_results:
         if r.get("violations"):
-            from dataclasses import dataclass
-            @dataclass
-            class FakeViolation:
-                level = None
-                def to_dict(self):
-                    return self._d
-                def __init__(self, d):
-                    self._d = d
-
-            violations = [FakeViolation(v) for v in r["violations"]]
+            violations = []
+            for v_dict in r["violations"]:
+                # 重建 Violation 对象供 ReportGenerator.generate 使用
+                level_str = v_dict.get("level", "info")
+                try:
+                    level = ViolationLevel(level_str)
+                except ValueError:
+                    level = ViolationLevel.INFO
+                violation = Violation(
+                    level=level,
+                    rule_name=v_dict.get("rule_name", ""),
+                    message=v_dict.get("message", ""),
+                    table_name=v_dict.get("table_name", r["table_name"]),
+                    column_name=v_dict.get("column_name", ""),
+                    suggestion=v_dict.get("suggestion", ""),
+                )
+                violations.append(violation)
             validation_results[r["table_name"]] = violations
 
     report = ReportGenerator.generate(validation_results) if validation_results else None

@@ -16,10 +16,9 @@
  * - 导航：点击对话跳转 /chat/:id（useNavigate）
  */
 import { useState, useMemo, useRef, useCallback } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useConversations, type Conversation } from '../../../store/conversationStore';
 import { ConfirmModal } from '../../../components/ConfirmModal';
-import { useAuth } from '../../../context/AuthContext';
 import { usePlatformSettings } from '../../../context/PlatformSettingsContext';
 
 const PAGE_SIZE = 100;
@@ -60,10 +59,9 @@ function shouldShowConversation(conv: Conversation): boolean {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ConversationBar({ collapsed, onToggleCollapse: _onToggleCollapse }: ConversationBarProps) {
-  const { conversations, deleteConversation, updateConversationTitle } =
+export function ConversationBar({ collapsed, onToggleCollapse }: ConversationBarProps) {
+  const { conversations, deleteConversation, updateConversationTitle, addConversation } =
     useConversations();
-  const { user, logout } = useAuth();
   const { settings } = usePlatformSettings();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -78,9 +76,13 @@ export function ConversationBar({ collapsed, onToggleCollapse: _onToggleCollapse
     ? location.pathname.split('/chat/')[1]
     : new URLSearchParams(location.search).get('conv');
 
-  const handleNew = useCallback(() => {
-    navigate('/');
-  }, [navigate]);
+  const handleNew = useCallback(async () => {
+    try {
+      await addConversation();
+    } finally {
+      navigate('/');
+    }
+  }, [navigate, addConversation]);
 
   const filtered = useMemo(() => {
     const displayable = conversations.filter(shouldShowConversation);
@@ -126,36 +128,52 @@ export function ConversationBar({ collapsed, onToggleCollapse: _onToggleCollapse
     <aside
       id="sidebar"
       className={[
-        'h-screen max-h-[100dvh] min-h-screen select-none',
-        'fixed top-0 left-0 z-50 shrink-0 overflow-x-hidden',
-        'text-sm text-gray-900 dark:text-gray-200',
+        'h-full select-none shrink-0 overflow-x-hidden',
+        'text-slate-700',
         collapsed
-          ? 'w-0 invisible'
-          : 'w-[var(--sidebar-width)] bg-gray-50/70 dark:bg-gray-950/70',
+          ? 'w-0 overflow-hidden'
+          : 'w-[260px] bg-white border-r border-slate-200',
         'transition-[width] duration-300',
       ].join(' ')}
     >
-      {/* Inner flex container with my-auto */}
-      <div className="my-auto flex flex-col justify-between h-screen max-h-[100dvh] w-[var(--sidebar-width)] overflow-x-hidden scrollbar-hidden">
+      <div className="flex flex-col justify-between h-full w-[260px] overflow-x-hidden scrollbar-hidden">
         {/* Top section: sticky */}
-        <div className="sticky top-0 px-[0.5625rem] pt-2 pb-1.5 z-10 bg-gray-50/70 dark:bg-gray-950/70">
-          {/* Top: brand + new icon */}
-          <div className="flex items-center justify-between h-12 px-2 flex-shrink-0">
-            <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 px-1">{settings.platform_name}</span>
+        <div className="sticky top-0 z-10">
+          {/* Logo + 平台名称 + 折叠按钮（与 AppSidebar 完全一致） */}
+          <div className="flex items-center justify-between px-2 pt-4 pb-2">
+            <div className="flex items-center gap-2 shrink-0">
+              <img src={settings.logo_url} alt={settings.platform_name} className="h-7 w-auto object-contain" />
+              <span className="text-[13px] font-semibold text-slate-600 tracking-wide hidden sm:block">
+                {settings.platform_name}
+              </span>
+            </div>
+
+            <button
+              onClick={onToggleCollapse}
+              className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors"
+              title={collapsed ? '展开侧边栏' : '折叠侧边栏'}
+            >
+              <i className={`ri-sidebar-fold-line text-lg ${collapsed ? 'rotate-180' : ''}`} />
+            </button>
+          </div>
+
+          {/* New conversation button */}
+          <div className="px-2 pb-2">
             <button
               onClick={handleNew}
-              title="新对话  ⌘N"
-              aria-label="新对话"
-              className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-xl
-                         text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-900
+              title="新建对话  ⌘N"
+              aria-label="新建对话"
+              className="w-full h-9 flex items-center justify-center gap-1.5 rounded-[10px]
+                         bg-blue-600 hover:bg-blue-700 text-white text-sm
                          transition-colors duration-150"
             >
-              <i className="ri-edit-box-line text-base" />
+              <i className="ri-add-line text-base" />
+              新建对话
             </button>
           </div>
 
           {/* Search box */}
-          <div className="px-1 pb-2">
+          <div className="px-2 pb-2">
             <div className="relative">
               <i className="ri-search-line absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm" />
               <input
@@ -219,48 +237,6 @@ export function ConversationBar({ collapsed, onToggleCollapse: _onToggleCollapse
           )}
         </div>
 
-        {/* Bottom: sticky */}
-        <div className="sticky bottom-0 border-t border-gray-200/50 dark:border-gray-800/50 px-3 py-3 space-y-1 bg-gray-50/70 dark:bg-gray-950/70">
-          {/* User info row */}
-          <div className="flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors cursor-pointer">
-            <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center shrink-0">
-              <span className="text-xs text-gray-600 dark:text-gray-300 font-bold">
-                {user?.display_name?.[0] ?? user?.username?.[0] ?? '?'}
-              </span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm text-gray-800 dark:text-gray-200 font-semibold truncate">
-                {user?.display_name ?? user?.username ?? '未知用户'}
-              </div>
-              <div className="text-xs text-gray-400 dark:text-gray-500">{user?.role ?? 'user'}</div>
-            </div>
-          </div>
-
-          {/* Settings entry (admin only) */}
-          {user?.role === 'admin' && (
-            <Link
-              to="/system/platform-settings"
-              className="flex items-center gap-2 px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400
-                         rounded-xl hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
-            >
-              <i className="ri-settings-3-line text-base" />
-              设置
-            </Link>
-          )}
-
-          {/* Logout */}
-          <button
-            onClick={async () => {
-              await logout();
-              navigate('/login');
-            }}
-            className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400
-                       rounded-xl hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
-          >
-            <i className="ri-logout-box-line text-base" />
-            退出登录
-          </button>
-        </div>
       </div>
 
       {/* 删除确认弹窗 */}

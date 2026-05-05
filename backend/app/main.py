@@ -98,7 +98,12 @@ from app.api import mcp_debug
 app.include_router(mcp_debug.router)
 
 from app.api.metrics import router as metrics_router
+from app.api.metrics_templates import router as metrics_templates_router
 app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
+from app.api import metrics_maintenance
+app.include_router(metrics_maintenance.router, prefix="/api/metrics/maintenance-windows", tags=["维护窗口"])
+
+app.include_router(metrics_templates_router, prefix="/api/metrics-templates", tags=["指标模板"])
 
 # Spec 24 P0 占位路由
 app.include_router(audit.router, prefix="/api/audit", tags=["审计"])

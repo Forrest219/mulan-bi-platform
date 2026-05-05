@@ -117,10 +117,13 @@ DIMENSION_RULE_COMPATIBILITY = {
 
 RULE_CONFIG_SCHEMA: dict = {
     RuleType.VOLUME_ANOMALY.value: {
-        "direction": {"type": "enum", "values": ["drop", "rise", "both"]},
-        "threshold_pct": {"type": "float", "min": 0.0, "max": 1.0},
-        "comparison_window": {"type": "enum", "values": ["1d", "7d", "30d"]},
-        "min_row_count": {"type": "int", "min": 0},
+        "time_column": {"type": "string", "required": False},
+        "observation_date": {"type": "string", "required": False, "default": "today"},
+        "baseline_offset": {"type": "int", "min": 1, "default": 1},
+        "direction": {"type": "enum", "values": ["drop", "rise", "both"], "default": "both"},
+        "threshold_pct": {"type": "float", "min": 0.0, "max": 1.0, "default": 0.05},
+        "min_row_count": {"type": "int", "min": 0, "default": 10},
+        "comparison_window": {"type": "enum", "values": ["1d", "7d", "30d"], "required": False},
     },
     RuleType.TABLE_COUNT_COMPARE.value: {
         "target_schema": {"type": "string", "required": True},

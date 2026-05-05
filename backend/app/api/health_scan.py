@@ -41,16 +41,7 @@ async def trigger_scan(
     if user["role"] not in ("admin",) and ds.owner_id != user["id"]:
         raise MulanError("AUTH_003", "无权操作此数据源", 403)
 
-    scan_db = HealthScanDatabase()
-    record = scan_db.create_scan(
-        datasource_id=ds.id,
-        datasource_name=ds.name,
-        db_type=ds.db_type,
-        database_name=ds.database_name,
-        triggered_by=user["id"],
-    )
-
-    # 解密密码并构建连接配置
+    # 解密密码并构建连接配置（必须在 create_scan 之前，因为 scoped_session 关闭会 detach ds）
     crypto = get_datasource_crypto()
     password = crypto.decrypt(ds.password_encrypted)
     db_config = {
@@ -61,6 +52,15 @@ async def trigger_scan(
         "password": password,
         "database": ds.database_name,
     }
+
+    scan_db = HealthScanDatabase()
+    record = scan_db.create_scan(
+        datasource_id=ds.id,
+        datasource_name=ds.name,
+        db_type=ds.db_type,
+        database_name=ds.database_name,
+        triggered_by=user["id"],
+    )
 
     # Celery 异步任务执行扫描
     from services.tasks.health_scan_tasks import run_health_scan_task

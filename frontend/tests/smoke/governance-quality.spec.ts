@@ -5,7 +5,7 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'admin123';
 
 /**
  * Smoke Test: 数据质量页
- * 路径：/governance/health-center?tab=quality（由 /governance/quality 重定向）
+ * 路径：/governance/dw-audit?tab=quality（由 /governance/quality 重定向）
  */
 test.describe('数据质量', () => {
 
@@ -40,7 +40,7 @@ test.describe('数据质量', () => {
   });
 
   test('页面加载后有内容或加载状态', async ({ page }) => {
-    await page.goto('/governance/health-center?tab=quality');
+    await page.goto('/governance/dw-audit?tab=quality');
     await page.waitForTimeout(2000);
     const hasTable = await page.locator('table').first().isVisible().catch(() => false);
     const hasEmpty = await page.locator('text=暂无').first().isVisible().catch(() => false);
@@ -52,7 +52,7 @@ test.describe('数据质量', () => {
   // ── 质量 Tab 内容 ──────────────────────────────────────────────
 
   test('质量 Tab 包含质量相关内容', async ({ page }) => {
-    await page.goto('/governance/health-center?tab=quality');
+    await page.goto('/governance/dw-audit?tab=quality');
     await page.waitForTimeout(2000);
     const body = await page.locator('body').textContent() ?? '';
     const hasQualityKeywords = [
@@ -63,7 +63,7 @@ test.describe('数据质量', () => {
   });
 
   test('页面无英文占位文案残留', async ({ page }) => {
-    await page.goto('/governance/health-center?tab=quality');
+    await page.goto('/governance/dw-audit?tab=quality');
     await page.waitForTimeout(1000);
     const body = await page.locator('body').textContent();
     const placeholderTexts = [
@@ -80,7 +80,7 @@ test.describe('数据质量', () => {
     page.on('console', (msg) => {
       if (msg.type() === 'error') errors.push(msg.text());
     });
-    await page.goto('/governance/health-center?tab=quality');
+    await page.goto('/governance/dw-audit?tab=quality');
     await page.waitForTimeout(2000);
     const realErrors = errors.filter(e =>
       !e.includes('401') &&
@@ -97,7 +97,7 @@ test.describe('数据质量', () => {
   // ── 操作入口（如有）──────────────────────────────────────────
 
   test('质量 Tab 可能有新增规则或刷新按钮', async ({ page }) => {
-    await page.goto('/governance/health-center?tab=quality');
+    await page.goto('/governance/dw-audit?tab=quality');
     await page.waitForTimeout(2000);
     const hasAddBtn = await page.locator('button').filter({ hasText: /新增|添加|创建/i }).first().isVisible().catch(() => false);
     const hasRefreshBtn = await page.locator('button').filter({ hasText: /刷新|重置/i }).first().isVisible().catch(() => false);
@@ -111,7 +111,7 @@ test.describe('数据质量', () => {
   // ── Tab 间切换 ──────────────────────────────────────────────
 
   test('可从质量 Tab 切回数据仓库 Tab', async ({ page }) => {
-    await page.goto('/governance/health-center?tab=quality');
+    await page.goto('/governance/dw-audit?tab=quality');
     await page.waitForTimeout(1000);
     const warehouseTab = page.locator('button').filter({ hasText: /仓库|数据/i }).first();
     if (await warehouseTab.isVisible().catch(() => false)) {
@@ -122,7 +122,7 @@ test.describe('数据质量', () => {
   });
 
   test('可从质量 Tab 切换到 Tableau 健康 Tab', async ({ page }) => {
-    await page.goto('/governance/health-center?tab=quality');
+    await page.goto('/governance/dw-audit?tab=quality');
     await page.waitForTimeout(1000);
     const tableauTab = page.locator('button', { hasText: /Tableau/i }).first();
     if (await tableauTab.isVisible().catch(() => false)) {

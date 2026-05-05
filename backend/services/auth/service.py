@@ -216,23 +216,15 @@ class AuthService:
 
     def update_user_role(self, user_id: int, role: str) -> bool:
         """更新用户角色"""
-        user = self._db.get_user(user_id)
-        if not user:
+        if not self._db.update_user_role(user_id, role):
             return False
-        user.role = role
-        self._db.update_user(user)
         # 撤销该用户所有 Refresh Token，强制重新登录以获取新角色
         self._db.revoke_all_user_refresh_tokens(user_id)
         return True
 
     def toggle_user_active(self, user_id: int) -> bool:
         """切换用户激活状态"""
-        user = self._db.get_user(user_id)
-        if not user:
-            return False
-        user.is_active = not user.is_active
-        self._db.update_user(user)
-        return True
+        return self._db.toggle_user_active(user_id)
 
     def update_user_permissions(self, user_id: int, permissions: list) -> bool:
         """更新用户权限"""

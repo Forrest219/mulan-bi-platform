@@ -6,6 +6,9 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'admin123';
 /**
  * Smoke Test: 首页问答功能
  * 路径：/
+ *
+ * SSE 协议：POST /api/agent/stream
+ * 事件类型：metadata → thinking → tool_call → tool_result → token → done | error
  */
 test.describe('首页 - 问答功能', () => {
 
@@ -24,12 +27,16 @@ test.describe('首页 - 问答功能', () => {
   });
 
   test('发送问题后出现加载或回答状态', async ({ page }) => {
-    // Mock SSE 确保有稳定回答，避免依赖真实后端
-    await page.route('**/api/chat/stream**', async (route) => {
+    await page.route('**/api/agent/stream**', async (route) => {
+      if (route.request().method() !== 'POST') { await route.continue(); return; }
       await route.fulfill({
         status: 200,
         headers: { 'content-type': 'text/event-stream' },
-        body: 'data: {"done":true,"answer":"销售额最高的区域是华东区。","trace_id":"smoke-001"}\n\n',
+        body: [
+          'data: {"type":"metadata","conversation_id":"conv-smoke-001","run_id":"smoke-001"}\n\n',
+          'data: {"type":"token","content":"销售额最高的区域是华东区。"}\n\n',
+          'data: {"type":"done","answer":"销售额最高的区域是华东区。","trace_id":"smoke-001","run_id":"smoke-001","tools_used":[],"response_type":"text","response_data":null,"steps_count":0,"execution_time_ms":100,"sources_count":0,"top_sources":[]}\n\n',
+        ].join(''),
       });
     });
 
@@ -41,7 +48,6 @@ test.describe('首页 - 问答功能', () => {
     await askBarInput.fill('查询销售额最高的产品');
     await sendBtn.click();
 
-    // 回答出现即表示 UI 正确渲染了流式响应
     await expect(page.locator('text=销售额最高的区域是华东区')).toBeVisible({ timeout: 5000 });
   });
 
@@ -52,7 +58,6 @@ test.describe('首页 - 问答功能', () => {
     await askBarInput.fill('查询本月收入');
     await askBarInput.press('Enter');
 
-    // 输入框应被清空
     await expect(askBarInput).toHaveValue('');
   });
 
@@ -65,23 +70,26 @@ test.describe('首页 - 问答功能', () => {
     await askBarInput.fill('测试问题');
     await sendBtn.click();
 
-    // 无论结果如何，输入框都应清空
     await expect(askBarInput).toHaveValue('');
   });
 
   // ─── P2: 网络层契约验证 ────────────────────────────────────────────────
 
-  test('Ask Data 调用正确 endpoint 并渲染 token 流', async ({ page }) => {
+  test('问答调用 POST /api/agent/stream 并渲染 token 流', async ({ page }) => {
+    let capturedMethod = '';
     let capturedUrl = '';
-    await page.route('**/api/chat/stream**', async (route) => {
+    await page.route('**/api/agent/stream**', async (route) => {
+      capturedMethod = route.request().method();
       capturedUrl = route.request().url();
+      if (capturedMethod !== 'POST') { await route.continue(); return; }
       await route.fulfill({
         status: 200,
         headers: { 'content-type': 'text/event-stream' },
         body: [
-          'data: {"token":"根","done":false}\n\n',
-          'data: {"token":"据","done":false}\n\n',
-          'data: {"done":true,"answer":"根据分析，销售额最高的产品是 A 产品。","trace_id":"test-trace-001"}\n\n',
+          'data: {"type":"metadata","conversation_id":"conv-001","run_id":"run-001"}\n\n',
+          'data: {"type":"token","content":"根据"}\n\n',
+          'data: {"type":"token","content":"分析，销售额最高的产品是 A 产品。"}\n\n',
+          'data: {"type":"done","answer":"根据分析，销售额最高的产品是 A 产品。","trace_id":"test-trace-001","run_id":"run-001","tools_used":[],"response_type":"text","response_data":null,"steps_count":0,"execution_time_ms":150,"sources_count":0,"top_sources":[]}\n\n',
         ].join(''),
       });
     });
@@ -91,16 +99,22 @@ test.describe('首页 - 问答功能', () => {
     await askBarInput.fill('销售额最高的产品是什么');
     await askBarInput.press('Enter');
 
-    expect(capturedUrl).toContain('/api/chat/stream');
+    expect(capturedUrl).toContain('/api/agent/stream');
+    expect(capturedMethod).toBe('POST');
     await expect(page.locator('text=根据分析，销售额最高的产品是 A 产品')).toBeVisible({ timeout: 5000 });
   });
 
   test('done 事件后显示回答并渲染反馈按钮', async ({ page }) => {
-    await page.route('**/api/chat/stream**', async (route) => {
+    await page.route('**/api/agent/stream**', async (route) => {
+      if (route.request().method() !== 'POST') { await route.continue(); return; }
       await route.fulfill({
         status: 200,
         headers: { 'content-type': 'text/event-stream' },
-        body: 'data: {"done":true,"answer":"答案是 42","trace_id":"trace-042"}\n\n',
+        body: [
+          'data: {"type":"metadata","conversation_id":"conv-042","run_id":"run-042"}\n\n',
+          'data: {"type":"token","content":"答案是 42"}\n\n',
+          'data: {"type":"done","answer":"答案是 42","trace_id":"trace-042","run_id":"run-042","tools_used":[],"response_type":"text","response_data":null,"steps_count":0,"execution_time_ms":80,"sources_count":0,"top_sources":[]}\n\n',
+        ].join(''),
       });
     });
 
@@ -113,44 +127,52 @@ test.describe('首页 - 问答功能', () => {
     await expect(page.locator('button[title="报告错误"]')).toBeVisible();
   });
 
-  test('点击反馈按钮发送 /api/ask-data/feedback', async ({ page }) => {
-    let feedbackBody: string | null = null;
-
-    await page.route('**/api/chat/stream**', async (route) => {
+  test('点击反馈按钮发送 /api/agent/feedback', async ({ page }) => {
+    await page.route('**/api/agent/stream**', async (route) => {
+      if (route.request().method() !== 'POST') { await route.continue(); return; }
       await route.fulfill({
         status: 200,
         headers: { 'content-type': 'text/event-stream' },
-        body: 'data: {"done":true,"answer":"满意","trace_id":"trace-abc123"}\n\n',
+        body: [
+          'data: {"type":"metadata","conversation_id":"conv-fb","run_id":"run-fb-001"}\n\n',
+          'data: {"type":"token","content":"满意"}\n\n',
+          'data: {"type":"done","answer":"满意","trace_id":"trace-abc123","run_id":"run-fb-001","tools_used":[],"response_type":"text","response_data":null,"steps_count":0,"execution_time_ms":60,"sources_count":0,"top_sources":[]}\n\n',
+        ].join(''),
       });
     });
 
-    await page.route('POST **/api/ask-data/feedback', async (route) => {
-      feedbackBody = route.request().postData() ?? '';
-      await route.fulfill({ status: 200, body: '{"ok":true}' });
+    await page.route('**/api/agent/feedback**', async (route) => {
+      await route.fulfill({ status: 200, body: '{"status":"created","feedback_id":1}' });
     });
 
     await page.goto('/');
     await page.locator('textarea[data-askbar-input]').fill('满意吗');
     await page.keyboard.press('Enter');
 
-    await expect(page.locator('text=满意')).toBeVisible({ timeout: 5000 });
-    await page.locator('button[title="有用"]').click();
+    await expect(page.getByText('满意', { exact: true })).toBeVisible({ timeout: 5000 });
+    await page.waitForTimeout(1000);
 
-    expect(feedbackBody).not.toBeNull();
-    const body = JSON.parse(feedbackBody!);
-    expect(body.trace_id).toBe('trace-abc123');
+    const feedbackPromise = page.waitForRequest(req =>
+      req.url().includes('/api/agent/feedback') && req.method() === 'POST',
+    );
+    await page.locator('button[title="有用"]').click();
+    const feedbackReq = await feedbackPromise;
+
+    const body = JSON.parse(feedbackReq.postData() ?? '{}');
+    expect(body.run_id).toBeTruthy();
     expect(body.rating).toBe('up');
   });
 
-  test('metadata 事件后显示来源徽章', async ({ page }) => {
-    await page.route('**/api/chat/stream**', async (route) => {
+  test('done 事件 sources 字段渲染来源徽章', async ({ page }) => {
+    await page.route('**/api/agent/stream**', async (route) => {
+      if (route.request().method() !== 'POST') { await route.continue(); return; }
       await route.fulfill({
         status: 200,
         headers: { 'content-type': 'text/event-stream' },
         body: [
-          'data: {"token":"根","done":false}\n\n',
-          'data: {"type":"metadata","sources_count":3,"top_sources":["产品表","销售表","客户表"]}\n\n',
-          'data: {"done":true,"answer":"共 3 个数据源。","trace_id":"trace-meta-001"}\n\n',
+          'data: {"type":"metadata","conversation_id":"conv-meta-001","run_id":"run-meta-001"}\n\n',
+          'data: {"type":"token","content":"共 3 个数据源。"}\n\n',
+          'data: {"type":"done","answer":"共 3 个数据源。","trace_id":"trace-meta-001","run_id":"run-meta-001","tools_used":[],"response_type":"text","response_data":null,"steps_count":0,"execution_time_ms":200,"sources_count":3,"top_sources":["产品表","销售表","客户表"]}\n\n',
         ].join(''),
       });
     });
@@ -160,9 +182,7 @@ test.describe('首页 - 问答功能', () => {
     await page.keyboard.press('Enter');
 
     await expect(page.locator('text=共 3 个数据源')).toBeVisible({ timeout: 5000 });
-    // 来源徽章：显示数据源总数
     await expect(page.locator('text=基于 3 个数据源生成')).toBeVisible();
-    // 来源徽章：显示具体表名
     await expect(page.locator('text=产品表')).toBeVisible();
     await expect(page.locator('text=销售表')).toBeVisible();
   });
@@ -198,13 +218,12 @@ test.describe('首页 - 回归测试', () => {
     await page.route('**/api/tableau/connections**', async (route) => {
       await route.fulfill({ status: 200, body: JSON.stringify([]) });
     });
-    await page.route('**/api/search/query**', async (route) => {
+    await page.route('**/api/agent/stream**', async (route) => {
+      if (route.request().method() !== 'POST') { await route.continue(); return; }
       await route.fulfill({
-        status: 400,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          detail: { error_code: 'NLQ_012', message: '暂无可用数据源，请先配置数据连接' },
-        }),
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+        body: 'data: {"type":"error","error_code":"NLQ_012","message":"暂无可用数据源，请先配置数据连接"}\n\n',
       });
     });
     await page.goto('/');
@@ -218,18 +237,16 @@ test.describe('首页 - 回归测试', () => {
     }
   });
 
-  test('后端返回 SYS_001 时 ErrorCard 应显示"服务器内部错误"而非"未知错误"', async ({ page }) => {
-    await page.route('**/api/search/query**', async (route) => {
+  test('后端返回 SYS_001 时显示"服务器内部错误"而非"未知错误"', async ({ page }) => {
+    await page.route('**/api/agent/stream**', async (route) => {
+      if (route.request().method() !== 'POST') { await route.continue(); return; }
       await route.fulfill({
-        status: 500,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          detail: { error_code: 'SYS_001', message: '服务器内部错误', details: {} },
-        }),
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+        body: 'data: {"type":"error","error_code":"SYS_001","message":"服务器内部错误"}\n\n',
       });
     });
     await page.goto('/');
-    // 通过 suggestion card 触发 handleExamplePick（走 /api/search/query）
     const suggestion = page.locator('[data-suggestion]').first();
     if (await suggestion.isVisible({ timeout: 3000 }).catch(() => false)) {
       await suggestion.click();

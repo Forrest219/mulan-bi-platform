@@ -786,7 +786,16 @@ else:
 > 自动回滚必须写 audit log（actor=`system`，原因=阈值告警 + 触发指标快照），见 §15.G 红线 4。
 > 自动切 `legacy_only` 后**仅允许 admin 在 UI 上手动解除**，禁止再次自动恢复，避免抖动。
 
-### 15.D 意图识别策略（替代 §7.2 "仅 LLM 推理"陈述，作为 Phase 1b 起的正式实现）
+### 15.D 意图识别策略
+
+> **MVP 阶段暂停（2026-05-04）**：当前所有首页请求均为问数场景（Tableau MCP），独立意图识别增加 2-5 秒延迟但不改变路由结果（除 chat 拦截外，所有意图均进入同一个 `run_agent()`）。回归 §7.2 策略：由 ReAct Engine 第一步 Think 内置判断意图。
+>
+> 代码模块 `services/data_agent/intent/` 保留不删，`bi_agent_intent_log` 表保留历史数据。待多场景路由需求出现时（如归因引擎、报表引擎独立入口）再重新启用策略链。
+
+<details>
+<summary>原设计（已暂停，点击展开）</summary>
+
+原标题：替代 §7.2 "仅 LLM 推理"陈述，作为 Phase 1b 起的正式实现
 
 > 替换原"仅给策略名"的描述，每种策略给出判定输入 / 输出 / 决策方式。Phase 1a 仍可走 §7.2 的 LLM 内置推理，Phase 1b 起切换到本节的策略链。
 
@@ -810,6 +819,8 @@ context_aware → keyword_match → llm_classify → fallback("chat")
 **审计**：每次意图识别（含每一级 fallback）写一条 `bi_agent_intent_log`（见 §15.E），`fallback_chain` 字段以 `→` 连接（如 `context_aware→keyword→llm→chat`）。
 
 **策略注册**：所有策略实现 `IntentStrategy` 抽象类，通过 `IntentStrategyRegistry.register()` 注册；新增策略必须同步补本节表格（见 §15.G 强制检查清单）。
+
+</details>
 
 ### 15.E 新增数据表
 

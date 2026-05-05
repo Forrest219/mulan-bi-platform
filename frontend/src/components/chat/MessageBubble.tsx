@@ -16,6 +16,7 @@ import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import type { Components } from 'react-markdown';
 import ThinkingBlock from '../../pages/home/components/ThinkingBlock';
 
+
 // ─── CodeBlock ────────────────────────────────────────────────────────────────
 
 interface CodeBlockProps {
@@ -147,10 +148,6 @@ export interface MessageBubbleProps {
   thinking?: string;
   /** trace_id for feedback/rating (Spec 36 §5) */
   traceId?: string;
-  /** Tool calls made during this message (Spec 29/30 §5) */
-  toolCalls?: Array<{ tool: string; params: Record<string, unknown> }>;
-  /** Tool results from this message (Spec 29/30 §5) */
-  toolResults?: Array<{ tool: string; summary: string }>;
 }
 
 export default function MessageBubble({
@@ -159,16 +156,14 @@ export default function MessageBubble({
   isStreaming = false,
   isError = false,
   thinking,
-  traceId: _traceId,
-  toolCalls: _toolCalls,
-  toolResults: _toolResults,
+  traceId,
 }: MessageBubbleProps) {
   const isUser = role === 'user';
 
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
+    <div className={`flex ${isUser ? 'flex-row-reverse' : 'justify-start'} mb-4 group`}>
       <div
-        className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${
+        className={`${isUser ? 'self-end max-w-[85%]' : 'self-start max-w-[80%]'} rounded-2xl px-4 py-3 text-sm ${
           isUser
             ? 'bg-blue-600 text-white'
             : 'bg-white border border-slate-200 text-slate-800 shadow-sm'

@@ -15,7 +15,7 @@ test.describe('Tableau 资产生态', () => {
 
   test('Tableau 资产页可访问且显示中文标题', async ({ page }) => {
     await page.goto('/assets/tableau');
-    await expect(page.locator('h1')).toContainText('Tableau', { timeout: 5000 });
+    await expect(page.locator('text=Tableau 资产浏览')).toBeVisible({ timeout: 5000 });
     await expect(page.locator('text=Page Not Found')).toHaveCount(0);
   });
 
@@ -91,5 +91,30 @@ test.describe('Tableau 资产生态', () => {
                               await page.locator('text=Workbook').isVisible().catch(() => false) ||
                               await page.locator('text=View').isVisible().catch(() => false);
     // 此测试不强制失败，因为可能为空状态
+  });
+
+  test('列表视图表头完整', async ({ page }) => {
+    await page.goto('/assets/tableau');
+    await page.waitForTimeout(2000);
+
+    // 切换到列表视图
+    const listBtn = page.locator('button i.ri-list-check').locator('..');
+    if (await listBtn.isVisible().catch(() => false)) {
+      await listBtn.click();
+      await page.waitForTimeout(500);
+    }
+
+    // 如果有数据，表头应完整
+    const hasTable = await page.locator('table').isVisible().catch(() => false);
+    if (hasTable) {
+      await expect(page.locator('th', { hasText: '类型' })).toBeVisible();
+      await expect(page.locator('th', { hasText: '名称' })).toBeVisible();
+      await expect(page.locator('th', { hasText: '项目' })).toBeVisible();
+      await expect(page.locator('th', { hasText: '所有者' })).toBeVisible();
+      await expect(page.locator('th', { hasText: '浏览量' })).toBeVisible();
+      await expect(page.locator('th', { hasText: '创建时间' })).toBeVisible();
+      await expect(page.locator('th', { hasText: '修改时间' })).toBeVisible();
+      await expect(page.locator('th', { hasText: '同步时间' })).toBeVisible();
+    }
   });
 });

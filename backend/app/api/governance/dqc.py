@@ -77,6 +77,27 @@ class UpdateRuleRequest(BaseModel):
 class SuggestRulesRequest(BaseModel):
     dimensions: Optional[List[str]] = None
     max_rules: int = 5
+    use_llm: bool = False
+
+
+class CreateTemplateRequest(BaseModel):
+    name: str = Field(..., max_length=256)
+    description: Optional[str] = None
+    dimension: str = Field(..., max_length=32)
+    rule_type: str = Field(..., max_length=32)
+    default_config: Dict[str, Any] = Field(default_factory=dict)
+    match_condition: Dict[str, Any] = Field(default_factory=dict)
+    severity: str = "MEDIUM"
+    enabled: bool = True
+
+
+class UpdateTemplateRequest(BaseModel):
+    name: Optional[str] = Field(None, max_length=256)
+    description: Optional[str] = None
+    default_config: Optional[Dict[str, Any]] = None
+    match_condition: Optional[Dict[str, Any]] = None
+    severity: Optional[str] = None
+    enabled: Optional[bool] = None
 
 
 class RunCycleRequest(BaseModel):
@@ -187,14 +208,20 @@ def _validate_rule_config(rule_type: str, config: Dict[str, Any]) -> None:
         if not config.get("sql"):
             raise DQCError.invalid_rule_config({"reason": "require_sql"})
     elif rule_type == RuleType.VOLUME_ANOMALY.value:
-        direction = config.get("direction", "drop").lower()
+        direction = config.get("direction", "both").lower()
         if direction not in ("drop", "rise", "both"):
             raise DQCError.invalid_rule_config({"reason": "invalid_direction", "value": direction})
-        threshold = config.get("threshold_pct", 0.80)
+        threshold = config.get("threshold_pct", 0.10)
         if not (0 < threshold <= 1):
             raise DQCError.invalid_rule_config({"reason": "threshold_pct_out_of_range", "value": threshold})
-        window = config.get("comparison_window", "1d")
-        if window not in ("1d", "7d", "30d"):
+        min_row = config.get("min_row_count", 10)
+        if not isinstance(min_row, (int, float)) or min_row < 0:
+            raise DQCError.invalid_rule_config({"reason": "min_row_count_invalid", "value": min_row})
+        time_col = config.get("time_column")
+        if time_col is not None and not isinstance(time_col, str):
+            raise DQCError.invalid_rule_config({"reason": "time_column_must_be_string"})
+        window = config.get("comparison_window")
+        if window and window not in ("1d", "7d", "30d"):
             raise DQCError.invalid_rule_config({"reason": "invalid_comparison_window", "value": window})
     elif rule_type == RuleType.TABLE_COUNT_COMPARE.value:
         if not config.get("target_schema"):
@@ -458,7 +485,17 @@ async def list_rules(
         is_active=is_active,
         is_system_suggested=is_system_suggested,
     )
-    return {"items": [r.to_dict() for r in rules], "total": len(rules)}
+    items = []
+    template_cache: dict = {}
+    for r in rules:
+        d = r.to_dict()
+        if r.template_id:
+            if r.template_id not in template_cache:
+                tmpl = dao.get_template(db, r.template_id)
+                template_cache[r.template_id] = tmpl.default_config if tmpl else {}
+            d["template_default_config"] = template_cache[r.template_id]
+        items.append(d)
+    return {"items": items, "total": len(rules)}
 
 
 @router.post("/assets/{asset_id}/rules")
@@ -522,6 +559,8 @@ async def update_rule(
         raise DQCError.rule_already_exists({"asset_id": asset_id, "name": updates["name"]})
 
     updates["updated_by"] = current_user["id"]
+    if rule.template_id:
+        updates["is_modified_by_user"] = True
     dao.update_rule(db, rule_id, **updates)
     db.commit()
 
@@ -564,11 +603,18 @@ async def suggest_rules(
         raise DQCError.asset_not_found()
     _check_asset_ownership(asset, current_user)
 
-    # V1 开放，MVP 返回空数组
+    from services.dqc.rule_suggester import suggest_and_create_rules
+
+    rules = suggest_and_create_rules(
+        db, asset_id,
+        created_by=current_user["id"],
+        use_llm=body.use_llm if body else False,
+        max_rules=body.max_rules if body else 5,
+    )
     return {
         "analysis_id": None,
-        "suggested_rules": [],
-        "message": "V1 开放",
+        "suggested_rules": [r.to_dict() for r in rules] if rules else [],
+        "message": f"生成 {len(rules)} 条建议规则" if rules else "无可建议规则（请先完成 Profiling）",
     }
 
 
@@ -751,4 +797,231 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
         "dimension_avg": dim_avg,
         "top_failing_assets": top_failing,
         "recent_signal_changes": recent_changes,
+    }
+
+
+# ==================== Templates ====================
+
+
+@router.get("/templates")
+async def list_templates(
+    request: Request,
+    enabled: Optional[bool] = None,
+    dimension: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    get_current_user(request, db)
+    dao = DqcDatabase()
+    templates = dao.list_templates(db, enabled=enabled, dimension=dimension)
+    items = []
+    for t in templates:
+        d = t.to_dict()
+        d["derived_rules_count"] = dao.count_derived_rules(db, t.id)
+        d["unmodified_rules_count"] = dao.count_derived_rules(db, t.id, only_unmodified=True)
+        items.append(d)
+    return {"items": items, "total": len(items)}
+
+
+@router.post("/templates")
+async def create_template(
+    body: CreateTemplateRequest,
+    current_user: dict = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    _validate_rule_type_and_dim(body.dimension, body.rule_type)
+    dao = DqcDatabase()
+    tmpl = dao.create_template(
+        db,
+        name=body.name,
+        description=body.description,
+        dimension=body.dimension,
+        rule_type=body.rule_type,
+        default_config=body.default_config,
+        match_condition=body.match_condition,
+        severity=body.severity,
+        enabled=body.enabled,
+        is_builtin=False,
+        created_by=current_user["id"],
+    )
+    db.commit()
+    db.refresh(tmpl)
+    return tmpl.to_dict()
+
+
+@router.get("/templates/{template_id}")
+async def get_template(template_id: int, request: Request, db: Session = Depends(get_db)):
+    get_current_user(request, db)
+    dao = DqcDatabase()
+    tmpl = dao.get_template(db, template_id)
+    if not tmpl:
+        raise DQCError.template_not_found()
+    d = tmpl.to_dict()
+    d["derived_rules_count"] = dao.count_derived_rules(db, template_id)
+    d["unmodified_rules_count"] = dao.count_derived_rules(db, template_id, only_unmodified=True)
+    return d
+
+
+@router.patch("/templates/{template_id}")
+async def update_template(
+    template_id: int,
+    body: UpdateTemplateRequest,
+    current_user: dict = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    dao = DqcDatabase()
+    tmpl = dao.get_template(db, template_id)
+    if not tmpl:
+        raise DQCError.template_not_found()
+
+    updates = body.model_dump(exclude_unset=True, exclude_none=True)
+    updates["updated_by"] = current_user["id"]
+    dao.update_template(db, template_id, **updates)
+
+    propagated = 0
+    if "default_config" in updates:
+        propagated = dao.propagate_template(db, template_id)
+
+    db.commit()
+    tmpl = dao.get_template(db, template_id)
+    d = tmpl.to_dict()
+    d["propagated_rules_count"] = propagated
+    return d
+
+
+@router.delete("/templates/{template_id}")
+async def delete_template(
+    template_id: int,
+    current_user: dict = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    dao = DqcDatabase()
+    tmpl = dao.get_template(db, template_id)
+    if not tmpl:
+        raise DQCError.template_not_found()
+    dao.delete_template(db, template_id)
+    db.commit()
+    return {"message": "模板已删除", "template_id": template_id}
+
+
+@router.post("/templates/{template_id}/apply")
+async def apply_template_to_assets(
+    template_id: int,
+    current_user: dict = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """对已有资产补刷模板。"""
+    dao = DqcDatabase()
+    tmpl = dao.get_template(db, template_id)
+    if not tmpl:
+        raise DQCError.template_not_found()
+    if not tmpl.enabled:
+        raise DQCError.invalid_parameter("模板未启用")
+
+    from services.dqc.template_matcher import TemplateMatcher
+
+    matcher = TemplateMatcher(dao)
+    assets = dao.list_enabled_assets(db)
+    total_created = 0
+    for asset in assets:
+        rules = matcher.match_and_instantiate(db, asset, created_by=current_user["id"])
+        total_created += len(rules)
+    db.commit()
+    return {
+        "message": f"已对 {len(assets)} 个资产补刷模板，创建 {total_created} 条规则",
+        "assets_count": len(assets),
+        "rules_created": total_created,
+    }
+
+
+# ── AI 智能填充 ──────────────────────────────────────────────────────
+
+class AiParseTemplateInput(BaseModel):
+    description: str = Field(..., min_length=2, max_length=500)
+    rule_type: Optional[str] = None
+
+AI_PARSE_TEMPLATE_PROMPT = """你是数据质量平台的配置助手。用户用自然语言描述了一条监控规则的意图，请解析为结构化配置。
+
+## 规则类型和对应参数
+
+- null_rate: max_rate(0~1)
+- uniqueness: max_duplicate_rate(0~1)
+- freshness: max_age_hours(整数，小时)
+- range_check: check_mode(min_max_all | sample)
+- regex: pattern(正则表达式)
+- volume_anomaly: time_column(时间列名，可选), observation_date(默认today), threshold_pct(0~1), direction(both|drop|rise), min_row_count(整数)
+- table_count_compare: tolerance_pct(0~1)
+- custom_sql: sql(SELECT语句)
+
+## 匹配范围
+
+- 表级: {{"scope": "table"}}
+- 列级: {{"scope": "column", "column_filter": {{...}}}}
+  column_filter 支持: has_nulls(bool), is_candidate_id(bool), has_numeric_range(bool), data_type_contains(字符串数组)
+
+## 用户描述
+
+规则类型: {rule_type}
+用户描述: {description}
+
+## 要求
+
+返回 JSON，格式如下（只返回 JSON，不要其他内容）：
+{{
+  "name": "模板名称（简洁中文）",
+  "default_config": {{...按规则类型填充}},
+  "match_condition": {{...}},
+  "severity": "LOW|MEDIUM|HIGH|CRITICAL",
+  "reasoning": "一句话解释你的理解"
+}}"""
+
+
+@router.post("/templates/ai-parse")
+async def ai_parse_template_config(
+    body: AiParseTemplateInput,
+    current_user: dict = Depends(get_current_user),
+):
+    """用 LLM 解析自然语言描述为模板配置。"""
+    import json as _json
+    import re
+
+    from services.common.async_compat import run_async_safely
+    from services.llm.service import LLMService
+
+    rule_type = body.rule_type or "未指定"
+    prompt = AI_PARSE_TEMPLATE_PROMPT.format(
+        rule_type=rule_type,
+        description=body.description,
+    )
+
+    service = LLMService()
+
+    async def _call():
+        return await service.complete_for_semantic(
+            prompt=prompt,
+            system="你是数据质量监控配置助手，擅长将自然语言转为结构化参数。只返回 JSON。",
+            timeout=20,
+            purpose="default",
+        )
+
+    result = run_async_safely(_call())
+
+    if "error" in result:
+        raise DQCError.invalid_parameter(f"AI 解析失败: {result['error']}")
+
+    content = result.get("content", "")
+    json_match = re.search(r"\{[\s\S]*\}", content)
+    if not json_match:
+        raise DQCError.invalid_parameter("AI 返回格式异常，请重试或手动配置")
+
+    try:
+        parsed = _json.loads(json_match.group())
+    except _json.JSONDecodeError:
+        raise DQCError.invalid_parameter("AI 返回 JSON 解析失败，请重试")
+
+    return {
+        "name": parsed.get("name", ""),
+        "default_config": parsed.get("default_config", {}),
+        "match_condition": parsed.get("match_condition", {"scope": "table"}),
+        "severity": parsed.get("severity", "MEDIUM"),
+        "reasoning": parsed.get("reasoning", ""),
     }

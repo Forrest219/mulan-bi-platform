@@ -65,7 +65,7 @@ await expect(page.locator('text=答案是 42')).toBeVisible();
 
 ### 冒烟测试用例索引
 
-> 共 **35 个** `.spec.ts` 文件，覆盖前端所有已开发页面。`npm run smoke` 运行全部。
+> 共 **36 个** `.spec.ts` 文件，覆盖前端所有已开发页面。`npm run smoke` 运行全部。
 
 #### 回归冒烟单元测试（Vitest）
 | 文件 | 覆盖链路 | 关键断言 |
@@ -120,13 +120,14 @@ await expect(page.locator('text=答案是 42')).toBeVisible();
 | `rule-config.spec.ts` | 规则配置 | 规则列表、分类/级别筛选、新建入口 |
 | `permission-redirect.spec.ts` | 任务管理、查询告警、Agent 监控、平台设置 | adminOnly 权限校验 |
 
-#### 资产管理 — Tableau（4 个）
+#### 资产管理 — Tableau（5 个）
 | 文件 | 覆盖链路 | 关键断言 |
 |------|---------|---------|
-| `tableau-asset-list.spec.ts` | Tableau 资产列表 | 资产卡片/表格、连接选择器、搜索框 |
+| `tableau-asset-list.spec.ts` | Tableau 资产列表 | 资产卡片/表格、连接选择器、搜索框、列表视图表头（8 列） |
 | `tableau-asset-detail.spec.ts` | Tableau 资产详情 | Tab 切换（基本信息/关联数据源/字段元数据/健康度/AI解读）、面包屑导航 |
-| `tableau-connections.spec.ts` | Tableau 连接管理 | 新建连接 Modal、连接类型选择、禁用启用切换 |
-| `sync-logs.spec.ts` | 同步日志 | 日志列表、分页、状态标签（进行中/成功/失败）、错误详情展开 |
+| `tableau-connections.spec.ts` | Tableau 连接（只读状态看板） | MCP 配置提示横幅、无增删改按钮、同步/测试/日志操作 |
+| `sync-logs.spec.ts` | 同步日志（单连接） | 日志列表、表头 12 列、分页、状态标签、错误详情展开 |
+| `sync-logs-all.spec.ts` | 同步日志（全局） | 筛选器（连接/状态/时间）、表头 13 列、状态选项、分页格式 |
 
 #### 资产管理 — 连接中心（2 个）
 | 文件 | 覆盖链路 | 关键断言 |
@@ -137,7 +138,7 @@ await expect(page.locator('text=答案是 42')).toBeVisible();
 #### 数据治理（7 个）
 | 文件 | 覆盖链路 | 关键断言 |
 |------|---------|---------|
-| `governance-health-center.spec.ts` | 健康中心 | Tab 切换（Warehouse/Quality/Tableau）、Scan 按钮、数据源选择器 |
+| `governance-health-center.spec.ts` | 数仓巡检 | Tab 切换（Warehouse/Quality/Tableau）、Scan 按钮、数据源选择器 |
 | `governance-quality.spec.ts` | 数据质量 | 质量规则内容、Tab 切换、无占位文案 |
 | `governance-metrics.spec.ts` | Metrics 指标 | 指标类型筛选（原子/派生/比率）、列表/空状态 |
 | `semantic-datasource-list.spec.ts` | 语义数据源 | 连接选择器、状态筛选、空状态 |
@@ -175,6 +176,14 @@ test.beforeEach(async ({ page }) => {
 - 禁止在测试文件中硬编码密码
 - 使用环境变量：`process.env.SMOKE_ADMIN_USERNAME` / `SMOKE_ADMIN_PASSWORD`
 - CI 中通过 secret 注入
+
+#### 测试数据清理（globalTeardown）
+- 配置入口：`frontend/playwright.config.ts` 的 `globalTeardown: './tests/global-teardown.ts'`
+- 当前覆盖：LLM 配置（按 `display_name` 前缀匹配，见 `tests/global-teardown.ts` 的 `CLEANUP_PATTERN`）
+- **新增冒烟用例若会写库，必须**：
+  1) 用约定前缀命名测试数据（如 `删除测试-`、`编辑测试-`、`MiniMax-Test-`）
+  2) 在 `CLEANUP_PATTERN` 追加该前缀
+- teardown 失败不影响测试退出码，仅打印警告
 
 #### 错误过滤（统一）
 ```ts

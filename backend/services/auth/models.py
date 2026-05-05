@@ -314,14 +314,44 @@ class UserDatabase:
         """更新用户"""
         self.session.commit()
 
+    def update_user_role(self, user_id: int, role: str) -> bool:
+        """更新用户角色"""
+        session = SessionLocal()
+        try:
+            user = session.query(User).filter(User.id == user_id).first()
+            if user:
+                user.role = role
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
+
     def update_user_permissions(self, user_id: int, permissions: list) -> bool:
         """更新用户权限"""
-        user = self.session.query(User).filter(User.id == user_id).first()
-        if user:
-            user.permissions = permissions # JSONB 字段直接传入 Python 列表/字典
-            self.session.commit()
-            return True
-        return False
+        session = SessionLocal()
+        try:
+            user = session.query(User).filter(User.id == user_id).first()
+            if user:
+                user.permissions = permissions
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
+
+    def toggle_user_active(self, user_id: int) -> bool:
+        """切换用户激活状态"""
+        session = SessionLocal()
+        try:
+            user = session.query(User).filter(User.id == user_id).first()
+            if user:
+                user.is_active = not user.is_active
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
 
     def delete_user(self, user_id: int) -> bool:
         """删除用户"""

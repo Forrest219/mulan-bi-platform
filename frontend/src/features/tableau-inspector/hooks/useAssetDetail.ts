@@ -3,6 +3,7 @@ import {
   getAsset,
   getAssetChildren,
   getAssetParent,
+  getAssetFields,
   explainAsset,
   getAssetHealth,
   TableauAsset,
@@ -43,6 +44,7 @@ export interface UseAssetDetailResult {
   loadHealth: () => void;
 
   fieldSemantics: FieldSemantic[];
+  fieldsLoading: boolean;
 
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
@@ -53,11 +55,11 @@ export interface UseAssetDetailResult {
   loadAIExplain: (refresh?: boolean) => void;
 }
 
-export function useAssetDetail(id: string | undefined): UseAssetDetailResult {
+export function useAssetDetail(id: string | undefined, defaultTab?: string): UseAssetDetailResult {
   const [asset, setAsset] = useState<TableauAsset | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<ActiveTab>('info');
+  const [activeTab, setActiveTab] = useState<ActiveTab>((defaultTab as ActiveTab) || 'info');
 
   // AI state
   const [aiExplain, setAiExplain] = useState<string | null>(null);
@@ -67,6 +69,7 @@ export function useAssetDetail(id: string | undefined): UseAssetDetailResult {
   const [aiCached, setAiCached] = useState(false);
   const [llmConfigured, setLlmConfigured] = useState(true);
   const [fieldSemantics, setFieldSemantics] = useState<FieldSemantic[]>([]);
+  const [fieldsLoading, setFieldsLoading] = useState(false);
 
   // Health state
   const [healthData, setHealthData] = useState<AssetHealth | null>(null);
@@ -105,6 +108,12 @@ export function useAssetDetail(id: string | undefined): UseAssetDetailResult {
             .catch(() => {})
             .finally(() => setChildrenLoading(false));
         }
+        // 独立加载字段元数据
+        setFieldsLoading(true);
+        getAssetFields(a.id)
+          .then(d => setFieldSemantics(d.fields))
+          .catch(() => {})
+          .finally(() => setFieldsLoading(false));
       })
       .catch(() => setError('资产加载失败'))
       .finally(() => setLoading(false));
@@ -188,6 +197,7 @@ export function useAssetDetail(id: string | undefined): UseAssetDetailResult {
     healthError,
     loadHealth,
     fieldSemantics,
+    fieldsLoading,
     activeTab,
     setActiveTab,
     confirmModal,

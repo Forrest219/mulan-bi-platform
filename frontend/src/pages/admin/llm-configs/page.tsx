@@ -37,6 +37,7 @@ interface LLMConfigItem {
   is_active: boolean;
   priority: number;
   has_api_key?: boolean;
+  api_key_decryption_ok?: boolean;
   api_key_preview?: string | null;
   api_key_updated_at?: string | null;
   created_at: string;
@@ -197,17 +198,21 @@ function ApiKeyCell({
   onSetupKey: () => void;
 }) {
   const hasKey = cfg.has_api_key === true;
+  const decryptionOk = cfg.api_key_decryption_ok !== false;
 
-  if (!hasKey) {
+  if (!hasKey || !decryptionOk) {
+    const isCorrupted = hasKey && !decryptionOk;
     return (
       <div className="flex items-center gap-1.5">
         <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
-        <span className="text-xs text-slate-500">未配置</span>
+        <span className="text-xs text-slate-500">
+          {isCorrupted ? 'Key 已损坏' : '未配置'}
+        </span>
         <button
           onClick={onSetupKey}
           className="text-xs text-blue-600 hover:text-blue-700 underline-offset-2 hover:underline"
         >
-          去设置
+          {isCorrupted ? '重新保存' : '去设置'}
         </button>
       </div>
     );
@@ -789,8 +794,14 @@ export default function LLMConfigsPage() {
                           <div className="flex items-center justify-start gap-1.5">
                             <button
                               onClick={() => handleRowTest(cfg)}
-                              disabled={evidence?.status === 'testing' || !cfg.has_api_key}
-                              title={!cfg.has_api_key ? '请先配置 API Key' : undefined}
+                              disabled={evidence?.status === 'testing' || !cfg.has_api_key || cfg.api_key_decryption_ok === false}
+                              title={
+                                cfg.api_key_decryption_ok === false
+                                  ? 'API Key 已损坏，请重新保存'
+                                  : !cfg.has_api_key
+                                    ? '请先配置 API Key'
+                                    : undefined
+                              }
                               className="px-2.5 py-1 text-xs text-slate-500 hover:text-slate-700
                                          hover:bg-slate-100 rounded-md transition-colors flex items-center gap-1
                                          disabled:opacity-40 disabled:cursor-not-allowed"

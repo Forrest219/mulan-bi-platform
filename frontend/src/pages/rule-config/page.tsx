@@ -10,6 +10,7 @@ interface ValidationRule {
   description: string;
   suggestion: string;
   db_type: string;
+  scene_type: string;
   built_in: boolean;
   status: string;
 }
@@ -29,6 +30,7 @@ export default function RuleConfigPage() {
   const [rules, setRules] = useState<ValidationRule[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [levelFilter, setLevelFilter] = useState<string>('ALL');
+  const [sceneTypeFilter, setSceneTypeFilter] = useState<string>('ALL');
   const [searchText, setSearchText] = useState('');
   const [toastMsg, setToastMsg] = useState('');
   const [loading, setLoading] = useState(true);
@@ -43,6 +45,7 @@ export default function RuleConfigPage() {
     description: '',
     suggestion: '',
     db_type: 'MySQL',
+    scene_type: 'ALL',
   });
 
   const showToast = (msg: string) => {
@@ -53,7 +56,11 @@ export default function RuleConfigPage() {
   const fetchRules = async () => {
     setLoading(true);
     try {
-      const resp = await fetch(`${API_BASE}/api/rules/`, { credentials: 'include' });
+      const params = new URLSearchParams();
+      if (sceneTypeFilter !== 'ALL') params.set('scene_type', sceneTypeFilter);
+      const query = params.toString();
+      const url = `${API_BASE}/api/rules/${query ? `?${query}` : ''}`;
+      const resp = await fetch(url, { credentials: 'include' });
       if (!resp.ok) throw new Error('获取规则列表失败');
       const data = await resp.json();
       setRules(data.rules);
@@ -63,10 +70,10 @@ export default function RuleConfigPage() {
     setLoading(false);
   };
 
-  /* eslint-disable react-hooks/exhaustive-deps -- fetchRules 在组件挂载时运行，故意不放入 deps */
+  /* eslint-disable react-hooks/exhaustive-deps -- fetchRules 依赖 sceneTypeFilter，故意不放入 deps */
   useEffect(() => {
     fetchRules();
-  }, []);
+  }, [sceneTypeFilter]);
   /* eslint-enable react-hooks/exhaustive-deps */
 
   const toggleRule = async (id: string) => {
@@ -115,6 +122,7 @@ export default function RuleConfigPage() {
         description: '',
         suggestion: '',
         db_type: 'MySQL',
+        scene_type: 'ALL',
       });
       fetchRules();
     } catch (_error) {
@@ -217,6 +225,18 @@ export default function RuleConfigPage() {
             ))}
           </div>
 
+          {/* Scene type filter */}
+          <select
+            value={sceneTypeFilter}
+            onChange={(e) => setSceneTypeFilter(e.target.value)}
+            className="px-2.5 py-1.5 text-[11px] font-medium border border-slate-200 rounded-lg bg-white text-slate-600 focus:outline-none focus:border-slate-400 cursor-pointer"
+          >
+            <option value="ALL">全部场景</option>
+            <option value="ODS">ODS</option>
+            <option value="DWD">DWD</option>
+            <option value="ADS">ADS</option>
+          </select>
+
           <span className="text-[12px] text-slate-400 ml-auto">
             显示 {filtered.length} / {rules.length} 条规则
           </span>
@@ -230,7 +250,7 @@ export default function RuleConfigPage() {
             <table className="w-full">
               <thead>
                 <tr className="bg-slate-50">
-                  {['Rule ID', 'Severity', '规则名称', '类别', '适用 DB', '来源', '描述', '状态'].map((h) => (
+                  {['Rule ID', 'Severity', '规则名称', '类别', '适用 DB', '场景', '来源', '描述', '状态'].map((h) => (
                     <th
                       key={h}
                       className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5 whitespace-nowrap"
@@ -263,6 +283,9 @@ export default function RuleConfigPage() {
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span className="text-[11px] text-slate-500">{rule.db_type}</span>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className="text-[11px] text-slate-500">{rule.scene_type}</span>
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       {rule.built_in ? (

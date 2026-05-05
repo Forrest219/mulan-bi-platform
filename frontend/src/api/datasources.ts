@@ -39,7 +39,7 @@ export interface UpdateDataSourceInput {
 }
 
 export async function listDataSources(): Promise<{ datasources: DataSource[]; total: number }> {
-  const res = await fetch(`${API_BASE}/api/datasources`, { credentials: 'include' });
+  const res = await fetch(`${API_BASE}/api/datasources/`, { credentials: 'include' });
   if (!res.ok) throw new Error('获取数据源列表失败');
   return res.json();
 }
@@ -51,7 +51,7 @@ export async function getDataSource(id: number): Promise<DataSource> {
 }
 
 export async function createDataSource(data: CreateDataSourceInput): Promise<{ datasource: DataSource; message: string }> {
-  const res = await fetch(`${API_BASE}/api/datasources`, {
+  const res = await fetch(`${API_BASE}/api/datasources/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
@@ -99,6 +99,42 @@ export async function testDataSource(id: number): Promise<{ success: boolean; me
     const err = await res.json();
     throw new Error(err.detail || '测试连接失败');
   }
+  return res.json();
+}
+
+export async function testDatasourceDraft(data: {
+  db_type: string; host: string; port: number;
+  database_name?: string; username: string; password: string;
+}): Promise<{ success: boolean; message: string }> {
+  const res = await fetch(`${API_BASE}/api/datasources/test-draft`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) return { success: false, message: '请求失败' };
+  return res.json();
+}
+
+export interface ParsedDatasource {
+  name?: string | null;
+  db_type?: string | null;
+  host?: string | null;
+  port?: number | null;
+  database_name?: string | null;
+  username?: string | null;
+  password?: string | null;
+  error?: string;
+}
+
+export async function parseDatasourceConfig(text: string): Promise<ParsedDatasource> {
+  const res = await fetch(`${API_BASE}/api/datasources/parse`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) throw new Error('解析失败');
   return res.json();
 }
 

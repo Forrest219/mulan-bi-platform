@@ -295,6 +295,10 @@ class CapabilityWrapper:
                 options=params.get("options"),
                 use_conversation_context=params.get("use_conversation_context", False),
                 target_sites=params.get("target_sites"),
+                request=params.get("request"),
+                response=params.get("response"),
+                user=params.get("user"),
+                # db 不通过 params 传递（避免跨请求生命周期问题），nlq_service 内部自己创建 session
             )
             return result
 
@@ -319,8 +323,10 @@ def _validate_params(params: dict, cap_def: CapabilityDefinition) -> None:
     """JSON Schema 参数校验"""
     import jsonschema
     schema = cap_def.params_schema
+    # Strip None values so optional fields not present in the schema don't fail validation
+    filtered_params = {k: v for k, v in params.items() if v is not None}
     try:
-        jsonschema.validate(instance=params, schema=schema)
+        jsonschema.validate(instance=filtered_params, schema=schema)
     except jsonschema.exceptions.ValidationError as e:
         raise CapabilityParamsInvalid(
             f"Params validation failed: {e.message}",

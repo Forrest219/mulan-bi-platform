@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { triggerScan, getHealthSummary, getScan, getScanIssues, listScans, downloadScanReport } from '@/api/health-scan';
 import type { HealthScan, HealthIssue } from '@/api/health-scan';
 import { listDataSources } from '@/api/datasources';
@@ -62,7 +63,10 @@ const ruleIdLabels: Record<string, string> = {
   RULE_SR_025: '视图命名 _vw 后缀',
 };
 
-function ScoreBar({ score }: { score: number }) {
+function ScoreBar({ score }: { score: number | null }) {
+  if (score === null || score === undefined) {
+    return <span className="text-sm text-slate-400">无数据</span>;
+  }
   const color = score >= 90 ? 'bg-emerald-500' : score >= 75 ? 'bg-amber-400' : 'bg-red-500';
   return (
     <div className="flex items-center gap-3">
@@ -74,12 +78,19 @@ function ScoreBar({ score }: { score: number }) {
   );
 }
 
-export default function DataHealthPage() {
+interface DataHealthPageProps {
+  headerControlsRef?: React.RefObject<HTMLDivElement | null>;
+}
+
+// 本组件由 dw-audit/page.tsx 作为 tab 子页面渲染，外层已提供 header + min-h-screen 容器
+export default function DataHealthPage({ headerControlsRef }: DataHealthPageProps) {
   const [summaryScans, setSummaryScans] = useState<HealthScan[]>([]);
   const [activeScan, setActiveScan] = useState<HealthScan | null>(null);
   const [issues, setIssues] = useState<HealthIssue[]>([]);
   const [issueTotal, setIssueTotal] = useState(0);
   const [filterSeverity, setFilterSeverity] = useState('');
+  const [filterObjectType, setFilterObjectType] = useState('');
+  const [filterObjectName, setFilterObjectName] = useState('');
   const [issuePage, setIssuePage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
@@ -94,6 +105,7 @@ export default function DataHealthPage() {
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyPage, setHistoryPage] = useState(1);
   const [exporting, setExporting] = useState(false);
+  const [filterDb, setFilterDb] = useState('all');
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -143,6 +155,12 @@ export default function DataHealthPage() {
     }
   }, [filterSeverity, issuePage]);
 
+  const filteredIssues = issues.filter((i) => {
+    if (filterObjectType && i.object_type !== filterObjectType) return false;
+    if (filterObjectName && !i.object_name.toLowerCase().includes(filterObjectName.toLowerCase())) return false;
+    return true;
+  });
+
   const loadHistory = useCallback(async () => {
     try {
       const data = await listScans({ page: historyPage, page_size: 20 });
@@ -163,6 +181,25 @@ export default function DataHealthPage() {
   useEffect(() => {
     if (tab === 'history') loadHistory();
   }, [tab, loadHistory]);
+
+  const uniqueDbs = [...new Set(summaryScans.map(s => s.database_name).filter(Boolean))];
+
+  useEffect(() => {
+    if (summaryScans.length === 0) return;
+    if (filterDb === 'all') {
+      const latest = summaryScans.reduce((a, b) => (a.id > b.id ? a : b));
+      setActiveScan(latest);
+    } else {
+      const match = summaryScans.filter(s => s.database_name === filterDb);
+      if (match.length > 0) {
+        setActiveScan(match.reduce((a, b) => (a.id > b.id ? a : b)));
+      }
+    }
+    setIssuePage(1);
+    setFilterSeverity('');
+    setFilterObjectType('');
+    setFilterObjectName('');
+  }, [filterDb, summaryScans]);
 
   async function handleExportReport() {
     if (!activeScan) return;
@@ -205,7 +242,8 @@ export default function DataHealthPage() {
   }
 
   // Aggregate stats from active scan
-  const score = activeScan?.health_score ?? 0;
+  const score = activeScan?.health_score ?? null;
+  const noData = score === null || activeScan?.total_tables === 0;
   const totalTables = activeScan?.total_tables ?? 0;
   const totalIssues = activeScan?.total_issues ?? 0;
   const highCount = activeScan?.high_count ?? 0;
@@ -213,156 +251,186 @@ export default function DataHealthPage() {
   const lowCount = activeScan?.low_count ?? 0;
   const lastScan = activeScan?.finished_at || activeScan?.started_at || '-';
 
-  return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Page header */}
-      <div className="bg-white border-b border-slate-200 px-8 py-5">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2 mb-0.5">
-              <span className="w-5 h-5 flex items-center justify-center">
-                <i className="ri-heart-pulse-line text-slate-500 text-base" />
-              </span>
-              <h1 className="text-lg font-semibold text-slate-800">数据仓库体检</h1>
-            </div>
-            <p className="text-[13px] text-slate-400 ml-7">Schema 级健康检查 · 问题识别与建议</p>
-          </div>
-          <div className="relative">
-            <button
-              onClick={() => setShowDsPicker(!showDsPicker)}
-              disabled={scanning}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-900 text-white text-[12px] font-medium rounded-lg hover:bg-slate-700 transition-colors cursor-pointer disabled:opacity-50"
-            >
-              {scanning ? (
-                <><i className="ri-loader-4-line animate-spin" /> 扫描中...</>
-              ) : (
-                <><i className="ri-play-line" /> 发起扫描</>
-              )}
-            </button>
-            {showDsPicker && (
-              <div className="absolute right-0 top-full mt-2 w-72 bg-white border border-slate-200 rounded-xl shadow-lg z-10 p-4">
-                <p className="text-xs text-slate-500 mb-2">选择数据源</p>
-                {datasources.length === 0 ? (
-                  <p className="text-xs text-slate-400">暂无数据源，请先在管理后台添加</p>
-                ) : (
-                  <div className="space-y-1 max-h-48 overflow-auto">
-                    {datasources.map((ds: any) => (
-                      <button
-                        key={ds.id}
-                        onClick={() => setSelectedDsId(ds.id)}
-                        className={`w-full text-left px-3 py-2 rounded-lg text-xs hover:bg-slate-50 ${
-                          selectedDsId === ds.id ? 'bg-blue-50 text-blue-600' : 'text-slate-700'
-                        }`}
-                      >
-                        <div className="font-medium">{ds.name}</div>
-                        <div className="text-slate-400">{ds.db_type} · {ds.database_name}</div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <div className="flex justify-end gap-2 mt-3 pt-3 border-t border-slate-100">
-                  <button onClick={() => setShowDsPicker(false)} className="px-3 py-1 text-xs text-slate-500 hover:bg-slate-100 rounded-lg">取消</button>
+  const headerControls = (
+    <>
+      <select
+        value={filterDb}
+        onChange={e => setFilterDb(e.target.value)}
+        className="text-xs px-3 py-1.5 border border-slate-200 rounded-lg text-slate-600 bg-white"
+      >
+        <option value="all">全部</option>
+        {uniqueDbs.map(db => (
+          <option key={db} value={db}>{db}</option>
+        ))}
+      </select>
+      <div className="relative">
+        <button
+          onClick={() => setShowDsPicker(!showDsPicker)}
+          disabled={scanning}
+          className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-900 text-white text-[12px] font-medium rounded-lg hover:bg-slate-700 transition-colors cursor-pointer disabled:opacity-50"
+        >
+          {scanning ? (
+            <><i className="ri-loader-4-line animate-spin" /> 扫描中...</>
+          ) : (
+            <><i className="ri-play-line" /> 发起扫描</>
+          )}
+        </button>
+        {showDsPicker && (
+          <div className="absolute right-0 top-full mt-2 w-72 bg-white border border-slate-200 rounded-xl shadow-lg z-10 p-4">
+            <p className="text-xs text-slate-500 mb-2">选择数据源</p>
+            {datasources.length === 0 ? (
+              <p className="text-xs text-slate-400">暂无数据源，请先在管理后台添加</p>
+            ) : (
+              <div className="space-y-1 max-h-48 overflow-auto">
+                {datasources.map((ds: any) => (
                   <button
-                    onClick={handleTriggerScan}
-                    disabled={!selectedDsId}
-                    className="px-3 py-1 text-xs bg-slate-900 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50"
-                  >确认扫描</button>
-                </div>
+                    key={ds.id}
+                    onClick={() => setSelectedDsId(ds.id)}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-xs hover:bg-slate-50 ${
+                      selectedDsId === ds.id ? 'bg-blue-50 text-blue-600' : 'text-slate-700'
+                    }`}
+                  >
+                    <div className="font-medium">{ds.name}</div>
+                    <div className="text-slate-400">{ds.db_type} · {ds.database_name}</div>
+                  </button>
+                ))}
               </div>
             )}
+            <div className="flex justify-end gap-2 mt-3 pt-3 border-t border-slate-100">
+              <button onClick={() => setShowDsPicker(false)} className="px-3 py-1 text-xs text-slate-500 hover:bg-slate-100 rounded-lg">取消</button>
+              <button
+                onClick={handleTriggerScan}
+                disabled={!selectedDsId}
+                className="px-3 py-1 text-xs bg-slate-900 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50"
+              >确认扫描</button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
+    </>
+  );
+
+  return (
+    <div className="px-8 py-7">
+      <div className="max-w-6xl mx-auto">
+      {headerControlsRef?.current && createPortal(headerControls, headerControlsRef.current)}
 
       {error && (
-        <div className="max-w-6xl mx-auto px-8 mt-4">
-          <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-lg px-4 py-2">{error}</div>
-        </div>
+        <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-lg px-4 py-2 mb-4">{error}</div>
       )}
 
-      <div className="max-w-6xl mx-auto px-8 py-7">
-        {loading ? (
-          <div className="text-center py-20 text-slate-400 text-sm">加载中...</div>
-        ) : !activeScan ? (
-          <div className="text-center py-20 text-slate-400 text-sm">暂无扫描记录，点击"发起扫描"开始</div>
-        ) : (
+      {loading ? (
+        <div className="text-center py-20 text-slate-400 text-sm">加载中...</div>
+      ) : !activeScan ? (
+        <div className="text-center py-20 text-slate-400 text-sm">暂无扫描记录，点击"发起扫描"开始</div>
+      ) : (
           <>
             {/* Stats row */}
             <div className="grid grid-cols-4 gap-4 mb-6">
-              {[
-                { label: '体检评分', value: score, sub: `问题数 ${totalIssues} 个`, icon: 'ri-award-line', special: true },
-                { label: '监控表数量', value: totalTables, sub: `数据源: ${activeScan.datasource_name}`, icon: 'ri-table-line' },
-                { label: '风险分布', value: `${highCount}/${mediumCount}/${lowCount}`, sub: '高/中/低', icon: 'ri-pie-chart-line' },
-                { label: '最近扫描', value: lastScan.split(' ')[1] || '-', sub: lastScan.split(' ')[0] || '-', icon: 'ri-time-line' },
-              ].map((s) => (
-                <div key={s.label} className="bg-white border border-slate-200 rounded-xl p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[11px] text-slate-500">{s.label}</span>
-                    <div className="w-6 h-6 flex items-center justify-center">
-                      <i className={`${s.icon} text-slate-400`} />
-                    </div>
-                  </div>
-                  {s.special ? (
-                    <div className="mb-2"><ScoreBar score={s.value as number} /></div>
-                  ) : (
-                    <div className="text-2xl font-bold text-slate-800">{s.value}</div>
-                  )}
-                  <div className="text-[11px] text-slate-400 mt-0.5">{s.sub}</div>
+              {/* 体检评分 */}
+              <div className="bg-white border border-slate-200 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] text-slate-500">体检评分</span>
+                  <div className="w-6 h-6 flex items-center justify-center"><i className="ri-award-line text-slate-400" /></div>
                 </div>
-              ))}
+                <div className="mb-2"><ScoreBar score={score} /></div>
+                <div className="text-[11px] text-slate-400 mt-0.5">{noData ? '未检测到业务表' : `问题数 ${totalIssues} 个`}</div>
+              </div>
+              {/* 监控表数量 */}
+              <div className="bg-white border border-slate-200 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] text-slate-500">监控表数量</span>
+                  <div className="w-6 h-6 flex items-center justify-center"><i className="ri-table-line text-slate-400" /></div>
+                </div>
+                <div className="text-2xl font-bold text-slate-800">{totalTables}</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">{`数据源: ${activeScan.datasource_name}`}</div>
+              </div>
+              {/* 风险分布 — 柱状图 */}
+              <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col">
+                <div className="flex items-center justify-between mb-auto">
+                  <span className="text-[11px] text-slate-500">风险分布</span>
+                  <div className="w-6 h-6 flex items-center justify-center"><i className="ri-pie-chart-line text-slate-400" /></div>
+                </div>
+                {(() => {
+                  const counts = [highCount, mediumCount, lowCount];
+                  const maxCount = Math.max(...counts, 1);
+                  return (
+                    <>
+                      <div className="flex items-end gap-1.5 h-10 mb-1">
+                        {[{ bg: 'bg-red-500' }, { bg: 'bg-amber-500' }, { bg: 'bg-blue-500' }].map((cfg, i) => {
+                          const ratio = counts[i] / maxCount;
+                          return (
+                            <div key={i} className="flex-1 flex flex-col items-center gap-0.5 h-full justify-end">
+                              <div className={`w-full rounded-sm ${cfg.bg}`} style={{ height: `${Math.max(6, ratio * 100)}%` }} />
+                              <span className="text-[9px] text-slate-400 shrink-0">{counts[i]}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="flex">
+                        {['高', '中', '低'].map(l => (
+                          <span key={l} className="text-[9px] text-slate-400 flex-1 text-center">{l}</span>
+                        ))}
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+              {/* 最近扫描 */}
+              <div className="bg-white border border-slate-200 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] text-slate-500">最近扫描</span>
+                  <div className="w-6 h-6 flex items-center justify-center"><i className="ri-time-line text-slate-400" /></div>
+                </div>
+                <div className="text-2xl font-bold text-slate-800">{lastScan.split(' ')[1] || '-'}</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">{lastScan.split(' ')[0] || '-'}</div>
+              </div>
             </div>
 
-            {/* Multi-datasource summary */}
-            {summaryScans.length > 1 && (
-              <div className="bg-white border border-slate-200 rounded-xl p-5 mb-5">
-                <h3 className="text-[13px] font-semibold text-slate-700 mb-3">数据源健康总览</h3>
-                <div className="grid grid-cols-3 gap-3">
-                  {summaryScans.map((s) => (
+            {/* Tab container */}
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+              <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 w-fit">
+                  {[
+                    { key: 'overview' as const, label: '扫描结果' },
+                    { key: 'history' as const, label: '历史记录' },
+                  ].map((t) => (
                     <button
-                      key={s.id}
-                      onClick={() => { setActiveScan(s); setIssuePage(1); setFilterSeverity(''); }}
-                      className={`text-left p-3 rounded-lg border transition-colors ${
-                        activeScan?.id === s.id ? 'border-blue-300 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'
+                      key={t.key}
+                      onClick={() => setTab(t.key)}
+                      className={`px-4 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                        tab === t.key ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
                       }`}
-                    >
-                      <div className="text-xs font-medium text-slate-700">{s.datasource_name}</div>
-                      <div className="flex items-center justify-between mt-1">
-                        <span className="text-[11px] text-slate-400">{s.db_type} · {s.database_name}</span>
-                        <span className={`text-xs font-bold ${
-                          (s.health_score ?? 0) >= 90 ? 'text-emerald-600' : (s.health_score ?? 0) >= 75 ? 'text-amber-600' : 'text-red-600'
-                        }`}>{s.health_score ?? '-'}</span>
-                      </div>
-                    </button>
+                    >{t.label}</button>
                   ))}
                 </div>
-              </div>
-            )}
-
-            {/* Tab switcher */}
-            <div className="flex items-center gap-1 mb-5 bg-white border border-slate-200 rounded-lg p-1 w-fit">
-              {[
-                { key: 'overview' as const, label: '扫描结果' },
-                { key: 'history' as const, label: '历史记录' },
-              ].map((t) => (
-                <button
-                  key={t.key}
-                  onClick={() => setTab(t.key)}
-                  className={`px-4 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                    tab === t.key ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >{t.label}</button>
-              ))}
-            </div>
-
-            {tab === 'overview' ? (
-            <>
-            {/* Issue list */}
-            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-                <h3 className="text-[13px] font-semibold text-slate-700">
-                  问题列表 <span className="text-slate-400 font-normal ml-1">({issueTotal})</span>
-                </h3>
-                <div className="flex items-center gap-3">
+                {tab === 'overview' && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <select
+                    value={filterSeverity}
+                    onChange={(e) => { setFilterSeverity(e.target.value); setIssuePage(1); }}
+                    className="text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg text-slate-600 bg-white"
+                  >
+                    <option value="">全部风险</option>
+                    <option value="high">高风险</option>
+                    <option value="medium">中风险</option>
+                    <option value="low">低风险</option>
+                  </select>
+                  <select
+                    value={filterObjectType}
+                    onChange={(e) => setFilterObjectType(e.target.value)}
+                    className="text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg text-slate-600 bg-white"
+                  >
+                    <option value="">全部类型</option>
+                    <option value="table">表</option>
+                    <option value="field">字段</option>
+                  </select>
+                  <input
+                    value={filterObjectName}
+                    onChange={(e) => setFilterObjectName(e.target.value)}
+                    placeholder="搜索对象名称"
+                    className="text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg text-slate-600 bg-white w-32"
+                  />
                   <button
                     onClick={handleExportReport}
                     disabled={exporting || activeScan?.status !== 'success'}
@@ -371,53 +439,55 @@ export default function DataHealthPage() {
                     <i className={exporting ? "ri-loader-4-line animate-spin" : "ri-download-line"} />
                     {exporting ? '导出中...' : '下载报告'}
                   </button>
-                  <select
-                    value={filterSeverity}
-                    onChange={(e) => { setFilterSeverity(e.target.value); setIssuePage(1); }}
-                    className="text-xs px-3 py-1.5 border border-slate-200 rounded-lg text-slate-600 bg-white"
-                  >
-                    <option value="">全部风险</option>
-                    <option value="high">高风险</option>
-                    <option value="medium">中风险</option>
-                    <option value="low">低风险</option>
-                  </select>
                 </div>
+                )}
               </div>
 
-              {issues.length === 0 ? (
+              {tab === 'overview' ? (
+              <>
+              {filteredIssues.length === 0 ? (
                 <div className="text-center py-10 text-slate-400 text-xs">
                   {activeScan.status === 'success' ? '未发现问题' : '扫描未完成'}
                 </div>
               ) : (
-                <table className="w-full">
+                <table className="w-full table-fixed">
                   <thead>
                     <tr className="bg-slate-50">
-                      {['风险', '对象类型', '对象名称', '问题类型', '描述', '建议'].map((h) => (
-                        <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5 whitespace-nowrap">
-                          {h}
-                        </th>
-                      ))}
+                      <th className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5 w-20">风险</th>
+                      <th className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5 w-16">对象类型</th>
+                      <th className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5">对象名称</th>
+                      <th className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5">主机地址</th>
+                      <th className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5 w-20">名称</th>
+                      <th className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5 w-[120px]">数据库</th>
+                      <th className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5 w-32">问题类型</th>
+                      <th className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5 w-14">评分</th>
+                      <th className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5 w-40">检查时间</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {issues.map((issue) => {
+                    {filteredIssues.map((issue) => {
                       const sc = severityConfig[issue.severity] || severityConfig.low;
                       return (
                         <tr key={issue.id} className="border-t border-slate-100 hover:bg-slate-50">
-                          <td className="px-4 py-3">
-                            <span className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${sc.bg} ${sc.text} ${sc.border}`}>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${sc.bg} ${sc.text} ${sc.border}`}>
                               <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />
                               {sc.label}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-[12px] text-slate-500">
+                          <td className="px-4 py-3 text-[12px] text-slate-500 whitespace-nowrap">
                             {issue.object_type === 'table' ? <i className="ri-table-line mr-1" /> : <i className="ri-function-line mr-1" />}
                             {issue.object_type === 'table' ? '表' : '字段'}
                           </td>
-                          <td className="px-4 py-3 text-[12px] font-medium text-slate-700 font-mono">{issue.object_name}</td>
-                          <td className="px-4 py-3 text-[12px] text-slate-600">{issueTypeLabels[issue.issue_type] || ruleIdLabels[issue.issue_type] || issue.issue_type}</td>
-                          <td className="px-4 py-3 text-[12px] text-slate-600 max-w-xs truncate">{issue.description}</td>
-                          <td className="px-4 py-3 text-[12px] text-slate-500 max-w-xs truncate">{issue.suggestion}</td>
+                          <td className="px-4 py-3 text-[12px] font-medium text-slate-700 font-mono break-all">{issue.object_name}</td>
+                          <td className="px-4 py-3 text-[12px] text-slate-500 font-mono break-all">{datasources.find((d: any) => d.id === activeScan.datasource_id)?.host || '-'}</td>
+                          <td className="px-4 py-3 text-[12px] text-slate-600">{activeScan.datasource_name}</td>
+                          <td className="px-4 py-3 text-[12px] text-slate-500 break-all">{issue.database_name || '-'}</td>
+                          <td className="px-4 py-3 text-[12px] text-slate-600 truncate">{issueTypeLabels[issue.issue_type] || ruleIdLabels[issue.issue_type] || issue.issue_type}</td>
+                          <td className="px-4 py-3 text-[12px] text-slate-600">{activeScan.health_score != null ? `${activeScan.health_score}分` : '-'}</td>
+                          <td className="px-4 py-3 text-[11px] text-slate-400 leading-tight">
+                            {activeScan.finished_at ? (<><div>{activeScan.finished_at.slice(0, 10)}</div><div>{activeScan.finished_at.slice(11, 19)}</div></>) : '-'}
+                          </td>
                         </tr>
                       );
                     })}
@@ -444,16 +514,9 @@ export default function DataHealthPage() {
                   </div>
                 </div>
               )}
-            </div>
-            </>
-            ) : (
-            /* History tab */
-            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-100">
-                <h3 className="text-[13px] font-semibold text-slate-700">
-                  扫描历史 <span className="text-slate-400 font-normal ml-1">({historyTotal})</span>
-                </h3>
-              </div>
+              </>
+              ) : (
+              <>
               {history.length === 0 ? (
                 <div className="text-center py-10 text-slate-400 text-xs">暂无扫描记录</div>
               ) : (
@@ -480,14 +543,14 @@ export default function DataHealthPage() {
                         </td>
                         <td className="px-4 py-3 text-xs text-slate-600">{s.total_tables}</td>
                         <td className="px-4 py-3 text-xs text-slate-600">{s.total_issues}</td>
-                        <td className="px-4 py-3 text-xs font-bold" style={{ color: (s.health_score ?? 0) >= 90 ? '#16a34a' : (s.health_score ?? 0) >= 75 ? '#d97706' : '#dc2626' }}>
-                          {s.health_score ?? '-'}
+                        <td className="px-4 py-3 text-xs font-bold" style={{ color: s.health_score == null ? '#94a3b8' : (s.health_score ?? 0) >= 90 ? '#16a34a' : (s.health_score ?? 0) >= 75 ? '#d97706' : '#dc2626' }}>
+                          {s.health_score ?? '无数据'}
                         </td>
                         <td className="px-4 py-3 text-xs text-slate-500">{s.finished_at || s.started_at || '-'}</td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
                             <button
-                              onClick={() => { setActiveScan(s); setTab('overview'); setIssuePage(1); setFilterSeverity(''); }}
+                              onClick={() => { setActiveScan(s); setTab('overview'); setIssuePage(1); setFilterSeverity(''); setFilterObjectType(''); setFilterObjectName(''); }}
                               className="text-[11px] text-blue-600 hover:underline"
                             >查看</button>
                             {s.status === 'success' && (
@@ -519,8 +582,9 @@ export default function DataHealthPage() {
                   </div>
                 </div>
               )}
+              </>
+              )}
             </div>
-            )}
           </>
         )}
       </div>

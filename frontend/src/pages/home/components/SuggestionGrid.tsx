@@ -1,7 +1,7 @@
 /**
  * SuggestionGrid — open-webui 风格 2×2 建议卡片
  *
- * 固定 4 条，每张卡 = 主问题 + 补充说明。
+ * 固定 4 条快速开始建议问题。
  * 挂载时尝试从 GET /api/chat/suggestions 获取动态建议；
  * 请求失败（网络、404、非 OK）时回退到本地 SUGGESTIONS 数组。
  */
@@ -13,10 +13,12 @@ interface Suggestion {
 }
 
 const SUGGESTIONS: Suggestion[] = [
-  { title: '分析近 30 天订单金额趋势', hint: '按日聚合并识别拐点' },
-  { title: '对比本月与上月各区域销售', hint: '找出同比增长最快的区域' },
-  { title: '找出退款率最高的产品类别', hint: '定位需要优化的品类' },
-  { title: '统计最近 7 天新增客户与环比', hint: '观察获客节奏' },
+  { title: '你有哪些看板？' },
+  { title: '你有哪些数据源？' },
+  { title: '哪些子类别近6个月利润率持续下滑？' },
+  { title: '对比各区域本季度销售额与利润率排名' },
+  { title: '分析各类别近12个月销售额的月度变化趋势' },
+  { title: '利润贡献前10的客户是谁？集中度如何？' },
 ];
 
 interface SuggestionGridProps {
@@ -74,8 +76,8 @@ export function SuggestionGrid({ onPick }: SuggestionGridProps) {
 
   if (loading) {
     return (
-      <div className="grid grid-cols-2 gap-2.5 w-full max-w-2xl mx-auto">
-        {[0, 1, 2, 3].map((i) => (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl mx-auto">
+        {[0, 1, 2, 3, 4, 5].map((i) => (
           <div
             key={i}
             className="h-16 rounded-xl bg-slate-100 animate-pulse"
@@ -86,33 +88,25 @@ export function SuggestionGrid({ onPick }: SuggestionGridProps) {
   }
 
   return (
-    <div className="grid grid-cols-2 gap-2.5 w-full max-w-2xl mx-auto">
-      {!fromApi && (
-        <p className="col-span-2 text-center text-xs text-slate-400 mb-1">
-          使用默认推荐问题
-        </p>
-      )}
-      {suggestions.map((s) => (
-        <button
-          key={s.title}
-          onClick={() => onPick(s.title)}
-          className="group flex flex-col justify-between text-left
-                     rounded-xl border border-slate-200 bg-white
-                     px-4 py-3 min-h-[72px]
-                     hover:bg-slate-50 hover:border-slate-300
-                     transition-colors duration-150
-                     focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
-        >
-          <span className="text-sm font-medium text-slate-800">
-            {s.title}
-          </span>
-          {s.hint && (
-            <span className="text-xs text-slate-500">
-              {s.hint}
-            </span>
-          )}
-        </button>
-      ))}
+    <div className="w-full max-w-2xl mx-auto mb-8">
+      <p className="text-xs text-slate-400 mb-3">快速开始</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {suggestions.map((s) => (
+          <button
+            key={s.title}
+            onClick={() => onPick(s.title)}
+            className="group flex items-center gap-2 text-left
+                       border border-slate-200 bg-white rounded-xl p-4
+                       text-[13px] text-slate-600
+                       hover:border-blue-300 hover:bg-blue-50/50 hover:text-slate-800
+                       transition-all duration-150 cursor-pointer
+                       focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+          >
+            <i className="ri-questionnaire-line text-slate-300 group-hover:text-blue-400 text-base" />
+            <span>{s.title}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

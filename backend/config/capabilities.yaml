@@ -37,7 +37,7 @@ capabilities:
       sensitivity_block: []
       max_rows: 10000
       forbid_raw_pii: false
-    rate_limit: "120/min/user"
+    rate_limit: "120/1m/user"
     timeout_seconds: 30
     cache:
       ttl_seconds: 60
@@ -93,7 +93,7 @@ capabilities:
         - high
         - confidential
       max_rows: 10000
-    rate_limit: "30/min/user"
+    rate_limit: "30/1m/user"
     timeout_seconds: 30
     cache:
       ttl_seconds: 300
@@ -145,7 +145,7 @@ capabilities:
       sensitivity_block: []
       max_rows: 100
       forbid_raw_pii: false
-    rate_limit: "60/min/user"
+    rate_limit: "60/1m/user"
     timeout_seconds: 15
     cache:
       ttl_seconds: 120
@@ -185,7 +185,7 @@ capabilities:
       sensitivity_block: []
       max_rows: 500
       forbid_raw_pii: false
-    rate_limit: "120/min/user"
+    rate_limit: "120/1m/user"
     timeout_seconds: 10
     cache:
       ttl_seconds: 60
@@ -224,7 +224,7 @@ capabilities:
         - confidential
       max_rows: 10000
       forbid_raw_pii: false
-    rate_limit: "60/min/user"
+    rate_limit: "60/1m/user"
     timeout_seconds: 20
     cache:
       ttl_seconds: 300
@@ -271,7 +271,7 @@ capabilities:
       sensitivity_block: []
       max_rows: 0
       forbid_raw_pii: false
-    rate_limit: "60/min/user"
+    rate_limit: "60/1m/user"
     timeout_seconds: 60
     cache:
       ttl_seconds: 0
@@ -326,7 +326,7 @@ capabilities:
         - confidential
       max_rows: 10000
       forbid_raw_pii: true
-    rate_limit: "30/min/user"
+    rate_limit: "30/1m/user"
     timeout_seconds: 60
     cache:
       ttl_seconds: 0
@@ -370,7 +370,7 @@ capabilities:
       sensitivity_block: []
       max_rows: 200
       forbid_raw_pii: false
-    rate_limit: "30/min/user"
+    rate_limit: "30/1m/user"
     timeout_seconds: 30
     cache:
       ttl_seconds: 600

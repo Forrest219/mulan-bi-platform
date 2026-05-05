@@ -65,7 +65,7 @@ test.describe('权限重定向', () => {
       // dev 前缀路由（router config 中在 /dev 下）
       { path: '/dev/ddl-validator',   name: 'DDL 检查',       permission: 'ddl_check' },
       { path: '/dev/rule-config',     name: '规则配置',       permission: 'rule_config' },
-      { path: '/dev/health-center',   name: '健康中心',       permission: 'database_monitor' },
+      { path: '/dev/dw-audit',        name: '数仓巡检',       permission: 'database_monitor' },
       // tableau 语义层路由
       { path: '/semantic/datasources', name: '语义数据源列表', permission: 'tableau' },
       // system admin 路由
@@ -173,10 +173,10 @@ test.describe('权限重定向', () => {
       const ok = await loginAs(page, SMOKE_USER, SMOKE_PASS);
       if (!ok) return;
 
-      await page.goto('/dev/health-center');
+      await page.goto('/dev/dw-audit');
       await page.waitForTimeout(1500);
 
-      expect(page.url()).toContain('/dev/health-center');
+      expect(page.url()).toContain('/dev/dw-audit');
       const hasContent = await page.locator('h1').first().isVisible().catch(() => false);
       expect(hasContent).toBe(true);
     });

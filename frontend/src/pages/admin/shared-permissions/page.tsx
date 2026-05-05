@@ -7,7 +7,7 @@
  * - 批量撤销按钮
  * - 过期权限高亮提示（warning 颜色）
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '../../../config';
 
 interface SharedPermission {
@@ -63,9 +63,7 @@ export default function SharedPermissionsPage() {
   const [revoking, setRevoking] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  useEffect(() => { fetchData(); }, [filterMode, filterId]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -93,7 +91,9 @@ export default function SharedPermissionsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filterMode, filterId]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const toggleSelect = (id: number) => {
     const next = new Set(selectedIds);

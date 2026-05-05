@@ -87,6 +87,7 @@ class HealthScanIssue(Base):
 from app.core.database import SessionLocal
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from services.datasources.models import DataSource
 
 class HealthScanDatabase:
     """健康检查数据库管理 - 不再是单例，直接使用中央 SessionLocal"""
@@ -118,17 +119,18 @@ class HealthScanDatabase:
                 db_type=db_type,
                 database_name=database_name,
                 status="running",
-                started_at=sa_func.now(), # 使用 server_default
+                started_at=sa_func.now(),
                 triggered_by=triggered_by,
             )
             s.add(record)
             s.commit()
+            s.refresh(record)
             return record
         except Exception:
             s.rollback()
             raise
         finally:
-            s.close() # 确保会话关闭
+            s.close()
 
     def finish_scan(self, scan_id: int, status: str, total_tables: int = 0,
                     total_issues: int = 0, high_count: int = 0, medium_count: int = 0,
@@ -177,12 +179,17 @@ class HealthScanDatabase:
             s.close() # 确保会话关闭
 
     def get_latest_scans(self) -> List[HealthScanRecord]:
-        """每个数据源的最新一次扫描"""
+        """每个数据源的最新一次已完成扫描（仅活跃数据源）"""
         s = self.session
         try:
+            active_ids = s.query(DataSource.id).filter(DataSource.is_active == True).subquery()  # noqa: E712
+
             subq = s.query(
                 HealthScanRecord.datasource_id,
                 func.max(HealthScanRecord.id).label("max_id")
+            ).filter(
+                HealthScanRecord.datasource_id.in_(s.query(active_ids)),
+                HealthScanRecord.status.in_(["success", "failed"]),
             ).group_by(HealthScanRecord.datasource_id).subquery()
 
             records = s.query(HealthScanRecord).join(
@@ -190,7 +197,7 @@ class HealthScanDatabase:
             ).all()
             return records
         finally:
-            s.close() # 确保会话关闭
+            s.close()
 
     # --- Issues CRUD ---
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   listAssets,
   searchAssets,
@@ -25,13 +25,12 @@ interface AssetExplorerProps {
   onSelect?: (assetId: string) => void;
 }
 
+const LS_KEY = 'tableau-explorer-connection';
+
 export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: AssetExplorerProps) {
-  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  // 如果 prop 传入 connectionId，优先使用；否则从 URL 参数读取
-  const connectionId = connectionIdProp ?? Number(searchParams.get('connection_id') || '0');
-
+  const [connectionId, setConnectionId] = useState<number>(connectionIdProp ?? 0);
   const [connections, setConnections] = useState<TableauConnection[]>([]);
   const [selectedConn, setSelectedConn] = useState<TableauConnection | null>(null);
   const [assets, setAssets] = useState<TableauAsset[]>([]);
@@ -41,7 +40,7 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
   const [assetTypeFilter, setAssetTypeFilter] = useState<string>('');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
 
@@ -74,14 +73,18 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
     }
   };
 
-  /* eslint-disable react-hooks/exhaustive-deps -- connectionId/setSearchParams 故意不放入 deps */
+  /* eslint-disable react-hooks/exhaustive-deps -- 初始化只执行一次 */
   useEffect(() => {
     listConnections().then(d => {
       setConnections(d.connections);
-      const found = d.connections.find(c => c.id === connectionId);
-      setSelectedConn(found || null);
-      if (!connectionId && d.connections.length > 0 && !connectionIdProp) {
-        setSearchParams({ connection_id: String(d.connections[0].id) });
+      if (connectionIdProp) return;
+      const savedName = localStorage.getItem(LS_KEY);
+      const match = savedName ? d.connections.find(c => c.name === savedName) : null;
+      const target = match || d.connections[0];
+      if (target) {
+        setConnectionId(target.id);
+        setSelectedConn(target);
+        localStorage.setItem(LS_KEY, target.name);
       }
     }).catch(() => { /* silently ignore */ });
   }, []);
@@ -125,7 +128,7 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
         <div className="max-w-7xl mx-auto">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h1 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+              <h1 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
                 <i className="ri-table-line text-blue-500" />
                 Tableau 资产浏览
               </h1>
@@ -133,8 +136,14 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
             <div className="flex items-center gap-3">
               {connections.length > 0 && (
                 <>
-                  <select value={connectionId} onChange={e => { setSearchParams({ connection_id: e.target.value }); setPage(1); }}
-                    className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white">
+                  <select value={connectionId} onChange={e => {
+                      const id = Number(e.target.value);
+                      setConnectionId(id);
+                      setPage(1);
+                      const conn = connections.find(c => c.id === id);
+                      if (conn) localStorage.setItem(LS_KEY, conn.name);
+                    }}
+                    className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-white">
                     {connections.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                   {selectedConn && (
@@ -167,7 +176,7 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
             <i className="ri-search-line absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input type="text" placeholder="搜索资产名称、项目或所有者..."
               value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
-              className="w-full pl-9 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
+              className="w-full pl-9 pr-4 py-2.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-blue-500" />
           </div>
           {/* Filters */}
           <div className="flex items-center gap-2 mt-3">
@@ -197,7 +206,7 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
                   <p className="text-xs text-slate-400">暂无项目数据</p>
                 )}
                 {projects.map(p => (
-                  <div key={p.name} className="text-sm">
+                  <div key={p.name} className="text-xs">
                     <div className="font-medium text-slate-700 py-1">{p.name}</div>
                     <div className="pl-3 space-y-0.5">
                       {Object.values(p.children).map((child: any) => (
@@ -221,14 +230,14 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
             {loading ? (
               <div className="flex flex-col items-center justify-center py-20">
                 <i className="ri-loader-4-line text-2xl text-blue-600 animate-spin" />
-                <p className="mt-3 text-sm text-gray-500">加载中...</p>
+                <p className="mt-3 text-xs text-slate-500">加载中...</p>
               </div>
             ) : assets.length === 0 ? (
               <div className="text-center py-20 text-slate-400">
                 <i className="ri-folder-open-line text-3xl mb-2 block" />
                 <p className="mb-4">未找到资产，请同步以获取资产数据</p>
                 {syncMsg && (
-                  <p className={`text-sm mb-3 ${syncMsg.includes('失败') ? 'text-red-500' : 'text-emerald-600'}`}>
+                  <p className={`text-xs mb-3 ${syncMsg.includes('失败') ? 'text-red-500' : 'text-emerald-600'}`}>
                     {syncMsg}
                   </p>
                 )}
@@ -236,7 +245,7 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
                   onClick={handleSync}
                   disabled={syncing || !connectionId}
                   data-testid="empty-sync-btn"
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   <i className={`${syncing ? 'ri-loader-4-line animate-spin' : 'ri-refresh-line'}`} />
                   {syncing ? '同步中...' : '同步资产'}
@@ -268,7 +277,7 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
                       )}
                       <span className="text-[10px] text-slate-400">{ASSET_TYPE_LABELS[asset.asset_type]}</span>
                     </div>
-                    <h4 className="font-medium text-slate-800 text-sm truncate">{asset.name}</h4>
+                    <h4 className="font-medium text-slate-800 text-xs truncate">{asset.name}</h4>
                     <p className="text-xs text-slate-400 mt-1 truncate">{asset.project_name || '未分类'}</p>
                     {asset.parent_workbook_name && (asset.asset_type === 'view' || asset.asset_type === 'dashboard') && (
                       <p className="text-xs text-slate-400 mt-1 truncate flex items-center gap-1">
@@ -299,23 +308,25 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
               </div>
             ) : (
               <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                <table className="w-full">
+                <table className="w-full text-xs">
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-200">
-                      <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">类型</th>
-                      <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">名称</th>
-                      <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">项目</th>
-                      <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">所有者</th>
-                      <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">浏览量</th>
-                      <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">同步时间</th>
+                      <th className="text-left font-medium text-slate-600 px-3 py-3 whitespace-nowrap">类型</th>
+                      <th className="text-left font-medium text-slate-600 px-3 py-3">名称</th>
+                      <th className="text-left font-medium text-slate-600 px-3 py-3">项目</th>
+                      <th className="text-left font-medium text-slate-600 px-3 py-3">所有者</th>
+                      <th className="text-right font-medium text-slate-600 px-3 py-3">浏览量</th>
+                      <th className="text-left font-medium text-slate-600 px-3 py-3 whitespace-nowrap">创建时间</th>
+                      <th className="text-left font-medium text-slate-600 px-3 py-3 whitespace-nowrap">修改时间</th>
+                      <th className="text-left font-medium text-slate-600 px-3 py-3 whitespace-nowrap">同步时间</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {assets.map(asset => (
                       <tr key={asset.id} onClick={() => handleAssetClick(asset)}
                         className="hover:bg-slate-50 cursor-pointer">
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs ${
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded ${
                             asset.asset_type === 'workbook' ? 'bg-blue-50 text-blue-600' :
                             asset.asset_type === 'dashboard' ? 'bg-purple-50 text-purple-600' :
                             asset.asset_type === 'view' ? 'bg-emerald-50 text-emerald-600' :
@@ -325,13 +336,15 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
                             {ASSET_TYPE_LABELS[asset.asset_type]}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-sm text-slate-800">{asset.name}</td>
-                        <td className="px-4 py-3 text-sm text-slate-500">{asset.project_name || '-'}</td>
-                        <td className="px-4 py-3 text-sm text-slate-500">{asset.owner_name || '-'}</td>
-                        <td className="px-4 py-3 text-sm text-slate-500 text-right">
+                        <td className="px-3 py-3 text-slate-700">{asset.name}</td>
+                        <td className="px-3 py-3 text-slate-700">{asset.project_name || '-'}</td>
+                        <td className="px-3 py-3 text-slate-700">{asset.owner_name || '-'}</td>
+                        <td className="px-3 py-3 text-slate-700 text-right">
                           {asset.view_count != null ? asset.view_count.toLocaleString() : '-'}
                         </td>
-                        <td className="px-4 py-3 text-xs text-slate-400">{asset.synced_at}</td>
+                        <td className="px-3 py-3 text-slate-700 whitespace-nowrap">{asset.created_on_server || '-'}</td>
+                        <td className="px-3 py-3 text-slate-700 whitespace-nowrap">{asset.updated_on_server || '-'}</td>
+                        <td className="px-3 py-3 text-slate-700 whitespace-nowrap">{asset.synced_at || '-'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -343,12 +356,12 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
             {total > 24 && (
               <div className="flex items-center justify-center gap-2 mt-6">
                 <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                  className="px-3 py-1.5 text-sm bg-white border border-slate-200 rounded-lg disabled:opacity-50 hover:bg-slate-50">
+                  className="px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg disabled:opacity-50 hover:bg-slate-50">
                   上一页
                 </button>
-                <span className="text-sm text-slate-500">第 {page} 页，共 {Math.ceil(total / 24)} 页</span>
+                <span className="text-xs text-slate-500">第 {page} 页，共 {Math.ceil(total / 24)} 页</span>
                 <button onClick={() => setPage(p => p + 1)} disabled={page >= Math.ceil(total / 24)}
-                  className="px-3 py-1.5 text-sm bg-white border border-slate-200 rounded-lg disabled:opacity-50 hover:bg-slate-50">
+                  className="px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg disabled:opacity-50 hover:bg-slate-50">
                   下一页
                 </button>
               </div>

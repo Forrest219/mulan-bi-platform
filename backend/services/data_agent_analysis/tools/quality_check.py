@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from app.core.database import SessionLocal
 from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
-from models.governance import BiQualityResult, BiQualityRule
+from services.governance.models import QualityResult, QualityRule
 
 logger = logging.getLogger(__name__)
 
@@ -90,34 +90,34 @@ class QualityCheckTool(BaseTool):
 
             db = SessionLocal()
             try:
-                query = db.query(BiQualityResult).join(
-                    BiQualityRule,
-                    BiQualityResult.rule_id == BiQualityRule.id,
+                query = db.query(QualityResult, QualityRule).join(
+                    QualityRule,
+                    QualityResult.rule_id == QualityRule.id,
                 ).filter(
-                    BiQualityRule.datasource_id == datasource_id,
+                    QualityRule.datasource_id == datasource_id,
                 )
 
                 if table_name:
-                    query = query.filter(BiQualityRule.table_name == table_name)
+                    query = query.filter(QualityRule.table_name == table_name)
 
                 if check_types:
-                    query = query.filter(BiQualityRule.rule_type.in_(check_types))
+                    query = query.filter(QualityRule.rule_type.in_(check_types))
 
                 results = query.order_by(
-                    BiQualityResult.created_at.desc()
+                    QualityResult.created_at.desc()
                 ).limit(limit).all()
 
                 checks = []
-                for r in results:
+                for result, rule in results:
                     checks.append({
-                        "type": r.rule.rule_type if r.rule else "unknown",
-                        "field": r.rule.field_name if r.rule else None,
-                        "actual": r.actual_value,
-                        "threshold": r.threshold_value,
-                        "passed": r.is_passed,
-                        "rule_name": r.rule.rule_name if r.rule else None,
-                        "table_name": r.rule.table_name if r.rule else None,
-                        "created_at": r.created_at.isoformat() if r.created_at else None,
+                        "type": rule.rule_type,
+                        "field": result.field_name,
+                        "actual": result.actual_value,
+                        "threshold": result.expected_value,
+                        "passed": result.passed,
+                        "rule_name": rule.name,
+                        "table_name": result.table_name,
+                        "created_at": result.created_at.isoformat() if result.created_at else None,
                     })
 
                 # 计算整体质量评分

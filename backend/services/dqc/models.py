@@ -96,6 +96,53 @@ class DqcMonitoredAsset(Base):
         }
 
 
+class DqcRuleTemplate(Base):
+    """DQC 规则模板 — 统一管理默认规则，注册新表时自动匹配实例化"""
+    __tablename__ = "bi_dqc_rule_templates"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(256), nullable=False)
+    description = Column(Text, nullable=True)
+    dimension = Column(String(32), nullable=False)
+    rule_type = Column(String(32), nullable=False)
+    default_config = Column(JSONB, nullable=False, server_default=sa_text("'{}'"))
+    match_condition = Column(JSONB, nullable=False, server_default=sa_text("'{}'"))
+    severity = Column(String(16), nullable=False, server_default=sa_text("'MEDIUM'"))
+
+    enabled = Column(Boolean, nullable=False, server_default=sa_text("true"))
+    is_builtin = Column(Boolean, nullable=False, server_default=sa_text("false"))
+    is_modified_by_user = Column(Boolean, nullable=False, server_default=sa_text("false"))
+
+    created_by = Column(Integer, nullable=True)
+    updated_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=sa_func.now(), onupdate=sa_func.now())
+
+    __table_args__ = (
+        Index("ix_dqc_tmpl_enabled", "enabled"),
+        Index("ix_dqc_tmpl_dim_type", "dimension", "rule_type"),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "dimension": self.dimension,
+            "rule_type": self.rule_type,
+            "default_config": self.default_config,
+            "match_condition": self.match_condition,
+            "severity": self.severity,
+            "enabled": self.enabled,
+            "is_builtin": self.is_builtin,
+            "is_modified_by_user": self.is_modified_by_user,
+            "created_by": self.created_by,
+            "updated_by": self.updated_by,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
+        }
+
+
 class DqcQualityRule(Base):
     """DQC 质量规则（关联到 monitored_asset）"""
     __tablename__ = "bi_dqc_quality_rules"
@@ -116,6 +163,13 @@ class DqcQualityRule(Base):
     is_active = Column(Boolean, nullable=False, server_default=sa_text("true"))
     is_system_suggested = Column(Boolean, nullable=False, server_default=sa_text("false"))
     suggested_by_llm_analysis_id = Column(Integer, nullable=True)
+    template_id = Column(
+        Integer,
+        ForeignKey("bi_dqc_rule_templates.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    is_modified_by_user = Column(Boolean, nullable=False, server_default=sa_text("false"))
 
     created_by = Column(Integer, nullable=False)
     updated_by = Column(Integer, nullable=True)
@@ -139,6 +193,8 @@ class DqcQualityRule(Base):
             "is_active": self.is_active,
             "is_system_suggested": self.is_system_suggested,
             "suggested_by_llm_analysis_id": self.suggested_by_llm_analysis_id,
+            "template_id": self.template_id,
+            "is_modified_by_user": self.is_modified_by_user,
             "created_by": self.created_by,
             "updated_by": self.updated_by,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,

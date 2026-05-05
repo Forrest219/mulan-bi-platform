@@ -16,6 +16,7 @@ from app.core.crypto import get_datasource_crypto
 from app.core.database import SessionLocal
 from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
 from services.datasources.models import DataSource
+from services.tableau.models import TableauConnection, TableauAsset, TableauDatasourceField
 
 logger = logging.getLogger(__name__)
 
@@ -98,33 +99,40 @@ class SchemaTool(BaseTool):
                 context.trace_id,
             )
 
-            # ── Stage 1: Fetch DataSource ──────────────────────────────────────
+            # ── Stage 1: Resolve connection type ────────────────────────────────
             db = SessionLocal()
             try:
-                ds: Optional[DataSource] = db.query(DataSource).filter(
-                    DataSource.id == connection_id
+                tc = db.query(TableauConnection).filter(
+                    TableauConnection.id == connection_id,
+                    TableauConnection.is_active == True,
                 ).first()
 
-                if not ds:
-                    return ToolResult(
-                        success=False,
-                        data=None,
-                        error=f"Data source not found: connection_id={connection_id}",
-                        execution_time_ms=int((time.time() - start_time) * 1000),
-                    )
-
-                crypto = get_datasource_crypto()
-                password = crypto.decrypt(ds.password_encrypted)
-
-                # ── Stage 2: Query INFORMATION_SCHEMA ──────────────────────────
-                if ds.db_type == "postgresql":
-                    result = await self._query_postgresql_schema(ds, password, table_name, limit)
-                elif ds.db_type in ("mysql", "mariadb"):
-                    result = await self._query_mysql_schema(ds, password, table_name, limit)
-                elif ds.db_type == "sqlserver":
-                    result = await self._query_sqlserver_schema(ds, password, table_name, limit)
+                if tc:
+                    result = self._query_tableau_schema(db, tc, table_name, limit)
                 else:
-                    result = await self._query_postgresql_schema(ds, password, table_name, limit)
+                    ds: Optional[DataSource] = db.query(DataSource).filter(
+                        DataSource.id == connection_id
+                    ).first()
+
+                    if not ds:
+                        return ToolResult(
+                            success=False,
+                            data=None,
+                            error=f"Data source not found: connection_id={connection_id}",
+                            execution_time_ms=int((time.time() - start_time) * 1000),
+                        )
+
+                    crypto = get_datasource_crypto()
+                    password = crypto.decrypt(ds.password_encrypted)
+
+                    if ds.db_type == "postgresql":
+                        result = await self._query_postgresql_schema(ds, password, table_name, limit)
+                    elif ds.db_type in ("mysql", "mariadb"):
+                        result = await self._query_mysql_schema(ds, password, table_name, limit)
+                    elif ds.db_type == "sqlserver":
+                        result = await self._query_sqlserver_schema(ds, password, table_name, limit)
+                    else:
+                        result = await self._query_postgresql_schema(ds, password, table_name, limit)
             finally:
                 db.close()
 
@@ -150,6 +158,61 @@ class SchemaTool(BaseTool):
                 error="查询表结构失败，请稍后重试",
                 execution_time_ms=int((time.time() - start_time) * 1000),
             )
+
+    def _query_tableau_schema(
+        self, db, tc: "TableauConnection", table_name: Optional[str], limit: int
+    ) -> Dict[str, Any]:
+        """Query Tableau assets and fields as the 'schema' for a Tableau connection."""
+        assets = db.query(TableauAsset).filter(
+            TableauAsset.connection_id == tc.id,
+            TableauAsset.is_deleted == False,
+        ).order_by(TableauAsset.asset_type, TableauAsset.name).limit(limit).all()
+
+        asset_types = {}
+        for a in assets:
+            asset_types.setdefault(a.asset_type, []).append({
+                "name": a.name,
+                "project": a.project_name,
+                "tableau_id": a.tableau_id,
+            })
+
+        tables = [
+            {"name": a.name, "type": a.asset_type, "project": a.project_name}
+            for a in assets
+        ]
+
+        fields: Dict[str, Any] = {}
+        if table_name:
+            target_asset = db.query(TableauAsset).filter(
+                TableauAsset.connection_id == tc.id,
+                TableauAsset.is_deleted == False,
+                TableauAsset.name == table_name,
+            ).first()
+            if target_asset:
+                field_records = db.query(TableauDatasourceField).filter(
+                    TableauDatasourceField.asset_id == target_asset.id,
+                ).all()
+                fields[table_name] = [
+                    {
+                        "name": f.field_name,
+                        "caption": f.field_caption,
+                        "data_type": f.data_type,
+                        "role": f.role,
+                        "is_calculated": f.is_calculated,
+                    }
+                    for f in field_records
+                ]
+
+        return {
+            "connection_id": tc.id,
+            "datasource_name": tc.name,
+            "db_type": "tableau",
+            "server_url": tc.server_url,
+            "site": tc.site,
+            "tables": tables,
+            "fields": fields,
+            "asset_summary": {k: len(v) for k, v in asset_types.items()},
+        }
 
     def _query_postgresql_schema_sync(
         self, ds: DataSource, password: str, table_name: Optional[str], limit: int

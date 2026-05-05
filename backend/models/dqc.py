@@ -11,11 +11,13 @@ from services.dqc.models import (  # noqa: F401
     DqcMonitoredAsset,
     DqcQualityRule,
     DqcRuleResult,
+    DqcRuleTemplate,
 )
 
 __all__ = [
     "DqcMonitoredAsset",
     "DqcQualityRule",
+    "DqcRuleTemplate",
     "DqcCycle",
     "DqcDimensionScore",
     "DqcAssetSnapshot",

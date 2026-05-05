@@ -19,7 +19,7 @@ test.describe('登录页', () => {
       if (msg.type() === 'error') errors.push(msg.text());
     });
     await page.goto('/login');
-    await expect(page.locator('h1')).toContainText('Mulan Platform');
+    await expect(page.locator('h1')).toContainText('木兰 BI 平台');
     // 过滤掉 401/403 等认证相关错误（登录页检查 session 时预期返回）
     const realErrors = errors.filter(e =>
       !e.includes('401') &&
@@ -34,7 +34,7 @@ test.describe('登录页', () => {
   test('所有表单元素正常渲染', async ({ page }) => {
     await page.goto('/login');
     // Logo 标题
-    await expect(page.locator('h1')).toContainText('Mulan Platform');
+    await expect(page.locator('h1')).toContainText('木兰 BI 平台');
     // 用户名输入框
     const usernameInput = page.locator('input[type="text"]');
     await expect(usernameInput).toBeVisible();
@@ -118,7 +118,10 @@ test.describe('登录页', () => {
     await page.locator('input[type="password"]').fill(ADMIN_PASSWORD);
     await page.locator('button[type="submit"]').click();
     await expect(page).toHaveURL('/');
-    await expect(page.locator('textarea, input[placeholder*="提问"], input[placeholder*="木兰"]').first()).toBeVisible();
+    // 修复后：ScopeProvider 已统一，connections 由 OpsWorkbench 内部唯一实例加载
+    // AskBar 的 textarea 应在连接列表加载完成后自动可见（不再需要手动选连接）
+    const textarea = page.locator('[data-askbar-input]');
+    await expect(textarea).toBeVisible({ timeout: 15000 });
   });
 
   // ===== 键盘交互 =====

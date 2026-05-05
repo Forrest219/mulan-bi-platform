@@ -31,6 +31,8 @@ class ToolContext:
     session_id: str
     user_id: int
     connection_id: Optional[int] = None
+    connection_name: Optional[str] = None
+    connection_type: Optional[str] = None
     trace_id: str = ""
     tenant_id: Optional[str] = None
 

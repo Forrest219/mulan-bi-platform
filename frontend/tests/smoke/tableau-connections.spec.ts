@@ -30,7 +30,7 @@ function mockConnectionsRoute(page: import('@playwright/test').Page) {
   );
 }
 
-test.describe('Tableau 连接管理', () => {
+test.describe('Tableau 连接', () => {
 
   test.beforeEach(async ({ page }) => {
     await page.goto('/login');
@@ -42,63 +42,53 @@ test.describe('Tableau 连接管理', () => {
 
   test('Tableau 连接页可访问且显示中文标题', async ({ page }) => {
     await page.goto('/assets/tableau-connections');
-    await expect(page.locator('h1')).toContainText('Tableau', { timeout: 5000 });
+    await expect(page.locator('text=Tableau 连接')).toBeVisible({ timeout: 5000 });
     await expect(page.locator('text=Page Not Found')).toHaveCount(0);
-  });
-
-  test('页面有新建按钮', async ({ page }) => {
-    await page.goto('/assets/tableau-connections');
-    const addBtn = page.locator('button').filter({ hasText: /新建|新增|添加|创建/ });
-    await expect(addBtn.first()).toBeVisible({ timeout: 5000 });
   });
 
   test('页面显示连接列表或空状态', async ({ page }) => {
     await page.goto('/assets/tableau-connections');
     await page.waitForTimeout(2000);
-    const hasTable = await page.locator('table').isVisible().catch(() => false);
-    const hasCards = await page.locator('[class*="rounded"]').first().isVisible().catch(() => false);
-    const hasEmpty = await page.locator('text=暂无').isVisible().catch(() => false);
+    const hasTable = await page.locator('table').isVisible();
+    const hasCards = await page.locator('[class*="rounded"]').first().isVisible();
+    const hasEmpty = await page.locator('text=暂无').isVisible();
     expect(hasTable || hasCards || hasEmpty).toBe(true);
   });
 
-  test('页面结构完整 - 标题、副标题、筛选复选框均可见', async ({ page }) => {
+  test('页面结构完整 - 标题、副标题、横幅、筛选复选框均可见', async ({ page }) => {
     await page.goto('/assets/tableau-connections');
     await page.waitForTimeout(2000);
 
-    // 页面主标题
-    await expect(page.locator('h1')).toContainText('Tableau 连接管理', { timeout: 5000 });
-    // 副标题
-    await expect(page.locator('text=配置 Tableau Server 连接并同步资产')).toBeVisible();
-    // 筛选复选框
+    await expect(page.locator('text=Tableau 连接')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=连接由 MCP 配置自动管理')).toBeVisible();
+    await expect(page.locator('a[href="/system/mcp-configs"]')).toBeVisible();
     await expect(page.locator('text=显示已禁用的连接')).toBeVisible();
-    // 新建按钮
-    await expect(page.locator('button', { hasText: '新建连接' })).toBeVisible();
-    // 无 404 错误
     await expect(page.locator('text=Page Not Found')).toHaveCount(0);
   });
 
-  test('打开新建连接 Modal，表单字段完整可见', async ({ page }) => {
+  test('页面无增删改操作按钮', async ({ page }) => {
+    await mockConnectionsRoute(page);
+    await page.goto('/assets/tableau-connections');
+    await expect(page.locator('text=mcp_test_0419')).toBeVisible({ timeout: 5000 });
+
+    await expect(page.locator('button', { hasText: '新建连接' })).toHaveCount(0);
+    await expect(page.locator('button', { hasText: '编辑' })).toHaveCount(0);
+    await expect(page.locator('button', { hasText: '删除' })).toHaveCount(0);
+    await expect(page.locator('button', { hasText: /^启用$|^禁用$/ })).toHaveCount(0);
+
+    await expect(page.locator('button', { hasText: '测试' })).toBeVisible();
+    await expect(page.locator('button', { hasText: '同步' })).toBeVisible();
+    await expect(page.locator('button', { hasText: '日志' })).toBeVisible();
+  });
+
+  test('MCP 配置提示横幅可见且包含链接', async ({ page }) => {
     await page.goto('/assets/tableau-connections');
     await page.waitForTimeout(2000);
-    await page.locator('button', { hasText: '新建连接' }).click();
-    await page.waitForTimeout(500);
 
-    // Modal 标题
-    await expect(page.locator('h2', { hasText: '新建 Tableau 连接' })).toBeVisible();
-    // 连接类型选项
-    await expect(page.locator('text=MCP/REST')).toBeVisible();
-    await expect(page.locator('text=TSC 直连')).toBeVisible();
-    // 必填字段标签
-    await expect(page.locator('text=连接名称')).toBeVisible();
-    await expect(page.locator('text=Server URL')).toBeVisible();
-    await expect(page.locator('text=站点 (Site)')).toBeVisible();
-    await expect(page.locator('text=PAT Name')).toBeVisible();
-    await expect(page.locator('text=PAT Token')).toBeVisible();
-    // 自动同步设置
-    await expect(page.locator('text=启用自动同步')).toBeVisible();
-    // 操作按钮
-    await expect(page.locator('button', { hasText: '取消' })).toBeVisible();
-    await expect(page.locator('button', { hasText: '创建' })).toBeVisible();
+    await expect(page.locator('text=连接由 MCP 配置自动管理')).toBeVisible({ timeout: 5000 });
+    const mcpLink = page.locator('a[href="/system/mcp-configs"]');
+    await expect(mcpLink).toBeVisible();
+    await expect(mcpLink).toContainText('MCP 配置');
   });
 
   test('列表页面无控制台 JS 错误', async ({ page }) => {
@@ -121,17 +111,16 @@ test.describe('Tableau 连接管理', () => {
     const body = await page.locator('body').textContent();
     expect(body).not.toContain('Import Placeholder');
     expect(body).not.toContain('TODO');
-    expect(body).not.toContain('New Connection (CTA)');
   });
 
   test('筛选复选框可点击切换状态', async ({ page }) => {
     await page.goto('/assets/tableau-connections');
     await page.waitForTimeout(2000);
     const checkbox = page.locator('text=显示已禁用的连接').locator('..').locator('input[type="checkbox"]');
-    const isChecked = await checkbox.isChecked().catch(() => false);
+    const isChecked = await checkbox.isChecked();
     await page.locator('text=显示已禁用的连接').click();
     await page.waitForTimeout(500);
-    const isCheckedAfter = await checkbox.isChecked().catch(() => false);
+    const isCheckedAfter = await checkbox.isChecked();
     expect(isCheckedAfter).toBe(!isChecked);
   });
 
@@ -198,5 +187,58 @@ test.describe('Tableau 连接管理', () => {
 
     // 按钮应恢复可点击
     await expect(syncBtn).toBeEnabled();
+  });
+
+  test('点击日志按钮跳转到同步日志页面', async ({ page }) => {
+    await mockConnectionsRoute(page);
+
+    await page.goto('/assets/tableau-connections');
+    await expect(page.locator('text=mcp_test_0419')).toBeVisible({ timeout: 5000 });
+
+    // 点击日志按钮
+    await page.locator('button', { hasText: '日志' }).click();
+
+    // 验证跳转到同步日志页面
+    await expect(page).toHaveURL(/\/assets\/tableau-connections\/1\/sync-logs/, { timeout: 5000 });
+    await expect(page.locator('text=的同步日志')).toBeVisible({ timeout: 5000 });
+  });
+
+  test('测试按钮成功时弹窗显示操作成功', async ({ page }) => {
+    await mockConnectionsRoute(page);
+    await page.route('**/api/tableau/connections/1/test', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, message: '连接测试成功' }),
+      })
+    );
+
+    await page.goto('/assets/tableau-connections');
+    await expect(page.locator('text=mcp_test_0419')).toBeVisible({ timeout: 5000 });
+
+    await page.locator('button', { hasText: '测试' }).click();
+    await expect(page.locator('text=操作成功')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=连接测试成功')).toBeVisible();
+  });
+
+  test('测试按钮失败时弹窗显示中文错误消息', async ({ page }) => {
+    await mockConnectionsRoute(page);
+    await page.route('**/api/tableau/connections/1/test', route =>
+      route.fulfill({
+        status: 403,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          detail: { error_code: 'TAB_002', message: '无权访问此连接', detail: {} },
+        }),
+      })
+    );
+
+    await page.goto('/assets/tableau-connections');
+    await expect(page.locator('text=mcp_test_0419')).toBeVisible({ timeout: 5000 });
+
+    await page.locator('button', { hasText: '测试' }).click();
+    await expect(page.locator('text=操作失败')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=无权访问此连接')).toBeVisible();
+    await expect(page.locator('text=[object Object]')).toHaveCount(0);
   });
 });

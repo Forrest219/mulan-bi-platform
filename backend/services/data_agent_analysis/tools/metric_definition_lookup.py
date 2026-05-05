@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from app.core.database import SessionLocal
 from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
+from services.metrics_agent.template_renderer import TemplateRenderer
 from models.metrics import BiMetricDefinition
 
 logger = logging.getLogger(__name__)
@@ -103,7 +104,15 @@ class MetricDefinitionLookupTool(BaseTool):
                 ).limit(limit).all()
 
                 metric_list = []
+                renderer = TemplateRenderer()
                 for m in metrics:
+                    rendered_formula_sql = None
+                    if m.formula_template:
+                        try:
+                            rendered_formula_sql = renderer.render(m.formula_template, m.filters or {})
+                        except (ValueError, Exception) as e:
+                            logger.warning(f"formula_template 渲染失败 metric_id={m.id}: {e}")
+                            rendered_formula_sql = m.formula_template  # 降级为原始模板
                     metric_list.append({
                         "id": str(m.id),
                         "name": m.name,
@@ -113,6 +122,7 @@ class MetricDefinitionLookupTool(BaseTool):
                         "description": m.description,
                         "formula": m.formula,
                         "formula_template": m.formula_template,
+                        "formula_sql": rendered_formula_sql,
                         "aggregation_type": m.aggregation_type,
                         "result_type": m.result_type,
                         "unit": m.unit,

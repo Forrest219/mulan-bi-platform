@@ -27,7 +27,7 @@ DEFAULT_MAX_STEPS = 10
 DEFAULT_STEP_TIMEOUT = 30  # 秒
 DEFAULT_TOTAL_TIMEOUT = 120  # 秒
 DEFAULT_MAX_TOOL_RETRIES = 1
-DEFAULT_MAX_HISTORY_TOKENS = 4000
+DEFAULT_MAX_HISTORY_TOKENS = 8000
 
 
 def _estimate_tokens(text: str) -> int:
@@ -160,6 +160,9 @@ class ReActEngine:
                 system_prompt=system_prompt,
                 context=context,
                 step=step_count,
+                connection_id=context.connection_id,
+                connection_name=context.connection_name,
+                connection_type=context.connection_type,
             )
 
             if think_result.get("error"):
@@ -277,10 +280,18 @@ class ReActEngine:
         system_prompt: str,
         context: ToolContext,
         step: int,
+        connection_id: Optional[int] = None,
+        connection_name: Optional[str] = None,
+        connection_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         """调用 LLM 进行推理决策"""
         # 构造 prompt
-        prompt = _build_think_prompt(query, history, step, self.max_history_tokens)
+        prompt = _build_think_prompt(
+            query, history, step, self.max_history_tokens,
+            connection_id=connection_id,
+            connection_name=connection_name,
+            connection_type=connection_type,
+        )
 
         # 调用 LLM
         try:
@@ -339,9 +350,13 @@ class ReActEngine:
 
     def _parse_llm_response(self, content: str) -> Dict[str, Any]:
         """解析 LLM 返回的 JSON 决策"""
+        import re
+        # 去掉 markdown 代码围栏（```json ... ```）
+        stripped = re.sub(r'^```\w*\s*', '', content.strip())
+        stripped = re.sub(r'\s*```$', '', stripped).strip()
+
         try:
-            # 尝试提取 JSON
-            data = json.loads(content)
+            data = json.loads(stripped)
             action = data.get("action", "final_answer")
             return {
                 "action": action,
@@ -351,7 +366,6 @@ class ReActEngine:
                 "answer": data.get("answer", ""),
             }
         except json.JSONDecodeError:
-            # 不是 JSON，尝试从文本中提取
             return self._parse_text_response(content)
 
     def _parse_text_response(self, content: str) -> Dict[str, Any]:
@@ -451,12 +465,20 @@ def _build_think_prompt(
     history: List[Dict[str, Any]],
     step: int,
     max_history_tokens: int = DEFAULT_MAX_HISTORY_TOKENS,
+    connection_id: Optional[int] = None,
+    connection_name: Optional[str] = None,
+    connection_type: Optional[str] = None,
 ) -> str:
     """构建 Think 阶段的 prompt"""
     prompt_parts = [
         f"用户问题：{query}",
         f"当前推理步：{step}",
     ]
+
+    if connection_id:
+        conn_desc = f"当前数据连接：{connection_name or '未知'}（ID={connection_id}，类型={connection_type or '未知'}）"
+        prompt_parts.append(conn_desc)
+        prompt_parts.append("请基于此连接回答用户问题。调用工具时无需额外指定 connection_id，系统会自动使用当前连接。")
 
     if history:
         truncated = _truncate_history(history[-10:], max_history_tokens)
@@ -466,9 +488,9 @@ def _build_think_prompt(
             content = msg.get("content", "")
             if role == "tool":
                 name = msg.get("name", "unknown")
-                prompt_parts.append(f"[工具 {name} 返回]: {content[:200]}")
+                prompt_parts.append(f"[工具 {name} 返回]: {content[:4000]}")
             else:
-                prompt_parts.append(f"[{role}]: {content[:200]}")
+                prompt_parts.append(f"[{role}]: {content[:500]}")
 
     prompt_parts.append("请根据以上信息，决定下一步操作。")
     return "\n".join(prompt_parts)

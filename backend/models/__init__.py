@@ -19,3 +19,12 @@ from models.dqc import (  # noqa: F401
     DqcRuleResult,
     DqcLlmAnalysis,
 )
+
+from models.metrics_maintenance_window import (  # noqa: F401
+    BiMaintenanceWindow,
+)
+
+from models.conversations import (  # noqa: F401
+    Conversation,
+    ConversationMessage,
+)

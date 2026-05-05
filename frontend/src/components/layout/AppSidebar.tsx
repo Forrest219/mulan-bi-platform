@@ -255,12 +255,14 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
       style={{ width, minWidth: width }}
     >
       {/* Logo + 平台名称 + 折叠按钮 */}
-      <div className="flex items-center justify-between px-2 pt-4 pb-2">
+      <div className={`flex items-center px-2 pt-4 pb-2 ${collapsed ? 'flex-col gap-2' : 'justify-between'}`}>
         <div className="flex items-center gap-2 shrink-0">
           <img src={platformSettings.logo_url} alt={platformSettings.platform_name} className="h-7 w-auto object-contain" />
-          <span className="text-[13px] font-semibold text-slate-600 tracking-wide hidden sm:block">
-            {platformSettings.platform_name}
-          </span>
+          {!collapsed && (
+            <span className="text-[13px] font-semibold text-slate-600 tracking-wide">
+              {platformSettings.platform_name}
+            </span>
+          )}
         </div>
 
         <button
@@ -314,20 +316,6 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
         })}
       </nav>
 
-      {/* 底部：返回首页 */}
-      <div className="px-2 py-3 border-t border-slate-100">
-        <Link
-          to="/"
-          className={`
-            flex items-center gap-2 px-3 py-2 rounded-lg transition-colors
-            ${location.pathname === '/' ? 'text-cyan-600 bg-cyan-50' : 'text-slate-400 hover:text-slate-500 hover:bg-slate-50'}
-          `}
-          title={collapsed ? '返回首页' : undefined}
-        >
-          <i className="ri-arrow-left-line text-base" />
-          {!collapsed && <span className="text-[13px] font-medium">返回首页</span>}
-        </Link>
-      </div>
     </aside>
   );
 }

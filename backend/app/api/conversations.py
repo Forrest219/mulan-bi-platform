@@ -1,14 +1,12 @@
 """对话历史 API"""
-import uuid
-from datetime import datetime, timezone
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from services.conversation_service import ConversationService
 
 router = APIRouter()
 
@@ -21,6 +19,12 @@ class ConversationUpdate(BaseModel):
     title: str
 
 
+class MessageCreate(BaseModel):
+    role: str
+    content: str
+    query_context: Optional[dict] = None
+
+
 # GET /api/conversations
 @router.get("")
 def list_conversations(
@@ -28,18 +32,8 @@ def list_conversations(
     user=Depends(get_current_user),
 ):
     """返回当前用户对话列表（按 updated_at DESC，最多 100 条）"""
-    rows = db.execute(text("""
-        SELECT c.id, c.title, c.updated_at,
-               COUNT(m.id) AS message_count
-        FROM conversations c
-        LEFT JOIN conversation_messages m ON m.conversation_id = c.id
-        WHERE c.user_id = :user_id
-        GROUP BY c.id, c.title, c.updated_at
-        HAVING COUNT(m.id) > 0
-        ORDER BY c.updated_at DESC
-        LIMIT 100
-    """), {"user_id": user["id"]}).fetchall()
-    return [dict(r._mapping) for r in rows]
+    service = ConversationService(db)
+    return service.list_conversations(user["id"])
 
 
 # POST /api/conversations
@@ -49,14 +43,15 @@ def create_conversation(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    conv_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc)
-    db.execute(text("""
-        INSERT INTO conversations (id, user_id, title, created_at, updated_at)
-        VALUES (:id, :user_id, :title, :now, :now)
-    """), {"id": conv_id, "user_id": user["id"], "title": body.title or "新对话", "now": now})
-    db.commit()
-    return {"id": conv_id, "title": body.title, "created_at": now.isoformat(), "updated_at": now.isoformat()}
+    """创建新对话"""
+    service = ConversationService(db)
+    conv = service.create_conversation(user["id"], body.title)
+    return {
+        "id": conv.id,
+        "title": conv.title,
+        "created_at": conv.created_at.isoformat() if conv.created_at else None,
+        "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
+    }
 
 
 # GET /api/conversations/search — 必须在 /{conversation_id} 之前注册
@@ -67,20 +62,8 @@ def search_conversations(
     user=Depends(get_current_user),
 ):
     """搜索对话标题或消息内容（最多 20 条）"""
-    like = f"%{q}%"
-    rows = db.execute(text("""
-        SELECT DISTINCT c.id, c.title, c.updated_at,
-               COUNT(m.id) AS message_count
-        FROM conversations c
-        LEFT JOIN conversation_messages m ON m.conversation_id = c.id
-        WHERE c.user_id = :user_id
-          AND (c.title ILIKE :q OR m.content ILIKE :q)
-        GROUP BY c.id, c.title, c.updated_at
-        HAVING COUNT(m.id) > 0
-        ORDER BY c.updated_at DESC
-        LIMIT 20
-    """), {"user_id": user["id"], "q": like}).fetchall()
-    return [dict(r._mapping) for r in rows]
+    service = ConversationService(db)
+    return service.search_conversations(user["id"], q)
 
 
 # GET /api/conversations/{conversation_id}/context — P2-1 追问上下文
@@ -91,30 +74,11 @@ def get_conversation_context(
     user=Depends(get_current_user),
 ):
     """获取对话最近一条 assistant 消息的 query_context（用于追问上下文继承）"""
-    import json as _json
-
-    conv = db.execute(
-        text("SELECT id FROM conversations WHERE id=:id AND user_id=:user_id"),
-        {"id": conversation_id, "user_id": user["id"]},
-    ).fetchone()
-    if not conv:
-        raise HTTPException(status_code=404, detail="对话不存在")
-
-    msg = db.execute(
-        text("""
-            SELECT query_context FROM conversation_messages
-            WHERE conversation_id=:cid AND role='assistant' AND query_context IS NOT NULL
-            ORDER BY created_at DESC LIMIT 1
-        """),
-        {"cid": conversation_id},
-    ).fetchone()
-
-    if not msg:
+    service = ConversationService(db)
+    ctx = service.get_conversation_context(conversation_id, user["id"])
+    if ctx is None:
+        # 可能没有上下文，也可能是对话不存在
         return {"context": None}
-
-    ctx = msg._mapping["query_context"]
-    if isinstance(ctx, str):
-        ctx = _json.loads(ctx)
     return {"context": ctx}
 
 
@@ -125,19 +89,17 @@ def get_conversation(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    conv = db.execute(text("""
-        SELECT id, title, updated_at FROM conversations
-        WHERE id = :id AND user_id = :user_id
-    """), {"id": conversation_id, "user_id": user["id"]}).fetchone()
+    """获取对话详情（含消息列表）"""
+    service = ConversationService(db)
+    conv = service.get_conversation(conversation_id, user["id"])
     if not conv:
         raise HTTPException(status_code=404, detail="对话不存在")
-    messages = db.execute(text("""
-        SELECT id, role, content, query_context, created_at FROM conversation_messages
-        WHERE conversation_id = :cid ORDER BY created_at ASC
-    """), {"cid": conversation_id}).fetchall()
+    _, messages = service.list_messages(conversation_id, user["id"])
     return {
-        **dict(conv._mapping),
-        "messages": [dict(m._mapping) for m in messages],
+        "id": conv.id,
+        "title": conv.title,
+        "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
+        "messages": [m.to_dict() for m in messages],
     }
 
 
@@ -149,14 +111,12 @@ def update_conversation(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    result = db.execute(text("""
-        UPDATE conversations SET title = :title, updated_at = now()
-        WHERE id = :id AND user_id = :user_id
-    """), {"title": body.title, "id": conversation_id, "user_id": user["id"]})
-    db.commit()
-    if result.rowcount == 0:
+    """更新对话标题"""
+    service = ConversationService(db)
+    conv = service.update_conversation(conversation_id, user["id"], body.title)
+    if not conv:
         raise HTTPException(status_code=404, detail="对话不存在")
-    return {"id": conversation_id, "title": body.title}
+    return {"id": conv.id, "title": conv.title}
 
 
 # DELETE /api/conversations/{conversation_id}
@@ -166,9 +126,47 @@ def delete_conversation(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    result = db.execute(text("""
-        DELETE FROM conversations WHERE id = :id AND user_id = :user_id
-    """), {"id": conversation_id, "user_id": user["id"]})
-    db.commit()
-    if result.rowcount == 0:
+    """删除对话"""
+    service = ConversationService(db)
+    ok = service.delete_conversation(conversation_id, user["id"])
+    if not ok:
         raise HTTPException(status_code=404, detail="对话不存在")
+
+
+# GET /api/conversations/{conversation_id}/messages
+@router.get("/{conversation_id}/messages")
+def list_messages(
+    conversation_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """获取对话消息列表"""
+    service = ConversationService(db)
+    conv, messages = service.list_messages(conversation_id, user["id"])
+    if not conv:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    return [m.to_dict() for m in messages]
+
+
+# POST /api/conversations/{conversation_id}/messages
+@router.post("/{conversation_id}/messages", status_code=201)
+def create_message(
+    conversation_id: str,
+    body: MessageCreate,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """发送消息"""
+    if body.role not in ("user", "assistant"):
+        raise HTTPException(status_code=400, detail="role must be 'user' or 'assistant'")
+    service = ConversationService(db)
+    msg = service.create_message(
+        conversation_id=conversation_id,
+        user_id=user["id"],
+        role=body.role,
+        content=body.content,
+        query_context=body.query_context,
+    )
+    if not msg:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    return msg.to_dict()

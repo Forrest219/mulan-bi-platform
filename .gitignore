@@ -37,4 +37,17 @@ config_mulan.md
 Thumbs.db
 frontend/out/
 backend/.venv/
+
+# Build artifacts
+backend/mulan_bi_backend.egg-info/
+backend/uv.lock
+
+# Local runtime state
+.dev-pids/
+cookies.txt
+backend/cookies.txt
+frontend/cookies.txt
+
+# Test artifacts
 frontend/test-results/
+frontend/playwright-report/

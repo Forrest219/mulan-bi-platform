@@ -56,18 +56,37 @@ interface TestResult {
   error?: string;
 }
 
+function friendlyError(raw?: string): string {
+  if (!raw) return '连接失败';
+  const map: Record<string, string> = {
+    ConnectError: '无法建立连接',
+    TimeoutException: '连接超时',
+    RemoteProtocolError: '远端协议异常（目标可能不是 HTTP 服务）',
+    ReadError: '读取响应失败',
+    ConnectTimeout: '连接超时',
+    ReadTimeout: '读取超时',
+    PoolTimeout: '连接池耗尽',
+    UnsupportedProtocol: '不支持的协议',
+  };
+  return map[raw] ?? raw;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TYPE_META: Record<string, { icon: string; cls: string; label: string }> = {
   tableau:   { icon: 'ri-bar-chart-2-line', cls: 'bg-blue-100 text-blue-700',    label: 'Tableau' },
-  starrocks: { icon: 'ri-database-2-line',  cls: 'bg-orange-100 text-orange-700', label: 'StarRocks' },
+  starrocks: { icon: 'ri-database-2-line', cls: 'bg-orange-100 text-orange-700', label: 'StarRocks' },
+  mysql:     { icon: 'ri-database-line',   cls: 'bg-cyan-100 text-cyan-700',    label: 'MySQL' },
+  custom:    { icon: 'ri-plug-line',        cls: 'bg-slate-100 text-slate-600',  label: '自定义' },
 };
 
 const TYPE_META_FALLBACK = { icon: 'ri-plug-line', cls: 'bg-slate-100 text-slate-600', label: '未知' };
 
 const URL_PLACEHOLDERS: Record<string, string> = {
   tableau:   'http://localhost:3927/tableau-mcp',
-  starrocks: 'http://localhost:8000/mcp',
+  starrocks: 'http://localhost:3928/starrocks-mcp',
+  mysql:     'http://localhost:3929/mysql-mcp',
+  custom:    'http://your-mcp-server/path',
 };
 
 const defaultForm: McpServerForm = {
@@ -82,6 +101,16 @@ const defaultForm: McpServerForm = {
 // ─── API helpers ──────────────────────────────────────────────────────────────
 
 const API_BASE = '/api/mcp-configs';
+
+function extractErrMsg(body: Record<string, unknown>, fallback: string): string {
+  if (typeof body.message === 'string' && body.message) return body.message;
+  if (typeof body.detail === 'string' && body.detail) return body.detail;
+  if (body.detail && typeof body.detail === 'object' && 'message' in (body.detail as object)) {
+    const msg = (body.detail as Record<string, unknown>).message;
+    if (typeof msg === 'string') return msg;
+  }
+  return fallback;
+}
 
 async function apiList(): Promise<McpServerItem[]> {
   const res = await fetch(`${API_BASE}/`, { credentials: 'include' });
@@ -98,7 +127,7 @@ async function apiCreate(data: McpServerForm): Promise<McpServerItem> {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    throw new Error(extractErrMsg(err, `HTTP ${res.status}`));
   }
   return res.json();
 }
@@ -112,7 +141,7 @@ async function apiUpdate(id: number, data: Partial<McpServerForm> & { credential
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    throw new Error(extractErrMsg(err, `HTTP ${res.status}`));
   }
   return res.json();
 }
@@ -124,7 +153,7 @@ async function apiDelete(id: number): Promise<void> {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    throw new Error(extractErrMsg(err, `HTTP ${res.status}`));
   }
 }
 
@@ -135,7 +164,7 @@ async function apiTest(id: number): Promise<TestResult> {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    throw new Error(extractErrMsg(err, `HTTP ${res.status}`));
   }
   return res.json();
 }
@@ -149,7 +178,7 @@ async function apiTestDraft(serverUrl: string): Promise<TestResult> {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    throw new Error(extractErrMsg(err, `HTTP ${res.status}`));
   }
   return res.json();
 }
@@ -250,7 +279,7 @@ async function apiGetConnectedApp(connectionId: number): Promise<ConnectedAppSta
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    throw new Error(extractErrMsg(err, `HTTP ${res.status}`));
   }
   return res.json();
 }
@@ -268,7 +297,7 @@ async function apiUpsertConnectedApp(data: {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    throw new Error(extractErrMsg(err, `HTTP ${res.status}`));
   }
   return res.json();
 }
@@ -280,7 +309,7 @@ async function apiDeactivateConnectedApp(connectionId: number): Promise<{ ok: bo
   );
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    throw new Error(extractErrMsg(err, `HTTP ${res.status}`));
   }
   return res.json();
 }
@@ -1011,7 +1040,7 @@ export default function McpConfigsPage() {
                               }`}>
                                 {testResult.status === 'online'
                                   ? `连接正常 · ${testResult.latency_ms}ms`
-                                  : `无法连接: ${testResult.error ?? '连接失败'}`}
+                                  : `无法连接: ${friendlyError(testResult.error)}`}
                               </div>
                             )}
                           </td>
@@ -1107,6 +1136,8 @@ export default function McpConfigsPage() {
                   >
                     <option value="tableau">Tableau</option>
                     <option value="starrocks">StarRocks</option>
+                    <option value="mysql">MySQL</option>
+                    <option value="custom">自定义</option>
                   </select>
                 </div>
 
@@ -1179,6 +1210,53 @@ export default function McpConfigsPage() {
                       label="Port"
                       fieldKey="port"
                       placeholder="9030"
+                      form={form}
+                      setForm={setForm}
+                      readOnly={false}
+                    />
+                    <CredentialField
+                      label="用户名"
+                      fieldKey="user"
+                      placeholder="root"
+                      form={form}
+                      setForm={setForm}
+                      readOnly={false}
+                    />
+                    <CredentialField
+                      label="密码"
+                      fieldKey="password"
+                      placeholder=""
+                      sensitive
+                      form={form}
+                      setForm={setForm}
+                      readOnly={false}
+                    />
+                    <CredentialField
+                      label="默认数据库（可选）"
+                      fieldKey="database"
+                      placeholder="可选"
+                      form={form}
+                      setForm={setForm}
+                      readOnly={false}
+                    />
+                  </CredentialSection>
+                )}
+
+                {/* 凭证字段 — MySQL */}
+                {form.type === 'mysql' && (
+                  <CredentialSection title="MySQL 连接">
+                    <CredentialField
+                      label="Host"
+                      fieldKey="host"
+                      placeholder="localhost"
+                      form={form}
+                      setForm={setForm}
+                      readOnly={false}
+                    />
+                    <CredentialField
+                      label="Port"
+                      fieldKey="port"
+                      placeholder="3306"
                       form={form}
                       setForm={setForm}
                       readOnly={false}

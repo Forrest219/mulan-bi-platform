@@ -1,5 +1,8 @@
 /**
- * 5 域菜单配置（Spec 18 §5.2）
+ * 7 域菜单配置（Spec 18 v0.3 §5.2）
+ *
+ * 域顺序（固定）：home → query → assets → governance → agents → config → admin
+ * 配置域（config）在管理域（admin）左侧
  *
  * P0 约束：
  * - 绝对禁止对 src/api/ 目录下的后端 API 路径做替换
@@ -60,36 +63,21 @@ export interface MenuDomain {
 }
 
 // ============================================================
-// 完整菜单配置（Spec 18 §5.2 menuConfig）
+// 完整菜单配置（Spec 18 v0.3 §2.0，7域）
+// 顺序：home（首页）、query（问数）、assets（资产）、governance（治理）、agents（智能体）、config（配置）、admin（管理）
 // ============================================================
 export const menuConfig: MenuDomain[] = [
-  // ──────────────────────────────────────────────────
-  // 运维工作台（Spec 20，独立入口）
-  // ──────────────────────────────────────────────────
-  {
-    key: 'ops',
-    label: '运维',
-    icon: 'ri-dashboard-3-line',
-    description: '运维工作台：问数、资产、健康一站式',
-    defaultOpen: true,
-    items: [
-      {
-        key: 'workbench',
-        label: '运维工作台',
-        icon: 'ri-dashboard-3-line',
-        path: '/ops/workbench',
-      },
-    ],
-  },
+
+  // 问数域已移除（当前阶段所有问数走首页 Data Agent）
 
   // ──────────────────────────────────────────────────
-  // 域 1：资产 /assets
+  // 域 2：资产 /assets
   // ──────────────────────────────────────────────────
   {
     key: 'assets',
     label: '资产',
     icon: 'ri-stack-line',
-    description: 'BI 资产浏览',
+    description: 'BI 资产浏览、数据源连接与 Tableau 资产管理',
     defaultOpen: false,
     permission: { requiredRole: 'analyst' },
     items: [
@@ -100,44 +88,49 @@ export const menuConfig: MenuDomain[] = [
         path: '/assets/tableau',
       },
       {
-        key: 'connections',
-        label: '连接总览',
+        key: 'tableau-connections',
+        label: 'Tableau 连接',
         icon: 'ri-links-line',
-        path: '/assets/connections',
-      },
-      {
-        key: 'datasources',
-        label: '数据源管理',
-        icon: 'ri-database-2-line',
-        path: '/assets/datasources',
+        path: '/assets/tableau-connections',
         permission: { requiredRole: 'data_admin' },
       },
       {
-        key: 'tableau-connections',
-        label: 'Tableau 连接',
-        icon: 'ri-plug-line',
-        path: '/assets/tableau-connections',
-        permission: { requiredPermission: 'tableau' },
+        key: 'sync-logs',
+        label: 'Tableau 同步日志',
+        icon: 'ri-refresh-line',
+        path: '/assets/sync-logs',
       },
     ],
   },
 
   // ──────────────────────────────────────────────────
-  // 域 2：治理 /governance
+  // 域 3：治理 /governance（Spec 18 v0.4）
   // ──────────────────────────────────────────────────
   {
     key: 'governance',
     label: '治理',
     icon: 'ri-shield-star-line',
-    description: '数据质量、语义治理与合规管理',
+    description: '数据质量、语义治理、合规管理与 DQC',
     defaultOpen: true,
     permission: { requiredRole: 'analyst' },
     items: [
       {
-        key: 'health-center',
-        label: '健康中心',
+        key: 'dw-audit',
+        label: '数仓巡检',
         icon: 'ri-heart-pulse-line',
-        path: '/governance/health-center',
+        path: '/governance/dw-audit',
+      },
+      {
+        key: 'tableau-audit',
+        label: 'Tableau 巡检',
+        icon: 'ri-pulse-line',
+        path: '/governance/tableau-audit',
+      },
+      {
+        key: 'dqc',
+        label: '数据质量监控',
+        icon: 'ri-dashboard-line',
+        path: '/governance/dqc',
       },
       {
         key: 'semantic',
@@ -151,39 +144,63 @@ export const menuConfig: MenuDomain[] = [
         icon: 'ri-bar-chart-grouped-line',
         path: '/governance/metrics',
       },
+    ],
+  },
+
+  // ──────────────────────────────────────────────────
+  // 域 4：智能体 /agents（Spec 28、29、30）
+  // ──────────────────────────────────────────────────
+  {
+    key: 'agents',
+    label: '智能体',
+    icon: 'ri-robot-line',
+    description: 'Data Agent、SQL Agent、Metrics Agent 与 Agent 监控',
+    defaultOpen: false,
+    items: [
       {
-        key: 'publish-logs',
-        label: '发布日志',
-        icon: 'ri-file-list-3-line',
-        path: '/governance/semantic/publish-logs',
+        key: 'data-agent',
+        label: 'Data Agent 分析工作台',
+        icon: 'ri-bar-chart-2-line',
+        path: '/agents/data',
+      },
+      {
+        key: 'data-agent-history',
+        label: 'Data Agent 执行历史',
+        icon: 'ri-history-line',
+        path: '/agents/data/history',
+      },
+      {
+        key: 'sql-agent',
+        label: 'SQL Agent',
+        icon: 'ri-file-code-line',
+        path: '/agents/sql',
+      },
+      {
+        key: 'metrics-agent',
+        label: 'Metrics Agent',
+        icon: 'ri-line-chart-line',
+        path: '/agents/metrics',
+      },
+      {
+        key: 'agent-monitor',
+        label: 'Agent 监控',
+        icon: 'ri-eye-line',
+        path: '/agents/agent-monitor',
       },
     ],
   },
 
   // ──────────────────────────────────────────────────
-  // 域 3：平台（基础设施、任务与监控）
+  // 域 5：配置 /config（原平台 + 实验室内容合并）
   // ──────────────────────────────────────────────────
   {
-    key: 'platform',
-    label: '平台',
+    key: 'config',
+    label: '配置',
     icon: 'ri-server-line',
-    description: '数据源连接、LLM/MCP 配置、任务调度与告警',
+    description: 'LLM/MCP 配置、任务调度、DDL 规范、知识库',
     defaultOpen: false,
     permission: { requiredRole: 'data_admin' },
     items: [
-      {
-        key: 'connections',
-        label: '数据源与连接',
-        icon: 'ri-links-line',
-        path: '/assets/connections',
-      },
-      {
-        key: 'tableau-connections',
-        label: 'Tableau 连接',
-        icon: 'ri-plug-line',
-        path: '/assets/tableau-connections',
-        permission: { requiredPermission: 'tableau' },
-      },
       {
         key: 'llm',
         label: 'LLM 配置',
@@ -197,6 +214,13 @@ export const menuConfig: MenuDomain[] = [
         icon: 'ri-plug-line',
         path: '/system/mcp-configs',
         permission: { adminOnly: true },
+      },
+      {
+        key: 'datasources',
+        label: '数据库连接',
+        icon: 'ri-database-2-line',
+        path: '/system/datasources',
+        permission: { requiredRole: 'data_admin' },
       },
       {
         key: 'mcp-debugger',
@@ -220,38 +244,10 @@ export const menuConfig: MenuDomain[] = [
         permission: { adminOnly: true },
       },
       {
-        key: 'agent-monitor',
-        label: 'Agent 监控',
-        icon: 'ri-robot-line',
-        path: '/system/agent-monitor',
-        permission: { adminOnly: true },
-      },
-    ],
-  },
-
-  // ──────────────────────────────────────────────────
-  // 域 4：实验室（数据开发 + 智能分析）
-  // ──────────────────────────────────────────────────
-  {
-    key: 'lab',
-    label: '实验室',
-    icon: 'ri-flask-line',
-    description: '数据库开发工具、规范管理与 AI 分析',
-    defaultOpen: false,
-    items: [
-      {
         key: 'ddl-validator',
         label: 'DDL 检查',
         icon: 'ri-code-s-slash-line',
         path: '/dev/ddl-validator',
-      },
-      {
-        key: 'ddl-generator',
-        label: 'DDL 生成器',
-        icon: 'ri-file-code-line',
-        path: '/empty/ddl-generator',
-        permission: { requiredRole: 'analyst' },
-        hidden: true,
       },
       {
         key: 'rule-config',
@@ -261,31 +257,22 @@ export const menuConfig: MenuDomain[] = [
         permission: { requiredRole: 'data_admin' },
       },
       {
-        key: 'nl-query',
-        label: '自然语言查询',
-        icon: 'ri-chat-search-line',
-        path: '/empty/nl-query',
-        permission: { requiredRole: 'analyst' },
-        hidden: true,
-      },
-      {
         key: 'knowledge',
         label: '知识库',
         icon: 'ri-book-open-line',
-        path: '/empty/knowledge-base',
-        hidden: true,
+        path: '/analytics/knowledge',
       },
     ],
   },
 
   // ──────────────────────────────────────────────────
-  // 域 5：设置（IAM + 审计）
+  // 域 6：管理 /admin（原系统/设置）
   // ──────────────────────────────────────────────────
   {
-    key: 'system',
-    label: '设置',
+    key: 'admin',
+    label: '管理',
     icon: 'ri-settings-2-line',
-    description: '用户管理、权限配置与操作审计',
+    description: '用户管理、权限配置、共享权限、操作日志、平台设置',
     defaultOpen: false,
     permission: { requiredRole: 'admin' },
     items: [
@@ -308,6 +295,12 @@ export const menuConfig: MenuDomain[] = [
         path: '/system/permissions',
       },
       {
+        key: 'shared-permissions',
+        label: '共享权限',
+        icon: 'ri-share-line',
+        path: '/system/shared-permissions',
+      },
+      {
         key: 'activity',
         label: '操作日志',
         icon: 'ri-history-line',
@@ -315,10 +308,15 @@ export const menuConfig: MenuDomain[] = [
       },
       {
         key: 'platform-settings',
-        label: 'Logo',
+        label: '平台设置',
         icon: 'ri-image-line',
         path: '/system/platform-settings',
-        permission: { adminOnly: true },
+      },
+      {
+        key: 'account-security',
+        label: '账户安全',
+        icon: 'ri-lock-line',
+        path: '/account/security',
       },
     ],
   },

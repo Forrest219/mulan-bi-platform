@@ -346,6 +346,7 @@ export interface AnomalyRecord {
   resolved_by: number | null;
   resolved_at: string | null;
   resolution_note: string | null;
+  alert_sent_at: string | null;
   created_at: string | null;
 }
 
@@ -373,6 +374,66 @@ export async function listMetricAnomalies(
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error((err as { message?: string }).message || '获取异常记录失败');
+  }
+  return res.json();
+}
+
+// =============================================================================
+// 维护窗口
+// =============================================================================
+
+export interface MaintenanceWindow {
+  id: number;
+  name: string;
+  start_at: string;
+  end_at: string;
+  timezone: string;
+  reason: string | null;
+  created_by: number | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ActiveWindowResponse {
+  has_active_window: boolean;
+  window: MaintenanceWindow | null;
+}
+
+export async function getActiveMaintenanceWindow(): Promise<ActiveWindowResponse> {
+  const res = await fetch(`${API_BASE}/api/metrics/maintenance-windows/active`, {
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { message?: string }).message || '获取维护窗口状态失败');
+  }
+  return res.json();
+}
+
+// =============================================================================
+// 模板渲染预览
+// =============================================================================
+
+export interface RenderTemplateResponse {
+  success: boolean;
+  result?: string;
+  error?: string;
+}
+
+export async function renderTemplate(
+  template: string,
+  context: Record<string, unknown>,
+): Promise<RenderTemplateResponse> {
+  const res = await fetch(`${API_BASE}/api/metrics-templates/render-template`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ template, context }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { message?: string }).message || '渲染模板失败');
   }
   return res.json();
 }

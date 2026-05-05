@@ -361,7 +361,7 @@ async def test_mcp_draft(request: Request):
             resp = await client.get(url)
         latency_ms = int((_time.monotonic() - start) * 1000)
         return {"status": "online", "latency_ms": latency_ms, "http_status": resp.status_code}
-    except (_httpx.ConnectError, _httpx.TimeoutException) as e:
+    except _httpx.HTTPError as e:
         latency_ms = int((_time.monotonic() - start) * 1000)
         return {"status": "offline", "latency_ms": latency_ms, "error": type(e).__name__}
 
@@ -387,6 +387,6 @@ async def test_mcp_server(id: int, request: Request):
             resp = await client.get(url)
         latency_ms = int((_time.monotonic() - start) * 1000)
         return {"status": "online", "latency_ms": latency_ms, "http_status": resp.status_code}
-    except (_httpx.ConnectError, _httpx.TimeoutException) as e:
+    except _httpx.HTTPError as e:
         latency_ms = int((_time.monotonic() - start) * 1000)
         return {"status": "offline", "latency_ms": latency_ms, "error": type(e).__name__}

@@ -88,6 +88,10 @@ class DataSourceDatabase:
         """根据 ID 获取数据源"""
         return db.query(DataSource).filter(DataSource.id == ds_id).first()
 
+    def get_by_name(self, db: Session, name: str) -> Optional[DataSource]:
+        """根据名称获取活跃数据源（用于唯一性校验）"""
+        return db.query(DataSource).filter(DataSource.name == name, DataSource.is_active == True).first()
+
     def get_all(
         self,
         db: Session,

@@ -670,7 +670,7 @@ sequenceDiagram
 | `backend/services/ddl_checker/parser.py` | TableInfo 加 database_name 字段 |
 | `backend/services/ddl_checker/scanner.py` | _read_table_info 填入 database_name |
 | `backend/app/api/rules.py` | DEFAULT_RULES_SEED 追加 25 条 |
-| `frontend/src/pages/data-governance/health-center/page.tsx` | 新增第 4 Tab |
+| `frontend/src/pages/data-governance/dw-audit/page.tsx` | 新增第 4 Tab |
 
 ### 禁止触碰
 

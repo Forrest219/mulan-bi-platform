@@ -2,11 +2,18 @@
 import logging
 from datetime import datetime
 
-from celery.signals import task_prerun, task_postrun, task_failure
+from celery.signals import task_prerun, task_postrun, task_failure, worker_process_init
 
 from app.core.database import get_db_context
 
 logger = logging.getLogger(__name__)
+
+
+@worker_process_init.connect
+def _load_all_models(**kwargs):
+    """Register all SQLAlchemy models so FK references (e.g. bi_events → auth_users) resolve."""
+    from app.core.database import init_db
+    init_db()
 
 TASK_LABELS = {
     "services.tasks.tableau_tasks.scheduled_sync_all": "Tableau 自动同步",

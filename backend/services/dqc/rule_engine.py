@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import column, create_engine, func, literal, select, table, text as sa_text
 
 from .constants import DEFAULT_MAX_SCAN_ROWS, RuleType
-from .models import DqcMonitoredAsset, DqcQualityRule
+from .models import DqcMonitoredAsset, DqcQualityRule, DqcRuleResult
 
 
 class SrViolationLevel(Enum):
@@ -74,15 +74,17 @@ class DqcRuleEngineError(Exception):
 class DqcRuleEngine:
     """DQC 规则执行器"""
 
-    def __init__(self, db_config: Optional[dict] = None, connection=None):
+    def __init__(self, db_config: Optional[dict] = None, connection=None, pg_session=None):
         """
         Args:
             db_config: 已解密的目标库连接配置；用于建立只读连接（orchestrator 通常传此）
             connection: 也可直接复用已建立的连接（测试用）
+            pg_session: 平台 PostgreSQL session，用于查询历史规则结果
         """
         self.db_config = db_config or {}
         self.db_type = (self.db_config.get("db_type") or "").lower()
         self._external_conn = connection
+        self._pg_session = pg_session
 
     # ------------------------------------------------------------------
     # 连接管理
@@ -149,7 +151,34 @@ class DqcRuleEngine:
             )
 
         if rule.rule_type == RuleType.VOLUME_ANOMALY.value:
-            passed, actual_value, err = handler(asset, rule, config)
+            time_column = config.get("time_column")
+            if time_column:
+                conn, owned = None, False
+                try:
+                    conn, owned = self._get_conn()
+                except Exception as exc:
+                    return RuleExecutionResult(
+                        rule_id=rule.id,
+                        asset_id=asset.id,
+                        dimension=rule.dimension,
+                        rule_type=rule.rule_type,
+                        passed=False,
+                        actual_value=None,
+                        expected_config=config,
+                        error_message=f"target_connection_failed: {exc}",
+                        execution_time_ms=int((time.time() - start) * 1000),
+                    )
+                try:
+                    passed, actual_value, err = self._exec_volume_anomaly_time_slice(
+                        conn, asset, rule, config
+                    )
+                except Exception as exc:
+                    logger.exception("dqc volume_anomaly time_slice failed: rule_id=%s", rule.id)
+                    passed, actual_value, err = False, None, f"execution_error: {exc}"
+                finally:
+                    self._close(conn, owned)
+            else:
+                passed, actual_value, err = handler(asset, rule, config)
             return RuleExecutionResult(
                 rule_id=rule.id,
                 asset_id=asset.id,
@@ -378,11 +407,11 @@ class DqcRuleEngine:
     def _exec_volume_anomaly(
         self, asset, rule, config, db=None
     ) -> Tuple[bool, Optional[float], Optional[str]]:
-        direction = config.get("direction", "drop")
-        threshold_pct = config.get("threshold_pct", 0.80)
-        comparison_window = config.get("comparison_window", "1d")
-        min_row_count = config.get("min_row_count", 1000)
+        direction = config.get("direction", "both")
+        threshold_pct = config.get("threshold_pct", 0.10)
+        min_row_count = config.get("min_row_count", 10)
 
+        comparison_window = config.get("comparison_window", "1d")
         today_count = self._get_row_count_snapshot(asset.id, db=db)
         if today_count is None:
             return False, None, "row_count_snapshot not available for today"
@@ -391,29 +420,116 @@ class DqcRuleEngine:
         if baseline_count is None:
             return False, None, f"insufficient history for {comparison_window} comparison"
 
-        if today_count <= min_row_count:
-            return True, 0.0, None
+        return self._compare_counts(today_count, baseline_count, direction, threshold_pct, min_row_count)
 
-        if baseline_count == 0:
-            return True, 0.0, None
+    def _exec_volume_anomaly_time_slice(
+        self, conn, asset, rule, config
+    ) -> Tuple[bool, Optional[float], Optional[str]]:
+        """time_column 模式：查源库当天 count，基线从历史结果取。"""
+        time_column = config["time_column"]
+        direction = config.get("direction", "both")
+        threshold_pct = config.get("threshold_pct", 0.05)
+        min_row_count = config.get("min_row_count", 10)
+        baseline_offset = config.get("baseline_offset", 1)
 
-        drop_pct = (baseline_count - today_count) / baseline_count
-        rise_pct = (today_count - baseline_count) / baseline_count
+        obs_expr = config.get("observation_date", "today")
+        obs_date = self._resolve_date_expr(obs_expr)
+
+        schema_table = f"{asset.schema_name}.{asset.table_name}" if asset.schema_name else asset.table_name
+
+        obs_sql = sa_text(
+            f"SELECT COUNT(*) AS cnt FROM {schema_table} WHERE {time_column} >= :obs_date"
+        )
+        obs_count = conn.execute(obs_sql, {"obs_date": str(obs_date)}).scalar() or 0
+
+        baseline_count = self._get_baseline_value(rule.id, baseline_offset)
+        if baseline_count is None:
+            return True, float(obs_count), None
+
+        return self._compare_counts(
+            obs_count, int(baseline_count), direction, threshold_pct, min_row_count,
+            actual_value_override=float(obs_count),
+        )
+
+    def _get_baseline_value(self, rule_id: int, offset_days: int = 1) -> Optional[float]:
+        """从历史结果取 N 天前该规则的 actual_value 作为基线。
+
+        offset_days=1: 取最近一条（即"上次执行"，等同于昨天）
+        offset_days=7: 取 7 天前最近的一条
+        """
+        if self._pg_session is None:
+            return None
+        from datetime import datetime, timedelta
+
+        if offset_days <= 1:
+            last = (
+                self._pg_session.query(DqcRuleResult.actual_value)
+                .filter(DqcRuleResult.rule_id == rule_id)
+                .order_by(DqcRuleResult.executed_at.desc())
+                .limit(1)
+                .scalar()
+            )
+            return last
+
+        target_date = datetime.now() - timedelta(days=offset_days)
+        last = (
+            self._pg_session.query(DqcRuleResult.actual_value)
+            .filter(
+                DqcRuleResult.rule_id == rule_id,
+                DqcRuleResult.executed_at <= target_date,
+            )
+            .order_by(DqcRuleResult.executed_at.desc())
+            .limit(1)
+            .scalar()
+        )
+        return last
+
+    @staticmethod
+    def _resolve_date_expr(expr: str) -> "date":
+        """解析日期表达式：'today', 'today-N', 或 ISO 日期字符串。"""
+        from datetime import date as _date, timedelta
+        if not expr or expr == "today":
+            return _date.today()
+        if expr.startswith("today-"):
+            try:
+                n = int(expr.split("-", 1)[1])
+                return _date.today() - timedelta(days=n)
+            except (ValueError, IndexError):
+                pass
+        try:
+            return _date.fromisoformat(expr)
+        except ValueError:
+            return _date.today()
+
+    @staticmethod
+    def _compare_counts(
+        current: int, baseline: int, direction: str, threshold_pct: float, min_row_count: int,
+        actual_value_override: Optional[float] = None,
+    ) -> Tuple[bool, Optional[float], Optional[str]]:
+        ret_default = actual_value_override if actual_value_override is not None else 0.0
+
+        if current <= min_row_count:
+            return True, ret_default, None
+
+        if baseline == 0:
+            return True, ret_default, None
+
+        drop_pct = (baseline - current) / baseline
+        rise_pct = (current - baseline) / baseline
 
         passed = True
-        direction_result = "ok"
-        actual_value = 0.0
+        alert_pct = 0.0
 
         if direction in ("drop", "both") and drop_pct >= threshold_pct:
             passed = False
-            direction_result = "drop"
-            actual_value = round(abs(drop_pct), 4)
+            alert_pct = abs(drop_pct)
         if direction in ("rise", "both") and rise_pct >= threshold_pct:
             passed = False
-            direction_result = "rise"
-            actual_value = round(abs(rise_pct), 4)
+            alert_pct = abs(rise_pct)
 
-        return passed, round(actual_value, 4), None
+        if actual_value_override is not None:
+            return passed, actual_value_override, None
+        return passed, round(alert_pct, 4) if not passed else 0.0, None
 
     def _get_row_count_snapshot(self, asset_id: int, db=None) -> Optional[int]:
         from services.dqc.database import DqcDatabase

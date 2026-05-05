@@ -171,6 +171,60 @@ async def _resolve_answer(
     return str(answer) if answer else "（无结果）"
 
 
+async def _stream_via_agent_forward(
+    question: str,
+    connection_id: Optional[int],
+    authorization: Optional[str],
+    cookie: Optional[str],
+) -> AsyncGenerator[str, None]:
+    """
+    Phase 1b: 内部转发到 Data Agent /api/agent/stream via httpx.
+    将 agent SSE 格式转换为 chat SSE 格式。
+    """
+    headers: dict = {"Content-Type": "application/json"}
+    if authorization:
+        headers["Authorization"] = authorization
+    if cookie:
+        headers["Cookie"] = cookie
+
+    payload: dict = {"question": question}
+    if connection_id is not None:
+        payload["connection_id"] = connection_id
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        try:
+            response = await client.post(
+                f"{_INTERNAL_BASE}/api/agent/stream",
+                json=payload,
+                headers=headers,
+            )
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
+            logger.debug("Agent forward connection failed (%s), will fallback", exc)
+            raise  # Re-raise to trigger fallback
+
+        if response.status_code >= 400:
+            logger.debug("Agent forward returned %s, will fallback", response.status_code)
+            raise Exception(f"Agent returned {response.status_code}")
+
+        async for line in response.aiter_lines():
+            if line.startswith("data: "):
+                data_str = line[6:]
+                try:
+                    event = json.loads(data_str)
+                    event_type = event.get("type", "")
+
+                    # 转换 agent SSE -> chat SSE
+                    if event_type == "token":
+                        yield f"data: {json.dumps({'token': event.get('content', '')}, ensure_ascii=False)}\n\n"
+                    elif event_type == "done":
+                        yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+                    elif event_type == "error":
+                        yield f"data: {json.dumps({'error': event.get('message', '未知错误')}, ensure_ascii=False)}\n\n"
+                    # Skip metadata, thinking, tool_call, tool_result (chat format doesn't use them)
+                except json.JSONDecodeError:
+                    pass
+
+
 async def _stream_llm_response(
     question: str,
     connection_id: Optional[int],
@@ -180,19 +234,19 @@ async def _stream_llm_response(
     db: Optional[Session] = None,
 ) -> AsyncGenerator[str, None]:
     """
-    Generator：先尝试 Agent 流，失败则 fallback 至 Phase 1 word-chunk 逻辑。
+    Generator：先尝试 Agent 转发，失败则 fallback 至 Phase 1 word-chunk 逻辑。
 
     chunk_size=3 words / 50ms → ~20 chunks/s。
     前端通过 requestAnimationFrame (~16ms) 批量 flush，约 1 帧消费 1 chunk。
     """
-    # Phase 2: 优先走 Agent 直连（需要 current_user 和 db）
-    if current_user is not None and db is not None:
+    # Phase 1b: 优先走 Agent 转发 via httpx
+    if authorization is not None or cookie is not None:
         try:
-            async for event in _stream_via_agent_direct(question, connection_id, current_user, db):
+            async for event in _stream_via_agent_forward(question, connection_id, authorization, cookie):
                 yield event
             return  # Agent stream succeeded
         except Exception as agent_exc:
-            logger.debug("Agent direct call failed (%s), falling back to search", agent_exc)
+            logger.debug("Agent forward failed (%s), falling back to search", agent_exc)
 
     # Phase 1 fallback: 走 search/query + word-chunk pseudo-stream
     try:
@@ -231,6 +285,60 @@ async def _stream_llm_response(
         yield f"data: {payload}\n\n"
 
 
+async def _chat_stream_with_fallback(
+    question: str,
+    connection_id: Optional[int],
+    authorization: Optional[str],
+    cookie: Optional[str],
+) -> AsyncGenerator[str, None]:
+    """
+    Generator：先尝试 Agent 转发，失败则 fallback 至 Phase 1 word-chunk 逻辑。
+    用于 POST /api/chat/stream。
+    """
+    # Phase 1b: 优先走 Agent 转发 via httpx
+    try:
+        async for event in _stream_via_agent_forward(question, connection_id, authorization, cookie):
+            yield event
+        return  # Agent stream succeeded
+    except Exception as agent_exc:
+        logger.debug("Agent forward failed (%s), falling back to search", agent_exc)
+
+    # Phase 1 fallback: 走 search/query + word-chunk pseudo-stream
+    try:
+        answer = await _resolve_answer(question, connection_id, authorization, cookie)
+
+        # 按行切分，保留换行符，每行再按词切 chunk
+        lines = answer.split("\n")
+        chunk_size = 3
+
+        for line_idx, line in enumerate(lines):
+            words = line.split(" ") if line.strip() else [""]
+            for i in range(0, len(words), chunk_size):
+                chunk_words = words[i : i + chunk_size]
+                chunk = " ".join(chunk_words)
+                # 非行末追加空格；每行结束追加换行
+                is_last_chunk = (i + chunk_size >= len(words))
+                is_last_line = (line_idx == len(lines) - 1)
+                if not is_last_chunk:
+                    chunk += " "
+                elif not is_last_line:
+                    chunk += "\n"
+                payload = json.dumps({"token": chunk}, ensure_ascii=False)
+                yield f"data: {payload}\n\n"
+                await asyncio.sleep(0.05)
+
+        yield f"data: {json.dumps({'done': True})}\n\n"
+
+    except asyncio.CancelledError:
+        logger.debug("SSE stream cancelled by client (question=%r)", question[:50])
+        return
+
+    except Exception as exc:
+        logger.warning("SSE stream error: %s", exc)
+        payload = json.dumps({"error": "服务器内部错误，请稍后重试"}, ensure_ascii=False)
+        yield f"data: {payload}\n\n"
+
+
 @router.post("/stream")
 async def chat_stream_post(
     request: Request,
@@ -241,7 +349,7 @@ async def chat_stream_post(
     POST /api/chat/stream — Phase 1b 内部转发到 Data Agent
 
     兼容现有前端，同时暴露新架构能力。
-    内部转发到 /api/agent/stream，使用 httpx 直连（不走 HTTP）。
+    内部转发到 /api/agent/stream via httpx，失败则 fallback 到 /api/search/query。
     """
     body = await request.json()
     question = body.get("q", body.get("question", ""))
@@ -253,11 +361,11 @@ async def chat_stream_post(
         )
 
     return StreamingResponse(
-        _stream_via_agent_direct(
+        _chat_stream_with_fallback(
             question=question,
             connection_id=body.get("connection_id"),
-            current_user=current_user,
-            db=db,
+            authorization=request.headers.get("Authorization"),
+            cookie=request.headers.get("Cookie"),
         ),
         media_type="text/event-stream",
         headers={

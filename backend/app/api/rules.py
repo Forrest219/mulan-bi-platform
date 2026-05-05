@@ -156,6 +156,107 @@ DEFAULT_RULES_SEED = [
      "description": "所有视图必须以 _vw 后缀命名",
      "suggestion": "视图命名: xxx_vw",
      "config_json": {"pattern": "_vw$"}},
+    {"rule_id": "SR-SCH-001", "name": "主键表必须显式声明 PRIMARY KEY", "level": "critical", "category": "sr_schema", "db_type": "StarRocks",
+     "description": "StarRocks 主键表必须显式声明 PRIMARY KEY，否则 KEYS_TYPE='PRIMARY_KEYS' 但无 PRIMARY KEY 子句",
+     "suggestion": "ALTER TABLE 重建并显式声明 PRIMARY KEY",
+     "config_json": {"trigger": "KEYS_TYPE='PRIMARY_KEYS' but DDL has no PRIMARY KEY"}},
+    {"rule_id": "SR-SCH-002", "name": "大宽表必须使用列存模型", "level": "high", "category": "sr_schema", "db_type": "StarRocks",
+     "description": "列数 >= 200 的大宽表必须使用 DUPLICATE/PRIMARY/AGG 模型，避免 aggregation 模型写入放大",
+     "suggestion": "将表模型改为 DUPLICATE 或 PRIMARY",
+     "config_json": {"min_columns": 200, "model": "DUPLICATE/PRIMARY/AGG"}},
+    {"rule_id": "SR-SCH-003", "name": "时间字段必须使用 DATETIME", "level": "high", "category": "sr_schema", "db_type": "StarRocks",
+     "description": "时间相关字段（_time/_at/_dt 后缀）必须使用 DATETIME/DATE 类型，禁止 VARCHAR/CHAR/STRING",
+     "suggestion": "将时间字段类型改为 DATETIME",
+     "config_json": {"suffixes": ["_time", "_at", "_dt"], "forbidden": ["VARCHAR", "CHAR", "STRING"]}},
+    {"rule_id": "SR-SCH-004", "name": "分区列必须为 DATE/DATETIME/INT", "level": "critical", "category": "sr_schema", "db_type": "StarRocks",
+     "description": "分区列仅允许 DATE、DATETIME、INT、BIGINT 类型，禁止 STRING 等其他类型",
+     "suggestion": "将分区列类型改为 DATE/DATETIME/INT/BIGINT",
+     "config_json": {"allowed": ["DATE", "DATETIME", "INT", "BIGINT"]}},
+    {"rule_id": "SR-SCH-005", "name": "主键长度 <= 128 字节", "level": "high", "category": "sr_schema", "db_type": "StarRocks",
+     "description": "主键列的总字节长度不得超过 128 字节，否则写入失败",
+     "suggestion": "精简主键列组合，确保总字节数 <= 128",
+     "config_json": {"max_bytes": 128}},
+    {"rule_id": "SR-SCH-006", "name": "表名/列名长度 <= 64", "level": "medium", "category": "sr_schema", "db_type": "StarRocks",
+     "description": "表名和列名字符数不得超过 64",
+     "suggestion": "缩短表名/列名到 64 字符以内",
+     "config_json": {"max_length": 64}},
+    {"rule_id": "SR-SCH-007", "name": "字符集统一 utf8mb4", "level": "medium", "category": "sr_schema", "db_type": "StarRocks",
+     "description": "所有表必须使用 utf8mb4 字符集，禁止 latin1/gbk 等其他字符集",
+     "suggestion": "ALTER TABLE CONVERT TO CHARACTER SET utf8mb4",
+     "config_json": {"required_charset": "utf8mb4"}},
+    {"rule_id": "SR-SCH-008", "name": "禁止 BLOB 字段", "level": "high", "category": "sr_schema", "db_type": "StarRocks",
+     "description": "禁止使用 BLOB、MEDIUMBLOB、LONGBLOB 类型，StarRocks 列存不适合大对象存储",
+     "suggestion": "将 BLOB 字段改为 VARCHAR 或迁移至专用对象存储",
+     "config_json": {"forbidden_types": ["BLOB", "MEDIUMBLOB", "LONGBLOB"]}},
+    {"rule_id": "SR-PART-001", "name": "单表分区数 <= 1000", "level": "high", "category": "sr_partition", "db_type": "StarRocks",
+     "description": "单表分区数不得超过 1000，否则元数据压力过大",
+     "suggestion": "合并分区或降低分区粒度",
+     "config_json": {"max": 1000}},
+    {"rule_id": "SR-PART-002", "name": "单分区数据量 1-10GB", "level": "medium", "category": "sr_partition", "db_type": "StarRocks",
+     "description": "单个分区数据量应在 1GB~10GB 之间，过小造成资源浪费，过大影响查询性能",
+     "suggestion": "调整分区策略，确保单分区数据量在 1-10GB",
+     "config_json": {"min_gb": 1, "max_gb": 10}},
+    {"rule_id": "SR-PART-003", "name": "分桶数与数据量匹配", "level": "high", "category": "sr_partition", "db_type": "StarRocks",
+     "description": "分桶数应与数据量匹配，范围 1~256，过少导致并行度不足，过多造成资源浪费",
+     "suggestion": "根据数据量调整分桶数，保持 1~256 范围",
+     "config_json": {"min_buckets": 1, "max_buckets": 256}},
+    {"rule_id": "SR-PART-004", "name": "分桶列必须高基数", "level": "high", "category": "sr_partition", "db_type": "StarRocks",
+     "description": "分桶列基数比应 >= 0.1，即不同值数/总行数 >= 10%，低基数导致数据倾斜",
+     "suggestion": "选择高基数字段作为分桶列",
+     "config_json": {"min_cardinality_ratio": 0.1}},
+    {"rule_id": "SR-BUCK-005", "name": "分桶列禁止可空", "level": "critical", "category": "sr_partition", "db_type": "StarRocks",
+     "description": "分桶列不允许为 NULL 或可空，否则导致数据倾斜和查询错误",
+     "suggestion": "将分桶列设为 NOT NULL",
+     "config_json": {"bucket_col_nullable": False}},
+    {"rule_id": "SR-PART-006", "name": "大表必须按时间分区", "level": "high", "category": "sr_partition", "db_type": "StarRocks",
+     "description": "超过 100GB 的表必须按时间字段分区，便于冷热数据分离和过期清理",
+     "suggestion": "添加时间分区键",
+     "config_json": {"min_size_gb": 100}},
+    {"rule_id": "SR-REP-001", "name": "生产环境副本数=3", "level": "critical", "category": "sr_replica", "db_type": "StarRocks",
+     "description": "生产环境（prod）表副本数必须为 3，保证高可用",
+     "suggestion": "修改表副本数为 3",
+     "config_json": {"env": "prod", "required_replicas": 3}},
+    {"rule_id": "SR-REP-002", "name": "测试环境副本数>=2", "level": "high", "category": "sr_replica", "db_type": "StarRocks",
+     "description": "测试/预发环境表副本数至少为 2",
+     "suggestion": "修改表副本数 >= 2",
+     "config_json": {"envs": ["test", "staging"], "min_replicas": 2}},
+    {"rule_id": "SR-REP-003", "name": "副本均衡度 <= 0.1", "level": "medium", "category": "sr_replica", "db_type": "StarRocks",
+     "description": "各 BE 节点副本数差异系数应 <= 0.1，过高导致负载不均",
+     "suggestion": "执行 ALTER SYSTEM BALANCE 重新均衡",
+     "config_json": {"max_imbalance": 0.1}},
+    {"rule_id": "SR-REP-004", "name": "colocate group 副本布局一致", "level": "high", "category": "sr_replica", "db_type": "StarRocks",
+     "description": "Colocate 表的副本分布必须一致，所有副本必须在同一组 BE 上",
+     "suggestion": "检查 colocate group 配置，确保副本布局一致",
+     "config_json": {}},
+    {"rule_id": "SR-PERF-001", "name": "单表 Tablet 数 <= 30000", "level": "high", "category": "sr_perf", "db_type": "StarRocks",
+     "description": "单表 Tablet 数不得超过 30000，过多导致元数据内存压力和查询调度开销",
+     "suggestion": "增加分桶数或合并小分区，减少 Tablet 总数",
+     "config_json": {"max_tablets": 30000}},
+    {"rule_id": "SR-PERF-002", "name": "单 Tablet 大小 <= 5GB", "level": "high", "category": "sr_perf", "db_type": "StarRocks",
+     "description": "单个 Tablet 大小不得超过 5GB，过大影响 Compaction 效率和查询并行度",
+     "suggestion": "增加分桶数或调整分区粒度，控制 Tablet 大小",
+     "config_json": {"max_tablet_size_gb": 5}},
+    {"rule_id": "SR-PERF-003", "name": "Compaction 累计 < 100", "level": "high", "category": "sr_perf", "db_type": "StarRocks",
+     "description": "单表累计 Compaction Score 不得超过 100，过高表明写入压力过大或 Compaction 滞后",
+     "suggestion": "降低写入速率或增加 Compaction 资源",
+     "config_json": {"max_compaction_score": 100}},
+    {"rule_id": "SR-PERF-004", "name": "慢查询比例 < 5%", "level": "medium", "category": "sr_perf", "db_type": "StarRocks",
+     "description": "慢查询（>5s）比例不得超过 5%，过高表明存在性能瓶颈",
+     "suggestion": "分析慢查询原因，优化查询或表结构",
+     "config_json": {"max_slow_query_ratio": 0.05}},
+    {"rule_id": "SR-META-001", "name": "表必须有 COMMENT", "level": "high", "category": "sr_meta", "db_type": "StarRocks",
+     "description": "所有表必须包含 COMMENT 说明表用途",
+     "suggestion": "添加表级 COMMENT",
+     "config_json": {}},
+    {"rule_id": "SR-META-002", "name": "关键列必须有 COMMENT", "level": "high", "category": "sr_meta", "db_type": "StarRocks",
+     "description": "主键列、分区列、分桶列必须包含 COMMENT 说明",
+     "suggestion": "为关键列添加 COMMENT",
+     "config_json": {"key_columns": ["主键列", "分区列", "分桶列"]}},
+    {"rule_id": "SR-META-003", "name": "表 owner 必须设置", "level": "medium", "category": "sr_meta", "db_type": "StarRocks",
+     "description": "表必须设置 owner，便于问题追踪和责任落实",
+     "suggestion": "通过 ALTER TABLE SET PROPERTY 设置 owner",
+     "config_json": {}}
+
 ]
 
 # 初始化 seed（幂等性：已修改的规则不会被覆盖）
@@ -176,6 +277,7 @@ class ValidationRule(BaseModel):
     description: str
     suggestion: str
     db_type: str
+    scene_type: str = "ALL"
     built_in: bool = True
     status: str = "enabled"
 
@@ -194,6 +296,7 @@ async def get_rules(
     category: Optional[str] = None,
     level: Optional[str] = None,
     db_type: Optional[str] = None,
+    scene_type: Optional[str] = None,
     status: Optional[str] = None
 ):
     """获取规则列表"""
@@ -209,6 +312,8 @@ async def get_rules(
         rules = [r for r in rules if r["level"] == level]
     if db_type and db_type != "ALL":
         rules = [r for r in rules if r["db_type"] == db_type]
+    if scene_type and scene_type != "ALL":
+        rules = [r for r in rules if r.get("scene_type") == scene_type]
     if status and status != "ALL":
         rules = [r for r in rules if r["status"] == status]
 
@@ -316,6 +421,7 @@ async def create_custom_rule(
         description=rule.description,
         suggestion=rule.suggestion,
         db_type=rule.db_type,
+        scene_type=rule.scene_type,
         is_custom=True,
         enabled=True,
         is_modified_by_user=True,  # 标记为用户创建的规则
@@ -339,6 +445,58 @@ async def create_custom_rule(
         logger.warning("规则变更审计日志写入失败: %s", e)
 
     return {"rule": new_rule.to_dict(), "message": "自定义规则创建成功"}
+
+
+class UpdateRuleRequest(BaseModel):
+    """规则更新请求"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    level: Optional[str] = None
+    category: Optional[str] = None
+    suggestion: Optional[str] = None
+    scene_type: Optional[str] = None
+    config_json: Optional[dict] = None
+
+
+@router.put("/{rule_id}")
+async def update_rule(
+    rule_id: str,
+    body: UpdateRuleRequest,
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+):
+    """更新规则字段。内置规则和自定义规则均可更新。"""
+    rule_db = RuleConfigDatabase()
+
+    rule = rule_db.get_by_rule_id(rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail={"code": "DDL_002", "message": "规则不存在"})
+
+    operator = current_user.get("username", "unknown")
+    operator_id = current_user.get("id")
+    old_snapshot = rule.to_dict()
+
+    update_fields = body.model_dump(exclude_none=True)
+    if not update_fields:
+        raise HTTPException(status_code=400, detail={"code": "DDL_004", "message": "未提供更新字段"})
+
+    updated_rule = rule_db.update_rule(rule_id, **update_fields)
+
+    RuleCache.invalidate()
+
+    try:
+        audit_logger.log_rule_change(
+            rule_section=rule_id,
+            change_type="update",
+            operator=operator,
+            operator_id=operator_id,
+            old_value=old_snapshot,
+            new_value=updated_rule.to_dict(),
+            description=f"更新规则 {rule_id}"
+        )
+    except Exception as e:
+        logger.warning("规则变更审计日志写入失败: %s", e)
+
+    return {"rule": updated_rule.to_dict(), "message": "规则更新成功"}
 
 
 @router.delete("/{rule_id}")

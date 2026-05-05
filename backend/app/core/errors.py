@@ -474,6 +474,14 @@ class DQCError:
     def llm_response_parse_failed(detail: dict = None):
         return MulanError("DQC_051", "LLM 响应解析失败", 502, detail)
 
+    @staticmethod
+    def template_not_found():
+        return MulanError("DQC_060", "规则模板不存在", 404)
+
+    @staticmethod
+    def invalid_parameter(message: str = "参数无效"):
+        return MulanError("DQC_061", message, 400)
+
 
 # ---------------------------------------------------------------------------
 # TR — Task Runtime  TR_001~TR_010  (Spec 24)

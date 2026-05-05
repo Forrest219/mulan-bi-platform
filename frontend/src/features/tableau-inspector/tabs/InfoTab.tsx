@@ -10,8 +10,8 @@ export function InfoTab({ asset }: InfoTabProps) {
   return (
     <div className="space-y-6">
       <div className="bg-white border border-slate-200 rounded-xl p-5">
-        <h3 className="text-sm font-semibold text-slate-700 mb-4">基本信息</h3>
-        <div className="grid grid-cols-2 gap-4 text-sm">
+        <h3 className="text-xs font-semibold text-slate-700 mb-4">基本信息</h3>
+        <div className="grid grid-cols-2 gap-4 text-xs">
           <div>
             <span className="text-slate-400">资产名称</span>
             <p className="font-medium text-slate-800">{asset.name}</p>
@@ -77,8 +77,8 @@ export function InfoTab({ asset }: InfoTabProps) {
         </div>
         {asset.description && (
           <div className="mt-4 pt-4 border-t border-slate-100">
-            <span className="text-slate-400 text-sm">描述</span>
-            <p className="text-sm text-slate-700 mt-1">{asset.description}</p>
+            <span className="text-slate-400 text-xs">描述</span>
+            <p className="text-xs text-slate-700 mt-1">{asset.description}</p>
           </div>
         )}
       </div>

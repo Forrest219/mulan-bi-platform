@@ -50,9 +50,9 @@ export function ChildrenTab({ children, childrenLoading }: ChildrenTabProps) {
                       {ASSET_TYPE_LABELS[child.asset_type]}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-sm text-slate-800">{child.name}</td>
-                  <td className="px-4 py-3 text-sm text-slate-500">{child.owner_name || '-'}</td>
-                  <td className="px-4 py-3 text-sm text-slate-500 text-right">
+                  <td className="px-4 py-3 text-xs text-slate-800">{child.name}</td>
+                  <td className="px-4 py-3 text-xs text-slate-500">{child.owner_name || '-'}</td>
+                  <td className="px-4 py-3 text-xs text-slate-500 text-right">
                     {child.view_count != null ? child.view_count.toLocaleString() : '-'}
                   </td>
                 </tr>

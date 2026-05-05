@@ -160,6 +160,10 @@ async def run_agent(
                 run.completed_at = datetime.utcnow()
                 db.commit()
 
+                # Build sources metadata from connection context
+                sources_count = 1 if context.connection_id else 0
+                top_sources = [context.connection_name] if context.connection_id and context.connection_name else []
+
                 # Yield a synthetic "done" event that carries all metadata
                 yield AgentEvent(
                     type="done",
@@ -172,6 +176,8 @@ async def run_agent(
                         "response_data": response_data,
                         "steps_count": steps_count,
                         "execution_time_ms": execution_time_ms,
+                        "sources_count": sources_count,
+                        "top_sources": top_sources,
                     },
                 )
 

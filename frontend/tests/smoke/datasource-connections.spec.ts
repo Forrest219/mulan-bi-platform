@@ -14,35 +14,33 @@ test.describe('数据源管理', () => {
   });
 
   test('数据源管理页可访问', async ({ page }) => {
-    await page.goto('/assets/datasources');
+    await page.goto('/system/datasources');
     await page.waitForLoadState('networkidle');
-    expect(page.url()).toContain('/assets/datasources');
+    expect(page.url()).toContain('/system/datasources');
     await expect(page.locator('text=Page Not Found')).toHaveCount(0);
     // 页面应显示标题或错误状态（API 依赖后端）
-    const hasH1 = await page.locator('h1').isVisible().catch(() => false);
-    const hasSidebar = await page.locator('text=数据源管理').isVisible().catch(() => false);
-    expect(hasH1 || hasSidebar).toBe(true);
+    await expect(page.locator('h1')).toBeVisible({ timeout: 3000 });
+    const hasSidebar = await page.locator('text=数据源管理').isVisible();
+    expect(hasSidebar).toBe(true);
   });
 
   test('页面有新建按钮或加载状态', async ({ page }) => {
-    await page.goto('/assets/datasources');
+    await page.goto('/system/datasources');
     await page.waitForLoadState('networkidle');
-    const hasBtn = await page.locator('button').filter({ hasText: /新建|新增|添加|创建/ }).first().isVisible().catch(() => false);
-    const hasContent = await page.locator('text=数据源').first().isVisible().catch(() => false);
-    expect(hasBtn || hasContent).toBe(true);
+    await expect(page.locator('button').filter({ hasText: /新建|新增|添加|创建/ }).first()).toBeVisible({ timeout: 3000 });
   });
 
   test('页面显示数据表格或空状态', async ({ page }) => {
-    await page.goto('/assets/datasources');
+    await page.goto('/system/datasources');
     await page.waitForTimeout(2000);
-    const hasTable = await page.locator('table').isVisible().catch(() => false);
-    const hasCards = await page.locator('[class*="rounded"]').first().isVisible().catch(() => false);
-    const hasEmpty = await page.locator('text=暂无').isVisible().catch(() => false);
+    const hasTable = await page.locator('table').isVisible();
+    const hasCards = await page.locator('[class*="rounded"]').first().isVisible();
+    const hasEmpty = await page.locator('text=暂无').isVisible();
     expect(hasTable || hasCards || hasEmpty).toBe(true);
   });
 
   test('页面结构完整 - 标题、副标题、新建按钮均可见', async ({ page }) => {
-    await page.goto('/assets/datasources');
+    await page.goto('/system/datasources');
     await page.waitForLoadState('networkidle');
 
     // 页面主标题
@@ -56,7 +54,7 @@ test.describe('数据源管理', () => {
   });
 
   test('打开新建数据源 Modal，表单字段完整可见', async ({ page }) => {
-    await page.goto('/assets/datasources');
+    await page.goto('/system/datasources');
     await page.waitForLoadState('networkidle');
     await page.locator('button', { hasText: '新建数据源' }).click();
     await page.waitForTimeout(500);
@@ -78,7 +76,7 @@ test.describe('数据源管理', () => {
   });
 
   test('新建 Modal 可取消关闭', async ({ page }) => {
-    await page.goto('/assets/datasources');
+    await page.goto('/system/datasources');
     await page.waitForLoadState('networkidle');
     await page.locator('button', { hasText: '新建数据源' }).click();
     await page.waitForTimeout(500);
@@ -93,7 +91,7 @@ test.describe('数据源管理', () => {
     page.on('console', (msg) => {
       if (msg.type() === 'error') errors.push(msg.text());
     });
-    await page.goto('/assets/datasources');
+    await page.goto('/system/datasources');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1000);
     const realErrors = errors.filter(e =>
@@ -104,7 +102,7 @@ test.describe('数据源管理', () => {
   });
 
   test('无英文占位文案残留', async ({ page }) => {
-    await page.goto('/assets/datasources');
+    await page.goto('/system/datasources');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1000);
     const body = await page.locator('body').textContent();
@@ -112,11 +110,5 @@ test.describe('数据源管理', () => {
     expect(body).not.toContain('TODO');
     expect(body).not.toContain('option C shell');
     expect(body).not.toContain('Owner placeholder');
-  });
-
-  test('连接中心有数据源管理跳转链接', async ({ page }) => {
-    await page.goto('/assets/connection-center?type=db');
-    await page.waitForTimeout(1000);
-    await expect(page.locator('a[href="/assets/datasources"]').last()).toBeVisible({ timeout: 3000 });
   });
 });

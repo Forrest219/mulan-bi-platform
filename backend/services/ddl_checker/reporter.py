@@ -116,6 +116,45 @@ def mask_results(results: Any) -> Any:
         return results
 
 
+# 需要整体掩码的键名（不区分大小写匹配）
+CREDENTIAL_FIELD_KEYS = frozenset([
+    "password", "pwd", "passwd",
+    "token", "api_key", "api_key", "secret", "private_key",
+    "connection_string", "credentials",
+])
+
+
+def mask_sensitive_data(results: Any) -> Any:
+    """
+    对检查结果进行键名级别的脱敏处理。
+
+    规则：递归遍历 JSON 结构，当键名命中 CREDENTIAL_FIELD_KEYS 时，
+    将对应值整体替换为 '***MASKED***'。
+
+    与 mask_results 的区别：
+    - mask_results：按值模式（列名/表名命中敏感词）部分掩码
+    - mask_sensitive_data：按键名整体掩码（用于密码/token等整段敏感值）
+
+    Args:
+        results: 任意 JSON 结构（dict/list/str/其他）
+
+    Returns:
+        脱敏后的同结构数据，原输入不变
+    """
+    if isinstance(results, dict):
+        masked = {}
+        for key, value in results.items():
+            if key.lower() in CREDENTIAL_FIELD_KEYS:
+                masked[key] = "***MASKED***"
+            else:
+                masked[key] = mask_sensitive_data(value)
+        return masked
+    elif isinstance(results, list):
+        return [mask_sensitive_data(item) for item in results]
+    else:
+        return results
+
+
 @dataclass
 class CheckReport:
     """检查报告"""
@@ -126,9 +165,18 @@ class CheckReport:
     warning_count: int
     info_count: int
     table_results: Dict[str, List[Dict[str, Any]]]
+    results_masked: Dict[str, List[Dict[str, Any]]] = None  # 脱敏后的完整结果副本
+
+    def __post_init__(self):
+        if self.results_masked is None:
+            self.results_masked = {}
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        # results_masked 为空 dict 时序列化不丢字段
+        if self.results_masked is None:
+            d["results_masked"] = {}
+        return d
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
@@ -180,6 +228,9 @@ class ReportGenerator:
             warning_count += sum(1 for v in violations if v.level == ViolationLevel.WARNING)
             info_count += sum(1 for v in violations if v.level == ViolationLevel.INFO)
 
+        # results_masked：对 table_results 再次进行键名级敏感字段掩码
+        results_masked = mask_sensitive_data(table_results) if mask else None
+
         return CheckReport(
             check_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             total_tables=len(validation_results),
@@ -188,6 +239,7 @@ class ReportGenerator:
             warning_count=warning_count,
             info_count=info_count,
             table_results=table_results,
+            results_masked=results_masked,
         )
 
     @staticmethod

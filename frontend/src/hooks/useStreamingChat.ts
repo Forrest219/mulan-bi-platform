@@ -24,6 +24,12 @@ export interface StreamingMessage {
   toolsUsed?: string[];      // tools called
   toolCalls?: Array<{ tool: string; params: Record<string, unknown> }>;
   toolResults?: Array<{ tool: string; summary: string }>;
+  /** conversation_id returned by metadata event; trumps any locally-generated ID */
+  conversationId?: string;
+  /** response_type from done event (e.g. 'text', 'table', 'chart') */
+  responseType?: string;
+  /** steps_count from done event */
+  stepsCount?: number;
 }
 
 export interface UseStreamingChatReturn {
@@ -110,13 +116,13 @@ export function useStreamingChat(): UseStreamingChatReturn {
           const event = value;
 
           if (event.type === 'metadata') {
-            // conversation_id is returned here; run_id comes in the done event
+            // conversation_id is returned here; sources metadata comes in the done event
             const id = streamingIdRef.current;
             if (id) {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === id
-                    ? { ...m, metadata: { sources_count: 0, top_sources: [] } }
+                    ? { ...m, conversationId: event.conversation_id }
                     : m,
                 ),
               );
@@ -169,6 +175,9 @@ export function useStreamingChat(): UseStreamingChatReturn {
                         ...m,
                         traceId: event.trace_id,
                         executionTimeMs: event.execution_time_ms,
+                        responseType: event.response_type,
+                        stepsCount: event.steps_count,
+                        metadata: { sources_count: event.sources_count, top_sources: event.top_sources },
                       }
                     : m,
                 ),
@@ -177,6 +186,14 @@ export function useStreamingChat(): UseStreamingChatReturn {
             done = true;
           } else if (event.type === 'error') {
             bufferRef.current += `\n\n⚠️ ${event.message}`;
+            const id = streamingIdRef.current;
+            if (id) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === id ? { ...m, isError: true } : m,
+                ),
+              );
+            }
             done = true;
           }
 

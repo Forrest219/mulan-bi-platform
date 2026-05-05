@@ -13,9 +13,9 @@ from services.governance.models import (
     QualityResult as BiQualityResult,
     QualityScore as BiQualityScore,
 )
-from backend.services.governance.schemas import RuleCreate, RuleUpdate
-from backend.services.governance.validators import validate_threshold
-from backend.services.governance.cron_validator import validate_cron
+from services.governance.schemas import RuleCreate, RuleUpdate
+from services.governance.validators import validate_threshold
+from services.governance.cron_validator import validate_cron
 from app.core.errors import MulanError
 
 

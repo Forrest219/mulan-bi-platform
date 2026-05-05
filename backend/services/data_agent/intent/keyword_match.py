@@ -34,7 +34,10 @@ INTENT_KEYWORDS = {
         "图", "图表", "柱状图", "折线图", "饼图", "散点图",
         "可视化", "画个图", "生成图表",
     ],
-    "chat": [],  # 默认意图，无关键词
+    "chat": [
+        "你好", "您好", "谢谢", "感谢", "再见", "拜拜",
+        "早上好", "下午好", "晚上好", "嗨",
+    ],
 }
 
 
@@ -62,11 +65,10 @@ class KeywordMatchStrategy(IntentStrategy):
     name = "keyword_match"
 
     def __init__(self):
-        # 预编译正则（匹配完整词或词边界）
         self._patterns: Dict[str, List[re.Pattern]] = {}
         for intent, keywords in INTENT_KEYWORDS.items():
             self._patterns[intent] = [
-                re.compile(rf"(^|\s){re.escape(kw)}(\s|$)") for kw in keywords
+                re.compile(re.escape(kw)) for kw in keywords
             ]
 
     async def classify(
@@ -81,7 +83,7 @@ class KeywordMatchStrategy(IntentStrategy):
         """
         normalized = _normalize(question)
 
-        priority_order = ["report", "analysis", "query", "chart"]
+        priority_order = ["report", "analysis", "query", "chart", "chat"]
 
         for intent in priority_order:
             patterns = self._patterns.get(intent, [])

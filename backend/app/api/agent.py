@@ -16,7 +16,7 @@ import logging
 import uuid as uuid_lib
 from typing import AsyncGenerator, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
@@ -38,6 +38,7 @@ from services.data_agent.session import SessionManager, AgentSession
 from services.data_agent.tool_base import ToolContext, ToolRegistry
 from services.data_agent.context import build_session_context
 from services.datasources.models import DataSource
+from services.tableau.models import TableauConnection
 
 # Spec 36 §15: Agent 驱动首页相关导入
 from services.agent.dual_write import (
@@ -91,6 +92,16 @@ class FeedbackRequest(BaseModel):
     comment: Optional[str] = Field(None, max_length=1000, description="可选文字反馈")
 
 
+class FeedbackV2Request(BaseModel):
+    """扩展反馈请求（支持 run_id 映射到 conversation_id）"""
+    run_id: Optional[str] = Field(None, description="Agent 运行 ID")
+    rating: str = Field(..., pattern="^(up|down)$", description="up 或 down")
+    conversation_id: Optional[str] = Field(None, description="会话 ID")
+    message_index: Optional[int] = Field(None, description="消息索引")
+    question: Optional[str] = Field(None, max_length=2000, description="用户问题")
+    answer_summary: Optional[str] = Field(None, max_length=500, description="回答摘要")
+
+
 # Spec 36 §15: HOMEPAGE_AGENT_MODE 端点 Schema
 class ModeStatusResponse(BaseModel):
     mode: str  # "legacy_only" | "agent_with_fallback" | "agent_only" | "dual_write"
@@ -134,6 +145,21 @@ def _validate_connection_access(
     - 其他情况 → 403 AGENT_005
     """
     if connection_id is None:
+        return
+
+    tc = db.query(TableauConnection).filter(
+        TableauConnection.id == connection_id,
+        TableauConnection.is_active == True,  # noqa: E712
+    ).first()
+    if tc:
+        role = current_user.get("role", "user")
+        if role in ("admin", "data_admin"):
+            return
+        if tc.owner_id != current_user["id"]:
+            raise HTTPException(
+                status_code=403,
+                detail={"error_code": "AGENT_005", "message": "无权限访问该连接"},
+            )
         return
 
     ds = db.query(DataSource).filter(
@@ -192,11 +218,27 @@ async def agent_stream(
 
     conversation_id_str = str(session.conversation_id)
 
+    # 解析连接名称和类型（用于 LLM prompt 上下文）
+    conn_name: Optional[str] = None
+    conn_type: Optional[str] = None
+    if req.connection_id:
+        tc = db.query(TableauConnection).filter(TableauConnection.id == req.connection_id).first()
+        if tc:
+            conn_name = tc.name
+            conn_type = "tableau"
+        else:
+            ds = db.query(DataSource).filter(DataSource.id == req.connection_id).first()
+            if ds:
+                conn_name = ds.name
+                conn_type = ds.db_type
+
     # 构建 ToolContext
     context = ToolContext(
         session_id=conversation_id_str,
         user_id=current_user["id"],
         connection_id=req.connection_id,
+        connection_name=conn_name,
+        connection_type=conn_type,
         trace_id=trace_id,
         tenant_id=str(current_user["tenant_id"]) if current_user.get("tenant_id") else None,
     )
@@ -254,7 +296,7 @@ async def agent_stream(
                 for char in answer_text:
                     yield f"data: {json.dumps({'type': 'token', 'content': char}, ensure_ascii=False)}\n\n"
                     await asyncio.sleep(0.01)
-                yield f"data: {json.dumps({'type': 'done', 'answer': answer_text, 'trace_id': event.content.get('trace_id', ''), 'run_id': event.content.get('run_id', ''), 'tools_used': event.content.get('tools_used', []), 'response_type': event.content.get('response_type', 'text'), 'response_data': event.content.get('response_data'), 'steps_count': event.content.get('steps_count', 0), 'execution_time_ms': event.content.get('execution_time_ms', 0)}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'answer': answer_text, 'trace_id': event.content.get('trace_id', ''), 'run_id': event.content.get('run_id', ''), 'tools_used': event.content.get('tools_used', []), 'response_type': event.content.get('response_type', 'text'), 'response_data': event.content.get('response_data'), 'steps_count': event.content.get('steps_count', 0), 'execution_time_ms': event.content.get('execution_time_ms', 0), 'sources_count': event.content.get('sources_count', 0), 'top_sources': event.content.get('top_sources', [])}, ensure_ascii=False)}\n\n"
 
             elif event.type == "error":
                 error_content = event.content if isinstance(event.content, dict) else {"message": str(event.content)}
@@ -449,6 +491,95 @@ def submit_feedback(
     db.commit()
     db.refresh(feedback)
     return {"status": "created", "feedback_id": feedback.id}
+
+
+@router.post("/feedback/v2")
+async def submit_agent_feedback_v2(
+    run_id: Optional[str] = Body(None),
+    rating: str = Body(..., pattern="^(up|down)$"),
+    conversation_id: Optional[str] = Body(None),
+    message_index: Optional[int] = Body(None),
+    question: Optional[str] = Body(None),
+    answer_summary: Optional[str] = Body(None),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    扩展反馈端点（Spec 25 Gap 1）。
+
+    支持两种调用方式：
+    1. run_id 方式：通过 run_id 查询 BiAgentRun 获取 conversation_id
+    2. 直接方式：直接传入 conversation_id、message_index 等字段
+
+    转发到 feedback service（/api/feedback）写入 message_feedback 表。
+    """
+    _require_agent_role(current_user.get("role", "user"))
+
+    # 如果没有 run_id 但有 conversation_id，直接转发
+    if not run_id and conversation_id:
+        pass  # 直接使用传入的参数
+    elif run_id:
+        # run_id -> conversation_id 映射
+        try:
+            run_uuid = uuid_lib.UUID(run_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail={"error_code": "AGENT_007", "message": "无效的运行 ID"},
+            )
+
+        run = db.query(BiAgentRun).filter(BiAgentRun.id == run_uuid).first()
+        if not run:
+            raise HTTPException(
+                status_code=404,
+                detail={"error_code": "AGENT_004", "message": "运行记录不存在"},
+            )
+
+        # 从 run 记录获取 conversation_id
+        resolved_conversation_id = str(run.conversation_id) if run.conversation_id else conversation_id
+        if conversation_id is None:
+            conversation_id = resolved_conversation_id
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "AGENT_007", "message": "必须提供 run_id 或 conversation_id"},
+        )
+
+    # 转发到 feedback service
+    from app.api.feedback import submit_feedback as forward_feedback
+    from datetime import datetime, timezone
+
+    try:
+        db.execute(
+            text(
+                "INSERT INTO message_feedback "
+                "(user_id, username, conversation_id, message_index, question, answer_summary, rating, created_at) "
+                "VALUES (:user_id, :username, :conversation_id, :message_index, :question, :answer_summary, :rating, :created_at)"
+            ),
+            {
+                "user_id": current_user["id"],
+                "username": current_user.get("username") or "",
+                "conversation_id": conversation_id,
+                "message_index": message_index,
+                "question": question,
+                "answer_summary": answer_summary[:100] if answer_summary else None,
+                "rating": rating,
+                "created_at": datetime.now(timezone.utc),
+            },
+        )
+        db.commit()
+        logger.info(
+            "反馈已记录（v2） user_id=%s rating=%s conversation_id=%s run_id=%s",
+            current_user["id"], rating, conversation_id, run_id,
+        )
+        return {"ok": True, "status": "created"}
+    except Exception as exc:
+        db.rollback()
+        logger.error("写入反馈失败（v2）: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error_code": "AGENT_008", "message": "反馈写入失败"},
+        )
 
 
 # ============================================================================

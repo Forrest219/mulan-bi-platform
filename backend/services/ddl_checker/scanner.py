@@ -82,6 +82,8 @@ class DDLScanner:
             # 初始化验证器（注入 db_type 以便正确加载 StarRocks 规则）
             db_type = self._db_config.get("db_type", "mysql") if self._db_config else "mysql"
             self.validator = DDLValidator(db_type=db_type.title())
+            # 注入 connector 到 table_validator 以支持 StarRocks 引擎检查
+            self.validator.table_validator.set_connector(self.connector)
 
             # 获取所有表
             table_names = self.connector.get_table_names()
@@ -92,6 +94,21 @@ class DDLScanner:
                 table_info = self._read_table_info(table_name)
                 if table_info:
                     tables.append(table_info)
+
+            # StarRocks scan 级别检查（数据库白名单等）
+            if self._db_config and self._db_config.get("db_type") == "starrocks":
+                try:
+                    with self.connector.engine.connect() as conn:
+                        from sqlalchemy import text
+                        result = conn.execute(text("SHOW DATABASES"))
+                        databases = [row[0] for row in result.fetchall()]
+                    scan_violations = self.validator.table_validator._check_sr_database_whitelist(databases)
+                    # 将 scan 级别 violations 注入到每个表的验证结果中
+                    for tbl in tables:
+                        for v in scan_violations:
+                            v.table_name = tbl.name
+                except Exception as e:
+                    logger.warning("StarRocks scan-level 检查失败: %s", e)
 
             # 验证所有表
             validation_results = self.validator.validate_tables(tables)
@@ -120,9 +137,9 @@ class DDLScanner:
             database_name = self._db_config.get("database", "unknown") if self._db_config else "unknown"
             db_type = self._db_config.get("db_type", "mysql") if self._db_config else "mysql"
 
-            # B13: 同时传递 results（原始）和 results_masked（脱敏后）
-            # report.table_results 已经过 mask=True 处理（ReportGenerator.generate）
-            results_masked = report.table_results if report else None
+            # B13: 使用 report.results_masked（ReportGenerator.generate 已生成）
+            # results_masked 在 CheckReport 生成时已通过 mask_sensitive_data 处理
+            results_masked = report.results_masked if report else None
 
             logger.log_scan(
                 database_name=database_name,

@@ -18,7 +18,6 @@
 import { useState, useEffect, useRef, forwardRef, memo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { SearchAnswer } from '../../../api/search';
-import { listConnections, type TableauConnection } from '../../../api/tableau';
 import { useScope } from '../context/ScopeContext';
 import { mockStreamAskData, streamAskData } from '../../../api/ask_data_contract';
 
@@ -61,22 +60,20 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
       connectionId: externalConnectionId,
       isStreaming,
       onAbort,
-      useMock = true,
+      useMock = false,
       onStreamToken,
     },
     ref
   ) {
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
-    const [connections, setConnections] = useState<TableauConnection[]>([]);
-    const [selectedConnectionId, setSelectedConnectionId] = useState<number | null>(null);
     const [noConnectionHint, setNoConnectionHint] = useState(false);
     const [files, setFiles] = useState<File[]>([]);
     const [isDragging, setIsDragging] = useState(false);
     const [searchParams] = useSearchParams();
 
-    const { connections: scopeConnections, connectionsLoading } = useScope();
-    const noConnection = !connectionsLoading && scopeConnections.length === 0;
+    const scopeContext = useScope();
+    const noConnection = !scopeContext.connectionsLoading && scopeContext.connections.length === 0;
 
     // B24: Support ?prefill= URL parameter to pre-fill the question input
     useEffect(() => {
@@ -88,26 +85,11 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
       }
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const useExternalConnection = externalConnectionId != null;
-
     const internalRef = useRef<HTMLTextAreaElement>(null);
     const textareaRef = (ref as React.RefObject<HTMLTextAreaElement>) ?? internalRef;
     const fileInputRef = useRef<HTMLInputElement>(null);
     const abortRef = useRef<(() => void) | null>(null);
     const dragCounterRef = useRef(0);
-
-    useEffect(() => {
-      if (useExternalConnection) return;
-      listConnections()
-        .then((res) => {
-          const active = res.connections.filter((c) => c.is_active);
-          setConnections(active);
-          if (active.length > 0) setSelectedConnectionId(active[0].id);
-        })
-        .catch(() => {
-          // 忽略：连接列表加载失败不影响问答
-        });
-    }, [useExternalConnection]);
 
     // Auto-grow textarea
     useEffect(() => {
@@ -138,9 +120,9 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
       prevIsStreamingRef.current = isStreaming ?? false;
     }, [isStreaming, useMock, onLoading]);
 
-    const effectiveConnectionId = useExternalConnection
+    const effectiveConnectionId = externalConnectionId != null
       ? (externalConnectionId ? Number(externalConnectionId) : null)
-      : selectedConnectionId;
+      : (scopeContext.connectionId ? Number(scopeContext.connectionId) : null);
 
     const submit = () => {
       if ((!input.trim() && files.length === 0) || loading) return;
@@ -150,9 +132,9 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
       }
 
       setLoading(true);
-      onLoading(true);
       const question = input.trim().slice(0, MAX_LENGTH);
       onQuestionChange?.(question);
+      onLoading(true);
       setInput('');
       setFiles([]);
 
@@ -231,7 +213,6 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
       setFiles((prev) => prev.filter((_, i) => i !== index));
     };
 
-    const showConnectionSelect = !useExternalConnection && connections.length > 1;
     const canSubmit = (input.trim().length > 0 || files.length > 0) && !loading;
 
     return (
@@ -258,6 +239,26 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
               释放以添加文件
             </span>
           </div>
+
+          {/* 连接选择器 — 仅在多连接时显示 */}
+          {scopeContext.connections.length > 1 && (
+            <div className="flex items-center gap-1.5 px-4 pt-2 pb-0">
+              <i className="ri-database-2-line text-xs text-slate-400" />
+              <select
+                value={scopeContext.connectionId ?? ''}
+                onChange={(e) => scopeContext.setConnectionId(e.target.value || null)}
+                className="text-xs text-slate-500 bg-transparent border-none outline-none cursor-pointer hover:text-slate-700 py-0.5 pr-4 appearance-none"
+                style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%2394a3b8\' stroke-width=\'2\'%3E%3Cpath d=\'M6 9l6 6 6-6\'/%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 0 center' }}
+                disabled={scopeContext.connectionsLoading}
+              >
+                {scopeContext.connections.map((c) => (
+                  <option key={c.id} value={String(c.id)}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* 文件 chips 预览区 */}
           {files.length > 0 && (
@@ -293,22 +294,6 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
             </div>
           )}
 
-          {/* 连接选择器（多连接时，左下角 inline） */}
-          {showConnectionSelect && (
-            <div className="absolute left-5 bottom-4 z-10">
-              <select
-                value={selectedConnectionId ?? ''}
-                onChange={(e) => setSelectedConnectionId(Number(e.target.value))}
-                className="text-xs text-slate-400 bg-slate-50 border border-slate-200 rounded-md
-                           px-1.5 py-0.5 focus:outline-none focus:border-blue-300 max-w-[120px]"
-              >
-                {connections.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
           <textarea
             ref={textareaRef}
             data-askbar-input
@@ -329,9 +314,8 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
             placeholder={noConnection ? '请先添加连接，再开始提问' : '向木兰提问…'}
             disabled={loading}
             style={{ minHeight: '56px', maxHeight: '200px', overflowY: 'auto' }}
-            className={`w-full pr-20 py-3 bg-white text-slate-800 placeholder-slate-400
-                       focus:outline-none text-sm resize-none overflow-y-auto leading-relaxed rounded-xl
-                       ${showConnectionSelect ? 'pl-36 px-4' : 'px-4'}`}
+            className="w-full pr-20 py-3 bg-white text-slate-800 placeholder-slate-400
+                       focus:outline-none text-sm resize-none overflow-y-auto leading-relaxed rounded-xl px-4"
           />
 
           {/* 左下角：paperclip 按钮 */}

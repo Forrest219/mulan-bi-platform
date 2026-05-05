@@ -67,3 +67,64 @@ export async function toggleComplianceRule(ruleId: string): Promise<{ rule_id: s
   }
   return res.json();
 }
+
+export interface CreateComplianceRuleInput {
+  id: string;
+  name: string;
+  description: string;
+  level: 'HIGH' | 'MEDIUM' | 'LOW';
+  category: string;
+  db_type: string;
+  suggestion?: string;
+  scene_type?: string;
+}
+
+export interface UpdateComplianceRuleInput {
+  name?: string;
+  description?: string;
+  level?: string;
+  category?: string;
+  suggestion?: string;
+  scene_type?: string;
+  config_json?: Record<string, unknown>;
+}
+
+export async function createComplianceRule(data: CreateComplianceRuleInput): Promise<{ rule: ComplianceRule; message: string }> {
+  const res = await fetch(`${API_BASE}/api/rules/`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail?.message || err.detail || '创建规则失败');
+  }
+  return res.json();
+}
+
+export async function updateComplianceRule(ruleId: string, data: UpdateComplianceRuleInput): Promise<{ rule: ComplianceRule; message: string }> {
+  const res = await fetch(`${API_BASE}/api/rules/${ruleId}`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail?.message || err.detail || '更新规则失败');
+  }
+  return res.json();
+}
+
+export async function deleteComplianceRule(ruleId: string): Promise<{ message: string }> {
+  const res = await fetch(`${API_BASE}/api/rules/${ruleId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail?.message || err.detail || '删除规则失败');
+  }
+  return res.json();
+}

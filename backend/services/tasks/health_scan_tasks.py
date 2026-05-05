@@ -24,7 +24,7 @@ def run_health_scan_task(self, scan_record_id: int, db_config: dict):
         logger.error("Health scan task failed for record %d: %s", scan_record_id, e, exc_info=True)
         try:
             scan_db = HealthScanDatabase()
-            scan_db.update_scan_status(scan_record_id, "failed", error=str(e))
+            scan_db.finish_scan(scan_record_id, "failed", error_message=str(e))
         except Exception:
             pass
         return {"status": "error", "scan_id": scan_record_id, "message": str(e)}

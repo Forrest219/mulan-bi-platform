@@ -1,14 +1,18 @@
-# 5+1 域菜单重构技术规格书
+# 菜单重构技术规格书
 
-> 版本：**v0.2** | 状态：已完成 | 日期：2026-04-24
+> 版本：**v0.3** | 状态：已完成 | 日期：2026-04-30
 >
-> 更新说明（v0.1 → v0.2）：
-> - 域 1 名称由"数据开发"改为"实验室"，图标由 `ri-terminal-box-line` 改为 `ri-flask-line`
-> - 新增域 3"平台"（platform），整合基础设施类菜单项
-> - 资产域扩展：新增连接总览、数据源管理、Tableau 连接三个菜单入口
-> - 治理域新增指标管理、健康中心（统一入口）
-> - 知识库移入实验室域（hidden，待知识库功能完成后迁出）
-> - 同步更新路由配置对照表
+> 更新说明（v0.2 → v0.3）：
+> - 新增域 1"问数"（Query）：问数界面（Spec 38）、NL 查询（Spec 14）
+> - 删除域"实验室"，其内容归入配置域
+> - 删除域"运维"，其功能已合并到首页工作台
+> - 平台 → 配置（Config）
+> - 系统/设置 → 管理（Admin）
+> - 新增域 4"智能体"（Agents）：Data Agent（Spec 28）、SQL Agent（Spec 29）、Metrics Agent（Spec 30）
+> - 治理域新增 DQC 模块（Spec 31）：DQC 概览、监控配置、信号灯、LLM 根因分析
+> - 资产域新增 StarRocks 巡检（Spec 35）
+> - 知识库从实验室 hidden 迁入配置域（正式功能）
+> - 标签修正："Logo" → "平台设置"
 
 ---
 
@@ -21,8 +25,10 @@
 - 顶部导航无分组，用户需记忆每个入口的位置
 - 管理后台与业务页面使用不同布局组件（`MainLayout` vs `AdminSidebarLayout`），切换时体验割裂
 - 新增页面时缺乏归属域指引，导致路由路径命名不一致
+- Agent 体系（Data/SQL/Metrics Agent）无独立域，能力分散
+- DQC（Spec 31）被降级为健康中心 Tab，未体现其独立地位
 
-本规格书将现有扁平菜单重构为 **5+1 个业务域**的分组侧边栏导航，统一布局体验。
+本规格书将现有扁平菜单重构为 **7 个业务域**的分组侧边栏导航，统一布局体验。
 
 ### 1.2 范围
 
@@ -38,49 +44,80 @@
 | Auth Spec | `docs/specs/04-auth-rbac-spec.md` | 角色定义 |
 | 语义维护 Spec | `docs/specs/09-semantic-maintenance-spec.md` | 语义维护路由 |
 | Spec 34 | `docs/specs/34-connection-management-spec.md` | 连接管理菜单整合 |
+| Spec 38 | `docs/specs/38-query-interface-spec.md` | 问数界面路由 |
+| Spec 31 | `docs/specs/31-governance-dqc-pipeline-spec.md` | DQC 模块 |
 
 ---
 
 ## 2. 菜单域定义
 
-### 2.1 6 域总览
+### 2.1 七域总览
 
 ```mermaid
 graph TD
-    subgraph 资产域["域 1：资产"]
+    subgraph 首页["域 0：首页"]
+        H1[工作台首页]
+        H2[问数记录]
+    end
+
+    subgraph 问数域["域 1：问数"]
+        Q1[问数界面]
+        Q2[NL 查询]
+    end
+
+    subgraph 资产域["域 2：资产"]
         A1[Tableau 资产]
-        A2[连接总览]
-        A3[数据源管理]
+        A2[资产详情]
+        A3[同步日志]
+        A4[连接总览]
+        A5[数据源管理]
+        A6[StarRocks 巡检]
     end
 
-    subgraph 治理域["域 2：治理"]
-        B1[健康中心]
-        B2[语义治理]
-        B3[指标管理]
-        B4[发布日志]
+    subgraph 治理域["域 3：治理"]
+        G1[数仓巡检]
+        G2[Tableau 巡检]
+        G3[数据质量]
+        G3a[DQC 概览]
+        G3b[数据质量规则]
+        G3c[信号灯]
+        G3d[LLM 根因分析]
+        G4[语义治理]
+        G4a[语义数据源]
+        G4b[语义字段]
+        G4c[发布日志]
+        G5[指标管理]
+        G5a[指标详情]
+        G5b[维护窗口]
     end
 
-    subgraph 平台域["域 3：平台"]
-        C0[数据源与连接]
-        C0b[Tableau 连接]
+    subgraph 智能体域["域 4：智能体"]
+        B1[Data Agent 分析工作台]
+        B2[Data Agent 执行历史]
+        B3[SQL Agent]
+        B4[Metrics Agent]
+        B5[Agent 监控]
+    end
+
+    subgraph 配置域["域 5：配置"]
         C1[LLM 配置]
         C2[MCP 配置]
         C3[MCP 调试器]
         C4[任务管理]
         C5[问数告警]
+        C6[DDL 检查]
+        C7[数据质量规则]
+        C8[知识库]
     end
 
-    subgraph 实验室域["域 4：实验室"]
-        D1[DDL 检查]
-        D2[规则配置]
-        D3[知识库]
-    end
-
-    subgraph 设置域["域 5：设置"]
-        E1[用户管理]
-        E2[用户组]
-        E3[权限配置]
-        E4[操作日志]
+    subgraph 管理域["域 6：管理"]
+        M1[用户管理]
+        M2[用户组]
+        M3[权限配置]
+        M4[共享权限]
+        M5[操作日志]
+        M6[平台设置]
+        M7[账户安全]
     end
 ```
 
@@ -88,15 +125,17 @@ graph TD
 
 一级菜单（域）的排列顺序为固定约定，**禁止通过修改代码调整**，如需变更必须先更新本规格书。
 
-| 顺序 | 域 key | 域标签 |
-|:----:|--------|--------|
-|  1   | `assets`    | 资产    |
-|  2   | `governance`| 治理    |
-|  3   | `platform`  | 平台    |
-|  4   | `lab`       | 实验室  |
-|  5   | `system`    | 设置    |
+| 顺序 | 域 key | 域标签 | 英文 |
+|:----:|--------|--------|------|
+|  0   | `home`       | 首页    | Home    |
+|  1   | `query`      | 问数    | Query   |
+|  2   | `assets`     | 资产    | Assets  |
+|  3   | `governance`  | 治理    | Governance |
+|  4   | `agents`      | 智能体  | Agents  |
+|  5   | `config`     | 配置    | Config  |
+|  6   | `admin`      | 管理    | Admin   |
 
-**约束**：实验室（lab）和设置（system）是一级目录的最后两位，且实验室必须在设置之前（lab 在左，设置在右）。
+**约束**：配置（config）和管理（admin）是一级目录的最后两位，且配置必须在管理之前（配置在左，管理在右）。
 
 ### 2.2 域详细定义
 
@@ -120,14 +159,18 @@ graph TD
 
 | 菜单项 | 路由路径 | 现有页面 | 图标 | 权限 |
 |--------|---------|---------|------|------|
-| 健康中心 | `/governance/health-center` | `pages/data-governance/health-center/page.tsx` | `ri-heart-pulse-line` | analyst+ |
+| 数仓巡检 | `/governance/dw-audit` | `pages/data-governance/dw-audit/page.tsx` | `ri-heart-pulse-line` | analyst+ |
+| Tableau 巡检 | `/governance/tableau-health` | `pages/tableau/health/page.tsx` | `ri-pulse-line` | analyst+ |
+| 数据质量 | `/governance/dqc` | `pages/data-governance/dqc/overview/page.tsx` | `ri-dashboard-line` | analyst+ |
 | 语义治理 | `/governance/semantic/datasources` | `pages/semantic-maintenance/datasource-list/page.tsx` | `ri-database-2-line` | analyst+ |
 | 指标管理 | `/governance/metrics` | `pages/data-governance/metrics/page.tsx` | `ri-bar-chart-grouped-line` | 任意已认证 |
-| 发布日志 | `/governance/semantic/publish-logs` | `pages/empty/EmptyStatePage.tsx` | `ri-file-list-3-line` | analyst+（disabled） |
 
 **域图标**：`ri-shield-star-line`
 **域描述**：数据质量、语义治理与合规管理
 **默认展开**：是
+
+> - "数据质量"为单一入口，内部通过 Tab 切换 DQC 概览 / 数据质量规则 / 信号灯 / LLM 根因分析（路由: `/governance/dqc`, `/governance/dqc/monitor`, `/governance/dqc/signals`, `/governance/dqc/analyses`）
+> - "发布日志"并入语义治理，作为其子路由 `/governance/semantic/publish-logs`，不再独立占据菜单位
 
 ---
 
@@ -230,31 +273,49 @@ interface MenuPermission {
 
 | 路由路径 | 页面组件 | 所在域 | 菜单入口 | 备注 |
 |---------|---------|--------|---------|------|
-| `/` | `pages/home/page.tsx` | — | — | 首页（AI 工作台） |
+| `/` | `pages/home/page.tsx` | 首页 | — | 首页（AI 工作台） |
 | `/login` | `pages/login/page.tsx` | — | — | 公开 |
+| `/query` | `pages/query/page.tsx` | 问数 | ✅ | Spec 38 |
+| `/query/nl` | `pages/query/nl/page.tsx` | 问数 | ✅ | Spec 14 |
+| `/chat/:id` | `pages/chat/[id]/page.tsx` | 首页 | ❌ | 问数记录（动态路由） |
 | `/assets/tableau` | `pages/tableau/assets/page.tsx` | 资产 | ✅ | |
 | `/assets/connections` | `pages/assets/connection-center/page.tsx` | 资产 | ✅ | 只读仪表盘 |
 | `/assets/datasources` | `pages/assets/datasources/page.tsx` | 资产 | ✅ | CRUD（data_admin+） |
-| `/assets/tableau-connections` | `pages/tableau/connections/page.tsx` | 平台 | ✅ | CRUD |
 | `/assets/tableau/:id` | `pages/tableau/asset-detail/page.tsx` | 资产 | ❌ | 动态路由 |
 | `/assets/tableau-connections/:connId/sync-logs` | `pages/tableau/sync-logs/page.tsx` | 资产 | ❌ | 动态路由 |
-| `/governance/health-center` | `pages/data-governance/health-center/page.tsx` | 治理 | ✅ | Tabbed 页面 |
+| `/assets/starrocks-inspection` | `pages/assets/starrocks-inspection/page.tsx` | 资产 | ✅ | Spec 35 |
+| `/governance/dw-audit` | `pages/data-governance/dw-audit/page.tsx` | 治理 | ✅ | Tabbed 页面 |
+| `/governance/dqc` | `pages/data-governance/dqc/overview/page.tsx` | 治理 | ✅ | Spec 31 |
+| `/governance/dqc/monitor` | `pages/data-governance/dqc/monitor/page.tsx` | 治理 | ✅ | Spec 31 |
+| `/governance/dqc/signals` | `pages/data-governance/dqc/signals/page.tsx` | 治理 | ✅ | Spec 31 |
+| `/governance/dqc/analyses` | `pages/data-governance/dqc/analyses/page.tsx` | 治理 | ✅ | Spec 31 |
 | `/governance/semantic/datasources` | `pages/semantic-maintenance/datasource-list/page.tsx` | 治理 | ✅ | |
 | `/governance/semantic/datasources/:id` | `pages/semantic-maintenance/datasource-detail/page.tsx` | 治理 | ❌ | 动态路由 |
 | `/governance/semantic/fields` | `pages/semantic-maintenance/field-list/page.tsx` | 治理 | ✅ | |
+| `/governance/semantic/publish-logs` | `pages/empty/publish-logs/page.tsx` | 治理 | ✅ | |
 | `/governance/metrics` | `pages/data-governance/metrics/page.tsx` | 治理 | ✅ | |
-| `/system/llm-configs` | `pages/admin/llm-configs/page.tsx` | 平台 | ✅ | admin |
-| `/system/mcp-configs` | `pages/admin/mcp-configs/page.tsx` | 平台 | ✅ | admin |
-| `/system/mcp-debugger` | `pages/system/mcp-debugger/page.tsx` | 平台 | ✅ | admin |
-| `/system/tasks` | `pages/admin/tasks/page.tsx` | 平台 | ✅ | admin |
-| `/system/query-alerts` | `pages/admin/query-alerts/page.tsx` | 平台 | ✅ | admin |
-| `/dev/ddl-validator` | `pages/ddl-validator/page.tsx` | 实验室 | ✅ | |
-| `/dev/rule-config` | `pages/rule-config/page.tsx` | 实验室 | ✅ | data_admin+ |
-| `/analytics/knowledge` | `pages/knowledge/page.tsx` | 实验室 | hidden | 待迁出到 analytics 域 |
-| `/system/users` | `pages/admin/user-management/page.tsx` | 设置 | ✅ | admin |
-| `/system/groups` | `pages/admin/groups/page.tsx` | 设置 | ✅ | admin |
-| `/system/permissions` | `pages/admin/permissions/page.tsx` | 设置 | ✅ | admin |
-| `/system/activity` | `pages/admin/activity/page.tsx` | 设置 | ✅ | admin |
+| `/governance/metrics/:id` | `pages/data-governance/metrics/detail/page.tsx` | 治理 | ❌ | 动态路由 |
+| `/governance/metrics/maintenance-windows` | `pages/data-governance/metrics/maintenance/page.tsx` | 治理 | ✅ | |
+| `/agents/data` | `pages/agents/data-workbench/page.tsx` | 智能体 | ✅ | Spec 28 |
+| `/agents/data/history` | `pages/agents/data-workbench/history/page.tsx` | 智能体 | ✅ | Spec 28 |
+| `/agents/sql` | `pages/agents/sql-agent/page.tsx` | 智能体 | ✅ | Spec 29 |
+| `/agents/metrics` | `pages/agents/metrics-agent/page.tsx` | 智能体 | ✅ | Spec 30 |
+| `/agents/agent-monitor` | `pages/agents/monitor/page.tsx` | 智能体 | ✅ | |
+| `/system/llm-configs` | `pages/admin/llm-configs/page.tsx` | 配置 | ✅ | admin |
+| `/system/mcp-configs` | `pages/admin/mcp-configs/page.tsx` | 配置 | ✅ | admin |
+| `/system/mcp-debugger` | `pages/system/mcp-debugger/page.tsx` | 配置 | ✅ | admin |
+| `/system/tasks` | `pages/admin/tasks/page.tsx` | 配置 | ✅ | admin |
+| `/system/query-alerts` | `pages/admin/query-alerts/page.tsx` | 配置 | ✅ | admin |
+| `/dev/ddl-validator` | `pages/ddl-validator/page.tsx` | 配置 | ✅ | |
+| `/dev/rule-config` | `pages/rule-config/page.tsx` | 配置 | ✅ | data_admin+ |
+| `/analytics/knowledge` | `pages/knowledge/page.tsx` | 配置 | ✅ | Spec 17 |
+| `/system/users` | `pages/admin/user-management/page.tsx` | 管理 | ✅ | admin |
+| `/system/groups` | `pages/admin/groups/page.tsx` | 管理 | ✅ | admin |
+| `/system/permissions` | `pages/admin/permissions/page.tsx` | 管理 | ✅ | admin |
+| `/system/shared-permissions` | `pages/admin/shared-permissions/page.tsx` | 管理 | ✅ | |
+| `/system/activity` | `pages/admin/activity/page.tsx` | 管理 | ✅ | admin |
+| `/system/platform-settings` | `pages/admin/platform-settings/page.tsx` | 管理 | ✅ | |
+| `/account/security` | `pages/account/security/page.tsx` | 管理 | ✅ | |
 
 ### 4.2 React Router v7 路由定义
 
@@ -264,11 +325,13 @@ interface MenuPermission {
 
 | 域 | chunk 名 | 主要页面 |
 |----|---------|---------|
-| 资产 | `chunk-assets` | Tableau 资产、连接总览、数据源 |
-| 治理 | `chunk-governance` | 健康中心、语义治理、指标管理 |
-| 平台 | `chunk-system` | 数据源与连接、Tableau 连接、LLM/MCP 配置、MCP 调试器、任务管理 |
-| 实验室 | `chunk-lab` | DDL 检查、规则配置 |
-| 设置 | `chunk-system` | 用户管理、用户组、权限配置、操作日志 |
+| 首页 | `chunk-home` | 工作台首页、问数记录 |
+| 问数 | `chunk-query` | 问数界面、NL 查询 |
+| 资产 | `chunk-assets` | Tableau 资产、连接总览、数据源、StarRocks 巡检 |
+| 治理 | `chunk-governance` | 健康中心、DQC、语义治理、指标管理 |
+| 智能体 | `chunk-agents` | Data Agent、SQL Agent、Metrics Agent、Agent 监控 |
+| 配置 | `chunk-config` | LLM/MCP 配置、MCP 调试器、任务管理、问数告警、规则配置、知识库 |
+| 管理 | `chunk-admin` | 用户管理、用户组、权限配置、操作日志、平台设置 |
 
 ---
 
@@ -293,7 +356,7 @@ graph TB
 |------|------|---------|
 | `AppShellLayout` | 统一页面骨架（Header + Sidebar + Content） | `MainLayout` + `AdminSidebarLayout` |
 | `AppHeader` | Logo、全局搜索、用户信息 | `Navbar.tsx` |
-| `AppSidebar` | 6 域菜单树、折叠状态、权限过滤 | `AdminSidebarLayout` 的侧边栏 |
+| `AppSidebar` | 7 域菜单树、折叠状态、权限过滤 | `AdminSidebarLayout` 的侧边栏 |
 
 ### 5.2 菜单配置数据结构
 
@@ -350,3 +413,28 @@ interface MenuDomain {
 | 4 | 治理域：健康扫描→健康中心（Tabbed 统一入口），新增指标管理 | 健康与质量入口合并，指标独立模块 |
 | 5 | 知识库暂时隐藏在实验室域，待功能完成后再迁入 analytics 域 | analytics 域尚未启用 |
 | 6 | Spec 34 实施后，资产域与平台域均有"连接"相关菜单（路由相同，标签不同） | 资产域侧重查看/治理，平台域侧重配置/管理，视角不同但共用同一底层路由 |
+
+### v0.2 → v0.3（2026-04-30）
+
+| # | 变更内容 | 原因 |
+|---|---------|------|
+| 1 | 新增域 1"问数"（Query）：问数界面（Spec 38）、NL 查询（Spec 14） | Spec 38 已完成但无菜单入口 |
+| 2 | 删除域"运维"，其内容归入首页工作台 | Spec 20 construction，功能已合并 |
+| 3 | 删除域"实验室"，其内容归入配置域 | MECE 原则：实验室为混合分类，不符合互斥原则 |
+| 4 | 域 5"平台" → "配置"（Config） | 语义更准确：平台是产品整体，配置是功能模块 |
+| 5 | 域 6"系统/设置" → "管理"（Admin） | 与配置分离，职责更清晰 |
+| 6 | 新增域 4"智能体"（Agents）：Data Agent（Spec 28）、SQL Agent（Spec 29）、Metrics Agent（Spec 30） | Agent 体系需要统一域 |
+| 7 | 治理域新增 DQC 模块（Spec 31）：DQC 概览、监控配置、信号灯、LLM 根因分析 | Spec 31 需要独立地位，不再降级为健康中心 Tab |
+| 8 | 资产域新增 StarRocks 巡检（Spec 35） | Spec 35 已完成，需有菜单入口 |
+| 9 | 知识库从实验室 hidden 迁入配置域（正式功能） | 功能已完成，解除 hidden 状态 |
+| 10 | 标签修正："Logo" → "平台设置" | 原标签无法传达功能含义 |
+
+### v0.3 → v0.4（2026-05-05）
+
+| # | 变更内容 | 原因 |
+|---|---------|------|
+| 1 | 治理域从 9 项精简为 5 项 | 同一层级混杂大模块入口和子页面，用户认知负担高 |
+| 2 | DQC 4 个菜单项合并为单一"数据质量"入口 | DQC 概览/规则/信号灯/根因分析是同一模块的子视图，应内部 Tab 切换 |
+| 3 | "发布日志"从独立菜单项并入"语义治理" | 发布日志是语义治理的审计子功能，脱离上下文无意义 |
+| 4 | "健康中心"更名为"数仓巡检"（与实际功能对齐） | 用户看到"健康中心"不知要做什么，"数仓巡检"直击场景 |
+| 5 | Tableau 巡检独立为二级菜单项 | v0.3 已拆出独立路由，但菜单配置未同步 |

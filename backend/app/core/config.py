@@ -41,6 +41,10 @@ class Settings:
     CELERY_BROKER_URL: str = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
     CELERY_RESULT_BACKEND: str = os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
 
+    # Alert Webhook (飞书/企微/钉钉)
+    ALERT_WEBHOOK_URL: Optional[str] = os.environ.get("ALERT_WEBHOOK_URL")
+    ALERT_WEBHOOK_ENABLED: bool = os.environ.get("ALERT_WEBHOOK_ENABLED", "false").lower() == "true"
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

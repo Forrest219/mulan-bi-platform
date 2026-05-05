@@ -23,7 +23,7 @@ export function HealthTab({
     <div className="space-y-4">
       <div className="bg-white border border-slate-200 rounded-xl p-5">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-slate-700">健康度评估</h3>
+          <h3 className="text-xs font-semibold text-slate-700">健康度评估</h3>
           <button
             onClick={onLoad}
             disabled={healthLoading}
@@ -35,21 +35,21 @@ export function HealthTab({
         </div>
 
         {healthError && (
-          <div className="text-center py-4 text-red-500 text-sm">{healthError}</div>
+          <div className="text-center py-4 text-red-500 text-xs">{healthError}</div>
         )}
 
         {healthLoading ? (
-          <div className="text-center py-10 text-slate-400 text-sm">
+          <div className="text-center py-10 text-slate-400 text-xs">
             <i className="ri-loader-2-line animate-spin text-xl block mb-2" />
             评估中...
           </div>
         ) : !healthData ? (
           <div className="text-center py-10">
             <i className="ri-heart-pulse-line text-3xl text-slate-300 block mb-3" />
-            <div className="text-slate-400 text-sm mb-4">点击&quot;开始评估&quot;检查资产健康度</div>
+            <div className="text-slate-400 text-xs mb-4">点击&quot;开始评估&quot;检查资产健康度</div>
             <button
               onClick={onLoad}
-              className="px-5 py-2.5 text-sm bg-slate-900 text-white rounded-lg hover:bg-slate-800"
+              className="px-5 py-2.5 text-xs bg-slate-900 text-white rounded-lg hover:bg-slate-800"
             >
               <i className="ri-heart-pulse-line mr-1" /> 开始评估
             </button>
@@ -72,7 +72,7 @@ export function HealthTab({
                 {healthData.score}
               </div>
               <div>
-                <div className="text-sm font-medium text-slate-700">
+                <div className="text-xs font-medium text-slate-700">
                   {healthData.level === 'excellent'
                     ? '优秀'
                     : healthData.level === 'good'
@@ -96,6 +96,7 @@ export function HealthTab({
                 assetName={assetName}
                 assetId={assetId}
                 healthScore={healthData.score}
+                checks={healthData.checks}
               />
             )}
 
