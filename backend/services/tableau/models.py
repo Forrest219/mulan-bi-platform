@@ -561,6 +561,7 @@ class TableauDatabase:
 
         if existing:
             existing.name = name
+            existing.asset_type = asset_type
             for key, value in kwargs.items():
                 if hasattr(existing, key) and value is not None:
                     setattr(existing, key, value)

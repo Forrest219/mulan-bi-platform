@@ -63,6 +63,41 @@ class TableauSyncService:
         except Exception as e:
             return {"success": False, "message": f"连接失败: {str(e)}"}
 
+    def _get_dashboard_luids(self) -> set:
+        """通过 Metadata API 获取所有 Dashboard 的 LUID 集合"""
+        query = """
+        {
+          dashboardsConnection(first: 5000) {
+            nodes { luid }
+          }
+        }
+        """
+        try:
+            auth_token = getattr(self.server, '_auth_token', None) or getattr(self.server, 'auth_token', None)
+            if not auth_token:
+                logger.warning("TSC auth token not available, cannot query Metadata API")
+                return set()
+            resp = requests.post(
+                f"{self.server_url}/api/metadata/graphql",
+                json={"query": query},
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "X-Tableau-Auth": auth_token,
+                },
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                logger.warning("Metadata API returned %s, falling back to all-view classification", resp.status_code)
+                return set()
+            nodes = resp.json().get("data", {}).get("dashboardsConnection", {}).get("nodes", [])
+            luids = {n["luid"] for n in nodes if n.get("luid")}
+            logger.info("Metadata API: found %d dashboard LUIDs", len(luids))
+            return luids
+        except Exception as e:
+            logger.warning("Metadata API query failed (%s), falling back to all-view classification", e)
+            return set()
+
     def _parse_server_datetime(self, value) -> Optional[datetime]:
         """安全解析 Tableau Server 返回的时间字段"""
         if value is None:
@@ -137,10 +172,11 @@ class TableauSyncService:
 
         # --- Views (including Dashboards) ---
         try:
+            dashboard_luids = self._get_dashboard_luids()
             for view in TSC.Pager(self.server.views):
                 content_url = f"/views/{view.id}"
-                sheet_type = getattr(view, 'sheet_type', None) or getattr(view, 'sheetType', None)
-                asset_type = "dashboard" if sheet_type == "dashboard" else "view"
+                asset_type = "dashboard" if view.id in dashboard_luids else "view"
+                sheet_type = "dashboard" if asset_type == "dashboard" else (getattr(view, 'sheet_type', None) or "")
 
                 # view → workbook 关联
                 workbook_id = getattr(view, 'workbook_id', None)
@@ -168,7 +204,7 @@ class TableauSyncService:
                         "sheet_type": sheet_type,
                         "workbook_id": workbook_id,
                     }) if sheet_type or workbook_id else None,
-                    sheet_type=sheet_type,
+                    sheet_type=sheet_type or None,
                     parent_workbook_id=workbook_id,
                     parent_workbook_name=workbook_name,
                     created_on_server=self._parse_server_datetime(getattr(view, 'created_at', None)),
@@ -527,7 +563,8 @@ class TableauRestSyncService:
                     pass
         api_content_url = item.get("contentUrl")
         if api_content_url:
-            return f"/{asset_type_segment}/{api_content_url}"
+            browser_path = api_content_url.replace("/sheets/", "/")
+            return f"/{asset_type_segment}/{browser_path}"
         return f"/{asset_type_segment}/{fallback_id}"
 
     def _get_workbook_datasources(self, workbook_id: str) -> List[Dict]:
@@ -542,6 +579,37 @@ class TableauRestSyncService:
             return ds_list
         except Exception:
             return []
+
+    def _get_dashboard_luids(self) -> set:
+        """通过 Metadata API 获取所有 Dashboard 的 LUID 集合"""
+        query = """
+        {
+          dashboardsConnection(first: 5000) {
+            nodes { luid }
+          }
+        }
+        """
+        try:
+            resp = self._session.post(
+                f"{self.server_url}/api/metadata/graphql",
+                json={"query": query},
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "X-Tableau-Auth": self._auth_token,
+                },
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                logger.warning("Metadata API returned %s, falling back to all-view classification", resp.status_code)
+                return set()
+            nodes = resp.json().get("data", {}).get("dashboardsConnection", {}).get("nodes", [])
+            luids = {n["luid"] for n in nodes if n.get("luid")}
+            logger.info("Metadata API: found %d dashboard LUIDs", len(luids))
+            return luids
+        except Exception as e:
+            logger.warning("Metadata API query failed (%s), falling back to all-view classification", e)
+            return set()
 
     def sync_all_assets(self, db, connection_id: int,
                         trigger_type: str = "manual",
@@ -601,12 +669,13 @@ class TableauRestSyncService:
 
         # --- Views (including Dashboards) ---
         try:
+            dashboard_luids = self._get_dashboard_luids()
             views = self._get_views()
             logger.info("REST MCP sync: fetched %d views", len(views))
             for view in views:
                 view_id = self._extract_id(view) or view.get("_id", "") or str(view.get("id", ""))
-                sheet_type = view.get("sheetType") or view.get("sheet_type") or ""
-                asset_type = "dashboard" if sheet_type.lower() == "dashboard" else "view"
+                asset_type = "dashboard" if view_id in dashboard_luids else "view"
+                sheet_type = "dashboard" if asset_type == "dashboard" else ""
 
                 workbook_id = view.get("workbook", {}).get("id", "") if isinstance(view.get("workbook"), dict) else (view.get("workbookId", "") or view.get("workbook_id", ""))
                 workbook_name = workbook_name_map.get(workbook_id)

@@ -143,6 +143,68 @@ test.describe('Tableau 资产详情页', () => {
     expect(linkHref).not.toMatch(/\/#\/views\/datasources/);
   });
 
+  /**
+   * 链接信息 — 各资产类型 URL 格式验证
+   *
+   * 通过 API 找到各类型真实资产，进入详情页，验证外链格式：
+   * - workbook:   /#/site/{site}/workbooks/{numericId}
+   * - view:       /#/site/{site}/views/{slug}/{sheet}
+   * - dashboard:  /#/site/{site}/views/{slug}/{sheet}
+   * - datasource: /#/site/{site}/datasources/{numericId}
+   */
+  for (const assetType of ['workbook', 'view', 'dashboard', 'datasource'] as const) {
+    test(`链接信息: ${assetType} 外链 URL 格式正确`, async ({ page }) => {
+      // 1. 获取可用连接
+      const connResp = await page.request.get('/api/tableau/connections');
+      if (!connResp.ok()) { test.skip(); return; }
+      const connBody = await connResp.json();
+      const connections = connBody.connections ?? connBody ?? [];
+      if (connections.length === 0) { test.skip(); return; }
+
+      // 2. 遍历连接，找到该类型的一个资产
+      let assetId: number | null = null;
+      for (const conn of connections) {
+        const assetResp = await page.request.get(
+          `/api/tableau/assets?connection_id=${conn.id}&asset_type=${assetType}&page=1&page_size=1`
+        );
+        if (!assetResp.ok()) continue;
+        const assetBody = await assetResp.json();
+        const assets = assetBody.assets ?? [];
+        if (assets.length > 0) { assetId = assets[0].id; break; }
+      }
+      if (assetId === null) { test.skip(); return; }
+
+      // 3. 进入详情页
+      await page.goto(`/assets/tableau/${assetId}`, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(3000);
+
+      // 4. 链接信息区域
+      const linkSection = page.locator('text=链接信息').first();
+      if (!await linkSection.isVisible().catch(() => false)) { test.skip(); return; }
+
+      const externalLink = page.locator('a[target="_blank"]').filter({ hasText: 'Tableau Server' }).first();
+      expect(await externalLink.isVisible()).toBe(true);
+
+      const href = await externalLink.getAttribute('href') ?? '';
+
+      // 通用校验：URL 以 http 开头，包含 /#/ 路径分隔符
+      expect(href).toMatch(/^https?:\/\/.+\/#\//);
+      // 路径中不应包含 UUID
+      expect(href).not.toMatch(/\/#.*\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
+      // 不应包含 REST API 内部的 /sheets/ 路径段
+      expect(href).not.toMatch(/\/sheets\//);
+
+      // 按类型验证 URL 路径段
+      if (assetType === 'workbook') {
+        expect(href).toMatch(/\/#.*\/workbooks\/\d+/);
+      } else if (assetType === 'view' || assetType === 'dashboard') {
+        expect(href).toMatch(/\/#.*\/views\//);
+      } else if (assetType === 'datasource') {
+        expect(href).toMatch(/\/#.*\/datasources\/\d+/);
+      }
+    });
+  }
+
   test('无效资产 ID 显示资产不存在提示', async ({ page }) => {
     await page.goto('/assets/tableau/invalid-test-asset-id-999', { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
