@@ -75,15 +75,19 @@ class TableauSyncService:
             return None
 
     def sync_all_assets(self, db, connection_id: int,
-                        trigger_type: str = "manual") -> Dict[str, Any]:
+                        trigger_type: str = "manual",
+                        sync_log_id: int | None = None) -> Dict[str, Any]:
         """同步所有资产类型到数据库，带日志记录"""
         import tableauserverclient as TSC
 
         if not self.server:
             raise Exception("未连接，请先调用 connect()")
 
-        # 开始同步：记录日志 + 更新连接状态
-        sync_log = db.create_sync_log(connection_id, trigger_type)
+        # 开始同步：复用已有日志或新建
+        if sync_log_id:
+            sync_log = type('obj', (object,), {'id': sync_log_id})()
+        else:
+            sync_log = db.create_sync_log(connection_id, trigger_type)
         db.set_sync_status(connection_id, "running")
         start_time = time.time()
 
@@ -211,10 +215,28 @@ class TableauSyncService:
         status = "success" if not errors else ("partial" if total > 0 else "failed")
         error_msg = "\n".join(errors) if errors else None
 
+        # 计算字段 diff（+X -Y）
+        sync_details = {}
+        ds_tableau_ids = synced_ids.get("datasource", []) or []
+        if ds_tableau_ids:
+            ds_db_ids = db.resolve_tableau_ids_to_asset_ids(connection_id, ds_tableau_ids)
+            current_counts = db.get_datasource_field_counts(ds_db_ids)
+            current_total = sum(current_counts.values())
+            prev_log = db.get_last_finished_sync_log(connection_id)
+            prev_total = prev_log.details.get("fields_total", 0) if prev_log and prev_log.details else 0
+            fields_added = max(0, current_total - prev_total)
+            fields_deleted = max(0, prev_total - current_total) if prev_log else 0
+            sync_details = {
+                "fields_added": fields_added,
+                "fields_deleted": fields_deleted,
+                "fields_total": current_total,
+            }
+
         # 更新同步日志
         db.finish_sync_log(
             sync_log.id,
             status=status,
+            details=sync_details or None,
             workbooks_synced=len(synced_ids["workbook"]),
             views_synced=len(synced_ids["view"]),
             dashboards_synced=len(synced_ids["dashboard"]),
@@ -381,36 +403,84 @@ class TableauRestSyncService:
         return list(self._get_all_items(f"sites/{self._site_id}/datasources", page_size=100))
 
     def _get_datasource_fields(self, datasource_luid: str) -> List[Dict]:
-        """通过 REST API 获取数据源的字段级元数据（Spec 07 §4.1.2 Step 5）"""
+        """获取数据源的字段级元数据
+
+        策略：先尝试 REST /fields 端点，若 404 则回退到 Metadata GraphQL API。
+        """
+        # 策略 1: REST /fields 端点
         try:
             url = f"{self.server_url}/api/{self.api_version}/sites/{self._site_id}/datasources/{datasource_luid}/fields"
             resp = self._session.get(url, headers=self._headers(), timeout=30)
-            if resp.status_code != 200:
+            if resp.status_code == 200:
+                data = resp.json()
+                fields_data = data.get("fields", {}) if isinstance(data, dict) else {}
+                if isinstance(fields_data, dict):
+                    result = fields_data.get("field", []) or []
+                elif isinstance(fields_data, list):
+                    result = fields_data
+                else:
+                    result = []
+                if result:
+                    return result
+            elif resp.status_code != 404:
                 logger.warning("REST _get_datasource_fields %s returned %s", datasource_luid, resp.status_code)
-                return []
-            data = resp.json()
-            # Tableau REST API 返回格式: { "fields": { "field": [...] } } 或直接 { "field": [...] }
-            fields_data = data.get("fields", {}) if isinstance(data, dict) else {}
-            if isinstance(fields_data, dict):
-                return fields_data.get("field", []) or []
-            elif isinstance(fields_data, list):
-                return fields_data
-            return []
         except Exception as e:
             logger.warning("REST _get_datasource_fields %s error: %s", datasource_luid, e)
+
+        # 策略 2: Metadata GraphQL API（适用于不支持 /fields 端点的 Tableau Server）
+        return self._get_datasource_fields_graphql(datasource_luid)
+
+    def _get_datasource_fields_graphql(self, datasource_luid: str) -> List[Dict]:
+        """通过 Metadata GraphQL API 获取数据源字段"""
+        try:
+            graphql_url = f"{self.server_url}/api/metadata/graphql"
+            query = (
+                '{publishedDatasources(filter: {luid: "' + datasource_luid + '"}) '
+                '{name fields {name fullyQualifiedName description isHidden}}}'
+            )
+            resp = self._session.post(
+                graphql_url,
+                json={"query": query},
+                headers={**self._headers(), "Content-Type": "application/json"},
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                logger.warning("GraphQL _get_datasource_fields %s returned %s", datasource_luid, resp.status_code)
+                return []
+            data = resp.json()
+            ds_list = data.get("data", {}).get("publishedDatasources", [])
+            if not ds_list:
+                return []
+            fields = ds_list[0].get("fields", [])
+            logger.info("GraphQL: fetched %d fields for datasource %s", len(fields), datasource_luid)
+            return fields
+        except Exception as e:
+            logger.warning("GraphQL _get_datasource_fields %s error: %s", datasource_luid, e)
             return []
 
     def _parse_field_metadata(self, field: Dict) -> Dict[str, Any]:
-        """解析单个字段元数据，返回标准字段字典"""
+        """解析单个字段元数据，返回标准字段字典
+
+        兼容两种来源：
+        - REST /fields 端点：name, caption, type, role, formula, aggregation
+        - GraphQL Metadata API：name, fullyQualifiedName, description, isHidden
+        """
+        name = field.get("name", "") or field.get("field-name", "") or ""
+        fqn = field.get("fullyQualifiedName", "")
+        caption = field.get("caption") or field.get("alias") or ""
+        if not caption and fqn:
+            parts = fqn.rsplit("].[", 1)
+            caption = parts[-1].strip("[]") if len(parts) > 1 else ""
         return {
-            "field_name": field.get("name", "") or field.get("field-name", "") or "",
-            "field_caption": field.get("caption") or field.get("alias") or "",
+            "field_name": name,
+            "field_caption": caption,
             "data_type": field.get("type") or field.get("dataType") or field.get("data_type") or "",
-            "role": field.get("role") or "",  # dimension / measure
+            "role": field.get("role") or "",
             "description": field.get("description") or "",
             "formula": field.get("formula") or field.get("expression") or "",
             "aggregation": field.get("aggregation") or "",
             "is_calculated": bool(field.get("formula") or field.get("expression")),
+            "is_hidden": bool(field.get("isHidden")),
             "metadata_json": field,
         }
 
@@ -438,6 +508,28 @@ class TableauRestSyncService:
             return val.get("id", "") or ""
         return str(val) if val else ""
 
+    @staticmethod
+    def _extract_content_path(item: Dict, asset_type_segment: str, fallback_id: str) -> str:
+        """从 API 响应中提取 content_url 路径。
+
+        优先使用 webpageUrl 中的路径（含数字 ID），
+        其次用 contentUrl 字段，最后 fallback 到 LUID。
+        """
+        webpage_url = item.get("webpageUrl") or ""
+        if webpage_url and "#" in webpage_url:
+            path = webpage_url.split("#", 1)[1]
+            parts = path.rstrip("/").rsplit("/", 2)
+            if len(parts) >= 2:
+                try:
+                    int(parts[-1])
+                    return f"/{parts[-2]}/{parts[-1]}"
+                except ValueError:
+                    pass
+        api_content_url = item.get("contentUrl")
+        if api_content_url:
+            return f"/{asset_type_segment}/{api_content_url}"
+        return f"/{asset_type_segment}/{fallback_id}"
+
     def _get_workbook_datasources(self, workbook_id: str) -> List[Dict]:
         """获取工作簿关联的数据源"""
         try:
@@ -452,12 +544,17 @@ class TableauRestSyncService:
             return []
 
     def sync_all_assets(self, db, connection_id: int,
-                        trigger_type: str = "manual") -> Dict[str, Any]:
+                        trigger_type: str = "manual",
+                        sync_log_id: int | None = None) -> Dict[str, Any]:
         """同步所有资产类型到数据库（MCP REST 模式）"""
         if not self._auth_token:
             raise Exception("未连接，请先调用 connect()")
 
-        sync_log = db.create_sync_log(connection_id, trigger_type)
+        # 复用已有日志或新建
+        if sync_log_id:
+            sync_log = type('obj', (object,), {'id': sync_log_id})()
+        else:
+            sync_log = db.create_sync_log(connection_id, trigger_type)
         db.set_sync_status(connection_id, "running")
         start_time = time.time()
 
@@ -474,7 +571,7 @@ class TableauRestSyncService:
                 wb_name = wb.get("name", "Unknown")
                 workbook_name_map[wb_id] = wb_name
 
-                content_url = f"/workbooks/{wb_id}"
+                content_url = self._extract_content_path(wb, "workbooks", wb_id)
                 asset = db.upsert_asset(
                     connection_id=connection_id,
                     asset_type="workbook",
@@ -514,7 +611,7 @@ class TableauRestSyncService:
                 workbook_id = view.get("workbook", {}).get("id", "") if isinstance(view.get("workbook"), dict) else (view.get("workbookId", "") or view.get("workbook_id", ""))
                 workbook_name = workbook_name_map.get(workbook_id)
 
-                content_url = f"/views/{view_id}"
+                content_url = self._extract_content_path(view, "views", view_id)
                 asset = db.upsert_asset(
                     connection_id=connection_id,
                     asset_type=asset_type,
@@ -542,7 +639,7 @@ class TableauRestSyncService:
             datasources = self._get_datasources()
             for ds in datasources:
                 ds_id = self._extract_id(ds) or ds.get("_id", "") or str(ds.get("id", ""))
-                content_url = f"/datasources/{ds_id}"
+                content_url = self._extract_content_path(ds, "datasources", ds_id)
                 asset = db.upsert_asset(
                     connection_id=connection_id,
                     asset_type="datasource",
@@ -586,9 +683,27 @@ class TableauRestSyncService:
         status = "success" if not errors else ("partial" if total > 0 else "failed")
         error_msg = "\n".join(errors) if errors else None
 
+        # 计算字段 diff（+X -Y）
+        sync_details = {}
+        ds_tableau_ids = synced_ids.get("datasource", []) or []
+        if ds_tableau_ids:
+            ds_db_ids = db.resolve_tableau_ids_to_asset_ids(connection_id, ds_tableau_ids)
+            current_counts = db.get_datasource_field_counts(ds_db_ids)
+            current_total = sum(current_counts.values())
+            prev_log = db.get_last_finished_sync_log(connection_id)
+            prev_total = prev_log.details.get("fields_total", 0) if prev_log and prev_log.details else 0
+            fields_added = max(0, current_total - prev_total)
+            fields_deleted = max(0, prev_total - current_total) if prev_log else 0
+            sync_details = {
+                "fields_added": fields_added,
+                "fields_deleted": fields_deleted,
+                "fields_total": current_total,
+            }
+
         db.finish_sync_log(
             sync_log.id,
             status=status,
+            details=sync_details or None,
             workbooks_synced=len(synced_ids["workbook"]),
             views_synced=len(synced_ids["view"]),
             dashboards_synced=len(synced_ids["dashboard"]),

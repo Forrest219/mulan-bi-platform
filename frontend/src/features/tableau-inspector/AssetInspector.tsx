@@ -23,7 +23,7 @@ export interface AssetInspectorProps {
   onClose?: () => void;
 }
 
-export function AssetInspector({ assetId, layout = 'page', onClose }: AssetInspectorProps) {
+export function AssetInspector({ assetId, layout = 'page', defaultTab, onClose }: AssetInspectorProps) {
   const navigate = useNavigate();
   const {
     asset,
@@ -42,12 +42,13 @@ export function AssetInspector({ assetId, layout = 'page', onClose }: AssetInspe
     healthError,
     loadHealth,
     fieldSemantics,
+    fieldsLoading,
     activeTab,
     setActiveTab,
     confirmModal,
     setConfirmModal,
     loadAIExplain,
-  } = useAssetDetail(assetId);
+  } = useAssetDetail(assetId, defaultTab);
 
   if (loading) return <div className="p-8 text-center text-slate-400">加载中...</div>;
   if (!asset) return <div className="p-8 text-center text-slate-400">资产不存在</div>;
@@ -199,7 +200,7 @@ export function AssetInspector({ assetId, layout = 'page', onClose }: AssetInspe
 
             {/* Tab: Field Metadata */}
             {activeTab === 'fields' && (
-              <FieldsTab fieldSemantics={fieldSemantics} aiLoading={aiLoading} />
+              <FieldsTab fieldSemantics={fieldSemantics} fieldsLoading={fieldsLoading} />
             )}
 
             {/* Tab: Health */}
@@ -235,7 +236,7 @@ export function AssetInspector({ assetId, layout = 'page', onClose }: AssetInspe
               <h3 className="text-sm font-semibold text-slate-700 mb-3">链接信息</h3>
               {asset.content_url && asset.server_url ? (
                 <a
-                  href={`${asset.server_url}/#/views${asset.content_url.replace('/views', '')}`}
+                  href={`${asset.server_url}/#${asset.site ? `/site/${asset.site}` : ''}${asset.content_url}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-xs text-blue-500 hover:underline break-all flex items-center gap-1"

@@ -417,6 +417,7 @@ async def get_asset(asset_id: int, request: Request, db: Session = Depends(get_d
     conn = _db.get_connection(asset.connection_id)
     if conn:
         result["server_url"] = conn.server_url
+        result["site"] = conn.site or ""
 
     return result
 
@@ -439,6 +440,37 @@ async def get_projects(
 
 
 # --- Sync Logs (Phase 2a) ---
+
+@router.get("/sync-logs")
+async def list_all_sync_logs(
+    request: Request,
+    connection_id: Optional[int] = Query(None),
+    status: Optional[str] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """跨连接获取同步日志列表"""
+    get_current_user(request, db)
+    _db = TableauDatabase(session=db)
+    logs, total = _db.get_all_sync_logs(
+        connection_id=connection_id,
+        status=status,
+        start_date=start_date,
+        end_date=end_date,
+        page=page,
+        page_size=page_size,
+    )
+    return {
+        "logs": logs,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": (total + page_size - 1) // page_size,
+    }
+
 
 @router.get("/connections/{conn_id}/sync-logs")
 async def list_sync_logs(
@@ -570,9 +602,42 @@ async def sync_connection(
     if conn.sync_status == "running":
         return {"message": "同步正在进行中", "status": "running"}
 
+    from services.tasks import celery_app
+    try:
+        pong = celery_app.control.inspect(timeout=1.0).ping()
+        if not pong:
+            raise HTTPException(
+                status_code=503,
+                detail={"error_code": "SYS_002", "message": "后台任务服务不可用，请联系管理员"},
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail={"error_code": "SYS_002", "message": "后台任务服务不可用，请联系管理员"},
+        )
+
+    _db.set_sync_status(conn_id, "running")
+
     from services.tasks.tableau_tasks import sync_connection_task
     task = sync_connection_task.delay(conn_id)
     return {"task_id": task.id, "message": "同步任务已提交", "status": "pending"}
+
+
+@router.get("/worker-health")
+async def check_worker_health(
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+):
+    """检查 Celery worker 是否在线"""
+    from services.tasks import celery_app
+    try:
+        pong = celery_app.control.inspect(timeout=1.0).ping()
+        if pong:
+            return {"available": True, "workers": len(pong)}
+        return {"available": False, "workers": 0}
+    except Exception:
+        return {"available": False, "workers": 0}
 
 
 # --- Asset Hierarchy (Phase 2a) ---
@@ -614,6 +679,31 @@ async def get_asset_parent(asset_id: int, request: Request, db: Session = Depend
 
 class ExplainRequest(BaseModel):
     refresh: bool = False
+
+
+@router.get("/assets/{asset_id}/fields")
+async def get_asset_fields(asset_id: int, request: Request, db: Session = Depends(get_db)):
+    """获取资产字段元数据（独立于 AI 解读）"""
+    user = get_current_user(request, db)
+    _db = TableauDatabase(session=db)
+    asset = _db.get_asset(asset_id)
+    if not asset or asset.is_deleted:
+        raise HTTPException(status_code=404, detail="资产不存在")
+    verify_connection_access(asset.connection_id, user, db)
+
+    fields = _db.get_datasource_fields(asset_id)
+    return {
+        "fields": [
+            {
+                "field": f.field_name,
+                "caption": f.ai_caption or f.field_caption or "",
+                "role": f.role or "",
+                "data_type": f.data_type or "",
+                "meaning": f.ai_description or f.description or "",
+            }
+            for f in (fields or [])
+        ]
+    }
 
 
 @router.post("/assets/{asset_id}/explain")
@@ -752,6 +842,9 @@ async def get_connection_health_overview(conn_id: int, request: Request, db: Ses
 
 
     from services.tableau.health import compute_asset_health, get_health_level
+    from datetime import datetime, timezone
+
+    checked_at = datetime.now(timezone.utc).isoformat()
 
     assets, total = _db.get_assets(conn_id, include_deleted=False, page=1, page_size=9999)
     asset_ids = [asset.id for asset in assets]
@@ -771,9 +864,11 @@ async def get_connection_health_overview(conn_id: int, request: Request, db: Ses
         total_score += health["score"]
         level_counts[health["level"]] += 1
 
+        failed_checks = []
         for check in health["checks"]:
             if not check["passed"]:
                 top_issues[check["key"]] = top_issues.get(check["key"], 0) + 1
+                failed_checks.append(check["key"])
 
         results.append({
             "asset_id": asset.id,
@@ -781,6 +876,8 @@ async def get_connection_health_overview(conn_id: int, request: Request, db: Ses
             "asset_type": asset.asset_type,
             "score": health["score"],
             "level": health["level"],
+            "failed_checks": failed_checks,
+            "checked_at": checked_at,
         })
 
     _db.update_assets_health_bulk(health_by_asset)

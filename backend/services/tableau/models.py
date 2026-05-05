@@ -1,7 +1,7 @@
 """Tableau Connection & Asset 数据模型"""
 from typing import Optional, List, Dict, Any
 
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, UniqueConstraint, Index
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, UniqueConstraint, Index, func
 from sqlalchemy.orm import relationship
 from app.core.database import Base, JSONB, sa_func, sa_text # 导入中央配置的 Base, JSONB, func, text
 
@@ -30,6 +30,8 @@ class TableauConnection(Base):
     last_sync_at = Column(DateTime, nullable=True)
     last_sync_duration_sec = Column(Integer, nullable=True)
     sync_status = Column(String(16), default="idle", server_default=sa_text("'idle'"))  # idle / running / failed
+    # 熔断：连续失败计数，达到 3 次自动关闭 auto_sync
+    consecutive_sync_failures = Column(Integer, default=0, server_default=sa_text('0'))
     # MCP V2 直连配置（Spec 13 §9.1）
     mcp_direct_enabled = Column(Boolean, default=False, server_default=sa_text('false'))
     mcp_server_url = Column(String(512), nullable=True)
@@ -66,6 +68,7 @@ class TableauConnection(Base):
             "last_sync_at": self.last_sync_at.strftime("%Y-%m-%d %H:%M:%S") if self.last_sync_at else None,
             "last_sync_duration_sec": self.last_sync_duration_sec,
             "sync_status": self.sync_status or "idle",
+            "consecutive_sync_failures": self.consecutive_sync_failures or 0,
             "mcp_direct_enabled": self.mcp_direct_enabled or False,
             "mcp_server_url": self.mcp_server_url,
             "next_sync_at": next_sync_at,
@@ -215,6 +218,12 @@ class TableauSyncLog(Base):
         duration = None
         if self.started_at and self.finished_at:
             duration = int((self.finished_at - self.started_at).total_seconds())
+        # 从 details(JSONB) 读取字段 diff
+        fields_added = None
+        fields_deleted = None
+        if self.details and isinstance(self.details, dict):
+            fields_added = self.details.get("fields_added")
+            fields_deleted = self.details.get("fields_deleted")
         return {
             "id": self.id,
             "connection_id": self.connection_id,
@@ -229,6 +238,8 @@ class TableauSyncLog(Base):
             "assets_deleted": self.assets_deleted,
             "error_message": self.error_message,
             "duration_sec": duration,
+            "fields_added": fields_added,
+            "fields_deleted": fields_deleted,
         }
 
 
@@ -781,7 +792,7 @@ class TableauDatabase:
         self.session.commit()
         return log
 
-    def finish_sync_log(self, log_id: int, status: str, **counts) -> bool:
+    def finish_sync_log(self, log_id: int, status: str, details: Optional[Dict[str, Any]] = None, **counts) -> bool:
         """完成同步日志（同步结束时调用）"""
         log = self.session.query(TableauSyncLog).filter(TableauSyncLog.id == log_id).first()
         if not log:
@@ -791,6 +802,8 @@ class TableauDatabase:
         for key, value in counts.items():
             if hasattr(log, key) and value is not None:
                 setattr(log, key, value)
+        if details is not None:
+            log.details = details
         self.session.commit()
         return True
 
@@ -807,6 +820,42 @@ class TableauDatabase:
 
     def get_sync_log(self, log_id: int) -> Optional[TableauSyncLog]:
         return self.session.query(TableauSyncLog).filter(TableauSyncLog.id == log_id).first()
+
+    def get_all_sync_logs(
+        self,
+        connection_id: Optional[int] = None,
+        status: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple:
+        """跨连接分页获取同步日志，附带连接名称"""
+        query = (
+            self.session.query(TableauSyncLog, TableauConnection.name)
+            .join(TableauConnection, TableauSyncLog.connection_id == TableauConnection.id)
+        )
+        if connection_id is not None:
+            query = query.filter(TableauSyncLog.connection_id == connection_id)
+        if status is not None:
+            query = query.filter(TableauSyncLog.status == status)
+        if start_date is not None:
+            query = query.filter(TableauSyncLog.started_at >= start_date)
+        if end_date is not None:
+            query = query.filter(TableauSyncLog.started_at <= end_date)
+        total = query.count()
+        rows = (
+            query.order_by(TableauSyncLog.started_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        logs = []
+        for log, conn_name in rows:
+            d = log.to_dict()
+            d["connection_name"] = conn_name
+            logs.append(d)
+        return logs, total
 
     # --- Datasource Fields ---
 
@@ -856,6 +905,35 @@ class TableauDatabase:
             grouped.setdefault(row.asset_id, []).append(row)
         return grouped
 
+    def resolve_tableau_ids_to_asset_ids(self, connection_id: int, tableau_ids: List[str]) -> List[int]:
+        """将 Tableau UUID 列表转换为数据库 asset.id 列表"""
+        if not tableau_ids:
+            return []
+        rows = self.session.query(TableauAsset.id).filter(
+            TableauAsset.connection_id == connection_id,
+            TableauAsset.tableau_id.in_(tableau_ids),
+        ).all()
+        return [row.id for row in rows]
+
+    def get_datasource_field_counts(self, asset_ids: List[int]) -> Dict[int, int]:
+        """批量获取多个数据源资产的字段数量"""
+        if not asset_ids:
+            return {}
+        rows = self.session.query(
+            TableauDatasourceField.asset_id,
+            func.count(TableauDatasourceField.id).label('count')
+        ).filter(
+            TableauDatasourceField.asset_id.in_(asset_ids)
+        ).group_by(TableauDatasourceField.asset_id).all()
+        return {row.asset_id: row.count for row in rows}
+
+    def get_last_finished_sync_log(self, connection_id: int) -> Optional[TableauSyncLog]:
+        """获取某连接上次成功完成的同步日志（用于字段数对比）"""
+        return self.session.query(TableauSyncLog).filter(
+            TableauSyncLog.connection_id == connection_id,
+            TableauSyncLog.status.in_(['success', 'partial']),
+        ).order_by(TableauSyncLog.finished_at.desc()).first()
+
     def update_field_annotation(self, field_id: int, ai_caption: str = None,
                                  ai_description: str = None, ai_role: str = None,
                                  ai_confidence: float = None) -> bool:
@@ -889,3 +967,22 @@ class TableauDatabase:
             conn.last_sync_duration_sec = duration_sec
         self.session.commit()
         return True
+
+    def increment_sync_failures(self, conn_id: int) -> int:
+        """递增连续失败计数，达到阈值自动关闭 auto_sync"""
+        conn = self.get_connection(conn_id)
+        if not conn:
+            return 0
+        conn.consecutive_sync_failures = (conn.consecutive_sync_failures or 0) + 1
+        if conn.consecutive_sync_failures >= 3:
+            conn.auto_sync_enabled = False
+        self.session.commit()
+        return conn.consecutive_sync_failures
+
+    def reset_sync_failures(self, conn_id: int):
+        """同步成功时重置连续失败计数"""
+        conn = self.get_connection(conn_id)
+        if not conn:
+            return
+        conn.consecutive_sync_failures = 0
+        self.session.commit()

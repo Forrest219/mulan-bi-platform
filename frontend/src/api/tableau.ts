@@ -56,6 +56,7 @@ export interface TableauAsset {
   // Detail enrichment
   datasources?: TableauAssetDatasource[];
   server_url?: string;
+  site?: string;
 }
 
 export interface TableauAssetDatasource {
@@ -68,6 +69,7 @@ export interface TableauAssetDatasource {
 export interface TableauSyncLog {
   id: number;
   connection_id: number;
+  connection_name?: string;
   trigger_type: 'manual' | 'scheduled';
   started_at: string;
   finished_at: string | null;
@@ -79,6 +81,8 @@ export interface TableauSyncLog {
   assets_deleted: number;
   error_message: string | null;
   duration_sec: number | null;
+  fields_added: number | null;
+  fields_deleted: number | null;
 }
 
 export interface ProjectNode {
@@ -177,7 +181,7 @@ export async function testConnection(id: number): Promise<{ success: boolean; me
   return res.json();
 }
 
-export async function syncConnection(id: number): Promise<{ success: boolean; message: string }> {
+export async function syncConnection(id: number): Promise<{ success?: boolean; message: string; status?: string }> {
   const res = await fetch(`${API_BASE}/api/tableau/connections/${id}/sync`, {
     method: 'POST',
     credentials: 'include',
@@ -241,6 +245,26 @@ export async function getProjects(connection_id: number): Promise<{ projects: Pr
 
 // Sync Logs API (Phase 2a)
 
+export async function listAllSyncLogs(params?: {
+  connection_id?: number;
+  status?: string;
+  start_date?: string;
+  end_date?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<{ logs: TableauSyncLog[]; total: number; page: number; page_size: number; pages: number }> {
+  const sp = new URLSearchParams();
+  if (params?.connection_id) sp.set('connection_id', String(params.connection_id));
+  if (params?.status) sp.set('status', params.status);
+  if (params?.start_date) sp.set('start_date', params.start_date);
+  if (params?.end_date) sp.set('end_date', params.end_date);
+  if (params?.page) sp.set('page', String(params.page));
+  if (params?.page_size) sp.set('page_size', String(params.page_size));
+  const res = await fetch(`${API_BASE}/api/tableau/sync-logs?${sp}`, { credentials: 'include' });
+  if (!res.ok) throw new Error('获取同步日志失败');
+  return res.json();
+}
+
 export async function listSyncLogs(connId: number, params?: {
   page?: number;
   page_size?: number;
@@ -287,6 +311,18 @@ export async function getAssetParent(assetId: number): Promise<{ parent: Tableau
   return res.json();
 }
 
+// Asset Fields API (独立于 AI 解读)
+
+export async function getAssetFields(assetId: number): Promise<{
+  fields: { field: string; caption: string; role: string; data_type: string; meaning: string }[];
+}> {
+  const res = await fetch(`${API_BASE}/api/tableau/assets/${assetId}/fields`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error('获取字段元数据失败');
+  return res.json();
+}
+
 // Deep AI Explain API (Phase 2a)
 
 export async function explainAsset(assetId: number, refresh = false): Promise<{
@@ -330,7 +366,7 @@ export interface HealthOverview {
   avg_level: string;
   level_distribution: { excellent: number; good: number; warning: number; poor: number };
   top_issues: { check: string; count: number }[];
-  assets: { asset_id: number; name: string; asset_type: string; score: number; level: string }[];
+  assets: { asset_id: number; name: string; asset_type: string; score: number; level: string; failed_checks: string[]; checked_at: string; connection_name?: string }[];
 }
 
 export async function getAssetHealth(assetId: number): Promise<AssetHealth> {
@@ -342,5 +378,13 @@ export async function getAssetHealth(assetId: number): Promise<AssetHealth> {
 export async function getConnectionHealthOverview(connId: number): Promise<HealthOverview> {
   const res = await fetch(`${API_BASE}/api/tableau/connections/${connId}/health-overview`, { credentials: 'include' });
   if (!res.ok) throw new Error('获取健康概览失败');
+  return res.json();
+}
+
+// Worker Health API
+
+export async function checkWorkerHealth(): Promise<{ available: boolean; workers: number }> {
+  const res = await fetch(`${API_BASE}/api/tableau/worker-health`, { credentials: 'include' });
+  if (!res.ok) return { available: false, workers: 0 };
   return res.json();
 }

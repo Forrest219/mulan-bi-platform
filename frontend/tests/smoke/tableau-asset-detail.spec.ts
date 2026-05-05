@@ -108,6 +108,41 @@ test.describe('Tableau 资产详情页', () => {
     }
   });
 
+  test('链接信息卡片使用正确的 Tableau Server URL 格式', async ({ page }) => {
+    // 从资产列表进入详情页
+    await page.goto('/assets/tableau', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000);
+
+    const firstAssetLink = page.locator('a[href^="/assets/tableau/"]').filter({ hasText: /\w/ }).first();
+    const hasAssetLink = await firstAssetLink.isVisible().catch(() => false);
+
+    if (!hasAssetLink) {
+      test.skip();
+      return;
+    }
+
+    const href = await firstAssetLink.getAttribute('href');
+    await page.goto(href!, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(3000);
+
+    // 链接信息卡片
+    const linkCard = page.locator('text=链接信息').first();
+    if (!await linkCard.isVisible().catch(() => false)) return;
+
+    const externalLink = page.locator('a[target="_blank"]').filter({ hasText: 'Tableau Server' }).first();
+    if (!await externalLink.isVisible().catch(() => false)) return;
+
+    const linkHref = await externalLink.getAttribute('href') ?? '';
+    // URL 中不应包含 UUID（应为数字 ID 或 contentUrl slug）
+    const uuidInPath = /\/#.*\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
+    expect(linkHref).not.toMatch(uuidInPath);
+    // URL 应包含 /#/ 路径
+    expect(linkHref).toMatch(/\/#\//);
+    // 不应把 workbook/datasource 错误拼在 /views/ 下
+    expect(linkHref).not.toMatch(/\/#\/views\/workbooks/);
+    expect(linkHref).not.toMatch(/\/#\/views\/datasources/);
+  });
+
   test('无效资产 ID 显示资产不存在提示', async ({ page }) => {
     await page.goto('/assets/tableau/invalid-test-asset-id-999', { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
