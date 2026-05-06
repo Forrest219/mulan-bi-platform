@@ -18,7 +18,9 @@ from .engine import ReActEngine
 from .models import BiAgentRun, BiAgentStep
 from .response import AgentEvent
 from .session import AgentSession, SessionManager
+from .intent.keyword_match import is_direct_query, is_chart_request
 from .tool_base import ToolContext
+from .engine import _infer_col_types, _build_chart_data
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +75,21 @@ async def run_agent(
 
         step_number = 0
 
-        async for event in engine.run(query=question, context=context):
+        # 直接查询快速路径：跳过 LLM Think 首步，直接执行 QueryTool
+        force_first_tool = None
+        force_first_params = None
+        if is_direct_query(question):
+            force_first_tool = "query"
+            force_first_params = {"question": question}
+            logger.info("fast_path: is_direct_query=True, force_first_tool=query, question=%s", question[:80])
+
+        async for event in engine.run(
+            query=question,
+            context=context,
+            session=session,
+            force_first_tool=force_first_tool,
+            force_first_params=force_first_params,
+        ):
             if event.type == "thinking":
                 step_number += 1
                 step = BiAgentStep(
@@ -121,6 +137,14 @@ async def run_agent(
                 last_tool_result = result_data
                 yield event
 
+            elif event.type == "table_data":
+                # Pass structured table data through to the API layer unchanged
+                yield event
+
+            elif event.type == "chart_data":
+                # Pass chart data through to the API layer unchanged
+                yield event
+
             elif event.type == "answer":
                 answer_text = event.content
                 execution_time_ms = int((time.time() - total_start) * 1000)
@@ -163,6 +187,18 @@ async def run_agent(
                 # Build sources metadata from connection context
                 sources_count = 1 if context.connection_id else 0
                 top_sources = [context.connection_name] if context.connection_id and context.connection_name else []
+
+                # Emit chart_data if question requests a chart and we have tabular results
+                _is_chart, _chart_type = is_chart_request(question)
+                if _is_chart and response_type == "table" and response_data:
+                    _fields = response_data.get("fields", [])
+                    _rows = response_data.get("rows", [])
+                    if _fields and _rows:
+                        _col_types = _infer_col_types(_fields, _rows)
+                        yield AgentEvent(
+                            type="chart_data",
+                            content=_build_chart_data(_fields, _rows, _col_types, _chart_type),
+                        )
 
                 # Yield a synthetic "done" event that carries all metadata
                 yield AgentEvent(

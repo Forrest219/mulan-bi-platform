@@ -1,7 +1,7 @@
 import { API_BASE } from '../config';
 
 // Types
-export type SemanticStatus = 'draft' | 'ai_generated' | 'pending_review' | 'reviewed' | 'approved' | 'rejected' | 'published';
+export type SemanticStatus = 'draft' | 'ai_generated' | 'pending_review' | 'reviewed' | 'approved' | 'rejected' | 'published' | 'archived';
 export type SensitivityLevel = 'low' | 'medium' | 'high' | 'confidential';
 export type PublishStatus = 'pending' | 'success' | 'failed' | 'rolled_back' | 'not_supported';
 
@@ -9,6 +9,7 @@ export interface SemanticDatasource {
   id: number;
   connection_id: number;
   tableau_datasource_id: string;
+  asset_name: string | null;
   field_registry_id: number | null;
   semantic_name: string | null;
   semantic_name_zh: string | null;
@@ -600,6 +601,7 @@ export function getStatusBadge(status: SemanticStatus): { text: string; classNam
     approved: { text: '已审核', className: 'bg-emerald-50 text-emerald-600' },
     rejected: { text: '已驳回', className: 'bg-red-50 text-red-600' },
     published: { text: '已发布', className: 'bg-blue-50 text-blue-600' },
+    archived: { text: '已归档', className: 'bg-slate-100 text-slate-400' },
   };
   return map[status] || { text: status, className: 'bg-slate-100 text-slate-600' };
 }

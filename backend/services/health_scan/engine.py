@@ -5,6 +5,7 @@ from typing import Dict, Any
 
 from ..ddl_checker.scanner import DDLScanner
 from .models import HealthScanDatabase
+from .scoring import calculate_health_score
 
 logger = logging.getLogger(__name__)
 
@@ -80,13 +81,8 @@ class HealthScanEngine:
             total_tables = report.total_tables
             total_issues = len(issues)
 
-            # 健康分：扣分制，error 扣 5 分，warning 扣 2 分，info 扣 0.5 分，最低 0 分
-            # 0 张表时不计分（无数据），避免空扫描给出误导性满分
-            if total_tables == 0:
-                health_score = None
-            else:
-                density = (high * 5 + medium * 2 + low * 0.5) / total_tables
-                health_score = max(0.0, round(100 - density * 10, 1))
+            # 健康分：0 张表时不计分，避免空扫描给出误导性满分
+            health_score = calculate_health_score(high, medium, low, total_tables)
 
             # 批量写入问题
             if issues:

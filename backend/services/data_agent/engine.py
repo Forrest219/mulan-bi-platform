@@ -18,14 +18,15 @@ except ImportError:
 from .tool_base import ToolContext, ToolRegistry, ToolResult
 from .response import AgentEvent
 from .prompts import build_react_system_prompt
+from .intent.keyword_match import is_chart_request as _is_chart_request
 
 logger = logging.getLogger(__name__)
 
 
 # 默认约束
-DEFAULT_MAX_STEPS = 10
+DEFAULT_MAX_STEPS = 20
 DEFAULT_STEP_TIMEOUT = 30  # 秒
-DEFAULT_TOTAL_TIMEOUT = 120  # 秒
+DEFAULT_TOTAL_TIMEOUT = 300  # 秒
 DEFAULT_MAX_TOOL_RETRIES = 1
 DEFAULT_MAX_HISTORY_TOKENS = 8000
 
@@ -123,6 +124,8 @@ class ReActEngine:
         query: str,
         context: ToolContext,
         session: Optional[Any] = None,
+        force_first_tool: Optional[str] = None,
+        force_first_params: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """执行 ReAct 循环，yield 流式事件
 
@@ -135,9 +138,23 @@ class ReActEngine:
         step_count = 0
         tools_used: List[str] = []
 
-        # 构建 system prompt
+        # 构建 system prompt（尝试注入数据源字段上下文，让 LLM 直接生成 VizQL）
         tool_descriptions = self.registry.get_tool_descriptions()
-        system_prompt = build_react_system_prompt(tool_descriptions)
+        datasource_context = None
+        if context.connection_id:
+            try:
+                from services.llm.nlq_service import route_datasource, get_datasource_fields_cached
+                _ds = route_datasource(query, connection_id=context.connection_id)
+                if _ds and _ds.get("asset_id"):
+                    _fields = get_datasource_fields_cached(_ds["asset_id"])
+                    datasource_context = {
+                        "luid": _ds["luid"],
+                        "name": _ds["name"],
+                        "fields": _fields,
+                    }
+            except Exception as _e:
+                logger.debug("engine: datasource pre-load skipped: %s", _e)
+        system_prompt = build_react_system_prompt(tool_descriptions, datasource_context=datasource_context)
 
         # 构建历史消息
         history_messages = _build_history_messages(session)
@@ -152,6 +169,72 @@ class ReActEngine:
                     content="已达到最大执行时间，基于当前信息给出回答...",
                 )
                 return
+
+            # ── 强制首步（直接查询快速路径）──────────────────────────────
+            # 跳过 LLM Think，直接执行指定工具；工具结果注入 history 后
+            # 进入下一步的正常 LLM Think（此时 LLM 拿到数据，通常直接 final_answer）
+            if force_first_tool and step == 0:
+                tool = self.registry.get(force_first_tool)
+                if tool:
+                    params = force_first_params or {"question": query}
+                    yield AgentEvent(type="tool_call", content={"tool": force_first_tool, "params": params})
+                    forced_result = await self._execute_tool_with_retry(
+                        tool=tool,
+                        tool_name=force_first_tool,
+                        tool_params=params,
+                        context=context,
+                        start_time=start_time,
+                    )
+                    if isinstance(forced_result, ToolResult):
+                        result_data: Dict[str, Any] = {"success": forced_result.success, "data": forced_result.data}
+                        if not forced_result.success:
+                            result_data["error"] = forced_result.error
+                    else:
+                        result_data = forced_result if isinstance(forced_result, dict) else {"data": forced_result}
+                    yield AgentEvent(type="tool_result", content={"tool": force_first_tool, "result": result_data})
+                    history_messages.append({
+                        "role": "assistant",
+                        "content": json.dumps({
+                            "action": "tool_call",
+                            "tool_name": force_first_tool,
+                            "tool_params": params,
+                            "reasoning": "直接查询快速路径",
+                        }, ensure_ascii=False),
+                    })
+                    history_messages.append({
+                        "role": "tool",
+                        "name": force_first_tool,
+                        "content": json.dumps(result_data, ensure_ascii=False),
+                    })
+                    if force_first_tool not in tools_used:
+                        tools_used.append(force_first_tool)
+                    # 工具成功 → 直接生成答案，完全跳过 LLM Think
+                    if isinstance(forced_result, ToolResult) and forced_result.success:
+                        # Emit structured table data before the text answer so the frontend
+                        # can render a native table component instead of a Markdown table.
+                        _data = result_data.get("data") or {}
+                        _fields = _data.get("fields", [])
+                        _rows = _data.get("rows", [])
+                        if _rows:
+                            yield AgentEvent(
+                                type="table_data",
+                                content={
+                                    "fields": _fields,
+                                    "rows": _rows,
+                                    "col_types": _infer_col_types(_fields, _rows),
+                                },
+                            )
+                            _is_chart, _chart_type = _is_chart_request(query)
+                            if _is_chart:
+                                yield AgentEvent(
+                                    type="chart_data",
+                                    content=_build_chart_data(
+                                        _fields, _rows, _infer_col_types(_fields, _rows), _chart_type
+                                    ),
+                                )
+                        yield AgentEvent(type="answer", content=_format_direct_answer(query, result_data))
+                        return
+                    continue  # 工具失败时走正常 LLM Think 尝试恢复
 
             # 1. Think：LLM 推理下一步
             think_result = await self._think(
@@ -357,22 +440,88 @@ class ReActEngine:
 
         try:
             data = json.loads(stripped)
-            action = data.get("action", "final_answer")
+        except json.JSONDecodeError as e1:
+            try:
+                # LLM 有时在 JSON 字符串值内输出真实换行符而非 \n，strict=False 容许此行为
+                data = json.JSONDecoder(strict=False).decode(stripped)
+            except (json.JSONDecodeError, ValueError) as e2:
+                logger.warning(
+                    "_parse_llm_response: JSON parse failed. strict err=%s | strict=False err=%s | stripped[:200]=%r",
+                    e1, e2, stripped[:200],
+                )
+                # 第三层 fallback：长 markdown 答案中可能含有未转义的 "，用 regex 逐字段提取
+                extracted = self._extract_from_malformed_json(stripped)
+                if extracted:
+                    return extracted
+                return self._parse_text_response(content)
+
+        action = data.get("action", "final_answer")
+        return {
+            "action": action,
+            "tool_name": data.get("tool_name", ""),
+            "tool_params": data.get("tool_params", {}),
+            "reasoning": data.get("reasoning", ""),
+            "answer": data.get("answer", ""),
+        }
+
+    def _extract_from_malformed_json(self, stripped: str) -> Optional[Dict[str, Any]]:
+        """从含未转义引号的 JSON 字符串中逐字段提取关键值（第三层 fallback）。
+
+        适用场景：LLM 在 answer 字段内含有字面量 "，导致 JSON 解析失败。
+        action/tool_name 均为简单关键字，不含嵌套引号，可安全用 regex 提取。
+        answer 是最后一个字段，通过定位起始 " 并裁剪末尾 "} 来还原完整内容。
+        """
+        import re
+        action_m = re.search(r'"action"\s*:\s*"([^"]+)"', stripped)
+        if not action_m:
+            return None
+        action = action_m.group(1)
+
+        reasoning_m = re.search(r'"reasoning"\s*:\s*"([^"]*)"', stripped)
+        reasoning = reasoning_m.group(1) if reasoning_m else ""
+
+        if action == "final_answer":
+            ans_m = re.search(r'"answer"\s*:\s*"', stripped)
+            if ans_m:
+                raw = stripped[ans_m.end():]
+                # answer 是 JSON 最后一个字段，裁去末尾的 closing " 和 }
+                answer = re.sub(r'"\s*\}?\s*$', '', raw, flags=re.DOTALL)
+                # 还原 JSON 字符串转义序列（json.loads 跳过时这些仍是原始字节）
+                # 顺序：先还原 \\ 避免二次替换
+                answer = (
+                    answer
+                    .replace('\\\\', '\x00BSLASH\x00')  # 占位符保护真实反斜杠
+                    .replace('\\"', '"')
+                    .replace('\\n', '\n')
+                    .replace('\\r', '\r')
+                    .replace('\\t', '\t')
+                    .replace('\x00BSLASH\x00', '\\')
+                )
+                return {
+                    "action": "final_answer",
+                    "tool_name": "",
+                    "tool_params": {},
+                    "reasoning": reasoning,
+                    "answer": answer,
+                }
+
+        elif action == "tool_call":
+            tool_m = re.search(r'"tool_name"\s*:\s*"([^"]*)"', stripped)
+            tool_name = tool_m.group(1) if tool_m else ""
             return {
-                "action": action,
-                "tool_name": data.get("tool_name", ""),
-                "tool_params": data.get("tool_params", {}),
-                "reasoning": data.get("reasoning", ""),
-                "answer": data.get("answer", ""),
+                "action": "tool_call",
+                "tool_name": tool_name,
+                "tool_params": {},
+                "reasoning": reasoning,
+                "answer": "",
             }
-        except json.JSONDecodeError:
-            return self._parse_text_response(content)
+
+        return None
 
     def _parse_text_response(self, content: str) -> Dict[str, Any]:
-        """从非 JSON 文本中提取决策信息（fallback）"""
+        """从非 JSON 文本中提取决策信息（最终 fallback）"""
         import re
         tool_match = re.search(r'"tool_name"\s*:\s*"([^"]+)"', content)
-        action_match = re.search(r'"action"\s*:\s*"([^"]+)"', content)
 
         if tool_match:
             return {
@@ -496,6 +645,85 @@ def _build_think_prompt(
     return "\n".join(prompt_parts)
 
 
+def _format_direct_answer(query: str, result_data: dict) -> str:
+    """为直接查询结果生成摘要行（结构化表格数据由 table_data 事件传给前端）"""
+    data = result_data.get("data") or {}
+    rows = data.get("rows", [])
+    ds_name = data.get("datasource_name", "")
+    row_count = len(rows)
+
+    if not row_count:
+        hint = f"数据源「{ds_name}」" if ds_name else "数据源"
+        return f"在{hint}中未查询到符合条件的数据，请确认筛选条件是否正确。"
+
+    hint = f"「{ds_name}」" if ds_name else ""
+    return f"已从{hint}查询到 **{row_count}** 条记录，详见下方表格。"
+
+
+_TIME_KEYWORDS = {'年', '月', '季', '日', '周', '年份', '月份', '日期', '时间', '季度',
+                  'year', 'month', 'quarter', 'date', 'week', 'time'}
+
+
+def _is_time_field(name: str) -> bool:
+    lower = name.lower()
+    return any(k in lower for k in _TIME_KEYWORDS)
+
+
+def _build_chart_data(fields: list, rows: list, col_types: list, chart_type: str) -> dict:
+    """Build chart-ready data structure from query result fields/rows.
+
+    x_field: time field preferred; fallback to first string col.
+    series_field: non-x string col with ≤8 unique values; skipped if too many series.
+    """
+    if not fields or not rows:
+        return {"chart_type": chart_type, "x_field": None, "y_fields": [], "series_field": None, "data": []}
+
+    string_idxs = [i for i, t in enumerate(col_types) if t == "string"]
+    numeric_idxs = [i for i, t in enumerate(col_types) if t == "numeric"]
+
+    # Prefer time-dimension field as x-axis
+    time_idxs = [i for i in string_idxs if _is_time_field(fields[i])]
+    x_idx = time_idxs[0] if time_idxs else (string_idxs[0] if string_idxs else 0)
+    x_field = fields[x_idx]
+
+    # series_field: string col (not x) with ≤8 unique values to avoid legend explosion
+    series_field = None
+    for i in [j for j in string_idxs if j != x_idx]:
+        unique_count = len({str(row[i]) for row in rows if i < len(row)})
+        if unique_count <= 8:
+            series_field = fields[i]
+            break
+
+    y_fields = [fields[i] for i in numeric_idxs]
+
+    data = []
+    for row in rows:
+        record = {fields[i]: row[i] for i in range(min(len(fields), len(row)))}
+        data.append(record)
+
+    return {
+        "chart_type": chart_type,
+        "x_field": x_field,
+        "y_fields": y_fields,
+        "series_field": series_field,
+        "data": data,
+    }
+
+
+def _infer_col_types(fields: list, rows: list) -> list:
+    """推断每列类型：'numeric' 或 'string'，用于前端格式化数字列。"""
+    if not rows or not fields:
+        return ["string"] * len(fields)
+    col_types = []
+    for col_idx in range(len(fields)):
+        # Sample up to 10 rows; if all non-null values are numeric → numeric
+        sample = [rows[i][col_idx] for i in range(min(10, len(rows))) if col_idx < len(rows[i])]
+        non_null = [v for v in sample if v is not None and v != ""]
+        is_num = bool(non_null) and all(isinstance(v, (int, float)) for v in non_null)
+        col_types.append("numeric" if is_num else "string")
+    return col_types
+
+
 def _build_history_messages(session: Optional[Any]) -> List[Dict[str, Any]]:
     """从 session 对象构建历史消息"""
     if session is None:
@@ -514,9 +742,19 @@ def _build_history_messages(session: Optional[Any]) -> List[Dict[str, Any]]:
 
     result = []
     for msg in messages:
-        if hasattr(msg, "role"):
-            result.append({"role": msg.role, "content": msg.content})
-        elif isinstance(msg, dict):
-            result.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
+        role = msg.role if hasattr(msg, "role") else msg.get("role", "user")
+        content = msg.content if hasattr(msg, "content") else msg.get("content", "")
+
+        # 追问图表时 LLM 需要看到上轮的表格数据；将 response_data 摘要追加到 content
+        r_type = getattr(msg, "response_type", None) or (msg.get("response_type") if isinstance(msg, dict) else None)
+        r_data = getattr(msg, "response_data", None) or (msg.get("response_data") if isinstance(msg, dict) else None)
+        if role == "assistant" and r_type == "table" and r_data and isinstance(r_data, dict):
+            fields = r_data.get("fields", [])
+            rows = r_data.get("rows", [])
+            if fields and rows:
+                sample = rows[:5]
+                content = content + f"\n\n[查询结果数据 fields={fields} rows(前{len(sample)}行)={sample} 共{len(rows)}行]"
+
+        result.append({"role": role, "content": content})
 
     return result

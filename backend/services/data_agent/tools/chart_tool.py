@@ -38,9 +38,10 @@ class ChartTool(BaseTool):
 
     name = "chart"
     description = (
-        "图表 spec 生成 + 发布。当用户要求可视化数据（如「做个图展示销售趋势」）时使用，"
-        "生成 Tableau 可发布的图表规格（支持 bar/line/pie/scatter/area/heatmap/geo/gantt 等类型）。"
-        "输入查询结果 schema + 意图，返回推荐图表类型、字段映射及发布路径（card/twb/mcp）。"
+        "【仅用于 Tableau 发布】将已有查询结果发布为 Tableau Custom View 或 TWB 骨架。"
+        "注意：此工具不用于对话内图表渲染——若用户只是想「看图」「做个趋势图」，"
+        "应直接用 query 工具获取数据，系统会自动渲染 Recharts 图表。"
+        "仅在用户明确要求「发布到 Tableau」「生成 TWB」「推送到工作簿」时才调用本工具。"
     )
     metadata = ToolMetadata(
         category="visualization",

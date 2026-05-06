@@ -79,7 +79,7 @@ class SemanticMaintenanceDatabase:
                 s.commit()
                 return obj
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def get_datasource_semantics(
         self, connection_id: int, tableau_datasource_id: str
@@ -91,7 +91,7 @@ class SemanticMaintenanceDatabase:
                 TableauDatasourceSemantics.tableau_datasource_id == tableau_datasource_id,
             ).first()
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def get_datasource_semantics_by_id(self, ds_id: int) -> Optional[TableauDatasourceSemantics]:
         s = self.session
@@ -100,7 +100,7 @@ class SemanticMaintenanceDatabase:
                 TableauDatasourceSemantics.id == ds_id
             ).first()
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def list_datasource_semantics(
         self,
@@ -116,13 +116,55 @@ class SemanticMaintenanceDatabase:
             )
             if status:
                 query = query.filter(TableauDatasourceSemantics.status == status)
+            else:
+                # 默认不显示已归档（资产已从 Tableau 删除）
+                query = query.filter(TableauDatasourceSemantics.status != SemanticStatus.ARCHIVED)
             total = query.count()
             items = query.order_by(
                 TableauDatasourceSemantics.updated_at.desc()
             ).offset((page - 1) * page_size).limit(page_size).all()
             return items, total
         finally:
-            s.remove()
+            SessionLocal.remove()
+
+    def archive_semantics_for_deleted_assets(
+        self, connection_id: int, active_datasource_ids: List[str]
+    ) -> int:
+        """将已从 Tableau 消失的数据源语义标记为 archived"""
+        s = self.session
+        try:
+            query = s.query(TableauDatasourceSemantics).filter(
+                TableauDatasourceSemantics.connection_id == connection_id,
+                TableauDatasourceSemantics.status != SemanticStatus.ARCHIVED,
+            )
+            if active_datasource_ids:
+                query = query.filter(
+                    ~TableauDatasourceSemantics.tableau_datasource_id.in_(active_datasource_ids)
+                )
+            count = query.update(
+                {TableauDatasourceSemantics.status: SemanticStatus.ARCHIVED},
+                synchronize_session=False,
+            )
+            s.commit()
+            return count
+        except Exception:
+            s.rollback()
+            raise
+        finally:
+            SessionLocal.remove()
+
+    def get_asset_names_batch(self, connection_id: int, tableau_ids: List[str]) -> Dict[str, str]:
+        """批量查询 tableau_assets.name，返回 {tableau_id: name}"""
+        from services.tableau.models import TableauAsset
+        s = self.session
+        try:
+            rows = s.query(TableauAsset.tableau_id, TableauAsset.name).filter(
+                TableauAsset.connection_id == connection_id,
+                TableauAsset.tableau_id.in_(tableau_ids),
+            ).all()
+            return {row.tableau_id: row.name for row in rows}
+        finally:
+            SessionLocal.remove()
 
     def update_datasource_semantics(
         self, ds_id: int, user_id: int = None,
@@ -147,7 +189,7 @@ class SemanticMaintenanceDatabase:
             s.rollback()
             raise
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def _create_datasource_version_snapshot(
         self, ds: TableauDatasourceSemantics,
@@ -160,6 +202,8 @@ class SemanticMaintenanceDatabase:
             "semantic_name_zh": ds.semantic_name_zh,
             "semantic_description": ds.semantic_description,
             "business_definition": ds.business_definition,
+            "metric_definition": ds.metric_definition,
+            "dimension_definition": ds.dimension_definition,
             "usage_scenarios": ds.usage_scenarios,
             "owner": ds.owner,
             "steward": ds.steward,
@@ -186,7 +230,7 @@ class SemanticMaintenanceDatabase:
                 TableauDatasourceSemanticVersion.datasource_semantic_id == ds_id
             ).order_by(TableauDatasourceSemanticVersion.version.desc()).all()
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def rollback_datasource_semantic(
         self, ds_id: int, version_id: int, user_id: int = None
@@ -226,7 +270,7 @@ class SemanticMaintenanceDatabase:
             logger.error(f"Error rolling back datasource semantic {ds_id} to version {version_id}: {e}", exc_info=True)
             return False, f"回滚失败: {e}"
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def transition_datasource_status(
         self, ds_id: int, new_status: str, user_id: int = None
@@ -253,7 +297,7 @@ class SemanticMaintenanceDatabase:
             s.rollback()
             raise
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     # ============================================================
     # 字段语义 CRUD
@@ -298,7 +342,7 @@ class SemanticMaintenanceDatabase:
                 s.commit()
                 return obj
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def upsert_field_semantics_by_reg_id(
         self,
@@ -342,7 +386,7 @@ class SemanticMaintenanceDatabase:
                 s.commit()
                 return obj
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def get_field_semantics_by_id(self, field_id: int) -> Optional[TableauFieldSemantics]:
         s = self.session
@@ -351,7 +395,7 @@ class SemanticMaintenanceDatabase:
                 TableauFieldSemantics.id == field_id
             ).first()
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def get_field_semantics_by_reg_id(self, field_registry_id: int) -> Optional[TableauFieldSemantics]:
         s = self.session
@@ -360,7 +404,7 @@ class SemanticMaintenanceDatabase:
                 TableauFieldSemantics.field_registry_id == field_registry_id
             ).first()
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def list_field_semantics(
         self,
@@ -386,7 +430,7 @@ class SemanticMaintenanceDatabase:
             ).offset((page - 1) * page_size).limit(page_size).all()
             return items, total
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def update_field_semantics(self, field_id: int, user_id: int = None, change_reason: str = None, **fields) -> bool:
         s = self.session
@@ -407,7 +451,7 @@ class SemanticMaintenanceDatabase:
             s.rollback()
             raise
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def transition_field_status(
         self, field_id: int, new_status: str, user_id: int = None
@@ -434,7 +478,7 @@ class SemanticMaintenanceDatabase:
             s.rollback()
             raise
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def _create_field_version_snapshot(
         self, field_semantic: TableauFieldSemantics,
@@ -478,7 +522,7 @@ class SemanticMaintenanceDatabase:
                 TableauFieldSemanticVersion.field_semantic_id == field_semantic_id
             ).order_by(TableauFieldSemanticVersion.version.desc()).all()
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def rollback_field_semantic(
         self, field_semantic_id: int, version_id: int, user_id: int = None
@@ -519,7 +563,7 @@ class SemanticMaintenanceDatabase:
             logger.error(f"Error rolling back field semantic {field_semantic_id} to version {version_id}: {e}", exc_info=True)
             return False, f"回滚失败: {e}"
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     # ============================================================
     # 发布日志 CRUD
@@ -551,7 +595,7 @@ class SemanticMaintenanceDatabase:
             s.commit()
             return log
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def update_publish_log_status(
         self,
@@ -572,7 +616,7 @@ class SemanticMaintenanceDatabase:
             s.commit()
             return True
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def list_publish_logs(
         self,
@@ -597,7 +641,7 @@ class SemanticMaintenanceDatabase:
             ).offset((page - 1) * page_size).limit(page_size).all()
             return items, total
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def get_publish_log(self, log_id: int, connection_id: Optional[int] = None) -> Optional[TableauPublishLog]:
         s = self.session
@@ -607,7 +651,7 @@ class SemanticMaintenanceDatabase:
                 query = query.filter(TableauPublishLog.connection_id == connection_id)
             return query.first()
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def list_publish_logs_with_filters(
         self,
@@ -747,7 +791,7 @@ class SemanticMaintenanceDatabase:
 
             return results, total
         finally:
-            s.remove()
+            SessionLocal.remove()
             app_session.close()
 
     def get_publish_log_detail(self, log_id: int) -> Optional[dict]:
@@ -868,7 +912,7 @@ class SemanticMaintenanceDatabase:
                 "related_logs": related_logs,
             }
         finally:
-            s.remove()
+            SessionLocal.remove()
             app_session.close()
 
     # ============================================================
@@ -899,7 +943,7 @@ class SemanticMaintenanceDatabase:
             field.chunk_text = chunk_text  # 记录 embedding 对应的原始文本
             s.commit()
         finally:
-            s.remove()
+            SessionLocal.remove()
 
     def search_field_embeddings(
         self,
@@ -957,4 +1001,4 @@ class SemanticMaintenanceDatabase:
             }).fetchall()
             return [dict(row._mapping) for row in rows]
         finally:
-            s.remove()
+            SessionLocal.remove()

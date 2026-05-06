@@ -18,7 +18,6 @@ const mainMenuSections: MenuSection[] = [
     section: '数据治理',
     items: [
       { path: '/data-governance/health', label: '数据仓库体检', icon: 'ri-heart-pulse-line' },
-      { path: '/data-governance/quality', label: '数据质量监控', icon: 'ri-shield-check-line' },
       { path: '/rule-config', label: '规则配置', icon: 'ri-file-settings-line' },
     ],
   },

@@ -1,12 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Fragment } from 'react';
 import {
   listComplianceRules,
   toggleComplianceRule,
   createComplianceRule,
   updateComplianceRule,
   deleteComplianceRule,
-  CATEGORY_LABELS,
-  CATEGORY_ICONS,
+  DISPLAY_GROUP_LABELS,
+  DISPLAY_GROUP_ICONS,
 } from '@/api/compliance';
 import type { ComplianceRule, CreateComplianceRuleInput, UpdateComplianceRuleInput } from '@/api/compliance';
 
@@ -16,12 +16,19 @@ const levelConfig: Record<string, { label: string; bg: string; text: string }> =
   LOW: { label: '低', bg: 'bg-blue-50', text: 'text-blue-600' },
 };
 
+function normalizeLevel(level: string): 'HIGH' | 'MEDIUM' | 'LOW' {
+  const l = level.toLowerCase();
+  if (l === 'critical' || l === 'high') return 'HIGH';
+  if (l === 'medium') return 'MEDIUM';
+  return 'LOW';
+}
+
 interface RuleFormData {
   id: string;
   name: string;
   description: string;
   level: 'HIGH' | 'MEDIUM' | 'LOW';
-  category: string;
+  display_group: string;
   suggestion: string;
   scene_type: string;
   db_type: string;
@@ -32,7 +39,7 @@ const EMPTY_FORM: RuleFormData = {
   name: '',
   description: '',
   level: 'MEDIUM',
-  category: 'sr_layer_naming',
+  display_group: 'naming',
   suggestion: '',
   scene_type: 'ALL',
   db_type: 'StarRocks',
@@ -45,6 +52,7 @@ export default function CompliancePage() {
   const [error, setError] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [filterLevel, setFilterLevel] = useState('');
+  const [filterSource, setFilterSource] = useState('');
   const [toggling, setToggling] = useState<string | null>(null);
 
   // Modal state
@@ -87,9 +95,13 @@ export default function CompliancePage() {
     }
   }, []);
 
+  function generateRuleId() {
+    return `RULE_CUSTOM_${Math.random().toString(16).slice(2, 7).toUpperCase()}`;
+  }
+
   function openCreateModal() {
     setEditingRule(null);
-    setFormData(EMPTY_FORM);
+    setFormData({ ...EMPTY_FORM, id: generateRuleId() });
     setShowModal(true);
   }
 
@@ -100,7 +112,7 @@ export default function CompliancePage() {
       name: rule.name,
       description: rule.description,
       level: rule.level as 'HIGH' | 'MEDIUM' | 'LOW',
-      category: rule.category,
+      display_group: rule.display_group || 'other',
       suggestion: rule.suggestion,
       scene_type: 'ALL',
       db_type: rule.db_type,
@@ -117,7 +129,7 @@ export default function CompliancePage() {
         if (formData.name !== editingRule.name) updates.name = formData.name;
         if (formData.description !== editingRule.description) updates.description = formData.description;
         if (formData.level !== editingRule.level) updates.level = formData.level;
-        if (formData.category !== editingRule.category) updates.category = formData.category;
+        if (formData.display_group !== (editingRule.display_group || 'other')) updates.display_group = formData.display_group;
         if (formData.suggestion !== editingRule.suggestion) updates.suggestion = formData.suggestion;
         if (formData.scene_type) updates.scene_type = formData.scene_type;
         await updateComplianceRule(editingRule.id, updates);
@@ -127,7 +139,8 @@ export default function CompliancePage() {
           name: formData.name,
           description: formData.description,
           level: formData.level,
-          category: formData.category,
+          category: formData.display_group,
+          display_group: formData.display_group,
           db_type: formData.db_type,
           suggestion: formData.suggestion || undefined,
           scene_type: formData.scene_type || undefined,
@@ -159,23 +172,25 @@ export default function CompliancePage() {
     }
   }
 
-  const categories = Array.from(new Set(rules.map((r) => r.category)));
   const filteredRules = rules.filter((r) => {
-    if (filterCategory && r.category !== filterCategory) return false;
-    if (filterLevel && r.level !== filterLevel) return false;
+    if (filterCategory && (r.display_group || 'other') !== filterCategory) return false;
+    if (filterLevel && normalizeLevel(r.level) !== filterLevel) return false;
+    if (filterSource === 'builtin' && !r.built_in) return false;
+    if (filterSource === 'custom' && r.built_in) return false;
     return true;
   });
 
   const groupedRules: Record<string, ComplianceRule[]> = {};
   for (const r of filteredRules) {
-    if (!groupedRules[r.category]) groupedRules[r.category] = [];
-    groupedRules[r.category].push(r);
+    const grp = r.display_group || 'other';
+    if (!groupedRules[grp]) groupedRules[grp] = [];
+    groupedRules[grp].push(r);
   }
 
   const enabledCount = rules.filter((r) => r.status === 'enabled').length;
-  const highCount = rules.filter((r) => r.level === 'HIGH').length;
-  const mediumCount = rules.filter((r) => r.level === 'MEDIUM').length;
-  const lowCount = rules.filter((r) => r.level === 'LOW').length;
+  const highCount = rules.filter((r) => normalizeLevel(r.level) === 'HIGH').length;
+  const mediumCount = rules.filter((r) => normalizeLevel(r.level) === 'MEDIUM').length;
+  const lowCount = rules.filter((r) => normalizeLevel(r.level) === 'LOW').length;
 
   return (
     <div className="max-w-6xl mx-auto px-8 py-7">
@@ -204,7 +219,9 @@ export default function CompliancePage() {
             <i className="ri-error-warning-line text-red-400" />
           </div>
           <div className="text-2xl font-bold text-red-600">{highCount}</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">HIGH 级别规则</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">
+            占 {rules.length > 0 ? Math.round(highCount / rules.length * 100) : 0}%
+          </div>
         </div>
         <div className="bg-white border border-slate-200 rounded-xl p-4">
           <div className="flex items-center justify-between mb-2">
@@ -212,7 +229,9 @@ export default function CompliancePage() {
             <i className="ri-alert-line text-amber-400" />
           </div>
           <div className="text-2xl font-bold text-amber-600">{mediumCount}</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">MEDIUM 级别规则</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">
+            占 {rules.length > 0 ? Math.round(mediumCount / rules.length * 100) : 0}%
+          </div>
         </div>
         <div className="bg-white border border-slate-200 rounded-xl p-4">
           <div className="flex items-center justify-between mb-2">
@@ -220,7 +239,9 @@ export default function CompliancePage() {
             <i className="ri-information-line text-blue-400" />
           </div>
           <div className="text-2xl font-bold text-blue-600">{lowCount}</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">LOW 级别规则</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">
+            占 {rules.length > 0 ? Math.round(lowCount / rules.length * 100) : 0}%
+          </div>
         </div>
       </div>
 
@@ -232,8 +253,8 @@ export default function CompliancePage() {
           className="text-xs px-3 py-1.5 border border-slate-200 rounded-lg text-slate-600 bg-white"
         >
           <option value="">全部分类</option>
-          {categories.map((cat) => (
-            <option key={cat} value={cat}>{CATEGORY_LABELS[cat] || cat}</option>
+          {Object.entries(DISPLAY_GROUP_LABELS).map(([key, label]) => (
+            <option key={key} value={key}>{label}</option>
           ))}
         </select>
         <select
@@ -242,9 +263,18 @@ export default function CompliancePage() {
           className="text-xs px-3 py-1.5 border border-slate-200 rounded-lg text-slate-600 bg-white"
         >
           <option value="">全部级别</option>
-          <option value="HIGH">HIGH</option>
-          <option value="MEDIUM">MEDIUM</option>
-          <option value="LOW">LOW</option>
+          <option value="HIGH">高</option>
+          <option value="MEDIUM">中</option>
+          <option value="LOW">低</option>
+        </select>
+        <select
+          value={filterSource}
+          onChange={(e) => setFilterSource(e.target.value)}
+          className="text-xs px-3 py-1.5 border border-slate-200 rounded-lg text-slate-600 bg-white"
+        >
+          <option value="">全部来源</option>
+          <option value="builtin">系统内置</option>
+          <option value="custom">用户自定义</option>
         </select>
         <span className="text-[11px] text-slate-400 ml-auto">
           共 {filteredRules.length} 条规则
@@ -260,43 +290,66 @@ export default function CompliancePage() {
 
       {rulesLoading ? (
         <div className="text-center py-20 text-slate-400 text-sm">加载中...</div>
+      ) : Object.keys(groupedRules).length === 0 ? (
+        <div className="text-center py-10 text-slate-400 text-xs">暂无匹配规则</div>
       ) : (
-        <div className="space-y-4">
-          {Object.entries(groupedRules).map(([category, catRules]) => (
-            <div key={category} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-              <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
-                <i className={`${CATEGORY_ICONS[category] || 'ri-file-list-line'} text-slate-500`} />
-                <h3 className="text-[13px] font-semibold text-slate-700">
-                  {CATEGORY_LABELS[category] || category}
-                </h3>
-                <span className="text-[11px] text-slate-400 ml-1">({catRules.length})</span>
-              </div>
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-slate-50">
-                    {['规则 ID', '名称', '级别', '描述', '状态', '操作'].map((h) => (
-                      <th
-                        key={h}
-                        className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5 whitespace-nowrap"
-                      >
-                        {h}
-                      </th>
-                    ))}
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <table className="w-full table-fixed">
+            <colgroup>
+              <col className="w-[14%]" />
+              <col className="w-[20%]" />
+              <col className="w-[7%]" />
+              <col className="w-[40%]" />
+              <col className="w-[9%]" />
+              <col className="w-[10%]" />
+            </colgroup>
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                {['规则 ID', '名称', '级别', '描述', '状态', '操作'].map((h) => (
+                  <th
+                    key={h}
+                    className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5 whitespace-nowrap"
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(groupedRules).map(([group, catRules]) => (
+                <Fragment key={group}>
+                  <tr className="bg-slate-50/70 border-t border-slate-200">
+                    <td colSpan={6} className="px-5 py-2">
+                      <div className="flex items-center gap-2">
+                        <i className={`${DISPLAY_GROUP_ICONS[group] || 'ri-file-list-line'} text-slate-400 text-[13px]`} />
+                        <span className="text-[12px] font-semibold text-slate-600">
+                          {DISPLAY_GROUP_LABELS[group] || group}
+                        </span>
+                        <span className="text-[11px] text-slate-400">({catRules.length})</span>
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {catRules.map((rule) => {
-                    const lc = levelConfig[rule.level] || levelConfig.MEDIUM;
+                  {catRules.map((rule: ComplianceRule) => {
+                    const lc = levelConfig[normalizeLevel(rule.level)];
                     return (
                       <tr key={rule.id} className="border-t border-slate-100 hover:bg-slate-50">
-                        <td className="px-4 py-3 text-[12px] font-mono text-slate-500">{rule.id}</td>
-                        <td className="px-4 py-3 text-[12px] font-medium text-slate-700">{rule.name}</td>
+                        <td className="px-4 py-3 text-[11px] font-mono text-slate-400 truncate">{rule.id}</td>
+                        <td className="px-4 py-3 text-[12px] font-medium text-slate-700">
+                          <span className="truncate block">
+                            {rule.name}
+                            {!rule.built_in && (
+                              <span className="ml-1.5 text-[10px] font-normal px-1.5 py-0.5 rounded bg-violet-50 text-violet-500">
+                                自定义
+                              </span>
+                            )}
+                          </span>
+                        </td>
                         <td className="px-4 py-3">
                           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${lc.bg} ${lc.text}`}>
                             {lc.label}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-[12px] text-slate-600 max-w-xs truncate">{rule.description}</td>
+                        <td className="px-4 py-3 text-[12px] text-slate-600 truncate">{rule.description}</td>
                         <td className="px-4 py-3">
                           <button
                             onClick={() => handleToggle(rule.id)}
@@ -335,16 +388,10 @@ export default function CompliancePage() {
                       </tr>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
-          ))}
-
-          {Object.keys(groupedRules).length === 0 && (
-            <div className="text-center py-10 text-slate-400 text-xs">
-              暂无匹配规则
-            </div>
-          )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -359,12 +406,11 @@ export default function CompliancePage() {
             <div className="space-y-3">
               {!editingRule && (
                 <div>
-                  <label className="text-[11px] text-slate-500 mb-1 block">规则 ID</label>
+                  <label className="text-[11px] text-slate-500 mb-1 block">规则 ID（自动生成）</label>
                   <input
                     value={formData.id}
-                    onChange={(e) => setFormData({ ...formData, id: e.target.value })}
-                    placeholder="如 RULE_CUSTOM_001"
-                    className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg"
+                    readOnly
+                    className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-400 font-mono cursor-default"
                   />
                 </div>
               )}
@@ -401,11 +447,11 @@ export default function CompliancePage() {
                 <div>
                   <label className="text-[11px] text-slate-500 mb-1 block">分类</label>
                   <select
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                    value={formData.display_group}
+                    onChange={(e) => setFormData({ ...formData, display_group: e.target.value })}
                     className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg"
                   >
-                    {Object.entries(CATEGORY_LABELS).map(([key, label]) => (
+                    {Object.entries(DISPLAY_GROUP_LABELS).map(([key, label]) => (
                       <option key={key} value={key}>{label}</option>
                     ))}
                   </select>
@@ -437,12 +483,16 @@ export default function CompliancePage() {
                 </div>
                 <div>
                   <label className="text-[11px] text-slate-500 mb-1 block">数据库类型</label>
-                  <input
+                  <select
                     value={formData.db_type}
                     onChange={(e) => setFormData({ ...formData, db_type: e.target.value })}
                     className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg"
                     disabled={!!editingRule}
-                  />
+                  >
+                    <option value="MySQL">MySQL</option>
+                    <option value="SQL Server">SQL Server</option>
+                    <option value="StarRocks">StarRocks</option>
+                  </select>
                 </div>
               </div>
             </div>
@@ -455,7 +505,7 @@ export default function CompliancePage() {
               </button>
               <button
                 onClick={handleSave}
-                disabled={saving || (!editingRule && !formData.id) || !formData.name}
+                disabled={saving || !formData.name}
                 className="px-4 py-1.5 text-xs text-white bg-slate-800 rounded-lg hover:bg-slate-700 disabled:opacity-50"
               >
                 {saving ? '保存中...' : '保存'}

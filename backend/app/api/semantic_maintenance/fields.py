@@ -106,7 +106,7 @@ async def list_field_semantics(
         page_size=page_size,
     )
     return {
-        "items": [item.to_dict() for item in items], # 确保返回 dict
+        "items": items,
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -147,7 +147,7 @@ async def create_field_semantics(req: CreateFieldSemanticsRequest, request: Requ
         user_id=user["id"],
         initial_data=initial,
     )
-    return {"item": obj.to_dict(), "message": "创建成功"} # 确保返回 dict
+    return {"item": obj, "message": "创建成功"}
 
 
 @router.put("/fields/{field_id}")
@@ -172,7 +172,7 @@ async def update_field_semantics(
     success, result = sm.update_field_semantics(field_id, user_id=user["id"], **fields)
     if not success:
         raise HTTPException(status_code=400, detail=result)
-    return {"item": result.to_dict(), "message": "更新成功"} # 确保返回 dict
+    return {"item": result, "message": "更新成功"}
 
 
 @router.post("/fields/{field_id}/submit-review")
@@ -241,7 +241,7 @@ async def get_field_versions(field_id: int, request: Request, db: Session = Depe
     verify_connection_access(field.connection_id, user, db) # 使用统一的权限验证函数
 
     versions = sm.get_field_semantic_history(field_id)
-    return {"versions": [v.to_dict() for v in versions]} # 确保返回 dict
+    return {"versions": versions} # 确保返回 dict
 
 
 @router.post("/fields/{field_id}/rollback/{version_id}")
@@ -294,7 +294,7 @@ async def generate_field_ai(field_id: int, req: GenerateFieldAIRequest, request:
     )
     if not success:
         raise HTTPException(status_code=400, detail=result)
-    return {"item": result.to_dict(), "message": "AI 语义草稿已生成"} # 确保返回 dict
+    return {"item": result, "message": "AI 语义草稿已生成"}
 
 
 # --- 向量字段解析（Spec 26 §P0） ---

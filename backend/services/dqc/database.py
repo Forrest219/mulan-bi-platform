@@ -54,14 +54,20 @@ class DqcDatabase:
         self,
         db: Session,
         datasource_id: Optional[int] = None,
+        datasource_ids: Optional[List[int]] = None,
+        schema_names: Optional[List[str]] = None,
         status: Optional[str] = None,
         owner_id: Optional[int] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> Dict[str, Any]:
         q = db.query(DqcMonitoredAsset)
-        if datasource_id is not None:
+        if datasource_ids:
+            q = q.filter(DqcMonitoredAsset.datasource_id.in_(datasource_ids))
+        elif datasource_id is not None:
             q = q.filter(DqcMonitoredAsset.datasource_id == datasource_id)
+        if schema_names:
+            q = q.filter(DqcMonitoredAsset.schema_name.in_(schema_names))
         if status:
             q = q.filter(DqcMonitoredAsset.status == status)
         if owner_id is not None:
@@ -691,6 +697,7 @@ class DqcDatabase:
         from .constants import Dimension, RuleType
 
         builtins = [
+            # L1 规则与逻辑
             {
                 "name": "空值率监控",
                 "dimension": Dimension.COMPLETENESS.value,
@@ -698,6 +705,8 @@ class DqcDatabase:
                 "default_config": {"max_rate": 0.05},
                 "match_condition": {"scope": "column", "column_filter": {"has_nulls": True}},
                 "severity": "HIGH",
+                "rule_package": "L1",
+                "description": "检测字段空值率是否超过阈值，超过则触发告警",
             },
             {
                 "name": "唯一性监控",
@@ -706,7 +715,10 @@ class DqcDatabase:
                 "default_config": {"max_duplicate_rate": 0},
                 "match_condition": {"scope": "column", "column_filter": {"is_candidate_id": True}},
                 "severity": "HIGH",
+                "rule_package": "L1",
+                "description": "检测候选主键字段的重复率，主键字段不允许重复",
             },
+            # L2 时效与数量
             {
                 "name": "新鲜度监控",
                 "dimension": Dimension.TIMELINESS.value,
@@ -714,14 +726,8 @@ class DqcDatabase:
                 "default_config": {"max_age_hours": 24},
                 "match_condition": {"scope": "column", "column_filter": {"data_type_contains": ["timestamp", "date"]}},
                 "severity": "MEDIUM",
-            },
-            {
-                "name": "值域监控",
-                "dimension": Dimension.ACCURACY.value,
-                "rule_type": RuleType.RANGE_CHECK.value,
-                "default_config": {"check_mode": "min_max_all"},
-                "match_condition": {"scope": "column", "column_filter": {"has_numeric_range": True}},
-                "severity": "LOW",
+                "rule_package": "L2",
+                "description": "检测时间戳字段的最新数据距当前时间是否超过阈值",
             },
             {
                 "name": "表行数异常监控",
@@ -730,6 +736,50 @@ class DqcDatabase:
                 "default_config": {"direction": "both", "threshold_pct": 0.05, "min_row_count": 10},
                 "match_condition": {"scope": "table"},
                 "severity": "MEDIUM",
+                "rule_package": "L2",
+                "description": "检测表行数是否出现异常波动，同比超出阈值比例则告警",
+            },
+            {
+                "name": "值域合法监控",
+                "dimension": Dimension.VALIDITY.value,
+                "rule_type": RuleType.ENUM_CHECK.value,
+                "default_config": {"allowed_values": []},
+                "match_condition": {"scope": "column", "column_filter": {"is_enum_like": True}},
+                "severity": "MEDIUM",
+                "rule_package": "L1",
+                "description": "检查枚举类字段是否只包含预期的合法值，存在非法值则触发告警",
+            },
+            # L3 一致性
+            {
+                "name": "跨表行数比对",
+                "dimension": Dimension.CONSISTENCY.value,
+                "rule_type": RuleType.TABLE_COUNT_COMPARE.value,
+                "default_config": {"tolerance_pct": 0.01},
+                "match_condition": {"scope": "table"},
+                "severity": "HIGH",
+                "rule_package": "L3",
+                "description": "将本表行数与目标对照表比对，超出容忍误差则触发告警",
+            },
+            # L4 AI Ready
+            {
+                "name": "表业务说明完整性",
+                "dimension": Dimension.COMPLETENESS.value,
+                "rule_type": RuleType.AI_TABLE_DESCRIPTION.value,
+                "default_config": {"min_length": 20, "require_zh": "true"},
+                "match_condition": {"scope": "ddl"},
+                "severity": "HIGH",
+                "rule_package": "L4",
+                "description": "检查表是否有充分的业务说明，确保 AI 选表准确",
+            },
+            {
+                "name": "字段注释完整性",
+                "dimension": Dimension.COMPLETENESS.value,
+                "rule_type": RuleType.AI_FIELD_COMMENT.value,
+                "default_config": {"min_coverage": 0.8},
+                "match_condition": {"scope": "ddl"},
+                "severity": "MEDIUM",
+                "rule_package": "L4",
+                "description": "检查表字段注释覆盖率，确保 AI 能准确理解字段语义",
             },
         ]
 
@@ -748,16 +798,21 @@ class DqcDatabase:
                     existing.default_config = spec["default_config"]
                     existing.match_condition = spec["match_condition"]
                     existing.severity = spec["severity"]
+                    existing.rule_package = spec.get("rule_package")
+                    if spec.get("description"):
+                        existing.description = spec["description"]
                 created.append(existing)
                 continue
 
             tmpl = DqcRuleTemplate(
                 name=spec["name"],
+                description=spec.get("description"),
                 dimension=spec["dimension"],
                 rule_type=spec["rule_type"],
                 default_config=spec["default_config"],
                 match_condition=spec["match_condition"],
                 severity=spec["severity"],
+                rule_package=spec.get("rule_package"),
                 enabled=True,
                 is_builtin=True,
             )

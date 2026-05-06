@@ -104,7 +104,13 @@ class SemanticMaintenanceService:
         items, total = self.db.list_datasource_semantics(
             connection_id, status=status, page=page, page_size=page_size
         )
-        return [item.to_dict() for item in items], total
+        dicts = [item.to_dict() for item in items]
+        if dicts:
+            tableau_ids = [d["tableau_datasource_id"] for d in dicts]
+            asset_names = self.db.get_asset_names_batch(connection_id, tableau_ids)
+            for d in dicts:
+                d["asset_name"] = asset_names.get(d["tableau_datasource_id"])
+        return dicts, total
 
     def get_datasource_semantic_history(self, ds_id: int) -> List[Dict[str, Any]]:
         """获取数据源语义版本历史"""
@@ -581,6 +587,8 @@ class SemanticMaintenanceService:
             semantic_name_zh=parsed.get("semantic_name_zh"),
             semantic_description=parsed.get("semantic_description"),
             business_definition=parsed.get("business_definition"),
+            metric_definition=parsed.get("metric_definition"),
+            dimension_definition=parsed.get("dimension_definition"),
             owner=parsed.get("owner"),
             sensitivity_level=parsed.get("sensitivity_level"),
             tags_json=json.dumps(parsed.get("tags_json", []), ensure_ascii=False) if parsed.get("tags_json") else None,

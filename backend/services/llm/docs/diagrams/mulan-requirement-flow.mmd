@@ -1,0 +1,71 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#4F46E5', 'primaryTextColor': '#fff', 'lineColor': '#6366F1'}}}%%
+
+flowchart TD
+    Start(["用户输入自然语言问题"])
+
+    Start --> Sanitize["输入清洗<br/>MAX_QUERY_LENGTH=500"]
+    Sanitize --> MetaCheck{"META 意图检测<br/>classify_meta_intent()"}
+
+    MetaCheck -->|"命中 META<br/>(meta_asset_count,<br/>meta_datasource_list...)"| MetaQuery["直接查本地 DB<br/>不走 LLM"]
+    MetaQuery --> MetaResp(["返回结构化文本"])
+
+    MetaCheck -->|"未命中"| ActionCheck{"Tableau 动作检测<br/>classify_tableau_action_intent()"}
+
+    ActionCheck -->|"命中动作意图<br/>(field_match,<br/>view_filter...)"| ActionSuggest["返回建议工具列表<br/>TABLEAU_ACTION_TOOL_MAP"]
+    ActionSuggest --> ActionResp(["返回工具建议"])
+
+    ActionCheck -->|"未命中"| SensitivityCheck{"敏感度检查<br/>PRD §10.3"}
+    SensitivityCheck -->|"HIGH/CONFIDENTIAL"| Block(["NLQ_011<br/>敏感数据不支持查询"])
+    SensitivityCheck -->|"通过"| RuleIntent{"规则意图分类<br/>classify_intent()"}
+
+    RuleIntent -->|"关键词命中<br/>confidence=0.90"| ContextAssembly
+    RuleIntent -->|"未命中"| ContextAssembly
+
+    subgraph Stage1["Stage 1: One-Pass LLM"]
+        ContextAssembly["上下文组装"]
+        ContextAssembly --> TokenBudget["Token 预算检查<br/>MAX_FIELDS=2000 tokens"]
+        TokenBudget --> SemanticRecall["RAG 字段召回<br/>recall_fields()"]
+        SemanticRecall --> GlossaryLookup["术语映射<br/>glossary_service"]
+        GlossaryLookup --> OnePassLLM["One-Pass LLM 调用<br/>temperature=0.1<br/>complete_for_semantic()"]
+        OnePassLLM --> ParseJSON["解析 JSON 响应"]
+        ParseJSON --> SchemaValidate{"Schema 校验<br/>validate_one_pass_output()"}
+        SchemaValidate -->|"失败"| RetryFeedback["带反馈重试<br/>ONE_PASS_RETRY_TEMPLATE"]
+        RetryFeedback --> SchemaValidate
+        SchemaValidate -->|"通过"| FieldConsistency{"fieldCaption 一致性<br/>validate_field_captions_consistency()"}
+        FieldConsistency -->|"不一致"| ConsistencyRetry["带可用字段重试<br/>_retry_field_consistency()"]
+        ConsistencyRetry --> FieldConsistency
+        FieldConsistency -->|"通过"| Stage1Out["输出: intent + confidence + vizql_json"]
+    end
+
+    subgraph Stage2["Stage 2: 数据源路由"]
+        Route["route_datasource()<br/>评分公式:<br/>50% 字段完备度<br/>25% 新鲜度<br/>10% 字段数<br/>15% 使用频次"]
+        Route --> RouteResult{"score >= 0.3?"}
+        RouteResult -->|"否"| NoDS(["NLQ_005<br/>无法匹配数据源"])
+        RouteResult -->|"是"| DSSelected["选定 datasource_luid"]
+    end
+
+    Stage1Out --> Route
+
+    subgraph Stage3["Stage 3: 查询执行"]
+        DSSelected --> MCPQuery["TableauMCPClient<br/>query_datasource()<br/>JSON-RPC 2.0"]
+        MCPQuery --> MCPResult{"执行结果"}
+        MCPResult -->|"失败"| Err6(["NLQ_006/007/009"])
+        MCPResult -->|"成功"| RawData["原始数据<br/>{fields, rows}"]
+    end
+
+    subgraph Stage4["Stage 4: 结果格式化"]
+        RawData --> InferType{"推断响应类型"}
+        InferType -->|"1x1"| NumResp["number 格式"]
+        InferType -->|"多行"| TableResp["table 格式"]
+        InferType -->|"空"| TextResp["text + 建议"]
+    end
+
+    NumResp --> Audit
+    TableResp --> Audit
+    TextResp --> Audit
+    Audit["审计日志<br/>log_nlq_query()"] --> Final(["返回前端渲染"])
+
+    style Stage1 fill:#FFF7ED,stroke:#EA580C
+    style Stage2 fill:#EEF2FF,stroke:#4F46E5
+    style Stage3 fill:#F0FDF4,stroke:#16A34A
+    style Stage4 fill:#FEF2F2,stroke:#DC2626

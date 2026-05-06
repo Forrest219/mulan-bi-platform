@@ -164,6 +164,27 @@ def _get_site_key(conn) -> str:
     return f"{server_url}|{site}"
 
 
+def _get_effective_mcp_base_url(conn) -> Optional[str]:
+    """Return a configured MCP endpoint, ignoring accidental Tableau server URLs.
+
+    Some records were backfilled with mcp_server_url equal to server_url
+    (for example https://bi.ksyun.com). That is a Tableau site root, not an MCP
+    streamable-http endpoint, and initialize returns 200 without mcp-session-id.
+    In that case fall back to TABLEAU_MCP_SERVER_URL.
+    """
+    mcp_url = (getattr(conn, "mcp_server_url", None) or "").strip()
+    server_url = (getattr(conn, "server_url", None) or "").strip()
+    if not mcp_url:
+        return None
+    if server_url and mcp_url.rstrip("/") == server_url.rstrip("/"):
+        logger.warning(
+            "Ignoring mcp_server_url equal to Tableau server_url; falling back to TABLEAU_MCP_SERVER_URL: %s",
+            mcp_url,
+        )
+        return None
+    return mcp_url
+
+
 def _get_or_create_session_state(site_key: str, _max_sites: int = 50) -> _MCPSessionState:
     """
     获取或创建指定 site_key 的 _MCPSessionState，并实现 LRU 驱逐（P1）。
@@ -685,7 +706,7 @@ class TableauMCPClient:
         conn = None
         try:
             asset = session.query(TableauAsset).filter(
-                TableauAsset.datasource_luid == datasource_luid,
+                TableauAsset.tableau_id == datasource_luid,
                 TableauAsset.connection_id == connection_id,
                 TableauAsset.is_deleted == False,
             ).first()
@@ -803,7 +824,7 @@ class TableauMCPClient:
             site_key = _get_site_key(conn)
             session_state = _get_or_create_session_state(site_key)
             # base_url：优先 conn.mcp_server_url，fallback 到全局配置
-            effective_base_url = getattr(conn, "mcp_server_url", None) or None
+            effective_base_url = _get_effective_mcp_base_url(conn)
 
             # 组装 MCP tools/call 请求（limit 在 arguments 顶层，verified by tools/list）
             payload = self._build_jsonrpc_request(
@@ -872,7 +893,7 @@ class TableauMCPClient:
         try:
             site_key = _get_site_key(conn_record)
             session_state = _get_or_create_session_state(site_key)
-            effective_base_url = getattr(conn_record, "mcp_server_url", None) or None
+            effective_base_url = _get_effective_mcp_base_url(conn_record)
 
             # 尝试调用 list_datasources 工具
             payload = {
@@ -942,7 +963,7 @@ class TableauMCPClient:
         try:
             site_key = _get_site_key(conn_record)
             session_state = _get_or_create_session_state(site_key)
-            effective_base_url = getattr(conn_record, "mcp_server_url", None) or None
+            effective_base_url = _get_effective_mcp_base_url(conn_record)
 
             # 调用 get-datasource-metadata 工具
             payload = {

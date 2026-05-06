@@ -344,18 +344,145 @@ async def delete_mcp_server(id: int, request: Request):
         db.close()
 
 
+async def _test_tableau_pat(credentials: dict, start: float) -> dict:
+    """验证 Tableau PAT 凭证有效性，返回测试结果 dict。"""
+    import time as _time
+    from app.api.tableau_mcp import _tableau_signin
+
+    tableau_server = (credentials.get("tableau_server") or "").rstrip("/")
+    pat_name = credentials.get("pat_name") or ""
+    pat_value = credentials.get("pat_value") or ""
+    site_name = credentials.get("site_name") or ""
+
+    if not (tableau_server and pat_name and pat_value):
+        return {"status": "auth_failed", "latency_ms": 0, "error": "凭证不完整，请填写 Tableau Server、PAT 名称和密钥"}
+
+    try:
+        _, site_id = await _tableau_signin(tableau_server, pat_name, pat_value, site_name)
+        latency_ms = int((_time.monotonic() - start) * 1000)
+        return {"status": "online", "latency_ms": latency_ms, "auth": "ok", "site_id": site_id}
+    except RuntimeError as e:
+        latency_ms = int((_time.monotonic() - start) * 1000)
+        return {"status": "auth_failed", "latency_ms": latency_ms, "error": str(e)}
+    except Exception:
+        latency_ms = int((_time.monotonic() - start) * 1000)
+        return {"status": "offline", "latency_ms": latency_ms, "error": "ConnectError"}
+
+
+async def _test_mcp_endpoint(url: str, start: float) -> dict:
+    """Verify a streamable-http MCP endpoint can complete initialize."""
+    import time as _time
+    import httpx as _httpx
+    from services.common.settings import get_tableau_mcp_protocol_version
+
+    endpoint = (url or "").strip()
+    if not endpoint:
+        return {"status": "offline", "latency_ms": 0, "error": "MCP Endpoint 不能为空"}
+
+    payload = {
+        "jsonrpc": "2.0",
+        "id": "mcp-config-test",
+        "method": "initialize",
+        "params": {
+            "protocolVersion": get_tableau_mcp_protocol_version(),
+            "capabilities": {},
+            "clientInfo": {"name": "mulan-bi-config-test", "version": "1.0.0"},
+        },
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "MCP-Protocol-Version": get_tableau_mcp_protocol_version(),
+    }
+
+    try:
+        async with _httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.post(endpoint, json=payload, headers=headers)
+            latency_ms = int((_time.monotonic() - start) * 1000)
+            if resp.status_code >= 400:
+                return {
+                    "status": "offline",
+                    "latency_ms": latency_ms,
+                    "endpoint_status": "offline",
+                    "endpoint": endpoint,
+                    "error": f"MCP Endpoint 返回 HTTP {resp.status_code}",
+                }
+
+            session_id = None
+            for k, v in resp.headers.items():
+                if k.lower() == "mcp-session-id":
+                    session_id = v
+                    break
+            if not session_id:
+                try:
+                    body = resp.json()
+                    session_id = body.get("sessionId") or body.get("session_id")
+                except Exception:
+                    pass
+            if not session_id:
+                return {
+                    "status": "offline",
+                    "latency_ms": latency_ms,
+                    "endpoint_status": "invalid",
+                    "endpoint": endpoint,
+                    "error": "MCP Endpoint 未返回 mcp-session-id，请确认这里不是 Tableau Server URL",
+                }
+
+            try:
+                await client.delete(endpoint, headers={**headers, "mcp-session-id": session_id})
+            except _httpx.HTTPError:
+                pass
+
+            return {
+                "status": "online",
+                "latency_ms": latency_ms,
+                "endpoint_status": "online",
+                "endpoint": endpoint,
+            }
+    except _httpx.HTTPError as e:
+        latency_ms = int((_time.monotonic() - start) * 1000)
+        return {
+            "status": "offline",
+            "latency_ms": latency_ms,
+            "endpoint_status": "offline",
+            "endpoint": endpoint,
+            "error": type(e).__name__,
+        }
+
+
 @router.post("/test-draft")
 async def test_mcp_draft(request: Request):
-    """新增配置前的连通性探测（不需要先保存）"""
+    """新增配置前的连通性 + PAT 认证探测（不需要先保存）"""
     get_current_admin(request)
     body = await request.json()
+    server_type = body.get("type", "")
     url = body.get("server_url", "").strip()
-    if not url:
-        raise HTTPException(status_code=400, detail="server_url is required")
+    credentials = body.get("credentials") or {}
 
     import time as _time
     import httpx as _httpx
     start = _time.monotonic()
+
+    if server_type == "tableau":
+        pat_result = await _test_tableau_pat(credentials, start)
+        if pat_result["status"] != "online":
+            return pat_result
+        endpoint_result = await _test_mcp_endpoint(url, start)
+        if endpoint_result["status"] != "online":
+            return {
+                **endpoint_result,
+                "auth": "ok",
+                "site_id": pat_result.get("site_id"),
+                "error": f"Tableau PAT 认证正常，但 {endpoint_result.get('error', 'MCP Endpoint 不可用')}",
+            }
+        return {
+            **endpoint_result,
+            "auth": "ok",
+            "site_id": pat_result.get("site_id"),
+        }
+
+    if not url:
+        raise HTTPException(status_code=400, detail="server_url is required")
     try:
         async with _httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(url)
@@ -368,13 +495,15 @@ async def test_mcp_draft(request: Request):
 
 @router.post("/{id}/test")
 async def test_mcp_server(id: int, request: Request):
-    """HTTP 可达性探测"""
+    """连通性 + PAT 认证探测"""
     get_current_admin(request)
     db = SessionLocal()
     try:
         record = db.query(McpServer).filter(McpServer.id == id).first()
         if not record:
             raise HTTPException(status_code=404, detail="MCP server not found")
+        server_type = record.type
+        credentials = record.credentials or {}
         url = record.server_url
     finally:
         db.close()
@@ -382,6 +511,25 @@ async def test_mcp_server(id: int, request: Request):
     import time as _time
     import httpx as _httpx
     start = _time.monotonic()
+
+    if server_type == "tableau":
+        pat_result = await _test_tableau_pat(credentials, start)
+        if pat_result["status"] != "online":
+            return pat_result
+        endpoint_result = await _test_mcp_endpoint(url, start)
+        if endpoint_result["status"] != "online":
+            return {
+                **endpoint_result,
+                "auth": "ok",
+                "site_id": pat_result.get("site_id"),
+                "error": f"Tableau PAT 认证正常，但 {endpoint_result.get('error', 'MCP Endpoint 不可用')}",
+            }
+        return {
+            **endpoint_result,
+            "auth": "ok",
+            "site_id": pat_result.get("site_id"),
+        }
+
     try:
         async with _httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(url)

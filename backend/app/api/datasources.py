@@ -40,6 +40,7 @@ class CreateDataSourceRequest(BaseModel):
     database_name: Optional[str] = ""
     username: str
     password: str
+    description: Optional[str] = None
     extra_config: Optional[dict] = None
 
 
@@ -53,6 +54,7 @@ class UpdateDataSourceRequest(BaseModel):
     database_name: Optional[str] = None
     username: Optional[str] = None
     password: Optional[str] = None
+    description: Optional[str] = None
     extra_config: Optional[dict] = None
     is_active: Optional[bool] = None
 
@@ -197,6 +199,7 @@ async def create_datasource(
         username=request.username,
         password_encrypted=encrypted_password,
         owner_id=current_user["id"],
+        description=request.description,
         extra_config=extra_config,
     )
 
@@ -301,15 +304,18 @@ async def test_connection(
         }
 
         from services.ddl_checker.connector import DatabaseConnector
+        from datetime import datetime
 
         def _do_connect():
             connector = DatabaseConnector(db_config)
             return connector.connect()
 
         connected = await asyncio.wait_for(asyncio.to_thread(_do_connect), timeout=10.0)
+        _db.update(db, ds_id, last_tested_at=datetime.now(), last_test_success=connected)
         return {"success": connected, "message": "连接成功" if connected else "连接失败"}
 
     except asyncio.TimeoutError:
+        _db.update(db, ds_id, last_tested_at=datetime.now(), last_test_success=False)
         return {"success": False, "message": "连接超时（10秒），请检查主机和网络"}
     except Exception as e:
         # P1 安全修复：脱敏敏感关键词，防止异常信息泄露
@@ -317,6 +323,7 @@ async def test_connection(
         if any(k in error_msg.lower() for k in ["password", "secret", "user", "@", "pwd", "credential"]):
             error_msg = "数据库连接失败，请检查配置（详细信息已隐藏）"
         logging.getLogger(__name__).error("数据源连接测试失败: %s", error_msg)
+        _db.update(db, ds_id, last_tested_at=datetime.now(), last_test_success=False)
         return {"success": False, "message": "连接失败，请检查配置"}
 
 

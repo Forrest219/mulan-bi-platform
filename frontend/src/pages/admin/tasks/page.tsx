@@ -4,7 +4,10 @@ import {
   fetchTaskSchedules,
   fetchTaskRuns,
   toggleSchedule,
+  updateScheduleCron,
   triggerTask,
+  parseCron,
+  previewCron,
   type TaskStats,
   type TaskSchedule,
   type TaskRun,
@@ -78,6 +81,171 @@ function DeltaIndicator({ value, suffix = '' }: { value: number; suffix?: string
   return <span className="text-xs text-slate-400">{'—'}</span>;
 }
 
+function CronEditModal({
+  schedule,
+  onClose,
+  onSaved,
+}: {
+  schedule: TaskSchedule;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [description, setDescription] = useState('');
+  const [parsing, setParsing] = useState(false);
+  const [cronExpr, setCronExpr] = useState<string | null>(schedule.cron_expr ?? null);
+  const [nextRuns, setNextRuns] = useState<string[]>([]);
+  const [parseError, setParseError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  // Pre-populate next runs if schedule already has a cron_expr
+  useEffect(() => {
+    if (schedule.cron_expr) {
+      previewCron(schedule.cron_expr, 6)
+        .then((r) => setNextRuns(r.next_runs))
+        .catch(() => {});
+    }
+  }, [schedule.cron_expr]);
+
+  async function handleParse() {
+    if (!description.trim()) return;
+    setParsing(true);
+    setParseError('');
+    setNextRuns([]);
+    setCronExpr(null);
+    try {
+      const result = await parseCron(description.trim());
+      setCronExpr(result.cron_expr);
+      // Fetch 6 runs for a richer confirmation view
+      const preview = await previewCron(result.cron_expr, 6);
+      setNextRuns(preview.next_runs);
+    } catch (e) {
+      setParseError(e instanceof Error ? e.message : 'AI 解析失败');
+    } finally {
+      setParsing(false);
+    }
+  }
+
+  async function handleSave() {
+    if (!cronExpr) return;
+    setSaving(true);
+    setParseError('');
+    try {
+      await updateScheduleCron(schedule.schedule_key, cronExpr);
+      onSaved();
+    } catch (e) {
+      setParseError(e instanceof Error ? e.message : '保存失败');
+      setSaving(false);
+    }
+  }
+
+  const confirmed = cronExpr !== null && nextRuns.length > 0;
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h3 className="text-base font-semibold text-slate-800">修改调度周期</h3>
+            <p className="text-xs text-slate-400 mt-0.5">{schedule.task_label}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <i className="ri-close-line text-xl" />
+          </button>
+        </div>
+
+        {/* Natural language input */}
+        <div className="mb-4">
+          <label className="block text-xs font-medium text-slate-600 mb-1.5">用自然语言描述执行周期</label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleParse()}
+              placeholder="例如：每天凌晨三点、每6小时一次"
+              className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20"
+            />
+            <button
+              onClick={handleParse}
+              disabled={parsing || !description.trim()}
+              className="px-4 py-2 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 whitespace-nowrap"
+            >
+              {parsing ? (
+                <i className="ri-loader-4-line animate-spin" />
+              ) : (
+                <i className="ri-sparkling-line" />
+              )}
+              AI 解析
+            </button>
+          </div>
+        </div>
+
+        {/* Confirmation: next run times */}
+        {nextRuns.length > 0 && (
+          <div className="mb-4 border border-slate-200 rounded-xl overflow-hidden">
+            <div className="bg-slate-50 px-4 py-2.5 flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-600">解析结果 — 请确认以下执行时间是否正确</span>
+              <i className="ri-calendar-check-line text-slate-400" />
+            </div>
+            <div className="divide-y divide-slate-100">
+              {nextRuns.map((t, i) => {
+                const d = new Date(t);
+                const dateStr = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+                const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+                return (
+                  <div key={i} className="px-4 py-2 flex items-center gap-3">
+                    <span className="text-xs text-slate-400 w-4">{i + 1}</span>
+                    <span className="text-sm font-mono text-slate-700">{dateStr}</span>
+                    <span className="text-sm font-mono text-blue-600 font-medium">{timeStr}</span>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Cron expression as footnote */}
+            {cronExpr && (
+              <div className="px-4 py-2 bg-slate-50 border-t border-slate-100 flex items-center gap-1.5">
+                <i className="ri-code-line text-slate-400 text-xs" />
+                <code className="text-xs text-slate-400 font-mono">{cronExpr}</code>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Error */}
+        {parseError && (
+          <div className="mb-4 text-xs text-red-600 bg-red-50 rounded-lg p-3">
+            {parseError}
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800 transition-colors"
+          >
+            取消
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || !confirmed}
+            className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {saving ? '保存中...' : '确认保存'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminTasksPage() {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<TaskStats | null>(null);
@@ -92,6 +260,7 @@ export default function AdminTasksPage() {
   const [error, setError] = useState<string>('');
   const [togglingKey, setTogglingKey] = useState<string | null>(null);
   const [triggeringKey, setTriggeringKey] = useState<string | null>(null);
+  const [cronModalSchedule, setCronModalSchedule] = useState<TaskSchedule | null>(null);
 
   useEffect(() => {
     loadData();
@@ -166,6 +335,11 @@ export default function AdminTasksPage() {
     } finally {
       setTriggeringKey(null);
     }
+  }
+
+  async function handleCronSaved() {
+    setCronModalSchedule(null);
+    await loadData();
   }
 
   if (loading) {
@@ -307,7 +481,23 @@ export default function AdminTasksPage() {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <code className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{schedule.schedule_expr}</code>
+                    <div className="flex items-center gap-2">
+                      <div>
+                        <div className="text-xs text-slate-500">{schedule.schedule_expr}</div>
+                        {schedule.cron_expr && (
+                          <code className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">
+                            {schedule.cron_expr}
+                          </code>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setCronModalSchedule(schedule)}
+                        className="text-slate-300 hover:text-blue-500 flex-shrink-0"
+                        title="编辑调度周期"
+                      >
+                        <i className="ri-pencil-line text-sm" />
+                      </button>
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <EnabledBadge enabled={schedule.is_enabled} />
@@ -492,6 +682,15 @@ export default function AdminTasksPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* Cron edit modal */}
+      {cronModalSchedule && (
+        <CronEditModal
+          schedule={cronModalSchedule}
+          onClose={() => setCronModalSchedule(null)}
+          onSaved={handleCronSaved}
+        />
       )}
     </div>
   );

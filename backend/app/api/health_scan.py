@@ -117,8 +117,7 @@ async def get_scan_report(scan_id: int, request: Request):
     issues = all_issues["issues"]
 
     # 计算健康评分
-    total = record.total_tables or 1
-    score = max(0, min(100, 100 - record.high_count * 20 - record.medium_count * 5 - record.low_count * 1))
+    score = record.health_score if record.health_score is not None else 0
     score_class = "high" if score >= 80 else "medium" if score >= 60 else "low"
 
     html = f"""

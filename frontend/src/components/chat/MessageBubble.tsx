@@ -15,6 +15,9 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import type { Components } from 'react-markdown';
 import ThinkingBlock from '../../pages/home/components/ThinkingBlock';
+import QueryResultTable from './QueryResultTable';
+import QueryResultChart from './QueryResultChart';
+import type { TableData, ChartData } from '../../hooks/useStreamingChat';
 
 
 // ─── CodeBlock ────────────────────────────────────────────────────────────────
@@ -148,6 +151,10 @@ export interface MessageBubbleProps {
   thinking?: string;
   /** trace_id for feedback/rating (Spec 36 §5) */
   traceId?: string;
+  /** Structured table data from table_data SSE event */
+  tableData?: TableData;
+  /** Structured chart data from chart_data SSE event */
+  chartData?: ChartData;
 }
 
 export default function MessageBubble({
@@ -157,6 +164,8 @@ export default function MessageBubble({
   isError = false,
   thinking,
   traceId,
+  tableData,
+  chartData,
 }: MessageBubbleProps) {
   const isUser = role === 'user';
 
@@ -181,8 +190,8 @@ export default function MessageBubble({
           <p className="whitespace-pre-wrap break-words">{content}</p>
         ) : isError ? (
           <div className="flex items-center gap-2 text-sm text-red-500 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
-            <i className="ri-wifi-off-line" />
-            <span>连接中断，请重试。</span>
+            <i className="ri-wifi-off-line flex-shrink-0" />
+            <span>{content.trim() || '连接中断，请重试。'}</span>
           </div>
         ) : isStreaming ? (
           <div className="prose prose-sm max-w-none prose-slate">
@@ -201,6 +210,8 @@ export default function MessageBubble({
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                     {bodyText}
                   </ReactMarkdown>
+                  {tableData && <QueryResultTable data={tableData} />}
+                  {chartData && <QueryResultChart data={chartData} />}
                 </>
               );
             })()}

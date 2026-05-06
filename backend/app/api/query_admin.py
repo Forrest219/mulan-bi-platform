@@ -264,6 +264,94 @@ class QueryErrorListResponse(BaseModel):
     page_size: int
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 查数日志
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class NlqLogItem(BaseModel):
+    id: int
+    username: Optional[str] = None
+    question: str
+    intent: Optional[str] = None
+    response_type: Optional[str] = None
+    datasource_luid: Optional[str] = None
+    execution_time_ms: Optional[int] = None
+    error_code: Optional[str] = None
+    success: bool
+    created_at: str
+
+
+class NlqLogListResponse(BaseModel):
+    items: List[NlqLogItem]
+    total: int
+    page: int
+    page_size: int
+
+
+@router.get("/logs", response_model=NlqLogListResponse)
+def list_nlq_logs(
+    db: Session = Depends(get_db),
+    _admin: dict = Depends(get_current_admin),
+    status: Optional[str] = Query(None, description="success / failed / 不传=全部"),
+    intent: Optional[str] = Query(None, description="意图过滤（精确匹配）"),
+    start_time: Optional[str] = Query(None, description="ISO 日期，如 2026-05-01"),
+    end_time: Optional[str] = Query(None, description="ISO 日期，如 2026-05-07"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    """GET /api/admin/query/logs — 分页查询所有用户的问数日志"""
+    from services.llm.models import NlqQueryLog
+    from services.auth.models import User
+    from sqlalchemy import func as sa_func2
+
+    q = db.query(NlqQueryLog, User.username).outerjoin(
+        User, NlqQueryLog.user_id == User.id
+    )
+
+    if status == "success":
+        q = q.filter(NlqQueryLog.error_code.is_(None))
+    elif status == "failed":
+        q = q.filter(NlqQueryLog.error_code.isnot(None))
+
+    if intent:
+        q = q.filter(NlqQueryLog.intent == intent)
+
+    if start_time:
+        try:
+            q = q.filter(NlqQueryLog.created_at >= datetime.fromisoformat(start_time))
+        except ValueError:
+            raise MulanError("Q_010", f"无效的 start_time 格式: {start_time}", 422)
+
+    if end_time:
+        try:
+            q = q.filter(NlqQueryLog.created_at <= datetime.fromisoformat(end_time))
+        except ValueError:
+            raise MulanError("Q_011", f"无效的 end_time 格式: {end_time}", 422)
+
+    total = q.count()
+    offset = (page - 1) * page_size
+    rows = q.order_by(NlqQueryLog.id.desc()).offset(offset).limit(page_size).all()
+
+    items = [
+        NlqLogItem(
+            id=log.id,
+            username=username,
+            question=log.question,
+            intent=log.intent,
+            response_type=log.response_type,
+            datasource_luid=log.datasource_luid,
+            execution_time_ms=log.execution_time_ms,
+            error_code=log.error_code,
+            success=log.error_code is None,
+            created_at=log.created_at.isoformat() if log.created_at else "",
+        )
+        for log, username in rows
+    ]
+
+    return NlqLogListResponse(items=items, total=total, page=page, page_size=page_size)
+
+
 @router.get("/errors", response_model=QueryErrorListResponse)
 def list_query_errors(
     db: Session = Depends(get_db),

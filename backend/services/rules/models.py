@@ -16,6 +16,7 @@ class RuleConfig(Base):
     description = Column(String(1024), default="", nullable=False)
     level = Column(String(32), default="MEDIUM", nullable=False)
     category = Column(String(64), default="general", nullable=False)
+    display_group = Column(String(32), server_default="other", nullable=False)
     db_type = Column(String(32), default="MySQL", nullable=False)
     suggestion = Column(String(1024), default="", nullable=False)
     enabled = Column(Boolean, default=True, nullable=False)
@@ -33,6 +34,7 @@ class RuleConfig(Base):
             "description": self.description,
             "level": self.level,
             "category": self.category,
+            "display_group": self.display_group or "other",
             "db_type": self.db_type,
             "scene_type": self.scene_type,
             "suggestion": self.suggestion,
@@ -176,7 +178,7 @@ class RuleConfigDatabase:
         """
         更新规则字段，自动标记 is_modified_by_user=True 防止种子覆盖。
         """
-        ALLOWED_FIELDS = {"name", "description", "level", "category", "suggestion", "scene_type", "config_json"}
+        ALLOWED_FIELDS = {"name", "description", "level", "category", "display_group", "suggestion", "scene_type", "config_json"}
         db = self._get_db()
         try:
             rule = db.query(RuleConfig).filter(RuleConfig.rule_id == rule_id).first()

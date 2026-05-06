@@ -25,6 +25,7 @@ const PAGE_SIZE = 100;
 interface ConversationBarProps {
   collapsed: boolean;
   onToggleCollapse: () => void;
+  onNew?: () => void;
 }
 
 // ─── 时间分组（本地时区）────────────────────────────────────────────────────
@@ -58,7 +59,7 @@ function shouldShowConversation(conv: Conversation): boolean {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ConversationBar({ collapsed: _collapsed, onToggleCollapse: _onToggleCollapse }: ConversationBarProps) {
+export function ConversationBar({ collapsed: _collapsed, onToggleCollapse: _onToggleCollapse, onNew }: ConversationBarProps) {
   const { conversations, deleteConversation, updateConversationTitle } = useConversations();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -74,8 +75,9 @@ export function ConversationBar({ collapsed: _collapsed, onToggleCollapse: _onTo
     : new URLSearchParams(location.search).get('conv');
 
   const handleNew = useCallback(() => {
+    onNew?.();
     navigate('/');
-  }, [navigate]);
+  }, [navigate, onNew]);
 
   const filtered = useMemo(() => {
     const displayable = conversations.filter(shouldShowConversation);
@@ -288,10 +290,10 @@ function ConversationItem({ conv, isActive, onSelect, onDelete, onRename }: Conv
   return (
     <div
       className={`group relative flex items-center gap-1 px-2 py-1.5 rounded-lg cursor-pointer
-                  transition-colors text-sm ${
+                  transition-colors text-sm border-l-2 ${
                     isActive
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'text-slate-600 hover:bg-slate-100'
+                      ? 'bg-blue-50 text-blue-700 border-l-blue-500'
+                      : 'text-slate-600 hover:bg-slate-100 border-l-transparent'
                   }`}
       onClick={() => {
         if (!renaming) onSelect();
@@ -308,7 +310,7 @@ function ConversationItem({ conv, isActive, onSelect, onDelete, onRename }: Conv
           className="flex-1 text-sm bg-white border border-blue-300 rounded px-1 py-0 focus:outline-none"
         />
       ) : (
-        <span className="flex-1 truncate">{conv.title}</span>
+        <span className="flex-1 truncate" title={conv.title}>{conv.title}</span>
       )}
 
       {/* ... 菜单按钮 */}

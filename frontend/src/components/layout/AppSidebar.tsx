@@ -170,7 +170,9 @@ function DomainGroup({
         onClick={onToggle}
         className={`
           w-full flex items-center gap-2 px-3 py-2 rounded-lg mb-1 transition-colors
-          ${isAnyActive ? 'text-cyan-600' : 'text-slate-400 hover:text-slate-500 hover:bg-slate-50'}
+          ${isAnyActive
+            ? 'bg-cyan-50/50 text-cyan-600'
+            : 'bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-600'}
         `}
       >
         <i className={`${domain.icon} text-lg`} />
@@ -184,7 +186,7 @@ function DomainGroup({
 
       {/* 菜单项列表 */}
       {expanded && (
-        <div className="pl-10">
+        <div className="ml-3.5 pl-3 border-l border-slate-100">
           {visibleItems.map((item) => (
             <SidebarItem key={item.key} item={item} collapsed={false} />
           ))}
@@ -268,7 +270,7 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
         <button
           onClick={onToggleCollapse}
           className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors"
-          title={collapsed ? '展开侧边栏' : '折叠侧边栏'}
+          title={collapsed ? '展开侧边栏  ⌘\\' : '折叠侧边栏  ⌘\\'}
         >
           <i className={`ri-sidebar-fold-line text-lg ${collapsed ? 'rotate-180' : ''}`} />
         </button>
@@ -280,7 +282,8 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
         <Link
           to="/"
           className={`
-            flex items-center gap-2.5 px-3 py-2.5 rounded-lg mb-3 transition-all duration-150
+          w-full flex rounded-lg transition-all duration-150
+            ${collapsed ? 'flex-col items-center justify-center py-3 gap-0 mb-1' : 'items-center gap-2.5 px-3 py-2.5 mb-3'}
             ${location.pathname === '/'
               ? 'bg-cyan-50 text-cyan-600'
               : 'text-slate-400 hover:bg-slate-50 hover:text-slate-500'
@@ -289,7 +292,9 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
           title={collapsed ? '首页' : undefined}
         >
           <i className="ri-home-4-line text-base shrink-0" />
-          {!collapsed && (
+          {collapsed ? (
+            <span className="text-[10px] mt-1 leading-tight text-center px-1">首页</span>
+          ) : (
             <span className={`text-[13px] truncate ${location.pathname === '/' ? 'font-semibold' : 'font-medium'}`}>首页</span>
           )}
         </Link>

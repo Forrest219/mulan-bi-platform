@@ -14,6 +14,71 @@ from .strategy import IntentResult, IntentStrategy
 logger = logging.getLogger(__name__)
 
 
+# 直接查询模式：可被单次 QueryTool 调用回答的问题特征
+DIRECT_QUERY_PATTERNS = [
+    r'过去\s*\d+\s*(年|季度|个月|周)',          # 过去四年 / 过去3个月
+    r'\d{4}\s*年',                              # 2021年 / 2024年
+    r'(今年|去年|上季度|上月|最近\d)',
+    r'(每个?|各)\s*(产品|类别|子类别|区域|城市|客户|省)',
+    r'(销售额|利润|收入|数量|订单数).{0,20}(走势|趋势|变化|占比)',
+    r'(走势|趋势|变化).{0,20}(销售|利润|收入)',
+    r'(前|top|排名?)\s*\d+',
+    r'占比|份额|百分比|市场占有率',
+    r'同比|环比',
+]
+
+# 复杂分析模式：即使匹配到上面的模式，也应走完整 ReAct
+COMPLEX_ANALYSIS_PATTERNS = [
+    r'为什么|原因|归因|导致|影响了',
+    r'分析.*原因|原因.*分析',
+    r'如何改善|如何提升|建议',
+    r'相关性|关联',
+]
+
+
+# 图表类型关键词映射（精确词先于通用词）
+CHART_TYPE_KEYWORDS = {
+    'line': ['趋势图', '折线图', '走势图', '时序图'],
+    'pie': ['饼图', '占比图', '饼状图', '环形图'],
+    'bar': ['柱状图', '柱形图', '条形图', '直方图'],
+}
+
+
+def is_chart_request(question: str) -> Tuple[bool, str]:
+    """判断问题是否包含图表请求，返回 (is_chart, chart_type)。
+
+    Returns:
+        tuple: (is_chart, chart_type) where chart_type is 'line' | 'bar' | 'pie'
+    """
+    normalized = _normalize(question)
+    for chart_type, keywords in CHART_TYPE_KEYWORDS.items():
+        for kw in keywords:
+            if kw in normalized:
+                return True, chart_type
+    for kw in ['图表', '可视化', '做图', '画图', '生成图']:
+        if kw in normalized:
+            return True, 'bar'
+    if '图' in normalized and any(k in normalized for k in ['做个', '画个', '生成', '展示成']):
+        return True, 'bar'
+    return False, 'bar'
+
+
+def is_direct_query(question: str) -> bool:
+    """判断问题是否可走直接查询快速路径（跳过 LLM Think 首步）。
+
+    匹配"时间区间 + 指标/维度聚合"特征，执行耗时 <1ms，无 LLM 调用。
+    复杂分析关键词（为什么/原因/归因）优先级更高，命中则返回 False。
+    """
+    normalized = _normalize(question)
+    for pattern in COMPLEX_ANALYSIS_PATTERNS:
+        if re.search(pattern, normalized):
+            return False
+    for pattern in DIRECT_QUERY_PATTERNS:
+        if re.search(pattern, normalized):
+            return True
+    return False
+
+
 # 意图关键词定义（优先级从高到低）
 INTENT_KEYWORDS = {
     "report": [

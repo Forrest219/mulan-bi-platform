@@ -354,6 +354,7 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
               onClick={() => fileInputRef.current?.click()}
               className="p-1.5 text-slate-400 hover:text-slate-600 transition-colors"
               aria-label="添加附件"
+              title="支持 Schema / Excel / 图片文件"
             >
               <i className="ri-attachment-2 text-base" />
             </button>

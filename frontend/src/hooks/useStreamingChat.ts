@@ -11,6 +11,20 @@
 import { useState, useRef, useCallback } from 'react';
 import { streamAgent } from '../api/agent';
 
+export interface TableData {
+  fields: string[];
+  rows: (string | number | null)[][];
+  col_types: ('numeric' | 'string')[];
+}
+
+export interface ChartData {
+  chart_type: 'bar' | 'line' | 'pie';
+  x_field: string | null;
+  y_fields: string[];
+  series_field: string | null;
+  data: Record<string, string | number | null>[];
+}
+
 export interface StreamingMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -28,8 +42,14 @@ export interface StreamingMessage {
   conversationId?: string;
   /** response_type from done event (e.g. 'text', 'table', 'chart') */
   responseType?: string;
+  /** Structured table data from table_data event — rendered as QueryResultTable */
+  tableData?: TableData;
+  /** Structured chart data from chart_data event — rendered as QueryResultChart */
+  chartData?: ChartData;
   /** steps_count from done event */
   stepsCount?: number;
+  /** ISO timestamp of when the message was created locally */
+  timestamp?: string;
 }
 
 export interface UseStreamingChatReturn {
@@ -82,10 +102,12 @@ export function useStreamingChat(): UseStreamingChatReturn {
    */
   const sendMessage = useCallback(
     async (question: string, connectionId?: number, conversationId?: string | null) => {
+      const now = new Date().toISOString();
       const userMsg: StreamingMessage = {
         id: crypto.randomUUID(),
         role: 'user',
         content: question,
+        timestamp: now,
       };
       const assistantId = crypto.randomUUID();
       const assistantMsg: StreamingMessage = {
@@ -93,6 +115,7 @@ export function useStreamingChat(): UseStreamingChatReturn {
         role: 'assistant',
         content: '',
         isStreaming: true,
+        timestamp: now,
       };
 
       setMessages((prev) => [...prev, userMsg, assistantMsg]);
@@ -159,6 +182,28 @@ export function useStreamingChat(): UseStreamingChatReturn {
                 prev.map((m) =>
                   m.id === id
                     ? { ...m, toolResults: [...(m.toolResults ?? []), { tool: event.tool, summary: event.summary }] }
+                    : m,
+                ),
+              );
+            }
+          } else if (event.type === 'table_data') {
+            const id = streamingIdRef.current;
+            if (id) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === id
+                    ? { ...m, tableData: { fields: event.fields, rows: event.rows, col_types: event.col_types } }
+                    : m,
+                ),
+              );
+            }
+          } else if (event.type === 'chart_data') {
+            const id = streamingIdRef.current;
+            if (id) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === id
+                    ? { ...m, chartData: { chart_type: event.chart_type, x_field: event.x_field, y_fields: event.y_fields, series_field: event.series_field, data: event.data } }
                     : m,
                 ),
               );

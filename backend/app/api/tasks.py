@@ -1,6 +1,7 @@
 """任务管理 API — Spec 33"""
 from datetime import datetime
 import logging
+import re
 
 from celery.result import AsyncResult
 from fastapi import APIRouter, Request, HTTPException
@@ -134,29 +135,55 @@ async def list_schedules(request: Request):
 
 @router.patch("/schedules/{schedule_key}")
 async def update_schedule_enabled(schedule_key: str, request: Request):
-    """启用/禁用调度任务"""
+    """启用/禁用调度任务，或更新 cron 表达式"""
     _require_admin(request)
 
     body = await request.json()
     is_enabled = body.get("is_enabled")
-    if is_enabled is None:
+    cron_expr = body.get("cron_expr")
+
+    if is_enabled is None and cron_expr is None:
         raise HTTPException(
             status_code=400,
-            detail={"error_code": "TASK_006", "message": "缺少 is_enabled 参数"},
+            detail={"error_code": "TASK_006", "message": "缺少 is_enabled 或 cron_expr 参数"},
         )
 
     from services.tasks.task_manager import TaskManager
 
     with SessionLocal() as db:
-        result = TaskManager().update_schedule_enabled(db, schedule_key, is_enabled)
-        if not result:
-            raise HTTPException(
-                status_code=404,
-                detail={"error_code": "TASK_002", "message": "调度任务不存在"},
-            )
+        tm = TaskManager()
+
+        if cron_expr is not None:
+            # Validate cron expression
+            try:
+                from croniter import croniter
+                if not croniter.is_valid(cron_expr):
+                    raise HTTPException(
+                        status_code=400,
+                        detail={"error_code": "TASK_007", "message": f"无效的 cron 表达式: {cron_expr}"},
+                    )
+            except ImportError:
+                pass  # croniter 未安装时跳过校验
+
+            result = tm.update_schedule_cron(db, schedule_key, cron_expr)
+            if not result:
+                raise HTTPException(
+                    status_code=404,
+                    detail={"error_code": "TASK_002", "message": "调度任务不存在"},
+                )
+
+        if is_enabled is not None:
+            result = tm.update_schedule_enabled(db, schedule_key, is_enabled)
+            if not result:
+                raise HTTPException(
+                    status_code=404,
+                    detail={"error_code": "TASK_002", "message": "调度任务不存在"},
+                )
+
         return {
             "schedule_key": schedule_key,
             "is_enabled": result.is_enabled,
+            "cron_expr": result.cron_expr,
             "updated_at": result.updated_at.isoformat() if result.updated_at else None,
         }
 
@@ -295,3 +322,118 @@ async def get_task_status(task_id: str, request: Request):
     elif result.status == "PENDING":
         response["message"] = "任务等待中"
     return response
+
+
+# ─── AI 解析 & 预览 ──────────────────────────────────────────
+
+_SYSTEM_PROMPT = """\
+你是一个 Cron 表达式生成器。将用户描述的任务执行时间转换为标准 5 字段 Cron 表达式。
+字段顺序：分钟 小时 日 月 星期（0=周日）。
+
+规则：
+- 只输出 cron 表达式本身，不加任何解释
+- 不支持秒级精度，最小粒度为分钟
+- 示例：
+  "每天凌晨三点" → 0 3 * * *
+  "每天零点和中午" → 0 0,12 * * *
+  "每周日凌晨三点" → 0 3 * * 0
+  "每月1号凌晨3点10分" → 10 3 1 * *
+  "工作日上午九点" → 0 9 * * 1-5
+  "每15分钟" → */15 * * * *
+  "每小时整点" → 0 * * * *\
+"""
+
+_CRON_RE = re.compile(r"^\S+\s+\S+\s+\S+\s+\S+\s+\S+$")
+
+
+@router.post("/parse-cron")
+async def parse_cron(request: Request):
+    """用 LLM 将自然语言描述解析为 Cron 表达式"""
+    _get_user(request)
+
+    body = await request.json()
+    description = (body.get("description") or "").strip()
+    if not description:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "TASK_008", "message": "描述不能为空"},
+        )
+
+    from services.llm.service import llm_service
+    result = await llm_service.complete(
+        prompt=description,
+        system=_SYSTEM_PROMPT,
+        timeout=15,
+        purpose="default",
+    )
+
+    if "error" in result:
+        raise HTTPException(
+            status_code=503,
+            detail={"error_code": "LLM_500", "message": result["error"]},
+        )
+
+    raw = result.get("content", "").strip()
+    # 从输出中提取第一个匹配的 5 字段 cron（防止 LLM 多输出文字）
+    cron_expr = None
+    for token in raw.splitlines():
+        token = token.strip()
+        if _CRON_RE.match(token):
+            cron_expr = token
+            break
+    if not cron_expr:
+        # fallback: 取第一行
+        cron_expr = raw.splitlines()[0].strip() if raw else ""
+
+    try:
+        from croniter import croniter
+        if not croniter.is_valid(cron_expr):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error_code": "TASK_009",
+                    "message": f"LLM 返回了无效的 cron 表达式：{cron_expr!r}，请重新描述或手动输入",
+                },
+            )
+    except ImportError:
+        pass
+
+    from services.tasks.task_manager import _compute_next_run
+    next_runs = []
+    try:
+        from croniter import croniter as _cr
+        import datetime as _dt
+        it = _cr(cron_expr, _dt.datetime.now())
+        for _ in range(3):
+            next_runs.append(it.get_next(_dt.datetime).strftime("%Y-%m-%dT%H:%M:%S"))
+    except Exception:
+        pass
+
+    return {"cron_expr": cron_expr, "next_runs": next_runs}
+
+
+@router.get("/preview-cron")
+async def preview_cron(request: Request, cron_expr: str, n: int = 3):
+    """计算 cron 表达式的下次 N 次执行时间（只读，不写库）"""
+    _get_user(request)
+
+    if n < 1 or n > 10:
+        n = 3
+
+    try:
+        from croniter import croniter
+        if not croniter.is_valid(cron_expr):
+            raise HTTPException(
+                status_code=400,
+                detail={"error_code": "TASK_007", "message": f"无效的 cron 表达式: {cron_expr}"},
+            )
+        import datetime as _dt
+        it = croniter(cron_expr, _dt.datetime.now())
+        next_runs = [it.get_next(_dt.datetime).strftime("%Y-%m-%dT%H:%M:%S") for _ in range(n)]
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail={"error_code": "TASK_010", "message": "croniter 未安装"},
+        )
+
+    return {"cron_expr": cron_expr, "next_runs": next_runs}

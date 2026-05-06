@@ -21,6 +21,7 @@ export interface AgentMessageItem {
   role: string;
   content: string;
   response_type: string | null;
+  response_data?: unknown;
   tools_used: string[] | null;
   trace_id: string | null;
   steps_count: number | null;
@@ -41,6 +42,8 @@ export type AgentStreamEvent =
   | { type: 'tool_call'; tool: string; params: Record<string, unknown> }
   | { type: 'tool_result'; tool: string; summary: string }
   | { type: 'token'; content: string }
+  | { type: 'table_data'; fields: string[]; rows: (string | number | null)[][]; col_types: ('numeric' | 'string')[] }
+  | { type: 'chart_data'; chart_type: 'bar' | 'line' | 'pie'; x_field: string | null; y_fields: string[]; series_field: string | null; data: Record<string, string | number | null>[] }
   | { type: 'done'; answer: string; trace_id: string; run_id: string; tools_used: string[]; response_type: string; response_data: unknown; steps_count: number; execution_time_ms: number; sources_count: number; top_sources: string[] }
   | { type: 'error'; error_code: string; message: string };
 
@@ -75,7 +78,6 @@ export function streamAgent(
             error_code: `HTTP_${response.status}`,
             message: `请求失败: HTTP ${response.status}`,
           } as AgentStreamEvent);
-          controller.close();
           return;
         }
 
@@ -129,6 +131,22 @@ export function streamAgent(
                   type: 'token',
                   content: raw['content'] as string,
                 });
+              } else if (raw['type'] === 'table_data') {
+                controller.enqueue({
+                  type: 'table_data',
+                  fields: (raw['fields'] as string[]) ?? [],
+                  rows: (raw['rows'] as (string | number | null)[][]) ?? [],
+                  col_types: (raw['col_types'] as ('numeric' | 'string')[]) ?? [],
+                });
+              } else if (raw['type'] === 'chart_data') {
+                controller.enqueue({
+                  type: 'chart_data',
+                  chart_type: (raw['chart_type'] as 'bar' | 'line' | 'pie') ?? 'bar',
+                  x_field: (raw['x_field'] as string | null) ?? null,
+                  y_fields: (raw['y_fields'] as string[]) ?? [],
+                  series_field: (raw['series_field'] as string | null) ?? null,
+                  data: (raw['data'] as Record<string, string | number | null>[]) ?? [],
+                });
               } else if (raw['type'] === 'done') {
                 controller.enqueue({
                   type: 'done',
@@ -178,6 +196,17 @@ export const agentConversationsApi = {
    */
   list: (): Promise<AgentConversationItem[]> =>
     fetch('/api/agent/conversations', { credentials: 'include' }).then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    }),
+
+  /**
+   * GET /api/agent/conversations/{id} — 获取单个会话元数据（含 connection_id）
+   */
+  getConversation: (conversationId: string): Promise<AgentConversationItem> =>
+    fetch(`/api/agent/conversations/${conversationId}`, {
+      credentials: 'include',
+    }).then((r) => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
     }),

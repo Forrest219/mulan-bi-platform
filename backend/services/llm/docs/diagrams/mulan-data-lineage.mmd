@@ -1,0 +1,79 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#4F46E5', 'primaryTextColor': '#fff', 'lineColor': '#6366F1'}}}%%
+
+graph LR
+    subgraph UserLayer["用户层"]
+        User["用户自然语言问题"]
+    end
+
+    subgraph EmbeddingLayer["Embedding 层"]
+        EmbService["LLMService<br/>generate_embedding()"]
+        MiniMax["MiniMax embo-01<br/>POST /v1/embeddings"]
+        EmbService -->|"type=query"| MiniMax
+        MiniMax -->|"vector"| QueryVec["查询向量"]
+    end
+
+    subgraph SemanticStore["语义存储 (PostgreSQL + pgvector)"]
+        FieldSem[("tableau_field_semantics<br/>embedding 列<br/>cosine 索引")]
+        DSSem[("tableau_datasource_semantics<br/>sensitivity_level<br/>semantic_name")]
+        Glossary[("knowledge_glossary<br/>术语同义词映射")]
+    end
+
+    subgraph RetrievalLayer["召回层"]
+        CosineTopK["cosine Top-K 召回<br/>semantic_retriever.py<br/>1 - (embedding <=> query_vec)"]
+        FieldCache[("Redis 缓存<br/>field_caption 列表<br/>TTL 1h")]
+        RouteScore["路由评分<br/>calculate_routing_score()"]
+    end
+
+    subgraph LLMLayer["LLM 推理层"]
+        ContextAsm["ContextAssembler<br/>P0-P5 优先级截断<br/>3000 token 预算"]
+        OnePass["One-Pass LLM<br/>ONE_PASS_NL_TO_QUERY_TEMPLATE"]
+        Validation["fieldCaption 一致性校验<br/>validate_field_captions_consistency()"]
+    end
+
+    subgraph TableauLayer["Tableau 数据层"]
+        MCP["Tableau MCP Server<br/>Streamable-HTTP JSON-RPC"]
+        VizQL["VizQL Data Service<br/>query-datasource"]
+        DS1[("Published Datasource A<br/>tableau_id: luid-xxx")]
+        DS2[("Published Datasource B<br/>tableau_id: luid-yyy")]
+    end
+
+    subgraph SyncLayer["同步链路 (Celery Beat 60s)"]
+        TSC["Tableau TSC API"]
+        SyncJob["sync_all_assets()"]
+        AssetTable[("tableau_assets<br/>tableau_datasource_fields")]
+    end
+
+    %% 主查询链路
+    User -->|"1. 提问"| EmbService
+    User -->|"1. 提问"| ContextAsm
+    QueryVec -->|"2. 向量检索"| CosineTopK
+    CosineTopK -->|"3. Top-K 字段"| FieldSem
+    FieldSem -->|"语义字段上下文"| ContextAsm
+
+    Glossary -->|"术语映射"| ContextAsm
+    DSSem -->|"敏感度过滤"| RouteScore
+    FieldCache -->|"字段列表"| RouteScore
+    RouteScore -->|"4. 最佳数据源"| ContextAsm
+
+    ContextAsm -->|"5. 组装 Prompt"| OnePass
+    OnePass -->|"6. vizql_json"| Validation
+    Validation -->|"7. 校验通过"| MCP
+
+    MCP -->|"JSON-RPC tools/call"| VizQL
+    VizQL --> DS1
+    VizQL --> DS2
+
+    %% 同步链路
+    TSC -->|"REST API"| SyncJob
+    SyncJob -->|"UPSERT"| AssetTable
+    AssetTable -->|"字段写入 Redis"| FieldCache
+    AssetTable -->|"embedding 生成"| FieldSem
+
+    %% 样式
+    style UserLayer fill:#EEF2FF,stroke:#4F46E5
+    style EmbeddingLayer fill:#FFF7ED,stroke:#EA580C
+    style SemanticStore fill:#F5F3FF,stroke:#7C3AED
+    style RetrievalLayer fill:#FEF9C3,stroke:#CA8A04
+    style LLMLayer fill:#FFF1F2,stroke:#E11D48
+    style TableauLayer fill:#F0FDF4,stroke:#16A34A
+    style SyncLayer fill:#F0F9FF,stroke:#0284C7

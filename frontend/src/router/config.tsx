@@ -27,8 +27,6 @@ const ChatPage            = lazy(() => import('../pages/chat/page'));
 const LLMConfigsPage      = lazy(() => import('../pages/admin/llm-configs/page'));
 const McpConfigsPage      = lazy(() => import('../pages/admin/mcp-configs/page'));
 const McpDebuggerPage     = lazy(() => import('../pages/system/mcp-debugger/page'));
-const DDLValidatorPage    = lazy(() => import('../pages/ddl-validator/page'));
-const RuleConfigPage      = lazy(() => import('../pages/rule-config/page'));
 const DataHealthPage      = lazy(() => import('../pages/data-governance/health/page'));
 const DwAuditPage         = lazy(() => import('../pages/data-governance/dw-audit/page'));
 const TableauAssetBrowserPage = lazy(() => import('../pages/tableau/assets/page'));
@@ -60,12 +58,16 @@ const QueryPage             = lazy(() => import('../pages/query/page'));
 const AccountSecurityPage   = lazy(() => import('../pages/account/security/page'));
 
 // DQC 模块
-const DqcOverviewPage = lazy(() => import('../pages/data-governance/dqc/overview/page'));
-const DqcMonitorPage = lazy(() => import('../pages/data-governance/dqc/monitor/page'));
-const DqcSignalsPage = lazy(() => import('../pages/data-governance/dqc/signals/page'));
-const DqcAnalysesPage = lazy(() => import('../pages/data-governance/dqc/analyses/page'));
-const DqcAssetDetailPage = lazy(() => import('../pages/data-governance/dqc/detail/page'));
-const DqcTemplatesPage = lazy(() => import('../pages/data-governance/dqc/templates/page'));
+const DqcOverviewPage      = lazy(() => import('../pages/data-governance/dqc/overview/page'));
+const DqcMonitorPage       = lazy(() => import('../pages/data-governance/dqc/monitor/page'));
+const DqcSignalsPage       = lazy(() => import('../pages/data-governance/dqc/signals/page'));
+const DqcAnalysesPage      = lazy(() => import('../pages/data-governance/dqc/analyses/page'));
+const DqcAssetDetailPage   = lazy(() => import('../pages/data-governance/dqc/detail/page'));
+const DqcTemplatesPage     = lazy(() => import('../pages/data-governance/dqc/templates/page'));
+const DqcTemplateDetailPage = lazy(() => import('../pages/data-governance/dqc/templates/detail'));
+const DqcAiCreateRulePage  = lazy(() => import('../pages/data-governance/dqc/templates/ai-create'));
+const DqcCheckRecordsPage  = lazy(() => import('../pages/data-governance/dqc/check-records/page'));
+const DqcDerivedRulesPage  = lazy(() => import('../pages/data-governance/dqc/derived-rules/page'));
 
 // Agent 模块
 const DataWorkbenchPage = lazy(() => import('../pages/agents/data-workbench/page'));
@@ -141,27 +143,10 @@ const routes: RouteObject[] = [
         path: '/dev',
         children: [
           {
-            path: 'ddl-validator',
-            element: (
-              <ProtectedRoute requiredPermission="ddl_check">
-                <DDLValidatorPage />
-              </ProtectedRoute>
-            ),
-          },
-          {
             path: 'ddl-generator',
-            // disabled: true，路由保留但菜单不可点击（Spec 18 §5.2）
             element: (
               <ProtectedRoute requiredPermission="ddl_generator">
-                <DDLValidatorPage /> {/* 临时复用 DDL 检查页占位，待功能开发后替换 */}
-              </ProtectedRoute>
-            ),
-          },
-          {
-            path: 'rule-config',
-            element: (
-              <ProtectedRoute requiredPermission="rule_config">
-                <RuleConfigPage />
+                <div className="p-8 text-center text-slate-400">功能开发中</div>
               </ProtectedRoute>
             ),
           },
@@ -193,8 +178,8 @@ const routes: RouteObject[] = [
             element: <Navigate to="/governance/dw-audit?tab=warehouse" replace />,
           },
           {
-            path: 'quality',
-            element: <Navigate to="/governance/dqc" replace />,
+            path: 'semantic',
+            element: <Navigate to="/governance/semantic/datasources" replace />,
           },
           {
             path: 'semantic/datasources',
@@ -271,11 +256,7 @@ const routes: RouteObject[] = [
           },
           {
             path: 'dqc/signals',
-            element: (
-              <ProtectedRoute>
-                <DqcSignalsPage />
-              </ProtectedRoute>
-            ),
+            element: <Navigate to="/governance/dqc" replace />,
           },
           {
             path: 'dqc/analyses',
@@ -290,6 +271,38 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute>
                 <DqcTemplatesPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'dqc/templates/ai-create',
+            element: (
+              <ProtectedRoute>
+                <DqcAiCreateRulePage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'dqc/templates/:id',
+            element: (
+              <ProtectedRoute>
+                <DqcTemplateDetailPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'dqc/check-records',
+            element: (
+              <ProtectedRoute>
+                <DqcCheckRecordsPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'dqc/derived-rules',
+            element: (
+              <ProtectedRoute>
+                <DqcDerivedRulesPage />
               </ProtectedRoute>
             ),
           },
@@ -578,10 +591,7 @@ const routes: RouteObject[] = [
   // 旧路由 301 重定向（Spec 18 §4.1，兼容期 3 个月）
   // ⚠️ 前端视图路由迁移专用，src/api/ 下的后端 API 路径不在此列
   // =====================
-  { path: '/ddl-validator',                    element: <Navigate to="/dev/ddl-validator" replace /> },
-  { path: '/rule-config',                      element: <Navigate to="/dev/rule-config" replace /> },
   { path: '/data-governance/health',           element: <Navigate to="/governance/dw-audit?tab=warehouse" replace /> },
-  { path: '/data-governance/quality',           element: <Navigate to="/governance/dqc" replace /> },
   { path: '/semantic-maintenance/datasources', element: <Navigate to="/governance/semantic/datasources" replace /> },
   { path: '/semantic-maintenance/datasources/:id', element: <Navigate to="/governance/semantic/datasources/:id" replace /> },
   { path: '/semantic-maintenance/fields',       element: <Navigate to="/governance/semantic/fields" replace /> },

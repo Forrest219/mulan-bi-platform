@@ -5,7 +5,7 @@ import {
   submitDatasourceForReview, approveDatasource, rejectDatasource,
   getStatusBadge, getSensitivityBadge,
   SemanticDatasource, SemanticStatus, SensitivityLevel,
-  previewDatasourceDiff, publishDatasource,
+  previewDatasourceDiff, publishDatasource, generateDatasourceAI,
 } from '../../../api/semantic-maintenance';
 import { listConnections, TableauConnection } from '../../../api/tableau';
 import { ConfirmModal } from '../../../components/ConfirmModal';
@@ -44,7 +44,9 @@ export default function SemanticDatasourceListPage() {
   const [modalNotify, setModalNotify] = useState<{ success: boolean; message: string } | null>(null);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingDs, setEditingDs] = useState<SemanticDatasource | null>(null);
   const [editForm, setEditForm] = useState<Partial<SemanticDatasource>>({});
+  const [aiGenerating, setAiGenerating] = useState(false);
   const [showDiff, setShowDiff] = useState<{ open: boolean; diff: DatasourceDiffPreview; ds: SemanticDatasource } | null>(null);
 
   // Load connections on mount
@@ -124,6 +126,7 @@ export default function SemanticDatasourceListPage() {
 
   const openEditModal = (ds: SemanticDatasource) => {
     setEditingId(ds.id);
+    setEditingDs(ds);
     setEditForm({
       semantic_name_zh: ds.semantic_name_zh,
       semantic_description: ds.semantic_description,
@@ -148,6 +151,29 @@ export default function SemanticDatasourceListPage() {
     }
   };
 
+  const handleAIGenerate = async () => {
+    if (!editingId) return;
+    setAiGenerating(true);
+    try {
+      const result = await generateDatasourceAI(editingId, {
+        description: editingDs?.asset_name ?? undefined,
+      });
+      const item = result.item;
+      setEditForm(prev => ({
+        ...prev,
+        semantic_name_zh: item.semantic_name_zh || prev.semantic_name_zh,
+        semantic_description: item.semantic_description || prev.semantic_description,
+        metric_definition: item.metric_definition || prev.metric_definition,
+        dimension_definition: item.dimension_definition || prev.dimension_definition,
+        sensitivity_level: item.sensitivity_level || prev.sensitivity_level,
+      }));
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: getErrorMessage(e, 'AI 生成失败') });
+    } finally {
+      setAiGenerating(false);
+    }
+  };
+
   const statusOptions: { value: SemanticStatus | ''; label: string }[] = [
     { value: '', label: '全部' },
     { value: 'draft', label: '草稿' },
@@ -156,6 +182,7 @@ export default function SemanticDatasourceListPage() {
     { value: 'approved', label: '已审核' },
     { value: 'rejected', label: '已驳回' },
     { value: 'published', label: '已发布' },
+    { value: 'archived', label: '已归档' },
   ];
 
   const formatDate = (str: string | null) => str ? new Date(str).toLocaleString() : '-';
@@ -164,8 +191,8 @@ export default function SemanticDatasourceListPage() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-slate-800">数据源语义管理</h1>
-          <p className="text-sm text-slate-400 mt-0.5">管理和审核数据源语义描述</p>
+          <h1 className="text-xl font-semibold text-slate-800">语义治理</h1>
+          <p className="text-sm text-slate-400 mt-0.5">Tableau 数据源语义管理与发布</p>
         </div>
       </div>
 
@@ -211,8 +238,7 @@ export default function SemanticDatasourceListPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">ID</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Tableau ID</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">数据源名称</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">语义名称</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">描述</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">敏感级别</th>
@@ -227,9 +253,11 @@ export default function SemanticDatasourceListPage() {
                 const statusBadge = getStatusBadge(ds.status);
                 const sensBadge = getSensitivityBadge(ds.sensitivity_level);
                 return (
-                  <tr key={ds.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 text-slate-500">{ds.id}</td>
-                    <td className="px-4 py-3 text-slate-600 font-mono text-xs">{ds.tableau_datasource_id.slice(0, 16)}...</td>
+                  <tr key={ds.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => navigate(`/governance/semantic/datasources/${ds.id}`)}>
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-slate-800 hover:text-blue-600 transition-colors">{ds.asset_name || ds.tableau_datasource_id.slice(0, 20) + '…'}</div>
+                      <div className="text-xs text-slate-400 font-mono">{ds.tableau_datasource_id.slice(0, 8)}…</div>
+                    </td>
                     <td className="px-4 py-3">
                       <div className="font-medium text-slate-800">{ds.semantic_name_zh || '-'}</div>
                       {ds.semantic_name && <div className="text-xs text-slate-400">{ds.semantic_name}</div>}
@@ -254,9 +282,9 @@ export default function SemanticDatasourceListPage() {
                     </td>
                     <td className="px-4 py-3 text-slate-500 text-xs">{formatDate(ds.updated_at)}</td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-1 flex-wrap">
+                      <div className="flex items-center gap-1 flex-wrap" onClick={e => e.stopPropagation()}>
                         <button
-                          onClick={() => navigate(`/semantic-maintenance/datasources/${ds.id}`)}
+                          onClick={() => navigate(`/governance/semantic/datasources/${ds.id}`)}
                           className="px-2 py-1 text-xs text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded"
                         >
                           详情
@@ -333,7 +361,7 @@ export default function SemanticDatasourceListPage() {
               })}
               {datasources.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-slate-400">
+                  <td colSpan={8} className="px-4 py-12 text-center text-slate-400">
                     暂无数据{selectedConnId ? '' : '，请先选择连接'}
                   </td>
                 </tr>
@@ -368,7 +396,20 @@ export default function SemanticDatasourceListPage() {
       {editingId && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
-            <h2 className="text-lg font-semibold text-slate-800 mb-4">编辑数据源语义</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-slate-800">编辑数据源语义</h2>
+              <button
+                type="button"
+                onClick={handleAIGenerate}
+                disabled={aiGenerating}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-violet-50 text-violet-600 rounded-lg hover:bg-violet-100 disabled:opacity-50 transition-colors"
+              >
+                {aiGenerating
+                  ? <i className="ri-loader-4-line animate-spin" />
+                  : <i className="ri-sparkling-2-line" />}
+                {aiGenerating ? '生成中…' : 'AI 生成'}
+              </button>
+            </div>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-600 mb-1.5">语义名称（中文）</label>

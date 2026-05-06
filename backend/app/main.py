@@ -15,7 +15,7 @@ from app.api import ddl, logs, requirements, rules, auth, users, groups, permiss
 from app.api.agent import router as data_agent_router
 from services.data_agent.routes.causation import router as causation_router
 from services.data_agent.routes.dau_churn import router as dau_churn_router
-from app.api.governance import api_contract_routes, dqc, quality
+from app.api.governance import api_contract_routes, dqc
 from app.api.semantic_maintenance import datasources as sm_datasources, fields as sm_fields, review as sm_review, sync as sm_sync, publish as sm_publish
 from app.api import audit, governance_runtime, connection_hub, agent_admin
 
@@ -60,7 +60,6 @@ app.include_router(activity.router, prefix="/api/activity", tags=["访问日志"
 app.include_router(datasources.router, prefix="/api/datasources", tags=["数据源管理"])
 app.include_router(tableau.router, prefix="/api/tableau", tags=["Tableau 管理"])
 app.include_router(health_scan.router, prefix="/api/governance/health", tags=["数仓健康检查"])
-app.include_router(quality.router, prefix="/api/governance/quality", tags=["数据质量监控"])
 app.include_router(dqc.router, prefix="/api/dqc", tags=["DQC"])
 app.include_router(api_contract_routes.router, prefix="/api/governance/api-contract", tags=["API Contract Governance"])
 app.include_router(llm.router, prefix="/api/llm", tags=["LLM 管理"])

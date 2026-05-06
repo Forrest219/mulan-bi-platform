@@ -13,8 +13,9 @@
 import asyncio
 import json
 import logging
+import time
 import uuid as uuid_lib
-from typing import AsyncGenerator, Dict, List, Optional
+from typing import AsyncGenerator, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -22,7 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.database import get_db, get_db_context
 from app.core.dependencies import get_current_user
 
 from services.data_agent.factory import create_engine
@@ -38,8 +39,8 @@ from services.data_agent.session import SessionManager, AgentSession
 from services.data_agent.tool_base import ToolContext, ToolRegistry
 from services.data_agent.context import build_session_context
 from services.datasources.models import DataSource
+from services.llm.models import log_nlq_query
 from services.tableau.models import TableauConnection
-
 # Spec 36 §15: Agent 驱动首页相关导入
 from services.agent.dual_write import (
     HomepageAgentMode,
@@ -56,6 +57,25 @@ router = APIRouter(prefix="/api/agent", tags=["Data Agent"])
 # ============================================================================
 # Schema
 # ============================================================================
+
+
+async def _generate_short_title(question: str, conversation_id: str, user_id: int) -> None:
+    """Best-effort: generate a 4-8 char title via LLM and update the conversation."""
+    try:
+        from services.llm.service import LLMService
+        llm = LLMService()
+        result = await llm.complete(
+            prompt=f"用4-8个中文字为以下问题生成简洁标题，只输出标题本身，不加任何标点或引号：\n{question[:200]}",
+            system="你是标题生成助手，只输出简洁的中文短语，禁止输出任何解释或符号。",
+            timeout=8,
+        )
+        raw = (result.get("content") or "").strip().strip('。，、.,"\'"」「').strip()[:20]
+        if len(raw) >= 2:
+            with get_db_context() as db:
+                mgr = SessionManager(db)
+                mgr.update_title(uuid_lib.UUID(conversation_id), raw, user_id)
+    except Exception:
+        pass
 
 
 class StreamRequest(BaseModel):
@@ -90,6 +110,7 @@ class MessageItem(BaseModel):
     role: str
     content: str
     response_type: Optional[str]
+    response_data: Optional[Any] = None
     tools_used: Optional[List[str]]
     trace_id: Optional[str]
     steps_count: Optional[int]
@@ -221,11 +242,13 @@ async def agent_stream(
         session = session_mgr.resume_session(conv_uuid, current_user["id"])
         if not session:
             raise HTTPException(status_code=404, detail={"error_code": "AGENT_004", "message": "会话不存在"})
+        is_new_session = False
     else:
         session = session_mgr.create_session(
             user_id=current_user["id"],
             connection_id=req.connection_id,
         )
+        is_new_session = True
 
     conversation_id_str = str(session.conversation_id)
 
@@ -275,6 +298,7 @@ async def agent_stream(
     )
 
     async def event_generator() -> AsyncGenerator[str, None]:
+        _t0 = time.monotonic()
         async for event in run_agent(
             engine=engine,
             context=context,
@@ -301,6 +325,12 @@ async def agent_stream(
                 summary_str = str(summary)[:200] if summary else ""
                 yield f"data: {json.dumps({'type': 'tool_result', 'tool': event.content.get('tool', ''), 'summary': summary_str}, ensure_ascii=False)}\n\n"
 
+            elif event.type == "table_data":
+                yield f"data: {json.dumps({'type': 'table_data', 'fields': event.content.get('fields', []), 'rows': event.content.get('rows', []), 'col_types': event.content.get('col_types', [])}, ensure_ascii=False)}\n\n"
+
+            elif event.type == "chart_data":
+                yield f"data: {json.dumps({'type': 'chart_data', 'chart_type': event.content.get('chart_type', 'bar'), 'x_field': event.content.get('x_field'), 'y_fields': event.content.get('y_fields', []), 'series_field': event.content.get('series_field'), 'data': event.content.get('data', [])}, ensure_ascii=False)}\n\n"
+
             elif event.type == "done":
                 # Emit per-char tokens before the done event
                 answer_text = event.content.get("answer", "")
@@ -308,11 +338,28 @@ async def agent_stream(
                     yield f"data: {json.dumps({'type': 'token', 'content': char}, ensure_ascii=False)}\n\n"
                     await asyncio.sleep(0.01)
                 yield f"data: {json.dumps({'type': 'done', 'answer': answer_text, 'trace_id': event.content.get('trace_id', ''), 'run_id': event.content.get('run_id', ''), 'tools_used': event.content.get('tools_used', []), 'response_type': event.content.get('response_type', 'text'), 'response_data': event.content.get('response_data'), 'steps_count': event.content.get('steps_count', 0), 'execution_time_ms': event.content.get('execution_time_ms', 0), 'sources_count': event.content.get('sources_count', 0), 'top_sources': event.content.get('top_sources', [])}, ensure_ascii=False)}\n\n"
+                log_nlq_query(
+                    user_id=current_user.get("id"),
+                    question=req.question,
+                    response_type=event.content.get("response_type"),
+                    execution_time_ms=event.content.get("execution_time_ms") or int((time.monotonic() - _t0) * 1000),
+                    error_code=None,
+                )
+                if is_new_session:
+                    asyncio.create_task(
+                        _generate_short_title(req.question, conversation_id_str, current_user["id"])
+                    )
 
             elif event.type == "error":
                 error_content = event.content if isinstance(event.content, dict) else {"message": str(event.content)}
                 err_code = error_content.get("error_code", "AGENT_003")
                 yield f"data: {json.dumps({'type': 'error', 'error_code': err_code, 'message': error_content.get('message', '未知错误')}, ensure_ascii=False)}\n\n"
+                log_nlq_query(
+                    user_id=current_user.get("id"),
+                    question=req.question,
+                    execution_time_ms=int((time.monotonic() - _t0) * 1000),
+                    error_code=err_code,
+                )
 
     return StreamingResponse(
         event_generator(),
@@ -384,6 +431,38 @@ def list_conversations(
     ]
 
 
+@router.get("/conversations/{conversation_id}")
+def get_conversation(
+    conversation_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取单个会话元数据（含 connection_id）"""
+    _require_agent_role(current_user.get("role", "user"))
+
+    try:
+        conv_uuid = uuid_lib.UUID(conversation_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail={"error_code": "AGENT_007", "message": "无效的会话 ID"})
+
+    conv = db.query(AgentConversation).filter(
+        AgentConversation.id == conv_uuid,
+        AgentConversation.user_id == current_user["id"],
+    ).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail={"error_code": "AGENT_004", "message": "会话不存在"})
+
+    return ConversationItem(
+        id=str(conv.id),
+        title=conv.title or "",
+        connection_id=conv.connection_id,
+        status=conv.status,
+        message_count=0,
+        created_at=conv.created_at.isoformat() if conv.created_at else "",
+        updated_at=conv.updated_at.isoformat() if conv.updated_at else "",
+    )
+
+
 @router.get("/conversations/{conversation_id}/messages")
 def get_conversation_messages(
     conversation_id: str,
@@ -411,6 +490,7 @@ def get_conversation_messages(
             role=m.role,
             content=m.content,
             response_type=m.response_type,
+            response_data=m.response_data,
             tools_used=m.tools_used,
             trace_id=m.trace_id,
             steps_count=m.steps_count,

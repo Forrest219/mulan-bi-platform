@@ -1,0 +1,15 @@
+{
+  "name": "mulan-llm-diagrams",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mermaid diagrams for Mulan BI LLM service architecture",
+  "scripts": {
+    "diagram:architecture": "mmdc -i docs/diagrams/mulan-architecture.mmd -o ~/Desktop/mulan-architecture.svg -p puppeteer-config.json",
+    "diagram:requirement": "mmdc -i docs/diagrams/mulan-requirement-flow.mmd -o ~/Desktop/mulan-requirement-flow.svg -p puppeteer-config.json",
+    "diagram:lineage": "mmdc -i docs/diagrams/mulan-data-lineage.mmd -o ~/Desktop/mulan-data-lineage.svg -p puppeteer-config.json",
+    "diagram:all": "npm run diagram:architecture && npm run diagram:requirement && npm run diagram:lineage"
+  },
+  "devDependencies": {
+    "@mermaid-js/mermaid-cli": "^11.4.2"
+  }
+}

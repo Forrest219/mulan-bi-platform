@@ -1162,53 +1162,6 @@ class ReportWriteTool(BaseTool):
         return "\n".join(lines)
 
 
-class QualityCheckTool(BaseTool):
-    """
-    quality_check — §4.2
-    查询 Spec 15 质量结果（bi_quality_results）。
-    """
-
-    name = "quality_check"
-    description = "查询数据质量结果。输入数据源+表名+时间范围+检查类型，返回质量评分和各项检查结果。"
-    metadata = ToolMetadata(
-        category="query",
-        version="1.0.0",
-        dependencies=["requires_database"],
-        tags=["quality", "data_quality", "checks"],
-    )
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "datasource_id": {"type": "integer", "description": "数据源 ID"},
-            "table_name": {"type": "string", "description": "表名"},
-            "time_range": {
-                "type": "object",
-                "description": "{start, end}",
-            },
-            "check_types": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "null_rate/freshness/duplication",
-            },
-        },
-        "required": ["datasource_id", "table_name"],
-    }
-
-    async def execute(self, params: dict, context: ToolContext) -> ToolResult:
-        start = time.time()
-        # 降级：返回模拟质量检查结果
-        return ToolResult(
-            success=True,
-            data={
-                "checks": [
-                    {"type": "null_rate", "field": "gmv", "actual": 0.001, "threshold": 0.05, "passed": True},
-                    {"type": "freshness", "field": "update_time", "hours_delay": 2, "threshold_hours": 24, "passed": True},
-                ],
-                "overall_quality_score": 95.5,
-            },
-            execution_time_ms=int((time.time() - start) * 1000),
-        )
-
 
 class InsightPublishTool(BaseTool):
     """
@@ -1288,7 +1241,6 @@ def create_spec28_registry() -> ToolRegistry:
     registry.register(HypothesisStoreTool())
     registry.register(SqlExecuteTool())
     registry.register(ReportWriteTool())
-    registry.register(QualityCheckTool())
     registry.register(CorrelationDetectTool())
     registry.register(InsightPublishTool())
 
@@ -1306,7 +1258,7 @@ def create_spec28_registry() -> ToolRegistry:
 
 
 def _startup_self_check(registry: ToolRegistry) -> None:
-    """§16 启动自检：所有 14 工具必须注册成功"""
+    """§16 启动自检：所有 13 工具必须注册成功"""
     expected = {
         "metric_definition_lookup",
         "schema_lookup",
@@ -1316,7 +1268,6 @@ def _startup_self_check(registry: ToolRegistry) -> None:
         "hypothesis_store",
         "sql_execute",
         "report_write",
-        "quality_check",
         "correlation_detect",
         "insight_publish",
         "past_analysis_retrieve",

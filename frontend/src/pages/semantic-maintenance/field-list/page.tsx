@@ -120,6 +120,7 @@ export default function SemanticFieldListPage() {
       dimension_definition: field.dimension_definition,
       unit: field.unit,
       sensitivity_level: field.sensitivity_level,
+      synonyms_json: field.synonyms_json,
     });
   };
 
@@ -485,6 +486,19 @@ export default function SemanticFieldListPage() {
                   <option value="high">高</option>
                   <option value="confidential">机密</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1.5">同义词（逗号分隔）</label>
+                <input
+                  type="text"
+                  value={editForm.synonyms_json ? (JSON.parse(editForm.synonyms_json) as string[]).join(', ') : ''}
+                  onChange={e => {
+                    const parts = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+                    setEditForm({ ...editForm, synonyms_json: parts.length ? JSON.stringify(parts) : null });
+                  }}
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
+                  placeholder="如：销售额, 营收, Revenue"
+                />
               </div>
             </div>
             <div className="flex justify-end gap-3 mt-6">

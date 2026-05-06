@@ -115,7 +115,7 @@ def _build_link(source_module: str, event_type: str, payload: dict) -> Optional[
         obj_type = payload.get("object_type")
         obj_id = payload.get("object_id")
         if obj_type and obj_id:
-            return f"/semantic-maintenance/{obj_type}s/{obj_id}"
+            return f"/governance/semantic/{obj_type}s/{obj_id}"
     elif source_module == "health":
         scan_id = payload.get("scan_id")
         if scan_id:

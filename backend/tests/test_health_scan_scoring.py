@@ -1,46 +1,52 @@
-"""单元测试：数仓健康扫描 — 评分算法"""
+"""单元测试：数仓健康扫描评分算法
+
+测试 services/health_scan/scoring.py 中的唯一权威实现。
+公式见 Spec 11 §4.2：
+  density = (high*5 + medium*2 + low*0.5) / total_tables
+  score   = max(0, round(100 - density*10, 1))
+"""
 import pytest
+from services.health_scan.scoring import calculate_health_score
 
 
-class TestHealthScanScoring:
-    """Spec 11 评分算法: score = 100 - high×20 - medium×5 - low×1"""
+class TestCalculateHealthScore:
+    def test_no_issues_full_score(self):
+        assert calculate_health_score(0, 0, 0, 10) == 100.0
 
-    def _calc_score(self, high=0, medium=0, low=0):
-        score = 100 - high * 20 - medium * 5 - low * 1
-        return max(0, min(100, score))
+    def test_no_tables_returns_none(self):
+        assert calculate_health_score(0, 0, 0, 0) is None
+        assert calculate_health_score(5, 3, 2, 0) is None
 
-    def test_perfect_score(self):
-        assert self._calc_score(high=0, medium=0, low=0) == 100
+    def test_high_weight_5(self):
+        # 1 high / 1 table → density=5 → score=100-50=50
+        assert calculate_health_score(1, 0, 0, 1) == 50.0
 
-    def test_high_issue_deducts_20(self):
-        assert self._calc_score(high=1) == 80
-        assert self._calc_score(high=2) == 60
-        assert self._calc_score(high=5) == 0  # 被 floor 截断
+    def test_medium_weight_2(self):
+        # 1 medium / 1 table → density=2 → score=100-20=80
+        assert calculate_health_score(0, 1, 0, 1) == 80.0
 
-    def test_medium_issue_deducts_5(self):
-        assert self._calc_score(medium=1) == 95
-        assert self._calc_score(medium=2) == 90
-        assert self._calc_score(medium=20) == 0
+    def test_low_weight_0_5(self):
+        # 1 low / 1 table → density=0.5 → score=100-5=95
+        assert calculate_health_score(0, 0, 1, 1) == 95.0
 
-    def test_low_issue_deducts_1(self):
-        assert self._calc_score(low=1) == 99
-        assert self._calc_score(low=5) == 95
+    def test_density_normalized_by_table_count(self):
+        # same issues but 10 tables → 10× less dense
+        assert calculate_health_score(1, 0, 0, 10) == 95.0
+
+    def test_score_clamped_to_zero(self):
+        assert calculate_health_score(100, 100, 100, 1) == 0.0
 
     def test_mixed_issues(self):
-        # 2 HIGH + 3 MEDIUM + 5 LOW = 100 - 40 - 15 - 5 = 40
-        assert self._calc_score(high=2, medium=3, low=5) == 40
+        # (5*5 + 10*2 + 20*0.5) / 10 = 55/10 = 5.5 → 100 - 55 = 45.0
+        assert calculate_health_score(5, 10, 20, 10) == 45.0
 
-    def test_score_clamped_to_0(self):
-        """极多问题分数不得为负"""
-        assert self._calc_score(high=10, medium=10, low=10) == 0
-
-    def test_score_clamped_to_100(self):
-        """分数不超过 100"""
-        assert self._calc_score(high=0, medium=0, low=0) == 100
+    def test_rounding_to_one_decimal(self):
+        # (1*5 + 1*2 + 1*0.5) / 3 = 7.5/3 = 2.5 → 100 - 25 = 75.0
+        assert calculate_health_score(1, 1, 1, 3) == 75.0
 
 
 class TestHealthLevelBoundaries:
-    """Spec 11 健康等级边界"""
+    """健康等级边界（与 engine 无关，测展示层分级逻辑）"""
 
     def _level(self, score):
         if score >= 80:

@@ -6,7 +6,7 @@ Session 管理规范（Spec 07 §7.3 P1）：
 - Celery 任务层：使用 get_db_context() 上下文管理器，禁止自行 new Session
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from services.tasks import celery_app
 from services.tasks.decorators import beat_guarded
@@ -193,18 +193,17 @@ def _bridge_mcp_to_connections(tableau_db, db_session):
 @beat_guarded("tableau-auto-sync")
 def scheduled_sync_all():
     """
-    Beat 调度任务：每 60 秒检查所有活跃连接，
-    对到期的连接触发 sync_connection_task。
+    Beat 调度任务：每日 00:00 / 12:00 触发所有启用自动同步的连接。
+    无论手工同步何时执行，cron 时间点一到即触发，不受 last_sync_at 影响。
     启动前先桥接 mcp_servers → tableau_connections。
 
-    并发保护：使用 Redis 分布式锁防止 Beat 多实例或同步超时时
-    导致的重复触发（P0 修复：日志暴涨根因）。
+    并发保护：使用 Redis 分布式锁防止 Beat 多实例重复触发。
     """
     import redis
     from services.common.settings import get_redis_url
 
     lock_key = "tableau:beat:scheduled_sync_all:lock"
-    lock_timeout = 120  # 秒，必须大于 Beat 间隔（60s），给足完成时间
+    lock_timeout = 600  # 秒，cron 间隔 12h，给足完成时间
 
     try:
         redis_client = redis.from_url(get_redis_url(), decode_responses=True)
@@ -228,10 +227,6 @@ def scheduled_sync_all():
 
             for conn in connections:
                 if not conn.auto_sync_enabled:
-                    continue
-
-                interval = timedelta(hours=conn.sync_interval_hours or 24)
-                if conn.last_sync_at and (datetime.now() - conn.last_sync_at) < interval:
                     continue
 
                 logger.info("Beat: triggering sync for '%s' (conn_id=%d)", conn.name, conn.id)

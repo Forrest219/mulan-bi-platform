@@ -1,66 +1,50 @@
 /**
- * QueryAlertsPage — /system/query-alerts
+ * QueryLogsPage — /system/query-alerts
  *
- * Spec 14 T-10：告警事件管理员查看页
+ * 查数日志：展示所有用户通过首页 Data Agent 发起的问数记录，
+ * 支持按状态（成功/失败）、意图、时间范围筛选。
  *
- * 功能：
- * - 分页查询 query_error_events 告警列表
- * - 筛选：未解决/全部 切换、错误码下拉筛选
- * - 每行「标记已解决」按钮，成功后列表刷新
- * - 空态：无告警时展示"暂无告警"提示
- *
- * 后端 API：
- *   GET  /api/admin/query/errors              → QueryErrorListResponse
- *   POST /api/admin/query/errors/{id}/resolve → { ok, resolved_at }
+ * 后端 API：GET /api/admin/query/logs
  */
 import { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '../../../config';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface QueryErrorEvent {
+interface NlqLogItem {
   id: number;
-  username: string;
-  error_type: string;
-  connection_id: number | null;
-  raw_error: string | null;
-  resolved: boolean;
+  username: string | null;
+  question: string;
+  intent: string | null;
+  response_type: string | null;
+  datasource_luid: string | null;
+  execution_time_ms: number | null;
+  error_code: string | null;
+  success: boolean;
   created_at: string;
-  resolved_at: string | null;
 }
 
-interface QueryErrorListResponse {
-  items: QueryErrorEvent[];
+interface NlqLogListResponse {
+  items: NlqLogItem[];
   total: number;
   page: number;
   page_size: number;
 }
 
-// 错误码选项（与后端 _VALID_ERROR_CODES 对应）
-const ERROR_CODE_OPTIONS = [
-  { value: '', label: '全部错误码' },
-  { value: 'Q_JWT_001', label: 'Q_JWT_001 — 身份未绑定' },
-  { value: 'Q_PERM_002', label: 'Q_PERM_002 — 权限不足' },
-  { value: 'Q_TIMEOUT_003', label: 'Q_TIMEOUT_003 — MCP 超时' },
-  { value: 'Q_MCP_004', label: 'Q_MCP_004 — MCP 失败' },
-  { value: 'Q_LLM_005', label: 'Q_LLM_005 — LLM 失败' },
+// 意图选项（与后端 nlq_query_logs.intent 字段值对应）
+const INTENT_OPTIONS = [
+  { value: '', label: '全部意图' },
+  { value: 'vizql', label: 'VizQL 查询' },
+  { value: 'text', label: '文本回答' },
+  { value: 'clarification', label: '澄清追问' },
 ];
-
-// error_type → 中文标签映射
-const ERROR_TYPE_LABEL: Record<string, string> = {
-  identity_not_found: '身份未绑定',
-  perm_denied: '权限不足',
-  mcp_timeout: 'MCP 超时',
-  mcp_error: 'MCP 失败',
-  llm_error: 'LLM 失败',
-};
 
 // ─── 工具函数 ─────────────────────────────────────────────────────────────────
 
 function formatDateTime(dateStr: string): string {
   if (!dateStr) return '-';
   try {
-    const d = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z');
+    const d = new Date(dateStr.includes('Z') ? dateStr : dateStr);
     return d.toLocaleString('zh-CN', {
       year: 'numeric',
       month: '2-digit',
@@ -74,100 +58,86 @@ function formatDateTime(dateStr: string): string {
   }
 }
 
-function truncate(text: string | null, maxLen = 80): string {
-  if (!text) return '-';
+function formatDuration(ms: number | null): string {
+  if (ms == null) return '-';
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function truncate(text: string, maxLen = 80): string {
   return text.length > maxLen ? text.slice(0, maxLen) + '...' : text;
+}
+
+function toDatetimeLocal(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function defaultRange(): { start: string; end: string } {
+  const now = new Date();
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  return { start: toDatetimeLocal(yesterday), end: toDatetimeLocal(now) };
 }
 
 // ─── Page Component ───────────────────────────────────────────────────────────
 
-export default function QueryAlertsPage() {
-  const [items, setItems] = useState<QueryErrorEvent[]>([]);
+export default function QueryLogsPage() {
+  const [items, setItems] = useState<NlqLogItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [resolveLoadingId, setResolveLoadingId] = useState<number | null>(null);
-  const [message, setMessage] = useState('');
-  const [messageType, setMessageType] = useState<'success' | 'error'>('success');
+  const [errorMsg, setErrorMsg] = useState('');
 
   // 筛选状态
-  const [showOnlyUnresolved, setShowOnlyUnresolved] = useState(true);
-  const [errorCode, setErrorCode] = useState('');
+  const [status, setStatus] = useState<'all' | 'success' | 'failed'>('all');
+  const [intent, setIntent] = useState('');
+  const { start: defaultStart, end: defaultEnd } = defaultRange();
+  const [startTime, setStartTime] = useState(defaultStart);
+  const [endTime, setEndTime] = useState(defaultEnd);
 
-  // 分页状态
+  // 分页
   const [page, setPage] = useState(1);
   const pageSize = 20;
 
   // ── 数据获取 ────────────────────────────────────────────────────────────────
 
-  const fetchAlerts = useCallback(async () => {
+  const fetchLogs = useCallback(async () => {
     setLoading(true);
+    setErrorMsg('');
     try {
       const params = new URLSearchParams({
-        resolved: String(!showOnlyUnresolved),
         page: String(page),
         page_size: String(pageSize),
       });
-      if (errorCode) params.set('error_code', errorCode);
+      if (status !== 'all') params.set('status', status);
+      if (intent) params.set('intent', intent);
+      if (startTime) params.set('start_time', startTime);
+      if (endTime) params.set('end_time', endTime);
 
-      const resp = await fetch(`${API_BASE}/api/admin/query/errors?${params}`, {
+      const resp = await fetch(`${API_BASE}/api/admin/query/logs?${params}`, {
         credentials: 'include',
       });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
-        showMessage(err.detail || '获取告警列表失败', 'error');
+        setErrorMsg(err.detail?.message || err.detail || '获取查数日志失败');
         return;
       }
-      const data: QueryErrorListResponse = await resp.json();
+      const data: NlqLogListResponse = await resp.json();
       setItems(data.items);
       setTotal(data.total);
-    } catch (e) {
-      showMessage('网络错误，请稍后重试', 'error');
+    } catch {
+      setErrorMsg('网络错误，请稍后重试');
     } finally {
       setLoading(false);
     }
-  }, [showOnlyUnresolved, errorCode, page]);
+  }, [status, intent, startTime, endTime, page]);
 
   useEffect(() => {
-    fetchAlerts();
-  }, [fetchAlerts]);
+    fetchLogs();
+  }, [fetchLogs]);
 
-  // 筛选条件变化时重置到第一页
   useEffect(() => {
     setPage(1);
-  }, [showOnlyUnresolved, errorCode]);
-
-  // ── 标记已解决 ──────────────────────────────────────────────────────────────
-
-  const handleResolve = async (eventId: number) => {
-    setResolveLoadingId(eventId);
-    try {
-      const resp = await fetch(`${API_BASE}/api/admin/query/errors/${eventId}/resolve`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        showMessage(err.detail || '标记失败', 'error');
-        return;
-      }
-      showMessage('已标记为已解决', 'success');
-      fetchAlerts();
-    } catch {
-      showMessage('网络错误，请稍后重试', 'error');
-    } finally {
-      setResolveLoadingId(null);
-    }
-  };
-
-  // ── 消息提示 ────────────────────────────────────────────────────────────────
-
-  const showMessage = (text: string, type: 'success' | 'error') => {
-    setMessage(text);
-    setMessageType(type);
-    setTimeout(() => setMessage(''), 4000);
-  };
-
-  // ── 分页 ────────────────────────────────────────────────────────────────────
+  }, [status, intent, startTime, endTime]);
 
   const totalPages = Math.ceil(total / pageSize);
 
@@ -175,29 +145,23 @@ export default function QueryAlertsPage() {
 
   return (
     <div className="p-6">
-      {/* 消息提示 */}
-      {message && (
-        <div
-          className={`mb-4 px-4 py-2 border rounded-lg text-sm ${
-            messageType === 'success'
-              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-              : 'bg-red-50 text-red-700 border-red-200'
-          }`}
-        >
-          {message}
+      {/* 错误提示 */}
+      {errorMsg && (
+        <div className="mb-4 px-4 py-2 border rounded-lg text-sm bg-red-50 text-red-700 border-red-200">
+          {errorMsg}
         </div>
       )}
 
       {/* 页面标题栏 */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-slate-800">问数告警</h1>
+          <h1 className="text-xl font-semibold text-slate-800">查数日志</h1>
           <p className="text-sm text-slate-400 mt-0.5">
-            查看问数过程中发生的身份绑定与权限告警，共 {total} 条
+            所有用户的问数记录，共 {total} 条
           </p>
         </div>
         <button
-          onClick={() => fetchAlerts()}
+          onClick={() => fetchLogs()}
           className="px-3 py-2 text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg flex items-center gap-1.5 transition-colors"
         >
           <i className="ri-refresh-line" />
@@ -205,71 +169,77 @@ export default function QueryAlertsPage() {
         </button>
       </div>
 
-      {/* 筛选条件 */}
+      {/* 筛选栏 */}
       <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
         <div className="flex items-center gap-4 flex-wrap">
-          {/* 未解决/全部 切换 */}
+          {/* 状态切换 */}
           <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
-            <button
-              onClick={() => setShowOnlyUnresolved(true)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                showOnlyUnresolved
-                  ? 'bg-white text-slate-700 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              未解决
-            </button>
-            <button
-              onClick={() => setShowOnlyUnresolved(false)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                !showOnlyUnresolved
-                  ? 'bg-white text-slate-700 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              全部
-            </button>
+            {(['all', 'success', 'failed'] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setStatus(s)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  status === s
+                    ? 'bg-white text-slate-700 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                {s === 'all' ? '全部' : s === 'success' ? '成功' : '失败'}
+              </button>
+            ))}
           </div>
 
-          {/* 错误码下拉筛选 */}
+          {/* 意图下拉 */}
           <select
-            value={errorCode}
-            onChange={(e) => setErrorCode(e.target.value)}
+            value={intent}
+            onChange={(e) => setIntent(e.target.value)}
             className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-blue-500"
           >
-            {ERROR_CODE_OPTIONS.map((opt) => (
+            {INTENT_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>
             ))}
           </select>
+
+          {/* 时间范围 */}
+          <div className="flex items-center gap-2">
+            <input
+              type="datetime-local"
+              value={startTime}
+              onChange={(e) => setStartTime(e.target.value)}
+              className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-blue-500"
+            />
+            <span className="text-slate-400 text-xs">至</span>
+            <input
+              type="datetime-local"
+              value={endTime}
+              onChange={(e) => setEndTime(e.target.value)}
+              className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          {/* 重置时间 */}
+          <button
+            onClick={() => { const r = defaultRange(); setStartTime(r.start); setEndTime(r.end); }}
+            className="text-xs text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            过去24小时
+          </button>
         </div>
       </div>
 
-      {/* 告警列表表格 */}
+      {/* 日志表格 */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200">
-              <th className="text-left text-xs font-semibold text-slate-500 uppercase px-4 py-3">
-                时间
-              </th>
-              <th className="text-left text-xs font-semibold text-slate-500 uppercase px-4 py-3">
-                用户名
-              </th>
-              <th className="text-left text-xs font-semibold text-slate-500 uppercase px-4 py-3">
-                错误类型
-              </th>
-              <th className="text-left text-xs font-semibold text-slate-500 uppercase px-4 py-3">
-                错误信息
-              </th>
-              <th className="text-left text-xs font-semibold text-slate-500 uppercase px-4 py-3">
-                状态
-              </th>
-              <th className="text-right text-xs font-semibold text-slate-500 uppercase px-4 py-3">
-                操作
-              </th>
+              <th className="text-left text-xs font-semibold text-slate-500 uppercase px-4 py-3 whitespace-nowrap">时间</th>
+              <th className="text-left text-xs font-semibold text-slate-500 uppercase px-4 py-3 whitespace-nowrap">用户</th>
+              <th className="text-left text-xs font-semibold text-slate-500 uppercase px-4 py-3">问题</th>
+              <th className="text-left text-xs font-semibold text-slate-500 uppercase px-4 py-3 whitespace-nowrap">意图</th>
+              <th className="text-left text-xs font-semibold text-slate-500 uppercase px-4 py-3 whitespace-nowrap">耗时</th>
+              <th className="text-left text-xs font-semibold text-slate-500 uppercase px-4 py-3 whitespace-nowrap">状态</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -283,58 +253,52 @@ export default function QueryAlertsPage() {
             ) : items.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-4 py-12 text-center text-slate-400">
-                  <i className="ri-alarm-warning-line text-3xl mb-2 block" />
-                  暂无告警
+                  <i className="ri-file-list-3-line text-3xl mb-2 block" />
+                  暂无记录
                 </td>
               </tr>
             ) : (
-              items.map((event) => (
-                <tr key={event.id} className="hover:bg-slate-50/50">
+              items.map((log) => (
+                <tr key={log.id} className="hover:bg-slate-50/50">
                   <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
-                    {formatDateTime(event.created_at)}
+                    {formatDateTime(log.created_at)}
                   </td>
                   <td className="px-4 py-3">
-                    <span className="text-sm font-medium text-slate-800">
-                      {event.username}
+                    <span className="text-sm font-medium text-slate-700">
+                      {log.username ?? '-'}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
-                    <span className="text-xs px-2 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full">
-                      {ERROR_TYPE_LABEL[event.error_type] ?? event.error_type}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 max-w-xs">
+                  <td className="px-4 py-3 max-w-sm">
                     <span
-                      className="text-xs text-slate-500 block truncate"
-                      title={event.raw_error ?? undefined}
+                      className="text-sm text-slate-800 block truncate"
+                      title={log.question}
                     >
-                      {truncate(event.raw_error)}
+                      {truncate(log.question)}
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    {event.resolved ? (
-                      <span className="text-xs font-medium px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
-                        已解决
+                    {log.intent ? (
+                      <span className="text-xs px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-full">
+                        {log.intent}
                       </span>
                     ) : (
-                      <span className="text-xs font-medium px-2 py-1 rounded-full bg-red-50 text-red-600">
-                        未解决
-                      </span>
+                      <span className="text-xs text-slate-400">-</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    {!event.resolved && (
-                      <button
-                        onClick={() => handleResolve(event.id)}
-                        disabled={resolveLoadingId === event.id}
-                        className="text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                  <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
+                    {formatDuration(log.execution_time_ms)}
+                  </td>
+                  <td className="px-4 py-3">
+                    {log.success ? (
+                      <span className="text-xs font-medium px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
+                        成功
+                      </span>
+                    ) : (
+                      <span
+                        className="text-xs font-medium px-2 py-1 rounded-full bg-red-50 text-red-600"
+                        title={log.error_code ?? undefined}
                       >
-                        {resolveLoadingId === event.id ? '处理中...' : '标记已解决'}
-                      </button>
-                    )}
-                    {event.resolved && event.resolved_at && (
-                      <span className="text-xs text-slate-400">
-                        {formatDateTime(event.resolved_at)}
+                        失败{log.error_code ? `·${log.error_code}` : ''}
                       </span>
                     )}
                   </td>

@@ -65,6 +65,7 @@ class BiTaskSchedule(Base):
     task_name = Column(String(256), nullable=False)
     description = Column(Text, nullable=True)
     schedule_expr = Column(String(256), nullable=False)
+    cron_expr = Column(String(64), nullable=True)
     is_enabled = Column(Boolean, nullable=False, server_default=sa_text("true"))
     last_run_at = Column(DateTime, nullable=True)
     last_run_status = Column(String(16), nullable=True)
@@ -78,6 +79,7 @@ class BiTaskSchedule(Base):
             "task_name": self.task_name,
             "description": self.description,
             "schedule_expr": self.schedule_expr,
+            "cron_expr": self.cron_expr,
             "is_enabled": self.is_enabled,
             "last_run_at": self.last_run_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.last_run_at else None,
             "last_run_status": self.last_run_status,

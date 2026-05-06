@@ -76,9 +76,9 @@ function HomePageInner() {
   const [lastQuestion, setLastQuestion] = useState('');
   const lastQuestionRef = useRef('');
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
-  const [historyMessages, setHistoryMessages] = useState<Array<{role: 'user'|'assistant'; content: string}>>([]);
+  const [historyMessages, setHistoryMessages] = useState<Array<{role: 'user'|'assistant'; content: string; created_at?: string; response_type?: string | null; response_data?: unknown}>>([]);
 
-  const { connectionId: scopeConnectionId } = useScope();
+  const { connectionId: scopeConnectionId, setConnectionId: setScopeConnectionId } = useScope();
 
   const { user } = useAuth();
   const { settings } = usePlatformSettings();
@@ -86,22 +86,45 @@ function HomePageInner() {
   const { connectionId, selectedConvId } = useHomeUrlState();
 
   // Gap-05: streaming state 完全独立，不与 AskBar 的 input/loading state 共享
-  const { messages: streamingMessages, isStreaming, sendMessage, abort } = useStreamingChat();
+  const { messages: streamingMessages, isStreaming, sendMessage, abort, clearMessages } = useStreamingChat();
+
+  const handleNewConversation = useCallback(() => {
+    clearMessages();
+    setHistoryMessages([]);
+    setCurrentConversationId(null);
+    savedMessageCountRef.current = 0;
+    setHomeState('HOME_IDLE');
+    setResult(null);
+    setError(null);
+  }, [clearMessages]);
 
   // Task 1: URL conv= 参数驱动历史消息恢复
   const loadConvHistory = useCallback(async (convId: string) => {
     try {
-      const msgs = await agentConversationsApi.getMessages(convId);
-      const history = msgs.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+      const [msgs, conv] = await Promise.all([
+        agentConversationsApi.getMessages(convId),
+        agentConversationsApi.getConversation(convId),
+      ]);
+      const history = msgs.map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+        created_at: m.created_at,
+        response_type: m.response_type,
+        response_data: m.response_data,
+      }));
       setHistoryMessages(history);
       setCurrentConversationId(convId);
+      // 恢复对话原始连接，避免追问时 connection_id 为空导致多余 ReAct 步骤
+      if (conv.connection_id != null) {
+        setScopeConnectionId(String(conv.connection_id));
+      }
       setHomeState('HOME_RESULT');
     } catch {
       setHistoryMessages([]);
       setHomeState('HOME_ERROR');
       setError({ code: 'LOAD_HISTORY_FAILED', message: '历史对话加载失败，请刷新重试' });
     }
-  }, []);
+  }, [setScopeConnectionId]);
 
   // Mock 流路径：onStreamToken 逐 token 追加到此 state 用于展示
   const [mockStreamingContent, setMockStreamingContent] = useState('');
@@ -284,6 +307,22 @@ function HomePageInner() {
   };
 
   // ── 渲染 ──────────────────────────────────────────────────────────────────
+  const askBarNode = (
+    <AskBar
+      onResult={handleAskBarResult}
+      onError={(err) => setError(err)}
+      onLoading={handleLoading}
+      onQuestionChange={(q) => { setLastQuestion(q); lastQuestionRef.current = q; }}
+      conversationId={currentConversationId}
+      useMock={USE_MOCK}
+      isStreaming={isStreaming || isMockStreaming}
+      onAbort={abort}
+      onStreamToken={(token) => {
+        setMockStreamingContent((prev) => prev + token);
+      }}
+    />
+  );
+
   const idleContent = (
     <>
       {/* WelcomeHero */}
@@ -296,32 +335,17 @@ function HomePageInner() {
       )}
       {/* 消息展示区 */}
       {(streamingMessages.length > 0 || isMockStreaming || mockStreamingContent || historyMessages.length > 0) && (
-        <div className="flex-1 overflow-y-auto">
-          <MessageList
-            messages={streamingMessages}
-            mockContent={mockStreamingContent}
-            isMockStreaming={isMockStreaming}
-            lastQuestion={lastQuestion}
-            onRegenerate={handleRegenerate}
-            historyMessages={historyMessages}
-          />
-        </div>
+        <MessageList
+          messages={streamingMessages}
+          mockContent={mockStreamingContent}
+          isMockStreaming={isMockStreaming}
+          lastQuestion={lastQuestion}
+          onRegenerate={handleRegenerate}
+          historyMessages={historyMessages}
+        />
       )}
-      {/* 连接选择器（懒加载，失败降级为"全数据源"） */}
       {/* SuggestionGrid */}
       <SuggestionGrid onPick={handleExamplePick} />
-      {/* AskBar — idle 态也显示在底部 */}
-      <AskBar
-        onResult={handleAskBarResult}
-        onError={(err) => setError(err)}
-        onLoading={handleLoading}
-        onQuestionChange={(q) => { setLastQuestion(q); lastQuestionRef.current = q; }}
-        conversationId={currentConversationId}
-        useMock={USE_MOCK}
-        onStreamToken={(token) => {
-          setMockStreamingContent((prev) => prev + token);
-        }}
-      />
     </>
   );
 
@@ -329,16 +353,14 @@ function HomePageInner() {
     <>
       {/* 消息展示区 */}
       {(streamingMessages.length > 0 || isMockStreaming || mockStreamingContent || historyMessages.length > 0) && (
-        <div className="flex-1 overflow-y-auto">
-          <MessageList
-            messages={streamingMessages}
-            mockContent={mockStreamingContent}
-            isMockStreaming={isMockStreaming}
-            lastQuestion={lastQuestion}
-            onRegenerate={handleRegenerate}
-            historyMessages={historyMessages}
-          />
-        </div>
+        <MessageList
+          messages={streamingMessages}
+          mockContent={mockStreamingContent}
+          isMockStreaming={isMockStreaming}
+          lastQuestion={lastQuestion}
+          onRegenerate={handleRegenerate}
+          historyMessages={historyMessages}
+        />
       )}
       {/* SearchResult */}
       {result && !isStreaming && streamingMessages.length === 0 && !USE_MOCK && (
@@ -358,55 +380,28 @@ function HomePageInner() {
           onRetry={() => { if (lastQuestion) handleExamplePick(lastQuestion); }}
         />
       )}
-      {/* AskBar — 保持在底部，不受结果态影响 */}
-      <AskBar
-        onResult={handleAskBarResult}
-        onError={(err) => setError(err)}
-        onLoading={handleLoading}
-        onQuestionChange={(q) => { setLastQuestion(q); lastQuestionRef.current = q; }}
-        conversationId={currentConversationId}
-        useMock={USE_MOCK}
-        onStreamToken={(token) => {
-          setMockStreamingContent((prev) => prev + token);
-        }}
-      />
     </>
   );
 
   const submittingContent = (
     <>
       {(streamingMessages.length > 0 || isMockStreaming || mockStreamingContent || historyMessages.length > 0) && (
-        <div className="flex-1 overflow-y-auto">
-          <MessageList
-            messages={streamingMessages}
-            mockContent={mockStreamingContent}
-            isMockStreaming={isMockStreaming}
-            lastQuestion={lastQuestion}
-            onRegenerate={handleRegenerate}
-            historyMessages={historyMessages}
-          />
-        </div>
+        <MessageList
+          messages={streamingMessages}
+          mockContent={mockStreamingContent}
+          isMockStreaming={isMockStreaming}
+          lastQuestion={lastQuestion}
+          onRegenerate={handleRegenerate}
+          historyMessages={historyMessages}
+        />
       )}
-      <AskBar
-        onResult={handleAskBarResult}
-        onError={(err) => setError(err)}
-        onLoading={handleLoading}
-        onQuestionChange={(q) => { setLastQuestion(q); lastQuestionRef.current = q; }}
-        conversationId={currentConversationId}
-        useMock={USE_MOCK}
-        isStreaming
-        onAbort={abort}
-        onStreamToken={(token) => {
-          setMockStreamingContent((prev) => prev + token);
-        }}
-      />
     </>
   );
 
   return (
-    <div className="flex h-full">
-      <ConversationBar collapsed={barCollapsed} onToggleCollapse={toggleBar} />
-      <div className="flex-1 min-w-0 relative">
+    <div className="flex h-full overflow-hidden">
+      <ConversationBar collapsed={barCollapsed} onToggleCollapse={toggleBar} onNew={handleNewConversation} />
+      <div className="flex-1 min-w-0 relative h-full">
         {barCollapsed && (
           <button
             onClick={toggleBar}
@@ -418,11 +413,12 @@ function HomePageInner() {
           </button>
         )}
         <OpsWorkbench
-          homeState={homeState}
-          idleContent={idleContent}
-          resultContent={resultContent}
-          submittingContent={submittingContent}
-        />
+            homeState={homeState}
+            idleContent={idleContent}
+            resultContent={resultContent}
+            submittingContent={submittingContent}
+            bottomBar={askBarNode}
+          />
       </div>
     </div>
   );

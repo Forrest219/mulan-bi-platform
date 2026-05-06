@@ -140,7 +140,7 @@ erDiagram
       "high_count": 2,
       "medium_count": 5,
       "low_count": 5,
-      "health_score": 72.0,
+      "health_score": 95.5,
       "triggered_by": 1,
       "created_at": "2026-04-03 10:00:00"
     }
@@ -206,9 +206,21 @@ stateDiagram-v2
 
 ### 4.2 评分算法
 
+密度扣分制：先计算每张表的平均违规密度，再线性扣分。表数归一化的目的是让大库和小库的评分可比——100 张表有 5 个 HIGH 问题比 1 张表有 5 个 HIGH 问题健康得多。
+
 ```python
-score = 100 - high_count * 20 - medium_count * 5 - low_count * 1
-score = max(0, min(100, score))
+# 权威实现：services/health_scan/scoring.py
+def calculate_health_score(high, medium, low, total_tables):
+    if total_tables == 0:
+        return None  # 无数据，不出分
+    density = (high * 5 + medium * 2 + low * 0.5) / total_tables
+    return max(0.0, round(100 - density * 10, 1))
+```
+
+**示例**：50 张表，2 HIGH + 5 MEDIUM + 5 LOW
+```
+density = (2×5 + 5×2 + 5×0.5) / 50 = 22.5 / 50 = 0.45
+score   = 100 - 0.45 × 10 = 95.5
 ```
 
 ### 4.3 异步执行

@@ -8,6 +8,7 @@ export interface TaskSchedule {
   task_label: string;
   description: string;
   schedule_expr: string;
+  cron_expr: string | null;
   is_enabled: boolean;
   last_run_at: string | null;
   last_run_status: string | null;
@@ -113,6 +114,19 @@ export async function toggleSchedule(key: string, isEnabled: boolean): Promise<v
   }
 }
 
+export async function updateScheduleCron(key: string, cronExpr: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/tasks/schedules/${key}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ cron_expr: cronExpr }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail?.message || err.detail || '保存失败');
+  }
+}
+
 export async function triggerTask(taskName: string): Promise<{ celery_task_id: string }> {
   const res = await fetch(`${API_BASE}/api/tasks/trigger`, {
     method: 'POST',
@@ -123,6 +137,30 @@ export async function triggerTask(taskName: string): Promise<{ celery_task_id: s
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail?.message || err.detail || '触发失败');
+  }
+  return res.json();
+}
+
+export async function parseCron(description: string): Promise<{ cron_expr: string; next_runs: string[] }> {
+  const res = await fetch(`${API_BASE}/api/tasks/parse-cron`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ description }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail?.message || err.detail || 'AI 解析失败');
+  }
+  return res.json();
+}
+
+export async function previewCron(cronExpr: string, n = 3): Promise<{ cron_expr: string; next_runs: string[] }> {
+  const sp = new URLSearchParams({ cron_expr: cronExpr, n: String(n) });
+  const res = await fetch(`${API_BASE}/api/tasks/preview-cron?${sp}`, { credentials: 'include' });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail?.message || err.detail || 'Cron 预览失败');
   }
   return res.json();
 }

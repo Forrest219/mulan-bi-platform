@@ -30,7 +30,7 @@ class TrendAnalysisTool(BaseTool):
     """
 
     name = "trend_analysis"
-    description = "趋势分析。分析指标的时间序列趋势，识别上升/下降/平稳模式，计算移动平均、趋势斜率、季节性分解等。"
+    description = "趋势分析（统计摘要）。注意：本工具返回统计摘要，不包含原始时间序列数据。如需逐年/逐月明细数据，请先用 query 工具获取，再用本工具做趋势判断。"
     metadata = ToolMetadata(
         category="analysis",
         version="1.0.0",

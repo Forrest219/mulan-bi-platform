@@ -8,6 +8,7 @@ export interface ComplianceRule {
   description: string;
   level: string;
   category: string;
+  display_group: string;
   db_type: string;
   suggestion: string;
   status: 'enabled' | 'disabled';
@@ -22,34 +23,32 @@ export interface ComplianceRulesResponse {
   disabled_count: number;
 }
 
-// Category metadata for display
+// Display group metadata (6 groups, replaces 13 sr_* categories)
 
-export const CATEGORY_LABELS: Record<string, string> = {
-  sr_layer_naming: '分层命名',
-  sr_type_alignment: '字段类型对齐',
-  sr_public_fields: '公共字段',
-  sr_field_naming: '字段命名',
-  sr_comment: '注释规范',
-  sr_database_whitelist: '数据库白名单',
-  sr_table_naming: '表名规范',
-  sr_view_naming: '视图命名',
+export const DISPLAY_GROUP_LABELS: Record<string, string> = {
+  naming: '命名规范',
+  field: '字段规范',
+  comment: '注释规范',
+  storage: '存储规范',
+  performance: '性能规范',
+  schema: '架构与元数据',
+  other: '其他',
 };
 
-export const CATEGORY_ICONS: Record<string, string> = {
-  sr_layer_naming: 'ri-stack-line',
-  sr_type_alignment: 'ri-code-s-slash-line',
-  sr_public_fields: 'ri-grid-line',
-  sr_field_naming: 'ri-text',
-  sr_comment: 'ri-chat-3-line',
-  sr_database_whitelist: 'ri-database-2-line',
-  sr_table_naming: 'ri-table-line',
-  sr_view_naming: 'ri-eye-line',
+export const DISPLAY_GROUP_ICONS: Record<string, string> = {
+  naming: 'ri-text',
+  field: 'ri-code-s-slash-line',
+  comment: 'ri-chat-3-line',
+  storage: 'ri-server-line',
+  performance: 'ri-speed-line',
+  schema: 'ri-layout-line',
+  other: 'ri-file-list-line',
 };
 
 // API functions
 
 export async function listComplianceRules(): Promise<ComplianceRulesResponse> {
-  const res = await fetch(`${API_BASE}/api/rules/?db_type=StarRocks`, {
+  const res = await fetch(`${API_BASE}/api/rules/`, {
     credentials: 'include',
   });
   if (!res.ok) throw new Error('获取合规规则列表失败');
@@ -74,6 +73,7 @@ export interface CreateComplianceRuleInput {
   description: string;
   level: 'HIGH' | 'MEDIUM' | 'LOW';
   category: string;
+  display_group?: string;
   db_type: string;
   suggestion?: string;
   scene_type?: string;
@@ -84,6 +84,7 @@ export interface UpdateComplianceRuleInput {
   description?: string;
   level?: string;
   category?: string;
+  display_group?: string;
   suggestion?: string;
   scene_type?: string;
   config_json?: Record<string, unknown>;

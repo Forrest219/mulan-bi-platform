@@ -21,10 +21,13 @@ TASK_LABELS = {
     "services.tasks.dqc_tasks.run_daily_full_cycle": "DQC 每日完整检查",
     "services.tasks.dqc_tasks.partition_maintenance": "DQC 分区维护",
     "services.tasks.dqc_tasks.cleanup_old_analyses": "DQC 分析清理",
-    "services.tasks.quality_tasks.cleanup_old_quality_results": "质量结果清理",
     "services.tasks.event_tasks.purge_old_events": "事件数据清理",
     "services.tasks.knowledge_base_tasks.reindex_hnsw_task": "HNSW 索引重建",
     "services.tasks.knowledge_base_tasks.vacuum_analyze_embeddings_task": "向量表 VACUUM",
+    "services.tasks.cleanup_tasks.cleanup_old_task_runs": "任务记录清理",
+    "services.tasks.api_contract_tasks.sample_asset": "API 资产采样",
+    "services.tasks.api_contract_tasks.run_cycle": "API 合规检查",
+    "services.tasks.api_contract_tasks.compare_snapshots": "API 快照对比",
 }
 
 

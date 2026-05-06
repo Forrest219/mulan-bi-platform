@@ -6,6 +6,7 @@ Spec 24 P0 改动：
 """
 import json
 import logging
+import time
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -1736,6 +1737,7 @@ async def query(
     _wrapper = CapabilityWrapper()
     _principal = {"id": user.get("id"), "role": user.get("role", "analyst"), "tenant_id": user.get("tenant_id")}
 
+    _t0 = time.monotonic()
     try:
         # wrapper.invoke 会自动处理：鉴权、敏感度检查、限流、熔断、缓存、成本计量、审计
         pipeline_result = await _wrapper.invoke(
@@ -1759,6 +1761,21 @@ async def query(
         # wrapper 返回 CapabilityResult，取 .data
         result_data = pipeline_result.data if hasattr(pipeline_result, "data") else pipeline_result
 
+        _duration_ms = int((time.monotonic() - _t0) * 1000)
+        log_nlq_query(
+            user_id=user_id,
+            question=question,
+            intent=result_data.get("intent") if isinstance(result_data, dict) else None,
+            datasource_luid=(
+                result_data.get("datasource_luid")
+                or (result_data.get("datasource") or {}).get("datasource_luid")
+                if isinstance(result_data, dict) else None
+            ),
+            response_type=result_data.get("response_type") if isinstance(result_data, dict) else None,
+            execution_time_ms=_duration_ms,
+            error_code=None,
+        )
+
         # Spec 24 P0: 响应头透传 trace_id
         response.headers["X-Trace-ID"] = trace_id
         return {
@@ -1769,6 +1786,12 @@ async def query(
 
     except NLQError as e:
         logger.warning("NLQ 错误 [%s] trace=%s: %s", e.code, trace_id, e.message, exc_info=True)
+        log_nlq_query(
+            user_id=user_id,
+            question=question,
+            execution_time_ms=int((time.monotonic() - _t0) * 1000),
+            error_code=e.code,
+        )
         raise _nlq_error_response(e.code, e.message, e.details)
 
     except HTTPException:
@@ -1776,6 +1799,12 @@ async def query(
 
     except Exception as exc:
         logger.error("NLQ 意外错误 trace=%s: %s", trace_id, exc, exc_info=True)
+        log_nlq_query(
+            user_id=user_id,
+            question=question,
+            execution_time_ms=int((time.monotonic() - _t0) * 1000),
+            error_code="SYS_001",
+        )
         raise HTTPException(
             status_code=500,
             detail={"code": "SYS_001", "message": "服务器内部错误", "details": {}},

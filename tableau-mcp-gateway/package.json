@@ -1,0 +1,9 @@
+{
+  "name": "tableau-mcp-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local npm dependency for Tableau MCP Gateway",
+  "dependencies": {
+    "@tableau/mcp-server": "latest"
+  }
+}

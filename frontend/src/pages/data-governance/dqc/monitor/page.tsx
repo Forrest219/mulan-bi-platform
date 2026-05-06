@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import DqcTabs from '../DqcTabs';
 import {
-  listAssets, listRules, createAsset, deleteAsset,
+  listAssets, listRules, createAsset, deleteAsset, batchDeleteAssets,
+  listAssetSchemas,
   createRule, updateRule, deleteRule,
+  listDatasourceTables, batchImportAssets,
   DqcAsset, DqcRule,
   DIMENSION_LABELS, RULE_TYPE_LABELS, SIGNAL_CONFIG, DIMENSION_RULE_COMPATIBILITY,
   type Dimension, type RuleType, type SignalLevel,
@@ -22,7 +24,7 @@ const ALL_DIMENSIONS = Object.keys(DIMENSION_LABELS) as Dimension[];
 
 interface RuleFieldDef { key: string; label: string; type: 'text' | 'number' | 'select'; placeholder?: string; help?: string; options?: { value: string; label: string }[]; min?: number; max?: number; step?: number; advanced?: boolean }
 
-const RULE_CONFIG_FIELDS: Record<RuleType, RuleFieldDef[]> = {
+const RULE_CONFIG_FIELDS: Partial<Record<RuleType, RuleFieldDef[]>> = {
   null_rate: [
     { key: 'column', label: '检查哪个字段', type: 'text', placeholder: '如 user_id', help: '哪个字段不允许为空' },
     { key: 'max_rate', label: '最多允许多少比例为空', type: 'number', placeholder: '如 0.05 = 最多 5% 为空', min: 0, max: 1, step: 0.01 },
@@ -57,6 +59,23 @@ const RULE_CONFIG_FIELDS: Record<RuleType, RuleFieldDef[]> = {
     { key: 'target_table', label: '对比哪张表', type: 'text', help: '两张表的行数应该一致或接近' },
     { key: 'tolerance_pct', label: '允许多大差异', type: 'number', min: 0, max: 1, step: 0.01, help: '填 0 = 必须完全一致；填 0.05 = 允许 5% 的偏差' },
   ],
+  schema_drift: [
+    { key: 'tolerance_cols', label: '允许变更的字段数', type: 'number', min: 0, help: '与上次快照相比，字段新增/删除数超过此值则报警。填 0 = 不允许任何 Schema 变更' },
+  ],
+  enum_check: [
+    { key: 'field', label: '字段名', type: 'text', placeholder: '如 status', help: '检查哪个字段的值是否在允许的枚举范围内' },
+    { key: 'allowed_values', label: '允许的值（逗号分隔）', type: 'text', placeholder: '如 active,inactive,pending', help: '这些值之外的数据视为异常' },
+  ],
+  sensitive_field: [
+    { key: 'patterns', label: '敏感字段关键词（逗号分隔）', type: 'text', placeholder: '如 phone,id_card,email', help: '字段名包含这些关键词时，检查是否已标注脱敏处理方式' },
+  ],
+  ai_field_comment: [
+    { key: 'min_coverage', label: '最低注释覆盖率', type: 'number', placeholder: '如 0.8', min: 0, max: 1, step: 0.01, help: 'DDL 中有注释的字段数 / 总字段数，低于此值则报警' },
+  ],
+  ai_table_description: [],
+  ai_metric_definition: [
+    { key: 'min_coverage', label: '最低指标定义覆盖率', type: 'number', placeholder: '如 0.8', min: 0, max: 1, step: 0.01, help: '已定义指标语义的字段数 / 全部可度量字段数，低于此值报警' },
+  ],
 };
 
 // ── 组件 ──────────────────────────────────────────────────────
@@ -76,8 +95,11 @@ export default function DqcMonitorPage() {
 
   // 筛选
   const [filterSignal, setFilterSignal] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
+  const [filterStatus, setFilterStatus] = useState('enabled');
   const [search, setSearch] = useState('');
+  const [filterDsIds, setFilterDsIds] = useState<Set<number>>(new Set());
+  const [filterSchemas, setFilterSchemas] = useState<Set<string>>(new Set());
+  const [schemaOptions, setSchemaOptions] = useState<string[]>([]);
 
   // 行展开
   const [expandedAssetId, setExpandedAssetId] = useState<number | null>(null);
@@ -102,13 +124,26 @@ export default function DqcMonitorPage() {
   // 确认删除
   const [confirm, setConfirm] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void }>({ open: false, title: '', message: '', onConfirm: () => {} });
 
+  // 批量选择
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
+  // 批量导入
+  const [showBatchImport, setShowBatchImport] = useState(false);
+
   // ── 加载资产列表 ────────────────────────────────────────────
 
   const fetchAssets = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const res = await listAssets({ signal: filterSignal || undefined, status: filterStatus || undefined, page, page_size: 20 });
+      const res = await listAssets({
+        datasource_ids: filterDsIds.size ? [...filterDsIds] : undefined,
+        schema_names: filterSchemas.size ? [...filterSchemas] : undefined,
+        signal: filterSignal || undefined,
+        status: filterStatus || undefined,
+        page,
+        page_size: 20,
+      });
       let items = res.items;
       if (search) {
         const q = search.toLowerCase();
@@ -122,9 +157,29 @@ export default function DqcMonitorPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, filterSignal, filterStatus, search]);
+  }, [page, filterDsIds, filterSchemas, filterSignal, filterStatus, search]);
 
   useEffect(() => { fetchAssets(); }, [fetchAssets]);
+
+  useEffect(() => { setSelectedIds(new Set()); }, [page, filterSignal, filterStatus, search, filterDsIds, filterSchemas]);
+
+  // 数据源列表 & schema 选项
+  useEffect(() => {
+    listDataSources().then(res => setDatasources(res.datasources ?? [])).catch(() => {});
+    listAssetSchemas().then(setSchemaOptions).catch(() => {});
+  }, []);
+
+  // 数据源筛选变化时重新加载 schema 选项，并清空已选 schema
+  useEffect(() => {
+    const ids = [...filterDsIds];
+    listAssetSchemas(ids).then(schemas => {
+      setSchemaOptions(schemas);
+      setFilterSchemas(prev => {
+        const next = new Set([...prev].filter(s => schemas.includes(s)));
+        return next.size === prev.size ? prev : next;
+      });
+    }).catch(() => {});
+  }, [filterDsIds]);
 
   // ── 展开行加载规则 ──────────────────────────────────────────
 
@@ -144,14 +199,10 @@ export default function DqcMonitorPage() {
 
   // ── 添加监控 ────────────────────────────────────────────────
 
-  const openAddAsset = async () => {
+  const openAddAsset = () => {
     setAssetForm({ datasource_id: 0, schema_name: '', table_name: '', auto_suggest_rules: true });
     setAssetFormError('');
     setShowAddAsset(true);
-    try {
-      const ds = await listDataSources();
-      setDatasources(ds.datasources);
-    } catch { setDatasources([]); }
   };
 
   const handleCreateAsset = async () => {
@@ -182,6 +233,29 @@ export default function DqcMonitorPage() {
         try {
           await deleteAsset(asset.id);
           setConfirm(prev => ({ ...prev, open: false }));
+          fetchAssets();
+        } catch (e) {
+          setError(getErrorMessage(e));
+          setConfirm(prev => ({ ...prev, open: false }));
+        }
+      },
+    });
+  };
+
+  const handleBatchDelete = () => {
+    const count = selectedIds.size;
+    setConfirm({
+      open: true,
+      title: '批量停用监控',
+      message: `确定停用已选的 ${count} 张表的监控？`,
+      onConfirm: async () => {
+        try {
+          const result = await batchDeleteAssets([...selectedIds]);
+          setSelectedIds(new Set());
+          setConfirm(prev => ({ ...prev, open: false }));
+          if (result.unauthorized > 0) {
+            setError(`已停用 ${result.deleted} 张，跳过 ${result.unauthorized} 张（非本人创建，无权操作）`);
+          }
           fetchAssets();
         } catch (e) {
           setError(getErrorMessage(e));
@@ -274,6 +348,28 @@ export default function DqcMonitorPage() {
     });
   };
 
+  const handleBatchDeleteRules = (assetId: number, rulesToDelete: DqcRule[]) => {
+    setConfirm({
+      open: true,
+      title: '批量删除规则',
+      message: `确定删除已选的 ${rulesToDelete.length} 条规则？`,
+      onConfirm: async () => {
+        try {
+          for (const r of rulesToDelete) await deleteRule(assetId, r.id);
+          setConfirm(prev => ({ ...prev, open: false }));
+          if (expandedAssetId === assetId) {
+            const res = await listRules(assetId);
+            setAssetRules(res.items);
+          }
+          fetchAssets();
+        } catch (e) {
+          setError(getErrorMessage(e));
+          setConfirm(prev => ({ ...prev, open: false }));
+        }
+      },
+    });
+  };
+
   const handleConfirmSuggested = async (assetId: number, rule: DqcRule) => {
     try {
       await updateRule(assetId, rule.id, { is_active: true });
@@ -306,9 +402,14 @@ export default function DqcMonitorPage() {
             <p className="text-[13px] text-slate-400 ml-7">注册监控表并配置质量规则</p>
           </div>
           {isDataAdmin && (
-            <button onClick={openAddAsset} className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-900 text-white text-[12px] font-medium rounded-lg hover:bg-slate-700 transition-colors">
-              <i className="ri-add-line" />添加监控
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setShowBatchImport(true)} className="flex items-center gap-1.5 px-3.5 py-1.5 border border-slate-200 text-slate-700 text-[12px] font-medium rounded-lg hover:bg-slate-50 transition-colors">
+                <i className="ri-download-cloud-line" />批量导入
+              </button>
+              <button onClick={openAddAsset} className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-900 text-white text-[12px] font-medium rounded-lg hover:bg-slate-700 transition-colors">
+                <i className="ri-add-line" />添加监控
+              </button>
+            </div>
           )}
         </div>
         <div className="max-w-6xl mx-auto">
@@ -325,7 +426,25 @@ export default function DqcMonitorPage() {
         )}
 
         {/* Filters */}
-        <div className="flex items-center gap-3 mb-5">
+        <div className="flex items-center gap-3 mb-5 flex-wrap">
+          <MultiSelectFilter
+            options={datasources}
+            selected={filterDsIds}
+            onChange={next => { setFilterDsIds(new Set([...next].map(Number))); setPage(1); }}
+            label="全部数据源"
+            getKey={o => String(o.id)}
+            getLabel={o => o.name}
+            toValue={k => Number(k)}
+          />
+          <MultiSelectFilter
+            options={schemaOptions.map(s => ({ id: s, name: s }))}
+            selected={filterSchemas}
+            onChange={next => { setFilterSchemas(next as Set<string>); setPage(1); }}
+            label="全部 Database"
+            getKey={o => o.id}
+            getLabel={o => o.name}
+            toValue={k => k}
+          />
           <select value={filterSignal} onChange={e => { setFilterSignal(e.target.value); setPage(1); }} className="text-xs px-3 py-1.5 border border-slate-200 rounded-lg text-slate-600 bg-white">
             <option value="">全部信号</option>
             <option value="GREEN">GREEN</option>
@@ -341,6 +460,11 @@ export default function DqcMonitorPage() {
             <i className="ri-search-line absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm" />
             <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} placeholder="搜索表名..." className="pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg text-[13px] w-56 bg-white" />
           </div>
+          {isDataAdmin && selectedIds.size > 0 && (
+            <button onClick={handleBatchDelete} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 border border-red-200 text-red-600 text-[12px] font-medium rounded-lg hover:bg-red-100 transition-colors">
+              <i className="ri-delete-bin-line" />停用已选 {selectedIds.size} 条
+            </button>
+          )}
         </div>
 
         {/* Asset Table */}
@@ -357,6 +481,17 @@ export default function DqcMonitorPage() {
             <table className="w-full">
               <thead>
                 <tr className="bg-slate-50">
+                  {isDataAdmin && (
+                    <th className="w-8 pl-3">
+                      <input
+                        type="checkbox"
+                        className="rounded"
+                        checked={assets.length > 0 && assets.every(a => selectedIds.has(a.id))}
+                        ref={el => { if (el) el.indeterminate = assets.some(a => selectedIds.has(a.id)) && !assets.every(a => selectedIds.has(a.id)); }}
+                        onChange={e => setSelectedIds(e.target.checked ? new Set(assets.map(a => a.id)) : new Set())}
+                      />
+                    </th>
+                  )}
                   <th className="w-8" />
                   {['资产名称', '数据源', '信号', '置信分', '规则', '操作'].map(h => (
                     <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5">{h}</th>
@@ -377,11 +512,18 @@ export default function DqcMonitorPage() {
                       onDetail={() => navigate(`/governance/dqc/assets/${asset.id}`)}
                       onDelete={() => handleDeleteAsset(asset)}
                       isDataAdmin={isDataAdmin}
+                      isSelected={selectedIds.has(asset.id)}
+                      onToggleSelect={() => setSelectedIds(prev => {
+                        const next = new Set(prev);
+                        next.has(asset.id) ? next.delete(asset.id) : next.add(asset.id);
+                        return next;
+                      })}
                       rulesLoading={rulesLoading}
                       rules={isExpanded ? assetRules : []}
                       onCreateRule={() => openCreateRule(asset.id)}
                       onEditRule={(r) => openEditRule(asset.id, r)}
                       onDeleteRule={(r) => handleDeleteRule(asset.id, r)}
+                      onBatchDeleteRules={(rs) => handleBatchDeleteRules(asset.id, rs)}
                       onConfirmSuggested={(r) => handleConfirmSuggested(asset.id, r)}
                     />
                   );
@@ -448,6 +590,14 @@ export default function DqcMonitorPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── 批量导入 Modal ────────────────────────────────── */}
+      {showBatchImport && (
+        <BatchImportModal
+          onClose={() => setShowBatchImport(false)}
+          onImported={() => { setShowBatchImport(false); fetchAssets(); }}
+        />
       )}
 
       {/* ── 规则 Modal ────────────────────────────────────── */}
@@ -604,7 +754,7 @@ export default function DqcMonitorPage() {
 
 // ── 资产行组件 ────────────────────────────────────────────────
 
-function AssetRow({ asset, isExpanded, sigCfg, onToggle, onDetail, onDelete, isDataAdmin, rulesLoading, rules, onCreateRule, onEditRule, onDeleteRule, onConfirmSuggested }: {
+function AssetRow({ asset, isExpanded, sigCfg, onToggle, onDetail, onDelete, isDataAdmin, isSelected, onToggleSelect, rulesLoading, rules, onCreateRule, onEditRule, onDeleteRule, onBatchDeleteRules, onConfirmSuggested }: {
   asset: DqcAsset;
   isExpanded: boolean;
   sigCfg: typeof SIGNAL_CONFIG.GREEN | null;
@@ -612,16 +762,29 @@ function AssetRow({ asset, isExpanded, sigCfg, onToggle, onDetail, onDelete, isD
   onDetail: () => void;
   onDelete: () => void;
   isDataAdmin: boolean;
+  isSelected: boolean;
+  onToggleSelect: () => void;
   rulesLoading: boolean;
   rules: DqcRule[];
   onCreateRule: () => void;
   onEditRule: (r: DqcRule) => void;
   onDeleteRule: (r: DqcRule) => void;
+  onBatchDeleteRules: (rs: DqcRule[]) => void;
   onConfirmSuggested: (r: DqcRule) => void;
 }) {
+  const colSpan = isDataAdmin ? 8 : 7;
+  const [selectedRuleIds, setSelectedRuleIds] = useState<Set<number>>(new Set());
+
+  // 规则列表变化时清空选择
+  useEffect(() => { setSelectedRuleIds(new Set()); }, [rules]);
   return (
     <>
       <tr className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer" onClick={onToggle}>
+        {isDataAdmin && (
+          <td className="pl-3 py-3" onClick={e => e.stopPropagation()}>
+            <input type="checkbox" className="rounded" checked={isSelected} onChange={onToggleSelect} />
+          </td>
+        )}
         <td className="pl-3 py-3">
           <i className={`${isExpanded ? 'ri-arrow-down-s-line' : 'ri-arrow-right-s-line'} text-slate-400`} />
         </td>
@@ -652,15 +815,25 @@ function AssetRow({ asset, isExpanded, sigCfg, onToggle, onDetail, onDelete, isD
       </tr>
       {isExpanded && (
         <tr>
-          <td colSpan={7} className="bg-slate-50 px-4 py-3">
+          <td colSpan={colSpan} className="bg-slate-50 px-4 py-3">
             <div className="ml-4 border border-slate-200 rounded-lg bg-white">
               <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
                 <span className="text-[12px] font-semibold text-slate-600">规则列表</span>
-                {isDataAdmin && (
-                  <button onClick={onCreateRule} className="text-[11px] text-blue-600 hover:text-blue-500 flex items-center gap-1">
-                    <i className="ri-add-line" />新建规则
-                  </button>
-                )}
+                <div className="flex items-center gap-3">
+                  {isDataAdmin && selectedRuleIds.size > 0 && (
+                    <button
+                      onClick={() => onBatchDeleteRules(rules.filter(r => selectedRuleIds.has(r.id)))}
+                      className="text-[11px] text-red-500 hover:text-red-600 flex items-center gap-1"
+                    >
+                      <i className="ri-delete-bin-line" />删除已选 {selectedRuleIds.size} 条
+                    </button>
+                  )}
+                  {isDataAdmin && (
+                    <button onClick={onCreateRule} className="text-[11px] text-blue-600 hover:text-blue-500 flex items-center gap-1">
+                      <i className="ri-add-line" />新建规则
+                    </button>
+                  )}
+                </div>
               </div>
               {rulesLoading ? (
                 <div className="text-center py-6 text-[12px] text-slate-400">加载规则...</div>
@@ -670,6 +843,17 @@ function AssetRow({ asset, isExpanded, sigCfg, onToggle, onDetail, onDelete, isD
                 <table className="w-full">
                   <thead>
                     <tr className="bg-slate-50">
+                      {isDataAdmin && (
+                        <th className="w-8 pl-4">
+                          <input
+                            type="checkbox"
+                            className="rounded"
+                            checked={rules.length > 0 && rules.every(r => selectedRuleIds.has(r.id))}
+                            ref={el => { if (el) el.indeterminate = rules.some(r => selectedRuleIds.has(r.id)) && !rules.every(r => selectedRuleIds.has(r.id)); }}
+                            onChange={e => setSelectedRuleIds(e.target.checked ? new Set(rules.map(r => r.id)) : new Set())}
+                          />
+                        </th>
+                      )}
                       {['规则名称', '维度', '类型', '状态', '操作'].map(h => (
                         <th key={h} className="text-left text-[10px] font-semibold text-slate-500 uppercase px-4 py-2">{h}</th>
                       ))}
@@ -680,6 +864,20 @@ function AssetRow({ asset, isExpanded, sigCfg, onToggle, onDetail, onDelete, isD
                       const isSuggested = rule.is_system_suggested && !rule.is_active;
                       return (
                         <tr key={rule.id} className="border-t border-slate-100 hover:bg-slate-50">
+                          {isDataAdmin && (
+                            <td className="pl-4 py-2.5">
+                              <input
+                                type="checkbox"
+                                className="rounded"
+                                checked={selectedRuleIds.has(rule.id)}
+                                onChange={() => setSelectedRuleIds(prev => {
+                                  const next = new Set(prev);
+                                  next.has(rule.id) ? next.delete(rule.id) : next.add(rule.id);
+                                  return next;
+                                })}
+                              />
+                            </td>
+                          )}
                           <td className="px-4 py-2.5 text-[12px] text-slate-700">
                             {isSuggested && <i className="ri-lightbulb-line text-amber-500 mr-1" />}
                             {rule.name}
@@ -720,5 +918,361 @@ function AssetRow({ asset, isExpanded, sigCfg, onToggle, onDetail, onDelete, isD
         </tr>
       )}
     </>
+  );
+}
+
+// ── 多选筛选器 ────────────────────────────────────────────────
+
+function MultiSelectFilter<T extends { id: string | number; name: string }>({
+  options, selected, onChange, label, getKey, getLabel, toValue,
+}: {
+  options: T[];
+  selected: Set<string | number>;
+  onChange: (next: Set<string | number>) => void;
+  label: string;
+  getKey: (o: T) => string | number;
+  getLabel: (o: T) => string;
+  toValue: (k: string) => string | number;
+}) {
+  const [open, setOpen] = useState(false);
+  const count = selected.size;
+  const btnLabel = count === 0 ? label
+    : count === 1 ? getLabel(options.find(o => String(getKey(o)) === String([...selected][0]))!) || label
+    : `${count} 项已选`;
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className={`flex items-center gap-1 text-xs px-3 py-1.5 border rounded-lg bg-white transition-colors ${count > 0 ? 'border-blue-300 text-blue-700' : 'border-slate-200 text-slate-600'}`}
+      >
+        {btnLabel}
+        <i className={`ri-arrow-${open ? 'up' : 'down'}-s-line text-slate-400`} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute top-full mt-1 left-0 z-20 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[180px] max-h-64 overflow-y-auto">
+            {options.length === 0 && (
+              <div className="px-3 py-2 text-[12px] text-slate-400">暂无选项</div>
+            )}
+            {options.map(o => {
+              const key = String(getKey(o));
+              const checked = selected.has(toValue(key));
+              return (
+                <label key={key} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="rounded shrink-0"
+                    checked={checked}
+                    onChange={() => {
+                      const next = new Set(selected);
+                      checked ? next.delete(toValue(key)) : next.add(toValue(key));
+                      onChange(next);
+                    }}
+                  />
+                  <span className="text-[12px] text-slate-700 truncate">{getLabel(o)}</span>
+                </label>
+              );
+            })}
+            {count > 0 && (
+              <div className="border-t border-slate-100 mt-1 pt-1">
+                <button onClick={() => { onChange(new Set()); setOpen(false); }} className="w-full text-left px-3 py-1.5 text-[11px] text-slate-400 hover:text-slate-600">
+                  清空筛选
+                </button>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── 批量导入 Modal ────────────────────────────────────────────
+
+type TableItem = { schema_name: string; table_name: string };
+type ImportStep = 'pick-source' | 'select-tables';
+
+function BatchImportModal({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+  const [step, setStep] = useState<ImportStep>('pick-source');
+  const [datasources, setDatasources] = useState<DataSource[]>([]);
+  const [datasourceId, setDatasourceId] = useState<number>(0);
+  const [autoSuggest, setAutoSuggest] = useState(false);
+  const [loadingTables, setLoadingTables] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [allTables, setAllTables] = useState<TableItem[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveResult, setSaveResult] = useState('');
+
+  useEffect(() => {
+    listDataSources().then(r => setDatasources(r.datasources)).catch(() => {});
+  }, []);
+
+  const key = (t: TableItem) => `${t.schema_name}.${t.table_name}`;
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return allTables;
+    const q = search.toLowerCase();
+    return allTables.filter(t => t.table_name.toLowerCase().includes(q) || t.schema_name.toLowerCase().includes(q));
+  }, [allTables, search]);
+
+  const groups = useMemo(() => {
+    const map = new Map<string, TableItem[]>();
+    for (const t of filtered) {
+      const arr = map.get(t.schema_name) ?? [];
+      arr.push(t);
+      map.set(t.schema_name, arr);
+    }
+    return new Map([...map.entries()].sort((a, b) => a[0].localeCompare(b[0])));
+  }, [filtered]);
+
+  const handleLoadTables = async () => {
+    if (!datasourceId) { setLoadError('请选择数据源'); return; }
+    setLoadingTables(true);
+    setLoadError('');
+    try {
+      const res = await listDatasourceTables(datasourceId);
+      setAllTables(res.items);
+      setSelected(new Set(res.items.map(key)));
+      setStep('select-tables');
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : '加载失败，请重试');
+    } finally {
+      setLoadingTables(false);
+    }
+  };
+
+  const toggleItem = (t: TableItem) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(key(t))) next.delete(key(t)); else next.add(key(t));
+      return next;
+    });
+  };
+
+  const toggleSchema = (schema: string) => {
+    const items = groups.get(schema) ?? [];
+    const allSelected = items.every(t => selected.has(key(t)));
+    setSelected(prev => {
+      const next = new Set(prev);
+      items.forEach(t => allSelected ? next.delete(key(t)) : next.add(key(t)));
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    const allSelected = filtered.every(t => selected.has(key(t)));
+    setSelected(prev => {
+      const next = new Set(prev);
+      filtered.forEach(t => allSelected ? next.delete(key(t)) : next.add(key(t)));
+      return next;
+    });
+  };
+
+  const handleImport = async () => {
+    if (selected.size === 0) return;
+    setSaving(true);
+    setSaveResult('');
+    try {
+      const tables = allTables.filter(t => selected.has(key(t)));
+      const res = await batchImportAssets({ datasource_id: datasourceId, tables, auto_suggest_rules: autoSuggest });
+      setSaveResult(`成功注册 ${res.created} 张，跳过 ${res.skipped} 张已存在`);
+      setTimeout(() => onImported(), 1800);
+    } catch (e) {
+      setSaveResult(e instanceof Error ? e.message : '导入失败，请重试');
+      setSaving(false);
+    }
+  };
+
+  // 三态 checkbox ref helper
+  const SchemaCheckbox = ({ schema }: { schema: string }) => {
+    const items = groups.get(schema) ?? [];
+    const selectedCount = items.filter(t => selected.has(key(t))).length;
+    const allChk = selectedCount === items.length;
+    const indeterminate = selectedCount > 0 && selectedCount < items.length;
+    const ref = useRef<HTMLInputElement>(null);
+    useEffect(() => { if (ref.current) ref.current.indeterminate = indeterminate; }, [indeterminate]);
+    return (
+      <input
+        ref={ref}
+        type="checkbox"
+        checked={allChk}
+        onChange={() => toggleSchema(schema)}
+        className="rounded"
+        onClick={e => e.stopPropagation()}
+      />
+    );
+  };
+
+  const allFilteredSelected = filtered.length > 0 && filtered.every(t => selected.has(key(t)));
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4 flex flex-col max-h-[88vh]" onClick={e => e.stopPropagation()}>
+        {/* 头部 */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
+          <div>
+            <h2 className="text-[15px] font-semibold text-slate-800">从数据源批量导入</h2>
+            {step === 'select-tables' && (
+              <p className="text-[11px] text-slate-400 mt-0.5">已选 {selected.size} 张 / 共 {allTables.length} 张</p>
+            )}
+          </div>
+          <button onClick={onClose}><i className="ri-close-line text-slate-400 hover:text-slate-600 text-lg" /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {/* Step 1: 选数据源 */}
+          {step === 'pick-source' && (
+            <div className="px-6 py-6 space-y-5">
+              {loadError && (
+                <div className="px-3 py-2 bg-red-50 text-red-600 text-[12px] rounded-lg">{loadError}</div>
+              )}
+              <div>
+                <label className="text-[11px] font-medium text-slate-500 mb-1.5 block">数据源</label>
+                <select
+                  value={datasourceId || ''}
+                  onChange={e => setDatasourceId(Number(e.target.value))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px]"
+                >
+                  <option value="">选择数据源</option>
+                  {datasources.map(ds => <option key={ds.id} value={ds.id}>{ds.name}</option>)}
+                </select>
+              </div>
+              <label className="flex items-start gap-2.5 text-[12px] text-slate-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoSuggest}
+                  onChange={e => setAutoSuggest(e.target.checked)}
+                  className="rounded mt-0.5"
+                />
+                <span>
+                  导入后自动 Profiling 并推荐规则
+                  <span className="block text-[11px] text-slate-400 mt-0.5">2000+ 张表建议关闭，可导入后逐表开启</span>
+                </span>
+              </label>
+            </div>
+          )}
+
+          {/* Step 2: 选表 */}
+          {step === 'select-tables' && (
+            <div className="flex flex-col h-full">
+              {/* 搜索 + 全选 */}
+              <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-3 shrink-0">
+                <div className="relative flex-1">
+                  <i className="ri-search-line absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm" />
+                  <input
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    placeholder="搜索 schema 或表名..."
+                    className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg text-[12px]"
+                  />
+                </div>
+                <button
+                  onClick={toggleAll}
+                  className="text-[11px] text-slate-500 hover:text-slate-700 whitespace-nowrap"
+                >
+                  {allFilteredSelected ? '清空' : '全选'}
+                </button>
+              </div>
+
+              {/* 树形列表 */}
+              <div className="overflow-y-auto flex-1 py-1">
+                {groups.size === 0 ? (
+                  <div className="text-center py-12 text-[12px] text-slate-400">无匹配表</div>
+                ) : (
+                  [...groups.entries()].map(([schema, tables]) => {
+                    const isCollapsed = collapsed.has(schema);
+                    const selCount = tables.filter(t => selected.has(key(t))).length;
+                    return (
+                      <div key={schema}>
+                        {/* Schema 节点 */}
+                        <div
+                          className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-slate-50 cursor-pointer select-none"
+                          onClick={() => setCollapsed(prev => {
+                            const next = new Set(prev);
+                            isCollapsed ? next.delete(schema) : next.add(schema);
+                            return next;
+                          })}
+                        >
+                          <i className={`ri-arrow-${isCollapsed ? 'right' : 'down'}-s-line text-slate-400 text-[13px] w-4 shrink-0`} />
+                          <i className="ri-database-2-line text-blue-400 text-[13px] shrink-0" />
+                          <span className="text-[12px] font-medium text-slate-800 flex-1 truncate">{schema}</span>
+                          <span className="text-[10px] text-slate-400 mr-2 shrink-0">{selCount}/{tables.length}</span>
+                          <span onClick={e => e.stopPropagation()}>
+                            <SchemaCheckbox schema={schema} />
+                          </span>
+                        </div>
+                        {/* 表节点（缩进 + 左边框连线） */}
+                        {!isCollapsed && (
+                          <div className="ml-[22px] border-l border-slate-200">
+                            {tables.map((t, idx) => (
+                              <div
+                                key={t.table_name}
+                                onClick={() => toggleItem(t)}
+                                className="flex items-center gap-1.5 pl-3 pr-3 py-1 hover:bg-blue-50 cursor-pointer relative"
+                              >
+                                {/* 横向连接线 */}
+                                <span className="absolute left-0 top-1/2 w-3 h-px bg-slate-200 -translate-y-px shrink-0" />
+                                <i className="ri-table-line text-slate-300 text-[12px] shrink-0" />
+                                <span className="text-[12px] text-slate-600 flex-1 truncate">{t.table_name}</span>
+                                <input
+                                  type="checkbox"
+                                  checked={selected.has(key(t))}
+                                  onChange={() => toggleItem(t)}
+                                  onClick={e => e.stopPropagation()}
+                                  className="rounded shrink-0"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 底部操作栏 */}
+        <div className="px-6 py-4 border-t border-slate-100 shrink-0">
+          {saveResult && (
+            <p className={`text-[12px] mb-3 ${saveResult.includes('失败') ? 'text-red-600' : 'text-emerald-600'}`}>
+              {saveResult}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={step === 'select-tables' ? () => setStep('pick-source') : onClose}
+              className="px-4 py-2 text-[12px] text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
+            >
+              {step === 'select-tables' ? '上一步' : '取消'}
+            </button>
+            {step === 'pick-source' ? (
+              <button
+                onClick={handleLoadTables}
+                disabled={loadingTables || !datasourceId}
+                className="px-4 py-2 text-[12px] text-white bg-blue-600 rounded-lg hover:bg-blue-500 disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {loadingTables ? <><i className="ri-loader-4-line animate-spin" />加载中…</> : '加载表列表'}
+              </button>
+            ) : (
+              <button
+                onClick={handleImport}
+                disabled={saving || selected.size === 0}
+                className="px-4 py-2 text-[12px] text-white bg-slate-800 rounded-lg hover:bg-slate-700 disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {saving ? <><i className="ri-loader-4-line animate-spin" />导入中…</> : `导入已选 ${selected.size} 张`}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

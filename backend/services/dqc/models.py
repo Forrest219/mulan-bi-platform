@@ -108,6 +108,7 @@ class DqcRuleTemplate(Base):
     default_config = Column(JSONB, nullable=False, server_default=sa_text("'{}'"))
     match_condition = Column(JSONB, nullable=False, server_default=sa_text("'{}'"))
     severity = Column(String(16), nullable=False, server_default=sa_text("'MEDIUM'"))
+    rule_package = Column(String(8), nullable=True)
 
     enabled = Column(Boolean, nullable=False, server_default=sa_text("true"))
     is_builtin = Column(Boolean, nullable=False, server_default=sa_text("false"))
@@ -133,6 +134,7 @@ class DqcRuleTemplate(Base):
             "default_config": self.default_config,
             "match_condition": self.match_condition,
             "severity": self.severity,
+            "rule_package": self.rule_package,
             "enabled": self.enabled,
             "is_builtin": self.is_builtin,
             "is_modified_by_user": self.is_modified_by_user,

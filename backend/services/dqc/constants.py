@@ -43,6 +43,9 @@ class RuleType(str, Enum):
     CUSTOM_SQL = "custom_sql"
     VOLUME_ANOMALY = "volume_anomaly"
     TABLE_COUNT_COMPARE = "table_count_compare"
+    ENUM_CHECK = "enum_check"
+    AI_TABLE_DESCRIPTION = "ai_table_description"
+    AI_FIELD_COMMENT = "ai_field_comment"
 
 
 ALL_RULE_TYPES = [rt.value for rt in RuleType]
@@ -104,13 +107,16 @@ RULE_TYPE_TO_DIMENSION = {
     RuleType.REGEX.value: Dimension.VALIDITY.value,
     RuleType.VOLUME_ANOMALY.value: Dimension.COMPLETENESS.value,
     RuleType.TABLE_COUNT_COMPARE.value: Dimension.CONSISTENCY.value,
+    RuleType.ENUM_CHECK.value: Dimension.VALIDITY.value,
+    RuleType.AI_TABLE_DESCRIPTION.value: Dimension.COMPLETENESS.value,
+    RuleType.AI_FIELD_COMMENT.value: Dimension.COMPLETENESS.value,
 }
 
 DIMENSION_RULE_COMPATIBILITY = {
-    Dimension.COMPLETENESS.value: {RuleType.NULL_RATE.value, RuleType.CUSTOM_SQL.value, RuleType.VOLUME_ANOMALY.value},
+    Dimension.COMPLETENESS.value: {RuleType.NULL_RATE.value, RuleType.CUSTOM_SQL.value, RuleType.VOLUME_ANOMALY.value, RuleType.AI_TABLE_DESCRIPTION.value, RuleType.AI_FIELD_COMMENT.value},
     Dimension.ACCURACY.value: {RuleType.RANGE_CHECK.value, RuleType.CUSTOM_SQL.value},
     Dimension.TIMELINESS.value: {RuleType.FRESHNESS.value, RuleType.CUSTOM_SQL.value},
-    Dimension.VALIDITY.value: {RuleType.REGEX.value, RuleType.RANGE_CHECK.value, RuleType.CUSTOM_SQL.value},
+    Dimension.VALIDITY.value: {RuleType.REGEX.value, RuleType.RANGE_CHECK.value, RuleType.CUSTOM_SQL.value, RuleType.ENUM_CHECK.value},
     Dimension.UNIQUENESS.value: {RuleType.UNIQUENESS.value, RuleType.CUSTOM_SQL.value},
     Dimension.CONSISTENCY.value: {RuleType.CUSTOM_SQL.value, RuleType.TABLE_COUNT_COMPARE.value},
 }

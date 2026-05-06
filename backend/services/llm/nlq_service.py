@@ -695,8 +695,9 @@ def validate_field_captions_consistency(
             "Stage 2/1 fieldCaption 一致性校验失败: datasource_luid=%s, missing=%s, trace=%s",
             datasource_luid, missing_fields, get_trace_id(),
         )
+        return False, missing_fields, actual_captions
 
-    return False, missing_fields, actual_captions
+    return True, [], []
 
 
 async def _retry_field_consistency(
@@ -768,13 +769,31 @@ async def _retry_field_consistency(
 
 
 # === JSON Schema 校验 ===
+_FUNCTION_NORMALIZE_MAP = {
+    "groupby": "NONE", "group_by": "NONE", "group": "NONE",
+    "dimension": "NONE", "dim": "NONE", "none": "NONE",
+    "unspecified": "UNSPECIFIED",
+}
+
+
 def validate_one_pass_output(raw: Any) -> Tuple[bool, Optional[str]]:
     """
     校验 One-Pass LLM 输出是否符合 Schema。
-    返回 (is_valid, error_message)
+    返回 (is_valid, error_message)。在校验前就地规范化已知无效 function 值。
     """
     if not isinstance(raw, dict):
         return False, f"输出不是 JSON 对象：{type(raw)}"
+
+    # 规范化 vizql_json.fields[].function（就地修改，避免 LLM 返回无效聚合名导致反复重试）
+    for f in raw.get("vizql_json", {}).get("fields", []):
+        if isinstance(f, dict):
+            func = f.get("function")
+            if func is None:
+                f.pop("function", None)  # null → 移除键（无聚合的维度字段）
+            elif isinstance(func, str):
+                normalized = _FUNCTION_NORMALIZE_MAP.get(func.lower())
+                if normalized:
+                    f["function"] = normalized
 
     # 校验 required 字段
     for field in ONE_PASS_OUTPUT_SCHEMA.get("required", []):
@@ -801,6 +820,8 @@ def validate_one_pass_output(raw: Any) -> Tuple[bool, Optional[str]]:
             return False, f"fields[{i}] 缺少 fieldCaption"
         if "function" in f:
             func_val = f["function"]
+            if not isinstance(func_val, str):
+                return False, f"fields[{i}].function 必须是字符串，得到 {type(func_val).__name__}"
             func_enum = ONE_PASS_OUTPUT_SCHEMA["properties"]["vizql_json"]["properties"]["fields"]["items"]["properties"]["function"]["enum"]
             # Tableau MCP 支持表达式如 SUM(Sales)，也支持裸聚合名如 SUM
             import re
@@ -1127,20 +1148,16 @@ def route_datasource(question: str, connection_id: int = None) -> Optional[Dict[
     db = TableauDatabase()
     session = db.session
 
-    # C4：connection_id=None 时按优先级选最优活跃连接
+    # C4：connection_id=None 时自动选第一个活跃连接
     if connection_id is None:
-        # 优先级：is_default=True > priority 高 > last_test_at 最近
         active_conn = session.query(_TableauConnection).filter(
             _TableauConnection.is_active == True,
         ).order_by(
-            _TableauConnection.is_default.desc(),
-            _TableauConnection.priority.desc(),
             _TableauConnection.last_test_at.desc().nullslast(),
         ).first()
         if active_conn:
             connection_id = active_conn.id
-            logger.debug("route_datasource: connection_id=None，自动路由到 connection_id=%d（is_default=%s, priority=%s）",
-                        connection_id, active_conn.is_default, active_conn.priority)
+            logger.debug("route_datasource: connection_id=None，自动路由到 connection_id=%d", connection_id)
         else:
             logger.warning("route_datasource: connection_id=None 且无活跃连接，跳过 connection_id 过滤")
 
@@ -1186,8 +1203,11 @@ def route_datasource(question: str, connection_id: int = None) -> Optional[Dict[
 
     best_ds = scored[0][0]
     return {
-        "datasource_luid": best_ds.tableau_id,
-        "datasource_name": best_ds.name,
+        "datasource_luid": best_ds.tableau_id,   # kept for backward compat (search.py)
+        "luid": best_ds.tableau_id,              # alias used by query_tool.py
+        "datasource_name": best_ds.name,         # kept for backward compat
+        "name": best_ds.name,                    # alias
+        "asset_id": best_ds.id,                  # DB integer PK for field cache lookup
         "connection_id": best_ds.connection_id,
         "score": scored[0][1],
     }
@@ -1195,13 +1215,9 @@ def route_datasource(question: str, connection_id: int = None) -> Optional[Dict[
 
 def extract_terms(question: str) -> List[str]:
     """从用户问题中提取候选词（简单分词）"""
-    # 去除标点，分割中英文
     import re
-    # 移除标点符号
     cleaned = re.sub(r"[，。！？、；：""''（）《》【】\.,!?;:\"\'\(\)\[\]]", " ", question)
-    # 按空格分割
     tokens = cleaned.split()
-    # 提取长度 >= 2 的词
     terms = [t.strip() for t in tokens if len(t.strip()) >= 2]
     return terms
 
@@ -1223,8 +1239,11 @@ def calculate_routing_score(user_terms: List[str], field_captions: List[str], ds
     """
     import math
 
-    # 字段完备度
-    matched_count = sum(1 for term in user_terms if any(term.lower() in fc.lower() for fc in field_captions))
+    # 字段完备度（双向子串匹配：term 含字段名 OR 字段名含 term）
+    matched_count = sum(
+        1 for term in user_terms
+        if any(term.lower() in fc.lower() or fc.lower() in term.lower() for fc in field_captions)
+    )
     field_coverage = matched_count / max(len(user_terms), 1) if user_terms else 0.0
 
     # 新鲜度

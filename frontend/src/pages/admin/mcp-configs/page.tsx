@@ -50,9 +50,13 @@ interface McpServerForm {
 }
 
 interface TestResult {
-  status: 'online' | 'offline';
+  status: 'online' | 'offline' | 'auth_failed';
   latency_ms: number;
   http_status?: number;
+  auth?: string;
+  endpoint?: string;
+  endpoint_status?: string;
+  site_id?: string;
   error?: string;
 }
 
@@ -89,6 +93,13 @@ const URL_PLACEHOLDERS: Record<string, string> = {
   custom:    'http://your-mcp-server/path',
 };
 
+const SERVER_URL_LABELS: Record<string, string> = {
+  tableau: 'MCP HTTP Endpoint',
+  starrocks: 'MCP HTTP Endpoint',
+  mysql: 'MCP HTTP Endpoint',
+  custom: 'Server URL',
+};
+
 const defaultForm: McpServerForm = {
   name: '',
   type: 'tableau',
@@ -97,6 +108,18 @@ const defaultForm: McpServerForm = {
   is_active: true,
   credentials: {},
 };
+
+function normalizeUrl(url?: string): string {
+  return (url || '').trim().replace(/\/+$/, '');
+}
+
+function isTableauMcpEndpointLikelyWrong(form: McpServerForm): boolean {
+  if (form.type !== 'tableau') return false;
+  const endpoint = normalizeUrl(form.server_url);
+  const tableauServer = normalizeUrl(form.credentials.tableau_server);
+  if (!endpoint) return false;
+  return endpoint === tableauServer || !endpoint.toLowerCase().includes('/tableau-mcp');
+}
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
 
@@ -169,12 +192,12 @@ async function apiTest(id: number): Promise<TestResult> {
   return res.json();
 }
 
-async function apiTestDraft(serverUrl: string): Promise<TestResult> {
+async function apiTestDraft(serverUrl: string, type?: string, credentials?: Record<string, string>): Promise<TestResult> {
   const res = await fetch(`${API_BASE}/test-draft`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ server_url: serverUrl }),
+    body: JSON.stringify({ server_url: serverUrl, type, credentials }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -826,7 +849,7 @@ export default function McpConfigsPage() {
   // 表单内测试连接
   const handleFormTest = async () => {
     if (editingId === null && !form.server_url.trim()) {
-      alert('请先填写 Server URL');
+      alert(`请先填写 ${SERVER_URL_LABELS[form.type] ?? 'Server URL'}`);
       return;
     }
     setFormTesting(true);
@@ -834,7 +857,7 @@ export default function McpConfigsPage() {
     try {
       const result = editingId !== null
         ? await apiTest(editingId)
-        : await apiTestDraft(form.server_url);
+        : await apiTestDraft(form.server_url, form.type, form.credentials);
       setFormTestResult(result);
     } catch (e: unknown) {
       setFormTestResult({
@@ -952,7 +975,7 @@ export default function McpConfigsPage() {
                     <tr className="bg-slate-50 border-b border-slate-200">
                       <th className="px-4 py-3 text-left font-medium text-slate-600">类型</th>
                       <th className="px-4 py-3 text-left font-medium text-slate-600">名称</th>
-                      <th className="px-4 py-3 text-left font-medium text-slate-600">Server URL</th>
+                      <th className="px-4 py-3 text-left font-medium text-slate-600">Endpoint</th>
                       <th className="px-4 py-3 text-center font-medium text-slate-600">状态</th>
                       <th className="px-4 py-3 text-left font-medium text-slate-600">操作</th>
                     </tr>
@@ -1018,7 +1041,9 @@ export default function McpConfigsPage() {
                                   : testResult
                                     ? testResult.status === 'online'
                                       ? `${testResult.latency_ms}ms`
-                                      : `离线`
+                                      : testResult.status === 'auth_failed'
+                                        ? '认证失败'
+                                        : '离线'
                                     : '测试'}
                               </button>
                               {/* 删除 */}
@@ -1036,11 +1061,15 @@ export default function McpConfigsPage() {
                               <div className={`mt-1 text-xs px-2 py-0.5 rounded text-left ${
                                 testResult.status === 'online'
                                   ? 'text-emerald-600'
-                                  : 'text-red-500'
+                                  : testResult.status === 'auth_failed'
+                                    ? 'text-amber-600'
+                                    : 'text-red-500'
                               }`}>
                                 {testResult.status === 'online'
                                   ? `连接正常 · ${testResult.latency_ms}ms`
-                                  : `无法连接: ${friendlyError(testResult.error)}`}
+                                  : testResult.status === 'auth_failed'
+                                    ? `PAT 认证失败: ${testResult.error ?? '凭证无效或已过期'}`
+                                    : `无法连接: ${friendlyError(testResult.error)}`}
                               </div>
                             )}
                           </td>
@@ -1141,10 +1170,10 @@ export default function McpConfigsPage() {
                   </select>
                 </div>
 
-                {/* Server URL */}
+                {/* MCP HTTP Endpoint */}
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Server URL <span className="text-red-400">*</span>
+                    {SERVER_URL_LABELS[form.type] ?? 'Server URL'} <span className="text-red-400">*</span>
                   </label>
                   <input
                     type="text"
@@ -1154,6 +1183,11 @@ export default function McpConfigsPage() {
                     placeholder={URL_PLACEHOLDERS[form.type] ?? 'http://...'}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:border-blue-500"
                   />
+                  {form.type === 'tableau' && (
+                    <p className={`mt-1 text-xs ${isTableauMcpEndpointLikelyWrong(form) ? 'text-amber-600' : 'text-slate-400'}`}>
+                      这里填写 MCP 服务地址，例如 http://localhost:3927/tableau-mcp；Tableau 站点地址填写在下方认证区。
+                    </p>
+                  )}
                 </div>
 
                 {/* 凭证字段 — Tableau */}
@@ -1327,32 +1361,37 @@ export default function McpConfigsPage() {
                 <button
                   onClick={handleFormTest}
                   disabled={formTesting}
-                  title={!form.server_url.trim() ? '请先填写 Server URL' : undefined}
+                  title={!form.server_url.trim() ? `请先填写 ${SERVER_URL_LABELS[form.type] ?? 'Server URL'}` : undefined}
                   className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${
                     formTestResult?.status === 'online'
                       ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                      : formTestResult?.status === 'offline'
-                        ? 'border-red-200 bg-red-50 text-red-600'
-                        : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+                      : formTestResult?.status === 'auth_failed'
+                        ? 'border-amber-200 bg-amber-50 text-amber-700'
+                        : formTestResult?.status === 'offline'
+                          ? 'border-red-200 bg-red-50 text-red-600'
+                          : 'border-slate-200 text-slate-500 hover:bg-slate-50'
                   } disabled:opacity-40 disabled:cursor-not-allowed`}
                 >
                   <i className={`text-xs ${
                     formTesting ? 'ri-loader-4-line animate-spin' :
                     formTestResult?.status === 'online' ? 'ri-check-line' :
+                    formTestResult?.status === 'auth_failed' ? 'ri-lock-line' :
                     formTestResult?.status === 'offline' ? 'ri-close-circle-line' :
                     'ri-wifi-line'
                   }`} />
                   {formTesting
                     ? '测试中...'
                     : formTestResult?.status === 'online'
-                      ? `连接正常 · ${formTestResult.latency_ms}ms`
+                      ? form.type === 'tableau'
+                        ? `认证与 Endpoint 正常 · ${formTestResult.latency_ms}ms`
+                        : `连接正常 · ${formTestResult.latency_ms}ms`
+                      : formTestResult?.status === 'auth_failed'
+                        ? 'PAT 认证失败'
                       : formTestResult?.status === 'offline'
-                        ? '连接失败'
-                        : editingId !== null
-                          ? '测试连接'
-                          : '测试连接'}
+                          ? '连接失败'
+                          : form.type === 'tableau' ? '测试认证与 Endpoint' : '测试连接'}
                 </button>
-                {formTestResult?.status === 'offline' && formTestResult.error && (
+                {(formTestResult?.status === 'offline' || formTestResult?.status === 'auth_failed') && formTestResult.error && (
                   <p className="text-xs px-2 py-1 rounded text-red-600 bg-red-50">
                     {formTestResult.error}
                   </p>

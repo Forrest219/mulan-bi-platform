@@ -90,14 +90,23 @@ def get_tableau_mcp_server_url() -> str:
         from services.mcp.models import McpServer
         db = SessionLocal()
         try:
-            record = (
+            records = (
                 db.query(McpServer)
                 .filter(McpServer.type == "tableau", McpServer.is_active == True)
                 .order_by(McpServer.created_at.asc())
-                .first()
+                .all()
             )
-            if record:
-                return record.server_url
+            for record in records:
+                credentials = record.credentials or {}
+                tableau_server = (credentials.get("tableau_server") or "").rstrip("/")
+                record_url = (record.server_url or "").rstrip("/")
+                # mcp_servers.type='tableau' may store the Tableau site root
+                # together with PAT credentials. That is not a streamable-http
+                # MCP endpoint, so do not use it as TABLEAU_MCP_SERVER_URL.
+                if record_url and "/mcp" in record_url.lower():
+                    return record.server_url
+                if record_url and record_url != tableau_server:
+                    return record.server_url
         finally:
             db.close()
     except Exception:

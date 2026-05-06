@@ -55,6 +55,8 @@ class CreateDatasourceSemanticsRequest(BaseModel):
     semantic_name_zh: Optional[str] = None
     semantic_description: Optional[str] = None
     business_definition: Optional[str] = None
+    metric_definition: Optional[str] = None
+    dimension_definition: Optional[str] = None
     usage_scenarios: Optional[str] = None
     owner: Optional[str] = None
     steward: Optional[str] = None
@@ -69,6 +71,8 @@ class UpdateDatasourceSemanticsRequest(BaseModel):
     semantic_name_zh: Optional[str] = None
     semantic_description: Optional[str] = None
     business_definition: Optional[str] = None
+    metric_definition: Optional[str] = None
+    dimension_definition: Optional[str] = None
     usage_scenarios: Optional[str] = None
     owner: Optional[str] = None
     steward: Optional[str] = None
@@ -99,7 +103,7 @@ async def list_datasource_semantics(
         page_size=page_size,
     )
     return {
-        "items": [item.to_dict() for item in items], # 确保返回 dict
+        "items": items,
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -166,7 +170,7 @@ async def create_datasource_semantics(req: CreateDatasourceSemanticsRequest, req
     except Exception:
         pass  # 事件发布失败不影响主流程
 
-    return {"item": obj.to_dict(), "message": "创建成功"} # 确保返回 dict
+    return {"item": obj, "message": "创建成功"}
 
 
 @router.put("/datasources/{ds_id}")
@@ -191,7 +195,7 @@ async def update_datasource_semantics(
     success, result = sm.update_datasource_semantics(ds_id, user_id=user["id"], **fields)
     if not success:
         raise HTTPException(status_code=400, detail=result)
-    return {"item": result.to_dict(), "message": "更新成功"} # 确保返回 dict
+    return {"item": result, "message": "更新成功"}
 
 
 # --- AI Generation & Versions ---
@@ -221,7 +225,7 @@ async def generate_datasource_ai(ds_id: int, req: GenerateDatasourceAIRequest, r
     )
     if not success:
         raise HTTPException(status_code=400, detail=result)
-    return {"item": result.to_dict(), "message": "AI 语义草稿已生成"} # 确保返回 dict
+    return {"item": result, "message": "AI 语义草稿已生成"}
 
 
 @router.get("/datasources/{ds_id}/versions")
@@ -235,7 +239,7 @@ async def get_datasource_versions(ds_id: int, request: Request, db: Session = De
     verify_connection_access(ds.connection_id, user, db) # 使用统一的权限验证函数
 
     versions = sm.get_datasource_semantic_history(ds_id)
-    return {"versions": [v.to_dict() for v in versions]} # 确保返回 dict
+    return {"versions": versions} # 确保返回 dict
 
 
 @router.post("/datasources/{ds_id}/rollback/{version_id}")

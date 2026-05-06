@@ -82,7 +82,7 @@ export default function TableauConnectionsPage() {
       try {
         const { getSyncStatus, listSyncLogs } = await import('../../../api/tableau');
         const statusResp = await getSyncStatus(connId);
-        if (statusResp.sync_status === 'idle') {
+        if (statusResp.status === 'idle') {
           try {
             const logsResp = await listSyncLogs(connId, { page: 1, page_size: 1 });
             if (logsResp.logs && logsResp.logs.length > 0) {
@@ -105,7 +105,7 @@ export default function TableauConnectionsPage() {
           setSyncingId(null);
           return;
         }
-        if (statusResp.sync_status === 'failed') {
+        if (statusResp.status === 'failed') {
           setModalNotify({ success: false, message: '同步失败，请查看同步日志' });
           fetchConnections();
           setSyncingId(null);
@@ -221,10 +221,11 @@ export default function TableauConnectionsPage() {
                 {conn.auto_sync_enabled ? (
                   <div><span className="text-slate-400">下次同步：</span> {(() => {
                     const now = new Date();
-                    const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-                    const today12 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0);
-                    const tomorrow0 = new Date(today0.getTime() + 86400_000);
-                    const next = now < today0 ? today0 : now < today12 ? today12 : tomorrow0;
+                    const d = now.getDate(), m = now.getMonth(), y = now.getFullYear();
+                    const t00 = new Date(y, m, d, 0, 0, 0);
+                    const t12 = new Date(y, m, d, 12, 0, 0);
+                    const t00next = new Date(t00.getTime() + 86400_000);
+                    const next = now < t00 ? t00 : now < t12 ? t12 : t00next;
                     return next.toLocaleString('zh-CN');
                   })()}</div>
                 ) : (

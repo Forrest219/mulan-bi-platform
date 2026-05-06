@@ -8,8 +8,11 @@ export interface DataSource {
   port: number;
   database_name: string;
   username: string;
+  description: string | null;
   owner_id: number;
   is_active: boolean;
+  last_tested_at: string | null;
+  last_test_success: boolean | null;
   extra_config: string | null;
   created_at: string;
   updated_at: string;
@@ -23,6 +26,7 @@ export interface CreateDataSourceInput {
   database_name: string;
   username: string;
   password: string;
+  description?: string;
   extra_config?: Record<string, unknown>;
 }
 
@@ -34,6 +38,7 @@ export interface UpdateDataSourceInput {
   database_name?: string;
   username?: string;
   password?: string;
+  description?: string;
   extra_config?: Record<string, unknown>;
   is_active?: boolean;
 }

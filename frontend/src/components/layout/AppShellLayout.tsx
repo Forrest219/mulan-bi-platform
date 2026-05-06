@@ -12,7 +12,7 @@
  * - 响应式断点：>= 1280px 展开，768~1279px 折叠，< 768px 隐藏
  * - 折叠状态通过 localStorage 'mulan-sidebar-collapsed' 持久化
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Outlet } from 'react-router-dom';
 import AppHeader from './AppHeader';
 import AppSidebar from './AppSidebar';
@@ -54,16 +54,28 @@ export default function AppShellLayout() {
     return () => window.removeEventListener('resize', handler);
   }, []);
 
-  const toggleSidebar = () => {
+  const toggleSidebar = useCallback(() => {
     if (isMobile) {
       setMobileOpen((o) => !o);
     } else {
       setSidebarCollapsed((c) => !c);
     }
-  };
+  }, [isMobile]);
+
+  // ⌘+\ 快捷键收起/展开侧边栏
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
+        e.preventDefault();
+        toggleSidebar();
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [toggleSidebar]);
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
+    <div className="flex h-screen bg-slate-50">
       {/* 移动端 overlay */}
       {isMobile && mobileOpen && (
         <div
@@ -81,7 +93,7 @@ export default function AppShellLayout() {
       )}
 
       {/* 主内容区 */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* 顶部栏（含移动端 hamburger） */}
         <div className="shrink-0">
           {isMobile && (
@@ -96,7 +108,7 @@ export default function AppShellLayout() {
         </div>
 
         {/* 页面内容（Suspense 边界提供骨架屏） */}
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 overflow-auto min-h-0">
           <Suspense fallback={<PageSkeleton />}>
             <Outlet />
           </Suspense>

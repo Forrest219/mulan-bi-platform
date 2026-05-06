@@ -16,7 +16,7 @@ export default function DatasourcesPage() {
   const [editingDs, setEditingDs] = useState<DataSource | null>(null);
   const [formData, setFormData] = useState({
     name: '', db_type: 'mysql', host: '', port: 3306,
-    database_name: '', username: '', password: '',
+    database_name: '', username: '', password: '', description: '',
   });
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -50,7 +50,7 @@ export default function DatasourcesPage() {
   useEffect(() => { fetchDatasources(); }, []);
 
   const resetForm = () => {
-    setFormData({ name: '', db_type: 'mysql', host: '', port: 3306, database_name: '', username: '', password: '' });
+    setFormData({ name: '', db_type: 'mysql', host: '', port: 3306, database_name: '', username: '', password: '', description: '' });
     setFormError('');
     setEditingDs(null);
     setFormTestResult(null);
@@ -70,6 +70,7 @@ export default function DatasourcesPage() {
     setFormData({
       name: ds.name, db_type: ds.db_type, host: ds.host, port: ds.port,
       database_name: ds.database_name, username: ds.username, password: '',
+      description: ds.description ?? '',
     });
     setFormError('');
     setFormTestResult(null);
@@ -100,6 +101,7 @@ export default function DatasourcesPage() {
         const updateData: Record<string, unknown> = {
           name: formData.name, db_type: formData.db_type, host: formData.host,
           port: formData.port, database_name: formData.database_name, username: formData.username,
+          description: formData.description || null,
         };
         if (formData.password) updateData.password = formData.password;
         await updateDataSource(editingDs.id, updateData as Parameters<typeof updateDataSource>[1]);
@@ -320,6 +322,15 @@ export default function DatasourcesPage() {
                 </div>
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1.5">备注</label>
+                <textarea value={formData.description}
+                  onChange={e => setFormData({ ...formData, description: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 resize-none"
+                  rows={2}
+                  placeholder="选填，描述该连接的用途，如：生产环境 OpenClaw 主库" />
+              </div>
+
               {formError && (
                 <div className="text-sm text-red-600 bg-red-50 px-4 py-2.5 rounded-lg">{formError}</div>
               )}
@@ -404,23 +415,34 @@ export default function DatasourcesPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {datasources.map(ds => (
-              <div key={ds.id} className="bg-white border border-slate-200 rounded-xl p-5 hover:shadow-md transition-shadow">
+              <div key={ds.id} className="bg-white border border-slate-200 rounded-xl p-5 hover:shadow-md transition-shadow flex flex-col">
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <h3 className="font-medium text-slate-800">{ds.name}</h3>
                     <span className="text-xs text-slate-400">{DB_TYPE_OPTIONS.find(o => o.value === ds.db_type)?.label || ds.db_type}</span>
                   </div>
-                  <span
-                    className={`text-xs px-2 py-0.5 rounded-full ${ds.is_active ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}
-                    title="仅表示该配置是否启用，不代表连接测试通过"
-                  >
-                    {ds.is_active ? '已启用' : '已停用'}
-                  </span>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {ds.last_tested_at && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full flex items-center gap-1 ${ds.last_test_success ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                        <i className={ds.last_test_success ? 'ri-check-line' : 'ri-close-line'} />
+                        {ds.last_test_success ? '连通' : '断连'}
+                      </span>
+                    )}
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full ${ds.is_active ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}
+                    >
+                      {ds.is_active ? '已启用' : '已停用'}
+                    </span>
+                  </div>
                 </div>
-                <div className="text-xs text-slate-500 space-y-1 mb-4">
-                  <div><span className="text-slate-400">地址：</span>{ds.host}:{ds.port}{ds.database_name ? `/${ds.database_name}` : ''}</div>
+                <div className="text-xs text-slate-500 space-y-1 mb-4 flex-1">
+                  <div className="truncate" title={`${ds.host}:${ds.port}`}><span className="text-slate-400">主机：</span>{ds.host}:{ds.port}</div>
+                  {ds.database_name && <div><span className="text-slate-400">数据库：</span>{ds.database_name}</div>}
                   <div><span className="text-slate-400">用户：</span>{ds.username}</div>
+                  {ds.description && <div className="text-slate-400 italic truncate" title={ds.description}>{ds.description}</div>}
+                  <div><span className="text-slate-400">创建时间：</span>{formatDate(ds.created_at)}</div>
                   <div><span className="text-slate-400">更新时间：</span>{formatDate(ds.updated_at)}</div>
+                  {ds.last_tested_at && <div><span className="text-slate-400">最后测试：</span>{formatDate(ds.last_tested_at)}</div>}
                 </div>
                 <div className="flex items-center gap-2 pt-3 border-t border-slate-100">
                   <button onClick={() => handleTest(ds.id)}
@@ -467,6 +489,7 @@ export default function DatasourcesPage() {
       {/* Confirm Modal */}
       {confirmModal?.open && (
         <ConfirmModal
+          open={confirmModal.open}
           title={confirmModal.title}
           message={confirmModal.message}
           onConfirm={confirmModal.onConfirm}

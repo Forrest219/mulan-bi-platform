@@ -17,8 +17,9 @@ class SemanticStatus:
     APPROVED = "approved"
     PUBLISHED = "published"
     REJECTED = "rejected"
+    ARCHIVED = "archived"  # Tableau 资产已删除时自动归档
 
-    ALL = [DRAFT, AI_GENERATED, REVIEWED, APPROVED, PUBLISHED, REJECTED]
+    ALL = [DRAFT, AI_GENERATED, REVIEWED, APPROVED, PUBLISHED, REJECTED, ARCHIVED]
 
     # 允许的状态流转
     TRANSITIONS = {
@@ -28,6 +29,7 @@ class SemanticStatus:
         APPROVED: [PUBLISHED, REVIEWED],
         PUBLISHED: [DRAFT],  # 回滚后降级
         REJECTED: [DRAFT],
+        ARCHIVED: [DRAFT],   # 管理员手动恢复
     }
 
 
@@ -73,6 +75,8 @@ class TableauDatasourceSemantics(Base):
     semantic_name_zh = Column(String(256), nullable=True)
     semantic_description = Column(Text, nullable=True)
     business_definition = Column(Text, nullable=True)
+    metric_definition = Column(Text, nullable=True)
+    dimension_definition = Column(Text, nullable=True)
     usage_scenarios = Column(Text, nullable=True)
     owner = Column(String(128), nullable=True)
     steward = Column(String(128), nullable=True)
@@ -97,6 +101,8 @@ class TableauDatasourceSemantics(Base):
             "semantic_name_zh": self.semantic_name_zh,
             "semantic_description": self.semantic_description,
             "business_definition": self.business_definition,
+            "metric_definition": self.metric_definition,
+            "dimension_definition": self.dimension_definition,
             "usage_scenarios": self.usage_scenarios,
             "owner": self.owner,
             "steward": self.steward,

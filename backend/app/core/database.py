@@ -33,7 +33,7 @@ engine = create_engine(
 # 使用 scoped_session 确保每个线程/协程都有自己的 Session
 # 并在请求结束后自动关闭
 SessionLocal = scoped_session(
-    sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    sessionmaker(autocommit=False, autoflush=False, expire_on_commit=False, bind=engine)
 )
 
 Base = declarative_base()
@@ -56,7 +56,6 @@ def init_db():
         from services.semantic_maintenance.models import TableauDatasourceSemantics, TableauDatasourceSemanticVersion, TableauFieldSemantics, TableauFieldSemanticVersion, TableauPublishLog
         from services.events.models import BiEvent, BiNotification, BiEventSubscription
         from services.knowledge_base.models import KbGlossary, KbSchema, KbDocument, KbEmbedding
-        from services.governance.models import QualityRule, QualityResult, QualityScore
 
         Base.metadata.create_all(bind=engine)
         logger.info("Database schema initialized successfully.")

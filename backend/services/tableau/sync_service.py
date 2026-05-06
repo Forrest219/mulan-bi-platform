@@ -249,9 +249,34 @@ class TableauSyncService:
             logger.error("Datasource sync error: %s", e, exc_info=True)
             errors.append(f"Datasource sync: {e}")
 
+        # 为本次同步到的 datasource 自动创建语义占位记录
+        if synced_ids["datasource"]:
+            try:
+                from services.semantic_maintenance.service import SemanticMaintenanceService
+                sm = SemanticMaintenanceService()
+                for ds_tableau_id in synced_ids["datasource"]:
+                    try:
+                        sm.get_or_create_datasource_semantics(
+                            connection_id=connection_id,
+                            tableau_datasource_id=ds_tableau_id,
+                        )
+                    except Exception as _sem_err:
+                        logger.warning("semantic stub skipped %s: %s", ds_tableau_id, _sem_err)
+            except Exception as _sm_err:
+                logger.warning("semantic auto-init skipped: %s", _sm_err)
+
         # 软删除：标记不再存在的资产
         all_ids = synced_ids["workbook"] + synced_ids["dashboard"] + synced_ids["view"] + synced_ids["datasource"]
         deleted_count = db.mark_assets_deleted(connection_id, all_ids)
+
+        # 归档已删除数据源的语义记录
+        try:
+            from services.semantic_maintenance.database import SemanticMaintenanceDatabase
+            sm_db = SemanticMaintenanceDatabase()
+            active_ds_ids = [str(tid) for tid in (synced_ids.get("datasource") or [])]
+            sm_db.archive_semantics_for_deleted_assets(connection_id, active_ds_ids)
+        except Exception as _arc_err:
+            logger.warning("semantic archive skipped: %s", _arc_err)
 
         # 计算同步耗时和状态
         duration_sec = int(time.time() - start_time)
@@ -758,6 +783,15 @@ class TableauRestSyncService:
         # 软删除
         all_ids = synced_ids["workbook"] + synced_ids["dashboard"] + synced_ids["view"] + synced_ids["datasource"]
         deleted_count = db.mark_assets_deleted(connection_id, all_ids)
+
+        # 归档已删除数据源的语义记录
+        try:
+            from services.semantic_maintenance.database import SemanticMaintenanceDatabase
+            sm_db = SemanticMaintenanceDatabase()
+            active_ds_ids = [str(tid) for tid in (synced_ids.get("datasource") or [])]
+            sm_db.archive_semantics_for_deleted_assets(connection_id, active_ds_ids)
+        except Exception as _arc_err:
+            logger.warning("semantic archive skipped: %s", _arc_err)
 
         duration_sec = int(time.time() - start_time)
         total = len(all_ids)

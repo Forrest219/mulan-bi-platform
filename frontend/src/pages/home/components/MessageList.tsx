@@ -2,7 +2,15 @@ import React, { useEffect, useRef } from 'react';
 import MessageBubble from '../../../components/chat/MessageBubble';
 import { MessageActions } from './MessageActions';
 import SourceCard from './SourceCard';
-import type { StreamingMessage } from '../../../hooks/useStreamingChat';
+import type { StreamingMessage, TableData } from '../../../hooks/useStreamingChat';
+
+interface HistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  created_at?: string;
+  response_type?: string | null;
+  response_data?: unknown;
+}
 
 interface MessageListProps {
   messages: StreamingMessage[];
@@ -10,11 +18,24 @@ interface MessageListProps {
   isMockStreaming?: boolean;
   lastQuestion?: string;
   onRegenerate?: () => void;
-  historyMessages?: Array<{role: 'user'|'assistant'; content: string}>;
+  historyMessages?: HistoryMessage[];
 }
 
 function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onRegenerate, historyMessages }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  /** Reconstruct TableData from a history message's persisted response_data. */
+  function histTableData(msg: HistoryMessage): TableData | undefined {
+    if (msg.response_type !== 'table' || !msg.response_data || typeof msg.response_data !== 'object') return undefined;
+    const rd = msg.response_data as { fields?: string[]; rows?: (string | number | null)[][] };
+    const { fields, rows } = rd;
+    if (!fields?.length || !rows?.length) return undefined;
+    const col_types = fields.map((_, i) => {
+      const sample = rows!.slice(0, 5).map((r) => r[i]).filter((v) => v != null && v !== '');
+      return sample.length > 0 && sample.every((v) => typeof v === 'number') ? 'numeric' : 'string';
+    }) as ('numeric' | 'string')[];
+    return { fields, rows: rows!, col_types };
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -45,7 +66,13 @@ function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onR
               role={msg.role}
               content={msg.content}
               isStreaming={false}
+              tableData={histTableData(msg)}
             />
+            {msg.created_at && (
+              <p className={`text-[10px] text-slate-400 mt-1 ${msg.role === 'user' ? 'text-right' : 'ml-1'}`}>
+                {new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+              </p>
+            )}
           </div>
         ))}
 
@@ -70,7 +97,14 @@ function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onR
                   isError={msg.isError}
                   thinking={msg.thinking}
                   traceId={msg.traceId}
+                  tableData={msg.tableData}
+                  chartData={msg.chartData}
                 />
+                {msg.timestamp && !msg.isStreaming && (
+                  <p className={`text-[10px] text-slate-400 mt-1 ${msg.role === 'user' ? 'text-right' : 'ml-1'}`}>
+                    {new Date(msg.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                )}
                 {msg.role === 'assistant' && !msg.isStreaming && (
                   <>
                     {msg.metadata && msg.metadata.sources_count > 0 && (

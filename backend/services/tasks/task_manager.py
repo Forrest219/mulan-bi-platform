@@ -2,11 +2,42 @@
 from datetime import datetime, timedelta, date
 from math import ceil
 from typing import Optional, Dict, Any, List
+import logging
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from services.tasks.models import BiTaskRun, BiTaskSchedule
+
+logger = logging.getLogger(__name__)
+
+
+def _compute_next_run(cron_expr: Optional[str]) -> Optional[str]:
+    """Return ISO-format next run time for a 5-field cron expression, or None."""
+    if not cron_expr:
+        return None
+    try:
+        from croniter import croniter
+        cr = croniter(cron_expr, datetime.now())
+        return cr.get_next(datetime).strftime("%Y-%m-%dT%H:%M:%S")
+    except Exception:
+        return None
+
+
+def _cron_expr_to_crontab(cron_expr: str):
+    """Parse a 5-field cron string into a celery crontab object."""
+    from celery.schedules import crontab as celery_crontab
+    parts = cron_expr.strip().split()
+    if len(parts) != 5:
+        raise ValueError(f"Invalid cron expression (need 5 fields): {cron_expr!r}")
+    minute, hour, dom, month, dow = parts
+    return celery_crontab(
+        minute=minute,
+        hour=hour,
+        day_of_month=dom,
+        month_of_year=month,
+        day_of_week=dow,
+    )
 
 
 class TaskManager:
@@ -169,9 +200,14 @@ class TaskManager:
         }
 
     def list_schedules(self, db: Session) -> List[Dict[str, Any]]:
-        """返回所有调度配置"""
+        """返回所有调度配置，附带 next_run_at 计算值"""
         schedules = db.query(BiTaskSchedule).order_by(BiTaskSchedule.id).all()
-        return [s.to_dict() for s in schedules]
+        result = []
+        for s in schedules:
+            d = s.to_dict()
+            d["next_run_at"] = _compute_next_run(s.cron_expr)
+            result.append(d)
+        return result
 
     def update_schedule_enabled(
         self, db: Session, schedule_key: str, is_enabled: bool
@@ -200,3 +236,36 @@ class TaskManager:
             schedule.last_run_status = status
             schedule.updated_at = func.now()
             db.commit()
+
+    def update_schedule_cron(
+        self, db: Session, schedule_key: str, cron_expr: str
+    ) -> Optional[BiTaskSchedule]:
+        """更新调度的 cron 表达式，同时写入 Redis（供 Beat 立即生效）"""
+        schedule = db.query(BiTaskSchedule).filter(
+            BiTaskSchedule.schedule_key == schedule_key
+        ).first()
+        if not schedule:
+            return None
+
+        schedule.cron_expr = cron_expr
+        schedule.updated_at = func.now()
+        db.commit()
+        db.refresh(schedule)
+
+        # 同步写入 Redis，Beat 在 60s 内感知变更
+        try:
+            from redbeat import RedBeatSchedulerEntry
+            from services.tasks import celery_app
+
+            celery_schedule = _cron_expr_to_crontab(cron_expr)
+            entry = RedBeatSchedulerEntry(
+                schedule_key, schedule.task_name, celery_schedule, app=celery_app
+            )
+            entry.save()
+            logger.info("Updated redbeat entry '%s' → %s", schedule_key, cron_expr)
+        except ImportError:
+            logger.warning("redbeat not installed; Redis schedule not updated for '%s'", schedule_key)
+        except Exception as e:
+            logger.warning("Failed to update Redis schedule for '%s': %s", schedule_key, e)
+
+        return schedule

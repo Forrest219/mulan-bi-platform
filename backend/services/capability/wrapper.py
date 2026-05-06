@@ -284,6 +284,18 @@ class CapabilityWrapper:
             )
             return result
 
+        # 2b. llm_complete backend: 与 llm backend 相同，直接调 complete()
+        if backend_name == "llm_complete":
+            from services.llm.service import LLMService
+            llm = LLMService()
+            result = await llm.complete(
+                prompt=params.get("prompt", ""),
+                system=params.get("system"),
+                timeout=params.get("timeout", 30),
+                purpose=params.get("purpose", "default"),
+            )
+            return result
+
         # 3. nlq backend: delegate to nlq_service.run (nlq_search capability)
         if backend_name == "nlq":
             from services.llm import nlq_service as _nlq_svc

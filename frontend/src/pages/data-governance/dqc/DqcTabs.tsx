@@ -1,10 +1,11 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 
 const TABS = [
-  { key: '/governance/dqc', label: '概览' },
-  { key: '/governance/dqc/monitor', label: '监控资产' },
-  { key: '/governance/dqc/signals', label: '信号灯' },
-  { key: '/governance/dqc/templates', label: '规则模板' },
+  { key: '/governance/dqc',              label: '健康看板' },
+  { key: '/governance/dqc/monitor',      label: '监控资产' },
+  { key: '/governance/dqc/check-records', label: '检查记录' },
+  { key: '/governance/dqc/derived-rules', label: '检查规则' },
+  { key: '/governance/dqc/templates',     label: '检查能力库' },
 ] as const;
 
 export default function DqcTabs() {
@@ -14,7 +15,9 @@ export default function DqcTabs() {
   return (
     <div className="flex gap-1 mt-4">
       {TABS.map(({ key, label }) => {
-        const active = pathname === key;
+        const active =
+          pathname === key ||
+          (key !== '/governance/dqc' && pathname.startsWith(key + '/'));
         return (
           <button
             key={key}

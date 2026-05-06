@@ -18,6 +18,22 @@ os.environ.setdefault("ADMIN_PASSWORD", "")  # 禁用自动创建管理员
 os.environ.setdefault("SECURE_COOKIES", "false")
 os.environ.setdefault("SERVICE_JWT_SECRET", "test-jwt-secret-for-service-auth-32ch")
 
+# ─── 生产库防护 ───────────────────────────────────────────────────────────────
+# setdefault 只在环境变量未设置时生效；若开发者 shell 已 export DATABASE_URL 指向
+# 生产库，测试数据会直接写入生产，此处提前硬拦截。
+_db_url = os.environ.get("DATABASE_URL", "")
+_db_name = _db_url.rsplit("/", 1)[-1] if "/" in _db_url else _db_url
+if _db_url and "test" not in _db_name:
+    raise RuntimeError(
+        f"\n⛔  测试正在连接非测试数据库，已阻断！\n"
+        f"    DATABASE_URL = {_db_url}\n"
+        f"    数据库名必须包含 'test'（正确示例：mulan_bi_test）\n"
+        f"    修复方法：\n"
+        f"      unset DATABASE_URL\n"
+        f"      # 或者：\n"
+        f"      export DATABASE_URL=postgresql://mulan:mulan@localhost:5432/mulan_bi_test\n"
+    )
+
 import pytest
 from fastapi.testclient import TestClient
 from app.core.database import Base, engine
@@ -178,34 +194,26 @@ def analyst_client():
 @pytest.fixture(scope="function")
 def db_session():
     """
-    function-scoped 数据库 session — 每个测试后自动 rollback，实现数据隔离。
+    function-scoped 数据库 session — savepoint 模式，真正隔离测试数据。
 
-    用法示例：
-        def test_something(db_session):
-            db_session.add(SomeModel(...))
-            db_session.flush()  # 生成 id，但不提交
-            # 测试结束后自动 rollback，不影响其他测试
+    原理：
+      1. 开启外层事务（outer transaction），整个测试期间永不 commit
+      2. Session 以 join_transaction_mode="create_savepoint" 绑定到该连接：
+         session.commit() 只推进 SAVEPOINT，不真正写库
+      3. 测试结束后 outer_trans.rollback()，所有变更回滚
+
+    解决了旧 rollback-after-yield 方案的根本缺陷：
+    旧方案在 session.commit() 之后才执行 rollback，此时 rollback 是 no-op。
     """
-    from app.core.database import SessionLocal
-    session = SessionLocal()
+    from app.core.database import engine
+    from sqlalchemy.orm import Session
+
+    conn = engine.connect()
+    outer_trans = conn.begin()
+    session = Session(bind=conn, join_transaction_mode="create_savepoint")
     try:
         yield session
-        session.rollback()
     finally:
         session.close()
-
-
-@pytest.fixture(scope="function", autouse=False)
-def rollback_after_test():
-    """
-    可选 cleanup hook：在长时间运行的测试套件后手动调用清理。
-    默认禁用，避免干扰 session-scoped TestClient 的事务管理。
-    如需使用，在测试函数签名中加入此 fixture 即可。
-    """
-    yield
-    from app.core.database import SessionLocal
-    session = SessionLocal()
-    try:
-        session.rollback()
-    finally:
-        session.close()
+        outer_trans.rollback()
+        conn.close()

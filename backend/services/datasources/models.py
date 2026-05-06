@@ -1,7 +1,8 @@
 """数据源数据模型"""
 from typing import Optional, List, Dict, Any
+from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text
 from app.core.database import Base, JSONB, sa_func, sa_text  # 导入中央配置的 Base, JSONB, func, text
 from sqlalchemy.orm import Session
 
@@ -18,9 +19,12 @@ class DataSource(Base):
     database_name = Column(String(128), nullable=False)
     username = Column(String(128), nullable=False)
     password_encrypted = Column(String(512), nullable=False)  # 密码加密后长度可能变长，使用 String(512)
+    description = Column(Text, nullable=True)
     extra_config = Column(JSONB, nullable=True, server_default=sa_text("'{}'::jsonb"))  # P2 修复: 统一 JSONB 默认值
     owner_id = Column(Integer, nullable=False)  # 创建者用户 ID
     is_active = Column(Boolean, default=True, server_default=sa_text('true'))  # Boolean 默认值
+    last_tested_at = Column(DateTime, nullable=True)
+    last_test_success = Column(Boolean, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now())  # DateTime 默认值
     updated_at = Column(DateTime, server_default=sa_func.now(), onupdate=sa_func.now())  # DateTime 默认值和更新
 
@@ -33,8 +37,11 @@ class DataSource(Base):
             "port": self.port,
             "database_name": self.database_name,
             "username": self.username,
+            "description": self.description,
             "owner_id": self.owner_id,
             "is_active": self.is_active,
+            "last_tested_at": self.last_tested_at.strftime("%Y-%m-%d %H:%M:%S") if self.last_tested_at else None,
+            "last_test_success": self.last_test_success,
             "extra_config": self.extra_config,  # JSONB 字段直接是 Python 对象
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
             "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
@@ -66,6 +73,7 @@ class DataSourceDatabase:
         username: str,
         password_encrypted: str,
         owner_id: int,
+        description: str = None,
         extra_config: dict = None,
     ) -> DataSource:
         """创建数据源"""
@@ -78,6 +86,7 @@ class DataSourceDatabase:
             username=username,
             password_encrypted=password_encrypted,
             owner_id=owner_id,
+            description=description,
             extra_config=extra_config,
         )
         db.add(ds)

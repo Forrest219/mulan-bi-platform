@@ -1,0 +1,65 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#4F46E5', 'primaryTextColor': '#fff', 'lineColor': '#6366F1', 'secondaryColor': '#F0F0FF'}}}%%
+
+graph TB
+    subgraph Frontend["前端 React 19 + Vite"]
+        AskBar["AskBar 自然语言输入"]
+        AssetView["Tableau 资产详情"]
+        SemanticUI["语义维护 UI"]
+    end
+
+    subgraph API["FastAPI API 层 (app/api/)"]
+        SearchAPI["/api/search/query"]
+        AssetAPI["/api/tableau/assets"]
+        LlmAPI["/api/admin/llm"]
+        SemanticAPI["/api/semantic/"]
+    end
+
+    subgraph LLM["LLM Service (services/llm/)"]
+        LLMService["LLMService 单例<br/>OpenAI / Anthropic 双通道"]
+        NLQService["NLQ Pipeline<br/>四阶段流水线"]
+        SemanticRetriever["Semantic Retriever<br/>embedding cosine 召回"]
+        Prompts["Prompt 模板"]
+        Models["LLMConfig 多 purpose 路由"]
+    end
+
+    subgraph External["外部服务"]
+        OpenAI["OpenAI API"]
+        Anthropic["Anthropic API<br/>(via MiniMax)"]
+        MiniMaxEmb["MiniMax embo-01<br/>Embedding"]
+        TableauMCP["Tableau MCP Server<br/>VizQL JSON-RPC"]
+    end
+
+    subgraph Storage["持久层"]
+        PG[("PostgreSQL 16<br/>ai_llm_configs<br/>nlq_query_logs<br/>tableau_field_semantics")]
+        Redis[("Redis<br/>字段缓存 1h TTL")]
+    end
+
+    AskBar -->|SSE| SearchAPI
+    AssetView --> AssetAPI
+    SemanticUI --> SemanticAPI
+
+    SearchAPI --> NLQService
+    AssetAPI --> LLMService
+    SemanticAPI --> LLMService
+    LlmAPI --> Models
+
+    NLQService -->|"complete_for_semantic<br/>temperature=0.1"| LLMService
+    NLQService -->|"字段一致性校验"| Redis
+    NLQService -->|"Stage 3 执行"| TableauMCP
+    NLQService --> Prompts
+
+    SemanticRetriever -->|"generate_embedding"| LLMService
+    SemanticRetriever -->|"pgvector cosine"| PG
+
+    LLMService -->|"provider=openai"| OpenAI
+    LLMService -->|"provider=anthropic"| Anthropic
+    LLMService -->|"purpose=embedding"| MiniMaxEmb
+
+    Models --> PG
+    LLMService -->|"TTL 5min 客户端缓存"| LLMService
+
+    style Frontend fill:#EEF2FF,stroke:#4F46E5
+    style API fill:#F0FDF4,stroke:#16A34A
+    style LLM fill:#FFF7ED,stroke:#EA580C
+    style External fill:#FEF2F2,stroke:#DC2626
+    style Storage fill:#F5F3FF,stroke:#7C3AED
