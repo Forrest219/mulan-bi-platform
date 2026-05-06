@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
 from app.core.dependencies import get_current_user
+from app.api.agent import _resolve_conversation_title
 
 
 class TestAgentAPI:
@@ -77,6 +78,12 @@ class TestAgentAPI:
             assert resp.json() == []
         finally:
             app.dependency_overrides.clear()
+
+    def test_resolve_conversation_title_uses_first_user_message_for_placeholder(self):
+        """回归：列表接口不得把有消息的会话显示成'新对话'"""
+        assert _resolve_conversation_title(None, "你有几个数据源") == "你有几个数据源"
+        assert _resolve_conversation_title("新对话", "有哪些表") == "有哪些表"
+        assert _resolve_conversation_title("销售分析", "有哪些表") == "销售分析"
 
     # -------------------------------------------------------------------------
     # TC-API-003: GET /api/agent/conversations/{id}/messages

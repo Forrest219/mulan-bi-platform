@@ -19,7 +19,6 @@ import { useState, useMemo, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useConversations, type Conversation } from '../../../store/conversationStore';
 import { ConfirmModal } from '../../../components/ConfirmModal';
-import { usePlatformSettings } from '../../../context/PlatformSettingsContext';
 
 const PAGE_SIZE = 100;
 
@@ -59,10 +58,8 @@ function shouldShowConversation(conv: Conversation): boolean {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ConversationBar({ collapsed, onToggleCollapse }: ConversationBarProps) {
-  const { conversations, deleteConversation, updateConversationTitle, addConversation } =
-    useConversations();
-  const { settings } = usePlatformSettings();
+export function ConversationBar({ collapsed: _collapsed, onToggleCollapse: _onToggleCollapse }: ConversationBarProps) {
+  const { conversations, deleteConversation, updateConversationTitle } = useConversations();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
@@ -76,13 +73,9 @@ export function ConversationBar({ collapsed, onToggleCollapse }: ConversationBar
     ? location.pathname.split('/chat/')[1]
     : new URLSearchParams(location.search).get('conv');
 
-  const handleNew = useCallback(async () => {
-    try {
-      await addConversation();
-    } finally {
-      navigate('/');
-    }
-  }, [navigate, addConversation]);
+  const handleNew = useCallback(() => {
+    navigate('/');
+  }, [navigate]);
 
   const filtered = useMemo(() => {
     const displayable = conversations.filter(shouldShowConversation);
@@ -130,7 +123,7 @@ export function ConversationBar({ collapsed, onToggleCollapse }: ConversationBar
       className={[
         'h-full select-none shrink-0 overflow-x-hidden',
         'text-slate-700',
-        collapsed
+        _collapsed
           ? 'w-0 overflow-hidden'
           : 'w-[260px] bg-white border-r border-slate-200',
         'transition-[width] duration-300',
@@ -139,26 +132,8 @@ export function ConversationBar({ collapsed, onToggleCollapse }: ConversationBar
       <div className="flex flex-col justify-between h-full w-[260px] overflow-x-hidden scrollbar-hidden">
         {/* Top section: sticky */}
         <div className="sticky top-0 z-10">
-          {/* Logo + 平台名称 + 折叠按钮（与 AppSidebar 完全一致） */}
-          <div className="flex items-center justify-between px-2 pt-4 pb-2">
-            <div className="flex items-center gap-2 shrink-0">
-              <img src={settings.logo_url} alt={settings.platform_name} className="h-7 w-auto object-contain" />
-              <span className="text-[13px] font-semibold text-slate-600 tracking-wide hidden sm:block">
-                {settings.platform_name}
-              </span>
-            </div>
-
-            <button
-              onClick={onToggleCollapse}
-              className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors"
-              title={collapsed ? '展开侧边栏' : '折叠侧边栏'}
-            >
-              <i className={`ri-sidebar-fold-line text-lg ${collapsed ? 'rotate-180' : ''}`} />
-            </button>
-          </div>
-
           {/* New conversation button */}
-          <div className="px-2 pb-2">
+          <div className="px-2 pt-4 pb-2">
             <button
               onClick={handleNew}
               title="新建对话  ⌘N"

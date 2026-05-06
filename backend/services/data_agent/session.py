@@ -209,7 +209,9 @@ class SessionManager:
             AgentConversation.id == session.conversation_id
         ).first()
         if conversation:
-            if role == "user" and not conversation.title:
+            if role == "user" and (
+                not conversation.title or conversation.title.strip() == "新对话"
+            ):
                 conversation.title = content.strip()[:50] or "新对话"
             conversation.updated_at = datetime.utcnow()
 

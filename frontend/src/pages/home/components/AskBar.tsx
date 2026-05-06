@@ -240,8 +240,37 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
             </span>
           </div>
 
-          {/* 连接选择器 — 仅在多连接时显示 */}
-          {scopeContext.connections.length > 1 && (
+          {/* 连接状态 / 选择器 */}
+          {scopeContext.connectionsLoading && (
+            <div className="flex items-center gap-1.5 px-4 pt-2 pb-0 text-xs text-slate-400">
+              <i className="ri-database-2-line" />
+              <span>连接加载中…</span>
+            </div>
+          )}
+
+          {noConnection && (
+            <div className="flex items-center justify-between gap-3 px-4 pt-2 pb-0 text-xs">
+              <div className="flex min-w-0 items-center gap-1.5 text-amber-600">
+                <i className="ri-database-2-line shrink-0" />
+                <span className="truncate">暂无数据连接</span>
+              </div>
+              <Link
+                to="/system/mcp-configs"
+                className="shrink-0 font-medium text-blue-600 hover:text-blue-700 hover:underline"
+              >
+                前往添加连接
+              </Link>
+            </div>
+          )}
+
+          {!scopeContext.connectionsLoading && scopeContext.connections.length === 1 && (
+            <div className="flex items-center gap-1.5 px-4 pt-2 pb-0 text-xs text-slate-500">
+              <i className="ri-database-2-line text-slate-400" />
+              <span className="truncate">{scopeContext.connections[0].name}</span>
+            </div>
+          )}
+
+          {!scopeContext.connectionsLoading && scopeContext.connections.length > 1 && (
             <div className="flex items-center gap-1.5 px-4 pt-2 pb-0">
               <i className="ri-database-2-line text-xs text-slate-400" />
               <select

@@ -74,6 +74,17 @@ class ConversationItem(BaseModel):
     updated_at: str
 
 
+def _resolve_conversation_title(stored_title: Optional[str], first_user_message: Optional[str]) -> Optional[str]:
+    """Return a useful display title; default placeholders should not leak to the sidebar."""
+    title = (stored_title or "").strip()
+    if title and title != "新对话":
+        return title
+    message = (first_user_message or "").strip()
+    if message:
+        return message[:50]
+    return stored_title
+
+
 class MessageItem(BaseModel):
     id: int
     role: str
@@ -340,10 +351,29 @@ def list_conversations(
             .all()
         )
     } if convs else {}
+    first_user_messages: dict[str, str] = {}
+    if convs:
+        rows = (
+            db.query(
+                AgentConversationMessage.conversation_id,
+                AgentConversationMessage.content,
+            )
+            .filter(AgentConversationMessage.conversation_id.in_([c.id for c in convs]))
+            .filter(AgentConversationMessage.role == "user")
+            .order_by(
+                AgentConversationMessage.conversation_id.asc(),
+                AgentConversationMessage.created_at.asc(),
+            )
+            .all()
+        )
+        for row in rows:
+            conv_id = str(row._mapping["conversation_id"])
+            if conv_id not in first_user_messages:
+                first_user_messages[conv_id] = row._mapping["content"]
     return [
         ConversationItem(
             id=str(c.id),
-            title=c.title,
+            title=_resolve_conversation_title(c.title, first_user_messages.get(str(c.id))),
             connection_id=c.connection_id,
             status=c.status,
             message_count=message_counts.get(str(c.id), 0),

@@ -50,6 +50,25 @@ class TestConversationPersistence:
         mock_db.commit.assert_called()
         assert result is not None
 
+    def test_persist_message_user_backfills_default_title(self, session_mgr, mock_db):
+        """回归：有内容的会话不应长期显示默认标题'新对话'"""
+        mock_session = AgentSession(
+            conversation_id=uuid.uuid4(),
+            user_id=1,
+        )
+        mock_conv = MagicMock()
+        mock_conv.title = "新对话"
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_conv
+
+        session_mgr.persist_message(
+            session=mock_session,
+            role="user",
+            content="本月销售额多少？",
+        )
+
+        assert mock_conv.title == "本月销售额多少？"
+        mock_db.commit.assert_called()
+
     def test_persist_message_assistant(self, session_mgr, mock_db):
         """TC-API-008b: 持久化 assistant 消息（含元数据）"""
         mock_session = session_mgr.create_session(user_id=1)

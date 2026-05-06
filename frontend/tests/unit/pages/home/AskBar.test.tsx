@@ -10,13 +10,19 @@ import { MemoryRouter } from 'react-router-dom';
 import AskBar from '../../../../src/pages/home/components/AskBar';
 
 // ── Context mocks ────────────────────────────────────────────────────────────
-vi.mock('../../../../src/pages/home/context/ScopeContext', () => ({
-  useScope: () => ({
+const scopeMock = vi.hoisted(() => ({
+  value: {
     connections: [{ id: 1, name: 'Test Connection', is_active: true }],
     connectionsLoading: false,
     connectionId: '1',
     scopeProject: null,
-  }),
+    setConnectionId: vi.fn(),
+    setScopeProject: vi.fn(),
+  },
+}));
+
+vi.mock('../../../../src/pages/home/context/ScopeContext', () => ({
+  useScope: () => scopeMock.value,
 }));
 
 vi.mock('../../../../src/api/tableau', () => ({
@@ -42,6 +48,14 @@ function renderAskBar(props = {}) {
 describe('AskBar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    scopeMock.value = {
+      connections: [{ id: 1, name: 'Test Connection', is_active: true }],
+      connectionsLoading: false,
+      connectionId: '1',
+      scopeProject: null,
+      setConnectionId: vi.fn(),
+      setScopeProject: vi.fn(),
+    };
   });
 
   it('空输入不触发提交', async () => {
@@ -77,5 +91,26 @@ describe('AskBar', () => {
     const textarea = screen.getByRole('textbox');
     await user.type(textarea, 'a'.repeat(600));
     expect((textarea as HTMLTextAreaElement).value.length).toBe(500);
+  });
+
+  it('无连接时直接显示添加连接入口', () => {
+    scopeMock.value = {
+      ...scopeMock.value,
+      connections: [],
+      connectionId: null,
+    };
+
+    renderAskBar();
+
+    expect(screen.getByText('暂无数据连接')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '前往添加连接' })).toHaveAttribute(
+      'href',
+      '/system/mcp-configs'
+    );
+  });
+
+  it('单连接时显示当前连接名称', () => {
+    renderAskBar();
+    expect(screen.getByText('Test Connection')).toBeInTheDocument();
   });
 });

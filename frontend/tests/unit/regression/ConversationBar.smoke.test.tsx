@@ -77,8 +77,17 @@ import { ConversationBar } from '../../../src/pages/home/components/Conversation
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-// 防止回归：侧边栏头部禁止出现 Logo 图标和折叠按钮（已被修复 3+ 次，永久锁定）
-describe('ConversationBar 回归：头部不含 Logo 和折叠按钮', () => {
+// 防止回归：侧边栏头部禁止出现品牌、Logo 图标和折叠按钮（已被修复 3+ 次，永久锁定）
+describe('ConversationBar 回归：头部不含品牌、Logo 和折叠按钮', () => {
+  it('头部不渲染平台名称，避免和主侧栏重复', () => {
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <ConversationBar collapsed={false} onToggleCollapse={vi.fn()} />
+      </MemoryRouter>
+    );
+    expect(screen.queryByText('木兰 BI 平台')).toBeNull();
+  });
+
   it('头部不渲染任何 <img> 元素（无 Logo）', () => {
     render(
       <MemoryRouter initialEntries={['/']}>

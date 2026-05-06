@@ -50,7 +50,7 @@ function loadFromStorage(): Conversation[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed.filter(isDisplayableConversation) : [];
   } catch {
     return [];
   }
@@ -70,6 +70,13 @@ function generateId(): string {
 
 function nowUtc(): string {
   return new Date().toISOString();
+}
+
+function isDisplayableConversation(conv: Conversation): boolean {
+  if (typeof conv.message_count === 'number') {
+    return conv.message_count > 0;
+  }
+  return !(conv.messages.length === 0 && conv.title.trim() === '新对话');
 }
 
 // ─── Reducer ──────────────────────────────────────────────────────────────────
@@ -156,13 +163,15 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       .then((list) => {
         if (cancelled) return;
         // 将后端列表映射为本地 Conversation 结构（messages 为空，按需加载）
-        const mapped: Conversation[] = list.map((item) => ({
-          id: item.id,
-          title: item.title ?? '新对话',
-          updated_at: item.updated_at,
-          messages: [],
-          message_count: item.message_count,
-        }));
+        const mapped: Conversation[] = list
+          .map((item) => ({
+            id: item.id,
+            title: item.title ?? '新对话',
+            updated_at: item.updated_at,
+            messages: [],
+            message_count: item.message_count,
+          }))
+          .filter(isDisplayableConversation);
         dispatch({ type: 'LOAD', payload: mapped });
       })
       .catch(() => {

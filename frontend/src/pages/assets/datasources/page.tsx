@@ -410,8 +410,11 @@ export default function DatasourcesPage() {
                     <h3 className="font-medium text-slate-800">{ds.name}</h3>
                     <span className="text-xs text-slate-400">{DB_TYPE_OPTIONS.find(o => o.value === ds.db_type)?.label || ds.db_type}</span>
                   </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${ds.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                    {ds.is_active ? '正常' : '已禁用'}
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded-full ${ds.is_active ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}
+                    title="仅表示该配置是否启用，不代表连接测试通过"
+                  >
+                    {ds.is_active ? '已启用' : '已停用'}
                   </span>
                 </div>
                 <div className="text-xs text-slate-500 space-y-1 mb-4">
