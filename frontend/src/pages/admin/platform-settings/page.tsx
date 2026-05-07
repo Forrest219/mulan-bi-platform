@@ -1,23 +1,29 @@
 /**
  * PlatformSettingsPage — /admin/platform-settings
  *
- * admin-only 平台基础设置管理页。
+ * admin-only 平台设置管理页。
  *
  * 功能：
- * - 展示/编辑平台名称（platform_name）
- * - 展示/编辑平台副标题（platform_subtitle）
- * - 展示/编辑 Logo URL（logo_url）
- * - 展示/编辑 Favicon URL（favicon_url）
- * - 实时预览 Logo
+ * - 基础设置 Tab：平台名称、副标题、Logo URL、Favicon URL
+ * - 邮件通知 Tab：SMTP 配置、测试邮件、发送记录
  * - 仅 admin 可见
  *
  * 后端 API：
- *   GET    /api/platform-settings  → PlatformSettings
- *   PUT    /api/platform-settings  → PlatformSettings
+ *   GET    /api/platform-settings          → PlatformSettings
+ *   PUT    /api/platform-settings          → PlatformSettings
+ *   GET    /api/platform-settings/smtp     → SmtpConfigResponse
+ *   PUT    /api/platform-settings/smtp     → SmtpConfigResponse
+ *   POST   /api/platform-settings/smtp/test → { success, message }
+ *   GET    /api/platform-settings/email-logs → { items, total, page, page_size }
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
-import { usePlatformSettings, type PlatformSettings } from '../../../context/PlatformSettingsContext';
+import { usePlatformSettings } from '../../../context/PlatformSettingsContext';
+
+/* =====================================================================
+   基础设置
+   ===================================================================== */
 
 interface SettingsForm {
   platform_name: string;
@@ -27,14 +33,7 @@ interface SettingsForm {
 }
 
 const LOGO_URL_RE = /^https?:\/\/.+/i;
-
-// 禁止将随机/占位图片服务设为 Logo（每次请求返回不同图片）
-const FORBIDDEN_LOGO_PATTERNS = [
-  'httpbin.org/image',
-  'picsum.photos',
-  'via.placeholder.com',
-  'img.shields.io',
-];
+const FORBIDDEN_LOGO_PATTERNS = ['httpbin.org/image', 'picsum.photos', 'via.placeholder.com', 'img.shields.io'];
 
 function validateForm(form: SettingsForm): Record<string, string> {
   const errors: Record<string, string> = {};
@@ -50,7 +49,7 @@ function validateForm(form: SettingsForm): Record<string, string> {
   } else if (form.logo_url.length > 512) {
     errors.logo_url = 'Logo URL 不能超过 512 字符';
   } else if (FORBIDDEN_LOGO_PATTERNS.some(p => form.logo_url.includes(p))) {
-    errors.logo_url = 'Logo URL 不能使用随机/占位图片服务（如 httpbin.org/image、picsum.photos 等）';
+    errors.logo_url = 'Logo URL 不能使用随机/占位图片服务';
   }
   if (form.platform_subtitle.length > 256) {
     errors.platform_subtitle = '平台副标题不能超过 256 字符';
@@ -66,32 +65,163 @@ function validateForm(form: SettingsForm): Record<string, string> {
 function formatDate(isoStr: string): string {
   if (!isoStr) return '—';
   return new Date(isoStr).toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
   });
+}
+
+/* =====================================================================
+   邮件通知
+   ===================================================================== */
+
+interface SmtpForm {
+  smtp_host: string;
+  smtp_port: number;
+  smtp_user: string;
+  smtp_password: string;
+  smtp_from_addr: string;
+  smtp_use_tls: boolean;
+}
+
+interface EmailLog {
+  id: number;
+  email_type: string;
+  recipient: string;
+  from_addr: string;
+  subject: string;
+  status: 'enqueued' | 'sent' | 'permanent_failed';
+  error_detail: string | null;
+  attempt_count: number;
+  scheduled_at: string | null;
+  sent_at: string | null;
+  created_at: string;
+}
+
+const EMAIL_TYPE_LABELS: Record<string, string> = {
+  password_reset: '密码重置',
+  test_email: '测试邮件',
+};
+
+const STATUS_LABELS: Record<string, { label: string; color: string }> = {
+  enqueued:       { label: '排队中', color: 'bg-blue-100 text-blue-700' },
+  sent:           { label: '已发送', color: 'bg-emerald-100 text-emerald-700' },
+  permanent_failed: { label: '失败', color: 'bg-red-100 text-red-700' },
+};
+
+function validateSmtpForm(form: SmtpForm): Record<string, string> {
+  const errors: Record<string, string> = {};
+  if (!form.smtp_host.trim()) errors.smtp_host = 'SMTP 主机不能为空';
+  if (!form.smtp_port || form.smtp_port < 1 || form.smtp_port > 65535) {
+    errors.smtp_port = '端口必须在 1-65535 之间';
+  }
+  if (!form.smtp_user.trim()) errors.smtp_user = '用户名不能为空';
+  if (!form.smtp_from_addr.trim()) {
+    errors.smtp_from_addr = '发件人地址不能为空';
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.smtp_from_addr)) {
+    errors.smtp_from_addr = '发件人地址格式无效';
+  }
+  return errors;
+}
+
+async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    // err.detail 可能是字符串/数组/对象，统一转为字符串展示
+    const detail = err?.detail;
+    const msg = typeof detail === 'string'
+      ? detail
+      : detail != null && typeof detail === 'object'
+        ? JSON.stringify(detail)
+        : `请求失败 (${res.status})`;
+    throw new Error(msg || `请求失败 (${res.status})`);
+  }
+  return res.json();
+}
+
+/* =====================================================================
+   页面组件
+   ===================================================================== */
+
+type TabKey = 'general' | 'email';
+
+/* ── 密码输入框（带显示/隐藏切换） ── */
+function PasswordField({
+  value,
+  onChange,
+  placeholder,
+  className = '',
+}: {
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  placeholder?: string;
+  className?: string;
+}) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className="relative">
+      <input
+        type={visible ? 'text' : 'password'}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        className={`w-full px-3 py-2 pr-10 border rounded-lg text-sm text-slate-800 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition ${className}`}
+      />
+      <button
+        type="button"
+        onClick={() => setVisible(v => !v)}
+        className="absolute inset-y-0 right-3 flex items-center text-slate-400 hover:text-slate-600 transition"
+        tabIndex={-1}
+      >
+        <i className={visible ? 'ri-eye-off-line' : 'ri-eye-line'} />
+      </button>
+    </div>
+  );
 }
 
 export default function PlatformSettingsPage() {
   const { isAdmin } = useAuth();
-  const { settings, isLoading, updateSettings, previewSettings } = usePlatformSettings();
+  const { settings, isLoading: settingsLoading, updateSettings, previewSettings } = usePlatformSettings();
 
+  /* ── Tab 状态（URL 参数驱动，支持直接跳转到指定 Tab） ── */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = (searchParams.get('tab') as TabKey | null) ?? 'general';
+  const setActiveTab = (tab: TabKey) => setSearchParams({ tab }, { replace: true });
+
+  /* ── 基础设置表单 ── */
   const [form, setForm] = useState<SettingsForm>({
-    platform_name: '',
-    platform_subtitle: '',
-    logo_url: '',
-    favicon_url: '',
+    platform_name: '', platform_subtitle: '', logo_url: '', favicon_url: '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [logoPreviewError, setLogoPreviewError] = useState(false);
 
-  // 当 settings 加载完成后填充表单
+  /* ── 邮件表单 ── */
+  const [smtpForm, setSmtpForm] = useState<SmtpForm>({
+    smtp_host: '', smtp_port: 465, smtp_user: '', smtp_password: '',
+    smtp_from_addr: '', smtp_use_tls: true,
+  });
+  const [smtpErrors, setSmtpErrors] = useState<Record<string, string>>({});
+  const [smtpLoading, setSmtpLoading] = useState(false);
+  const [smtpSaveMsg, setSmtpSaveMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [smtpSaving, setSmtpSaving] = useState(false);
+  const [testEmail, setTestEmail] = useState('');
+  const [testSending, setTestSending] = useState(false);
+  const [testMsg, setTestMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  /* ── 邮件日志 ── */
+  const [emailLogs, setEmailLogs] = useState<EmailLog[]>([]);
+  const [logsTotal, setLogsTotal] = useState(0);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [emailLogsError, setEmailLogsError] = useState<string | null>(null);
+
+  /* ── 填充基础设置 ── */
   useEffect(() => {
-    if (!isLoading) {
+    if (!settingsLoading) {
       setForm({
         platform_name: settings.platform_name || '',
         platform_subtitle: settings.platform_subtitle || '',
@@ -99,24 +229,72 @@ export default function PlatformSettingsPage() {
         favicon_url: settings.favicon_url || '',
       });
     }
-  }, [isLoading, settings]);
+  }, [settingsLoading, settings]);
 
-  // Logo 预览错误重置
+  /* ── 加载邮件配置 ── */
+  const loadSmtpConfig = useCallback(async () => {
+    setSmtpLoading(true);
+    setSmtpSaveMsg(null);
+    try {
+      const cfg = await apiFetch<{
+        smtp_host: string; smtp_port: number; smtp_user: string;
+        smtp_password: string; smtp_from_addr: string; smtp_use_tls: boolean;
+      }>('/api/platform-settings/smtp');
+      setSmtpForm({
+        smtp_host: cfg.smtp_host || '',
+        smtp_port: cfg.smtp_port || 465,
+        smtp_user: cfg.smtp_user || '',
+        smtp_password: '',  // 密码不显示，*** 表示已配置
+        smtp_from_addr: cfg.smtp_from_addr || '',
+        smtp_use_tls: cfg.smtp_use_tls ?? true,
+      });
+      if (cfg.smtp_password && cfg.smtp_password !== '***') {
+        setSmtpForm(prev => ({ ...prev, smtp_password: cfg.smtp_password }));
+      }
+    } catch (e) {
+      setSmtpSaveMsg({ type: 'error', text: e instanceof Error ? e.message : '加载失败' });
+    } finally {
+      setSmtpLoading(false);
+    }
+  }, []);
+
+  /* ── 加载邮件日志 ── */
+  const loadEmailLogs = useCallback(async () => {
+    setLogsLoading(true);
+    try {
+      const data = await apiFetch<{ items: EmailLog[]; total: number }>(
+        '/api/platform-settings/email-logs?page=1&page_size=50'
+      );
+      setEmailLogs(data.items || []);
+      setLogsTotal(data.total || 0);
+    } catch (e) {
+      console.error('[EmailTab] 加载日志失败:', e);
+      const msg = e instanceof Error ? e.message : String(e);
+      setEmailLogsError(msg || '加载失败');
+    } finally {
+      setLogsLoading(false);
+    }
+  }, []);
+
+  /* ── Tab 切换时加载邮件数据 ── */
   useEffect(() => {
-    setLogoPreviewError(false);
-  }, [form.logo_url]);
+    if (activeTab === 'email') {
+      loadSmtpConfig();
+      loadEmailLogs();
+    }
+  }, [activeTab, loadSmtpConfig, loadEmailLogs]);
 
+  /* ── Logo 预览重置 ── */
+  useEffect(() => { setLogoPreviewError(false); }, [form.logo_url]);
+
+  /* ── 基础设置 ── */
   const handleChange = (field: keyof SettingsForm, value: string) => {
     setForm(prev => ({ ...prev, [field]: value }));
-    // 清除该字段错误
     if (errors[field]) {
-      setErrors(prev => { const next = { ...prev }; delete next[field]; return next; });
+      setErrors(prev => { const n = { ...prev }; delete n[field]; return n; });
     }
-    // 实时预览：同步更新 Context（不调 API）
     previewSettings({ [field]: value });
-    // 实时校验：即时显示格式错误（不等待提交）
-    const singleFieldForm = { ...form, [field]: value };
-    const singleFieldErrors = validateForm(singleFieldForm);
+    const singleFieldErrors = validateForm({ ...form, [field]: value });
     if (singleFieldErrors[field]) {
       setErrors(prev => ({ ...prev, [field]: singleFieldErrors[field] }));
     }
@@ -132,24 +310,80 @@ export default function PlatformSettingsPage() {
     setSaving(true);
     setSaveMsg(null);
     try {
-      console.log('[LogoSettings] Submitting:', form.platform_name, form.logo_url);
       await updateSettings({
         platform_name: form.platform_name.trim(),
         platform_subtitle: form.platform_subtitle.trim() || null,
         logo_url: form.logo_url.trim(),
         favicon_url: form.favicon_url.trim() || null,
       });
-      console.log('[LogoSettings] updateSettings returned successfully');
       setSaveMsg({ type: 'success', text: '保存成功' });
     } catch (err) {
-      console.error('[LogoSettings] updateSettings threw:', err);
       setSaveMsg({ type: 'error', text: err instanceof Error ? err.message : '保存失败' });
     } finally {
       setSaving(false);
     }
   };
 
-  // 仅 admin 可见
+  /* ── 邮件设置 ── */
+  const handleSmtpChange = (field: keyof SmtpForm, value: string | number | boolean) => {
+    setSmtpForm(prev => ({ ...prev, [field]: value }));
+    if (smtpErrors[field]) {
+      setSmtpErrors(prev => { const n = { ...prev }; delete n[field]; return n; });
+    }
+  };
+
+  const handleSaveSmtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const validationErrors = validateSmtpForm(smtpForm);
+    if (Object.keys(validationErrors).length > 0) {
+      setSmtpErrors(validationErrors);
+      return;
+    }
+    setSmtpSaveMsg(null);
+    setSmtpSaving(true);
+    try {
+      await apiFetch('/api/platform-settings/smtp', {
+        method: 'PUT',
+        body: JSON.stringify({
+          smtp_host: smtpForm.smtp_host.trim(),
+          smtp_port: smtpForm.smtp_port,
+          smtp_user: smtpForm.smtp_user.trim(),
+          smtp_password: smtpForm.smtp_password || undefined,
+          smtp_from_addr: smtpForm.smtp_from_addr.trim(),
+          smtp_use_tls: smtpForm.smtp_use_tls,
+        }),
+      });
+      setSmtpSaveMsg({ type: 'success', text: '保存成功' });
+    } catch (err) {
+      setSmtpSaveMsg({ type: 'error', text: err instanceof Error ? err.message : '保存失败' });
+    } finally {
+      setSmtpSaving(false);
+    }
+  };
+
+  const handleSendTestEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!testEmail.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testEmail)) {
+      setTestMsg({ type: 'error', text: '请输入有效的收件人邮箱' });
+      return;
+    }
+    setTestSending(true);
+    setTestMsg(null);
+    try {
+      const res = await apiFetch<{ success: boolean; message: string }>(
+        '/api/platform-settings/smtp/test',
+        { method: 'POST', body: JSON.stringify({ recipient_email: testEmail.trim() }) }
+      );
+      setTestMsg({ type: 'success', text: res.message || '测试邮件已发送' });
+      loadEmailLogs();
+    } catch (err) {
+      setTestMsg({ type: 'error', text: err instanceof Error ? err.message : '发送失败' });
+    } finally {
+      setTestSending(false);
+    }
+  };
+
+  /* ── 仅 admin ── */
   if (!isAdmin) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
@@ -162,7 +396,7 @@ export default function PlatformSettingsPage() {
     );
   }
 
-  if (isLoading) {
+  if (settingsLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <span className="w-6 h-6 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
@@ -175,160 +409,425 @@ export default function PlatformSettingsPage() {
     <div className="max-w-2xl mx-auto p-6">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-xl font-semibold text-slate-800">平台设置</h1>
-        <p className="text-sm text-slate-500 mt-1">配置平台 Logo 和名称，修改后全站实时生效</p>
+        <h1 className="text-lg font-semibold text-slate-800">平台设置</h1>
+        <p className="text-[13px] text-slate-400">配置平台 Logo、名称和邮件通知设置</p>
       </div>
 
-      {/* 设置表单 */}
-      <form onSubmit={handleSubmit} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-5">
-        {/* 平台名称 */}
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1.5">
-            平台名称 <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            value={form.platform_name}
-            onChange={e => handleChange('platform_name', e.target.value)}
-            placeholder="例如：木兰 BI 平台"
-            maxLength={128}
-            className={`w-full px-3 py-2 border rounded-lg text-sm text-slate-800 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition ${errors.platform_name ? 'border-red-400 bg-red-50' : 'border-slate-200'}`}
-          />
-          <div className="flex justify-between mt-1">
-            {errors.platform_name ? (
-              <p className="text-xs text-red-500">{errors.platform_name}</p>
-            ) : (
-              <span />
-            )}
-            <p className="text-xs text-slate-400">{form.platform_name.length}/128</p>
-          </div>
-        </div>
-
-        {/* 平台副标题 */}
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1.5">
-            平台副标题
-            <span className="text-xs text-slate-400 font-normal ml-1">可选</span>
-          </label>
-          <input
-            type="text"
-            value={form.platform_subtitle}
-            onChange={e => handleChange('platform_subtitle', e.target.value)}
-            placeholder="例如：数据建模与治理平台"
-            maxLength={256}
-            className={`w-full px-3 py-2 border rounded-lg text-sm text-slate-800 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition ${errors.platform_subtitle ? 'border-red-400 bg-red-50' : 'border-slate-200'}`}
-          />
-          <div className="flex justify-between mt-1">
-            {errors.platform_subtitle ? (
-              <p className="text-xs text-red-500">{errors.platform_subtitle}</p>
-            ) : (
-              <span />
-            )}
-            <p className="text-xs text-slate-400">{form.platform_subtitle.length}/256</p>
-          </div>
-        </div>
-
-        {/* Logo URL */}
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1.5">
-            Logo URL <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="url"
-            value={form.logo_url}
-            onChange={e => handleChange('logo_url', e.target.value)}
-            placeholder="https://example.com/logo.png"
-            maxLength={512}
-            className={`w-full px-3 py-2 border rounded-lg text-sm text-slate-800 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition font-mono ${errors.logo_url ? 'border-red-400 bg-red-50' : 'border-slate-200'}`}
-          />
-          <div className="flex justify-between mt-1">
-            {errors.logo_url ? (
-              <p className="text-xs text-red-500">{errors.logo_url}</p>
-            ) : (
-              <p className="text-xs text-slate-400">支持 http:// 和 https://</p>
-            )}
-            <p className="text-xs text-slate-400">{form.logo_url.length}/512</p>
-          </div>
-          {/* Logo 实时预览 */}
-          <div className="mt-3 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-200 shrink-0">
-              {form.logo_url && !logoPreviewError ? (
-                <img
-                  src={form.logo_url}
-                  alt="Logo 预览"
-                  className="w-full h-full object-contain"
-                  onError={() => setLogoPreviewError(true)}
-                />
-              ) : (
-                <i className="ri-image-line text-lg text-slate-400" />
-              )}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-slate-700 truncate">
-                {form.platform_name || '平台名称'}
-                {form.platform_subtitle && (
-                  <span className="text-xs text-slate-400 font-normal ml-2">{form.platform_subtitle}</span>
-                )}
-              </p>
-              {logoPreviewError && (
-                <p className="text-xs text-red-500">Logo 无法加载，请检查 URL</p>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Favicon URL */}
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1.5">
-            Favicon URL
-            <span className="text-xs text-slate-400 font-normal ml-1">可选</span>
-          </label>
-          <input
-            type="url"
-            value={form.favicon_url}
-            onChange={e => handleChange('favicon_url', e.target.value)}
-            placeholder="https://example.com/favicon.ico"
-            className={`w-full px-3 py-2 border rounded-lg text-sm text-slate-800 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition font-mono ${errors.favicon_url ? 'border-red-400 bg-red-50' : 'border-slate-200'}`}
-          />
-          {errors.favicon_url && (
-            <p className="text-xs text-red-500 mt-1">{errors.favicon_url}</p>
-          )}
-        </div>
-
-        {/* 提交按钮 */}
-        <div className="flex items-center gap-3 pt-2">
+      {/* Tab 切换 */}
+      <div className="flex border-b border-slate-200 mb-6">
+        {([
+          ['general', '基础设置'],
+          ['email', '邮件通知'],
+        ] as [TabKey, string][]).map(([key, label]) => (
           <button
-            type="submit"
-            disabled={saving}
-            className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-2"
+            key={key}
+            onClick={() => setActiveTab(key)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition ${
+              activeTab === key
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
           >
-            {saving && <span className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin" />}
-            {saving ? '保存中…' : '保存设置'}
+            {label}
           </button>
-          {saveMsg && (
-            <span className={`text-sm ${saveMsg.type === 'success' ? 'text-emerald-600' : 'text-red-500'}`}>
-              {saveMsg.type === 'success' ? (
-                <i className="ri-check-line mr-1" />
-              ) : (
-                <i className="ri-error-warning-line mr-1" />
-              )}
-              {saveMsg.text}
-            </span>
-          )}
-        </div>
-      </form>
-
-      {/* 辅助信息 */}
-      <div className="mt-5 bg-slate-50 border border-slate-200 rounded-xl p-4">
-        <h3 className="text-sm font-medium text-slate-600 mb-2">配置说明</h3>
-        <ul className="text-xs text-slate-500 space-y-1">
-          <li>· Logo 建议使用 1:1 比例的 PNG/SVG 图片</li>
-          <li>· Logo URL 变更后，预览即时更新，无需保存</li>
-          <li>· 上次更新：
-            <span className="font-mono text-slate-400 ml-1">{formatDate(settings.updated_at)}</span>
-          </li>
-        </ul>
+        ))}
       </div>
+
+      {/* ========== 基础设置 Tab ========== */}
+      {activeTab === 'general' && (
+        <>
+          <form onSubmit={handleSubmit} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-5">
+            {/* 平台名称 */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                平台名称 <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={form.platform_name}
+                onChange={e => handleChange('platform_name', e.target.value)}
+                placeholder="例如：木兰 BI 平台"
+                maxLength={128}
+                className={`w-full px-3 py-2 border rounded-lg text-sm text-slate-800 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition ${errors.platform_name ? 'border-red-400 bg-red-50' : 'border-slate-200'}`}
+              />
+              <div className="flex justify-between mt-1">
+                {errors.platform_name ? (
+                  <p className="text-xs text-red-500">{errors.platform_name}</p>
+                ) : <span />}
+                <p className="text-xs text-slate-400">{form.platform_name.length}/128</p>
+              </div>
+            </div>
+
+            {/* 平台副标题 */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                平台副标题
+                <span className="text-xs text-slate-400 font-normal ml-1">可选</span>
+              </label>
+              <input
+                type="text"
+                value={form.platform_subtitle}
+                onChange={e => handleChange('platform_subtitle', e.target.value)}
+                placeholder="例如：数据建模与治理平台"
+                maxLength={256}
+                className={`w-full px-3 py-2 border rounded-lg text-sm text-slate-800 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition ${errors.platform_subtitle ? 'border-red-400 bg-red-50' : 'border-slate-200'}`}
+              />
+              <div className="flex justify-between mt-1">
+                {errors.platform_subtitle ? (
+                  <p className="text-xs text-red-500">{errors.platform_subtitle}</p>
+                ) : <span />}
+                <p className="text-xs text-slate-400">{form.platform_subtitle.length}/256</p>
+              </div>
+            </div>
+
+            {/* Logo URL */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                Logo URL <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="url"
+                value={form.logo_url}
+                onChange={e => handleChange('logo_url', e.target.value)}
+                placeholder="https://example.com/logo.png"
+                maxLength={512}
+                className={`w-full px-3 py-2 border rounded-lg text-sm text-slate-800 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition font-mono ${errors.logo_url ? 'border-red-400 bg-red-50' : 'border-slate-200'}`}
+              />
+              <div className="flex justify-between mt-1">
+                {errors.logo_url ? (
+                  <p className="text-xs text-red-500">{errors.logo_url}</p>
+                ) : (
+                  <p className="text-xs text-slate-400">支持 http:// 和 https://</p>
+                )}
+                <p className="text-xs text-slate-400">{form.logo_url.length}/512</p>
+              </div>
+              {/* Logo 实时预览 */}
+              <div className="mt-3 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-200 shrink-0">
+                  {form.logo_url && !logoPreviewError ? (
+                    <img
+                      src={form.logo_url}
+                      alt="Logo 预览"
+                      className="w-full h-full object-contain"
+                      onError={() => setLogoPreviewError(true)}
+                    />
+                  ) : (
+                    <i className="ri-image-line text-lg text-slate-400" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-slate-700 truncate">
+                    {form.platform_name || '平台名称'}
+                    {form.platform_subtitle && (
+                      <span className="text-xs text-slate-400 font-normal ml-2">{form.platform_subtitle}</span>
+                    )}
+                  </p>
+                  {logoPreviewError && (
+                    <p className="text-xs text-red-500">Logo 无法加载，请检查 URL</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Favicon URL */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                Favicon URL
+                <span className="text-xs text-slate-400 font-normal ml-1">可选</span>
+              </label>
+              <input
+                type="url"
+                value={form.favicon_url}
+                onChange={e => handleChange('favicon_url', e.target.value)}
+                placeholder="https://example.com/favicon.ico"
+                className={`w-full px-3 py-2 border rounded-lg text-sm text-slate-800 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition font-mono ${errors.favicon_url ? 'border-red-400 bg-red-50' : 'border-slate-200'}`}
+              />
+              {errors.favicon_url && (
+                <p className="text-xs text-red-500 mt-1">{errors.favicon_url}</p>
+              )}
+            </div>
+
+            {/* 提交按钮 */}
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="submit"
+                disabled={saving}
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-2"
+              >
+                {saving && <span className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin" />}
+                {saving ? '保存中…' : '保存设置'}
+              </button>
+              {saveMsg && (
+                <span className={`text-sm ${saveMsg.type === 'success' ? 'text-emerald-600' : 'text-red-500'}`}>
+                  <i className={`ri-${saveMsg.type === 'success' ? 'check-line' : 'error-warning-line'} mr-1`} />
+                  {saveMsg.text}
+                </span>
+              )}
+            </div>
+          </form>
+
+          {/* 辅助信息 */}
+          <div className="mt-5 bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <h3 className="text-sm font-medium text-slate-600 mb-2">配置说明</h3>
+            <ul className="text-xs text-slate-500 space-y-1">
+              <li>· Logo 建议使用 1:1 比例的 PNG/SVG 图片</li>
+              <li>· Logo URL 变更后，预览即时更新，无需保存</li>
+              <li>· 上次更新：
+                <span className="font-mono text-slate-400 ml-1">{formatDate(settings.updated_at)}</span>
+              </li>
+            </ul>
+          </div>
+        </>
+      )}
+
+      {/* ========== 邮件通知 Tab ========== */}
+      {activeTab === 'email' && (
+        <>
+          {smtpLoading ? (
+            <div className="flex items-center justify-center min-h-[200px]">
+              <span className="w-6 h-6 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+              <span className="ml-2 text-slate-500">加载中…</span>
+            </div>
+          ) : (
+            <form onSubmit={handleSaveSmtp} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-5 mb-5">
+
+              {/* 区块：服务器配置 */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <i className="ri-server-line text-slate-500" />
+                  <h3 className="text-sm font-medium text-slate-700">服务器配置</h3>
+                </div>
+                <div className="space-y-4">
+                  {/* SMTP 主机 */}
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">SMTP 主机 <span className="text-red-500">*</span></label>
+                    <input
+                      type="text"
+                      value={smtpForm.smtp_host}
+                      onChange={e => handleSmtpChange('smtp_host', e.target.value)}
+                      placeholder="smtp.example.com"
+                      className={`w-full px-3 py-2 border rounded-lg text-sm text-slate-800 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition font-mono ${smtpErrors.smtp_host ? 'border-red-400 bg-red-50' : 'border-slate-200'}`}
+                    />
+                    {smtpErrors.smtp_host && <p className="text-xs text-red-500 mt-1">{smtpErrors.smtp_host}</p>}
+                  </div>
+
+                  {/* 端口 + TLS 并行 */}
+                  <div className="flex items-start gap-3">
+                    <div className="w-28 flex-shrink-0">
+                      <label className="block text-sm font-medium text-slate-700 mb-1">端口 <span className="text-red-500">*</span></label>
+                      <input
+                        type="number"
+                        value={smtpForm.smtp_port}
+                        onChange={e => handleSmtpChange('smtp_port', parseInt(e.target.value) || 465)}
+                        min={1} max={65535}
+                        className={`w-full px-3 py-2 border rounded-lg text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition ${smtpErrors.smtp_port ? 'border-red-400 bg-red-50' : 'border-slate-200'}`}
+                      />
+                      {smtpErrors.smtp_port && <p className="text-xs text-red-500 mt-1">{smtpErrors.smtp_port}</p>}
+                    </div>
+                    <div className="flex-1 pt-6">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="smtp_use_tls"
+                          checked={smtpForm.smtp_use_tls}
+                          onChange={e => handleSmtpChange('smtp_use_tls', e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-300 text-blue-600"
+                        />
+                        <label htmlFor="smtp_use_tls" className="text-sm text-slate-700">启用 TLS 加密</label>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1">常用端口：465（SSL）、587（TLS）、25（不推荐）</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 分隔线 */}
+              <div className="border-t border-slate-100" />
+
+              {/* 区块：账户信息 */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <i className="ri-shield-user-line text-slate-500" />
+                  <h3 className="text-sm font-medium text-slate-700">账户信息</h3>
+                </div>
+                <div className="space-y-4">
+                  {/* 用户名 */}
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">用户名 <span className="text-red-500">*</span></label>
+                    <input
+                      type="text"
+                      value={smtpForm.smtp_user}
+                      onChange={e => handleSmtpChange('smtp_user', e.target.value)}
+                      placeholder="your@email.com"
+                      className={`w-full px-3 py-2 border rounded-lg text-sm text-slate-800 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition ${smtpErrors.smtp_user ? 'border-red-400 bg-red-50' : 'border-slate-200'}`}
+                    />
+                    {smtpErrors.smtp_user && <p className="text-xs text-red-500 mt-1">{smtpErrors.smtp_user}</p>}
+                  </div>
+
+                  {/* 密码 */}
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">密码 / 授权码 <span className="text-red-500">*</span></label>
+                    <div className="relative">
+                      <PasswordField
+                        value={smtpForm.smtp_password}
+                        onChange={e => handleSmtpChange('smtp_password', e.target.value)}
+                        placeholder={smtpForm.smtp_password === '' ? '******（已配置，不修改请留空）' : '输入新密码'}
+                        className={smtpErrors.smtp_password ? 'border-red-400 bg-red-50' : 'border-slate-200'}
+                      />
+                    </div>
+                    {smtpErrors.smtp_password && <p className="text-xs text-red-500 mt-1">{smtpErrors.smtp_password}</p>}
+                    <p className="text-xs text-slate-400 mt-1">留空表示保持当前密码不变</p>
+                  </div>
+
+                  {/* 发件人地址 */}
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">发件人地址 <span className="text-red-500">*</span></label>
+                    <input
+                      type="email"
+                      value={smtpForm.smtp_from_addr}
+                      onChange={e => handleSmtpChange('smtp_from_addr', e.target.value)}
+                      placeholder="no-reply@example.com"
+                      className={`w-full px-3 py-2 border rounded-lg text-sm text-slate-800 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition ${smtpErrors.smtp_from_addr ? 'border-red-400 bg-red-50' : 'border-slate-200'}`}
+                    />
+                    {smtpErrors.smtp_from_addr && <p className="text-xs text-red-500 mt-1">{smtpErrors.smtp_from_addr}</p>}
+                  </div>
+                </div>
+              </div>
+
+              {/* 保存按钮 */}
+              <div className="flex items-center gap-3 pt-1">
+                <button
+                  type="submit"
+                  disabled={smtpSaving}
+                  className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-2"
+                >
+                  {smtpSaving && <span className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin" />}
+                  {smtpSaving ? '保存中…' : '保存邮件设置'}
+                </button>
+                {smtpSaveMsg && (
+                  <span className={`text-sm ${smtpSaveMsg.type === 'success' ? 'text-emerald-600' : 'text-red-500'}`}>
+                    <i className={`ri-${smtpSaveMsg.type === 'success' ? 'check-line' : 'error-warning-line'} mr-1`} />
+                    {smtpSaveMsg.text}
+                  </span>
+                )}
+              </div>
+            </form>
+          )}
+
+          {/* 测试邮件 */}
+          <form onSubmit={handleSendTestEmail} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-3 mb-5">
+            <div className="text-sm font-medium text-slate-700">发送测试邮件</div>
+            <div className="flex items-center gap-3">
+              <input
+                type="email"
+                value={testEmail}
+                onChange={e => setTestEmail(e.target.value)}
+                placeholder="输入收件人邮箱"
+                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-800 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+              />
+              <button
+                type="submit"
+                disabled={testSending}
+                className="px-4 py-2 bg-slate-100 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-2 whitespace-nowrap"
+              >
+                {testSending && <span className="w-4 h-4 border-2 border-slate-400/50 border-t-slate-600 rounded-full animate-spin" />}
+                发送测试邮件
+              </button>
+            </div>
+            {testMsg && (
+              <p className={`text-xs ${testMsg.type === 'success' ? 'text-emerald-600' : 'text-red-500'}`}>
+                <i className={`ri-${testMsg.type === 'success' ? 'check-line' : 'error-warning-line'} mr-1`} />
+                {testMsg.text}
+              </p>
+            )}
+          </form>
+
+          {/* 发送记录 */}
+          <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-medium text-slate-700">发送记录</h3>
+                <p className="text-xs text-slate-400 mt-0.5">最近 {logsTotal} 条记录</p>
+              </div>
+              <button
+                onClick={loadEmailLogs}
+                className="text-xs text-slate-500 hover:text-slate-700 transition"
+              >
+                <i className="ri-refresh-line mr-1" />刷新
+              </button>
+            </div>
+
+            {logsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <span className="w-5 h-5 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+              </div>
+            ) : emailLogsError ? (
+              <div className="flex flex-col items-center py-8 text-red-500">
+                <i className="ri-error-warning-line text-3xl mb-2" />
+                <p className="text-sm">{emailLogsError}</p>
+                <button onClick={loadEmailLogs} className="mt-2 text-xs text-blue-500 hover:underline">重试</button>
+              </div>
+            ) : emailLogs.length === 0 ? (
+              <div className="flex flex-col items-center py-8 text-slate-400">
+                <i className="ri-mail-line text-3xl mb-2" />
+                <p className="text-sm">暂无发送记录</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 text-left text-slate-500">
+                      <th className="px-4 py-2 font-medium">类型</th>
+                      <th className="px-4 py-2 font-medium">收件人</th>
+                      <th className="px-4 py-2 font-medium">主题</th>
+                      <th className="px-4 py-2 font-medium">状态</th>
+                      <th className="px-4 py-2 font-medium">发送时间</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {emailLogs.map(log => (
+                      <tr key={log.id} className="hover:bg-slate-50/50">
+                        <td className="px-4 py-2">
+                          <span className="text-slate-600">
+                            {EMAIL_TYPE_LABELS[log.email_type] || log.email_type}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-slate-600 max-w-[160px] truncate" title={log.recipient}>
+                          {log.recipient}
+                        </td>
+                        <td className="px-4 py-2 text-slate-600 max-w-[180px] truncate" title={log.subject || ''}>
+                          {log.subject || '—'}
+                        </td>
+                        <td className="px-4 py-2">
+                          {(() => {
+                            const s = STATUS_LABELS[log.status] || { label: log.status, color: 'bg-slate-100 text-slate-600' };
+                            return (
+                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${s.color}`}>
+                                {s.label}
+                              </span>
+                            );
+                          })()}
+                          {log.attempt_count > 1 && (
+                            <span className="ml-1 text-slate-400">×{log.attempt_count}</span>
+                          )}
+                          {log.error_detail && (
+                            <p className="text-[10px] text-red-400 mt-0.5 max-w-[160px] truncate" title={log.error_detail}>
+                              {log.error_detail}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-slate-400 whitespace-nowrap">
+                          {log.sent_at ? formatDate(log.sent_at) : (log.created_at ? formatDate(log.created_at) : '—')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

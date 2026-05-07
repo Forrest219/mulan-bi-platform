@@ -7,7 +7,6 @@
  *
  * 返回 {id, name, type} 数组，type 枚举：postgresql | tableau | starrocks
  */
-import { API_BASE } from '../config';
 import { listConnections as listTableauConnections } from './tableau';
 import { listDataSources } from './datasources';
 

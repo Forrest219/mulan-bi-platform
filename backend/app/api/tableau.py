@@ -603,26 +603,86 @@ async def sync_connection(
         return {"message": "同步正在进行中", "status": "running"}
 
     from services.tasks import celery_app
+    celery_available = False
     try:
         pong = celery_app.control.inspect(timeout=1.0).ping()
-        if not pong:
-            raise HTTPException(
-                status_code=503,
-                detail={"error_code": "SYS_002", "message": "后台任务服务不可用，请联系管理员"},
-            )
-    except HTTPException:
-        raise
+        celery_available = bool(pong)
     except Exception:
-        raise HTTPException(
-            status_code=503,
-            detail={"error_code": "SYS_002", "message": "后台任务服务不可用，请联系管理员"},
-        )
+        celery_available = False
 
     _db.set_sync_status(conn_id, "running")
 
-    from services.tasks.tableau_tasks import sync_connection_task
-    task = sync_connection_task.delay(conn_id)
-    return {"task_id": task.id, "message": "同步任务已提交", "status": "pending"}
+    if celery_available:
+        from services.tasks.tableau_tasks import sync_connection_task
+        task = sync_connection_task.delay(conn_id)
+        return {"task_id": task.id, "message": "同步任务已提交", "status": "pending"}
+
+    # Celery 不可用时回退到同步执行（开发环境兼容）
+    import asyncio
+
+    def _run_sync_inline():
+        from services.tableau.sync_service import TableauSyncService, TableauRestSyncService
+        from services.tableau.models import TableauDatabase as _TDB
+        from app.core.crypto import get_tableau_crypto
+        from app.core.database import get_db_context
+
+        with get_db_context() as sync_db:
+            sync_dbw = _TDB(session=sync_db)
+            sync_conn = sync_dbw.get_connection(conn_id)
+            if not sync_conn:
+                return {"status": "error", "message": "连接不存在"}
+
+            sync_log = sync_dbw.create_sync_log(conn_id, trigger_type="manual")
+            sync_dbw.set_sync_status(conn_id, "running")
+
+            crypto = get_tableau_crypto()
+            try:
+                token = crypto.decrypt(sync_conn.token_encrypted)
+            except Exception as e:
+                msg = f"Token 解密失败: {e}"
+                sync_dbw.finish_sync_log(sync_log.id, "failed", error_message=msg)
+                sync_dbw.set_sync_status(conn_id, "failed")
+                return {"status": "error", "message": msg}
+
+            if getattr(sync_conn, "connection_type", "mcp") == "mcp":
+                service = TableauRestSyncService(
+                    server_url=sync_conn.server_url, site=sync_conn.site,
+                    token_name=sync_conn.token_name, token_value=token,
+                    api_version=sync_conn.api_version,
+                )
+            else:
+                service = TableauSyncService(
+                    server_url=sync_conn.server_url, site=sync_conn.site,
+                    token_name=sync_conn.token_name, token_value=token,
+                    api_version=sync_conn.api_version,
+                )
+
+            try:
+                if not service.connect():
+                    msg = "连接 Tableau Server 失败，请检查配置"
+                    sync_dbw.finish_sync_log(sync_log.id, "failed", error_message=msg)
+                    sync_dbw.set_sync_status(conn_id, "failed")
+                    return {"status": "error", "message": msg}
+
+                result = service.sync_all_assets(sync_dbw, conn_id, trigger_type="manual", sync_log_id=sync_log.id)
+                sync_dbw.reset_sync_failures(conn_id)
+                return {"status": result["status"], "total": result["total"]}
+            except Exception as e:
+                msg = str(e)
+                sync_dbw.finish_sync_log(sync_log.id, "failed", error_message=msg)
+                sync_dbw.set_sync_status(conn_id, "failed")
+                return {"status": "error", "message": msg}
+            finally:
+                service.disconnect()
+
+    result = await asyncio.to_thread(_run_sync_inline)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=500, detail={"message": result["message"]})
+    return {
+        "message": f"同步已完成，共处理 {result.get('total', 0)} 个资产",
+        "status": "completed",
+        "total": result.get("total", 0),
+    }
 
 
 @router.get("/worker-health")

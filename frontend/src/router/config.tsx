@@ -52,15 +52,18 @@ const ActivityAdminPage     = lazy(() => import('../pages/admin/activity/page'))
 const QueryAlertsPage       = lazy(() => import('../pages/admin/query-alerts/page'));
 const PlatformSettingsPage  = lazy(() => import('../pages/admin/platform-settings/page'));
 const ForgotPasswordPage    = lazy(() => import('../pages/forgot-password/page'));
+const ResetPasswordPage    = lazy(() => import('../pages/reset-password/page'));
 const EmptyStatePage        = lazy(() => import('../pages/empty/EmptyStatePage'));
 const AgentMonitorPage      = lazy(() => import('../pages/admin/agent-monitor/page'));
 const QueryPage             = lazy(() => import('../pages/query/page'));
 const AccountSecurityPage   = lazy(() => import('../pages/account/security/page'));
+const AccountPasswordPage   = lazy(() => import('../pages/account/password/page'));
+const AccountProfilePage    = lazy(() => import('../pages/account/profile/page'));
+const NotificationsPage     = lazy(() => import('../pages/notifications/page'));
 
 // DQC 模块
 const DqcOverviewPage      = lazy(() => import('../pages/data-governance/dqc/overview/page'));
 const DqcMonitorPage       = lazy(() => import('../pages/data-governance/dqc/monitor/page'));
-const DqcSignalsPage       = lazy(() => import('../pages/data-governance/dqc/signals/page'));
 const DqcAnalysesPage      = lazy(() => import('../pages/data-governance/dqc/analyses/page'));
 const DqcAssetDetailPage   = lazy(() => import('../pages/data-governance/dqc/detail/page'));
 const DqcTemplatesPage     = lazy(() => import('../pages/data-governance/dqc/templates/page'));
@@ -92,6 +95,7 @@ const routes: RouteObject[] = [
   { path: '/login',          element: <LoginPage /> },
   { path: '/register',       element: <RegisterPage /> },
   { path: '/forgot-password', element: <ForgotPasswordPage /> },
+  { path: '/reset-password', element: <ResetPasswordPage /> },
 
   // =====================
   // 问数模块（独立布局，Spec 38、Spec 14）
@@ -412,7 +416,33 @@ const routes: RouteObject[] = [
               </ProtectedRoute>
             ),
           },
+          {
+            path: 'password',
+            element: (
+              <ProtectedRoute>
+                <AccountPasswordPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'profile',
+            element: (
+              <ProtectedRoute>
+                <AccountProfilePage />
+              </ProtectedRoute>
+            ),
+          },
         ],
+      },
+
+      // ── 消息中心 ──
+      {
+        path: '/notifications',
+        element: (
+          <ProtectedRoute>
+            <NotificationsPage />
+          </ProtectedRoute>
+        ),
       },
 
       // ── 域：智能体 /agents（Spec 28、29、30） ──

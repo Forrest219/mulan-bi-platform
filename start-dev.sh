@@ -149,7 +149,7 @@ require_port_free 3000 "frontend"
 
 # Docker 基础设施
 printf "docker... "
-"${COMPOSE[@]}" up -d --quiet-pull
+"${COMPOSE[@]}" up -d --quiet-pull postgres redis
 printf "${GREEN}ok${RESET}\n"
 
 # 等 PostgreSQL 就绪

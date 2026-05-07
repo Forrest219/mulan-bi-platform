@@ -6,8 +6,6 @@ import {
   CHECK_STATUS_CONFIG, RULE_PACKAGE_LABELS,
 } from '../../../../api/dqc';
 
-const getErrorMessage = (e: unknown, fallback = '操作失败') =>
-  e instanceof Error ? e.message : fallback;
 
 export default function DqcCheckRecordsPage() {
   const [results, setResults] = useState<DqcCheckResult[]>([]);
@@ -43,12 +41,17 @@ export default function DqcCheckRecordsPage() {
             <i className="ri-list-check text-slate-500 text-base" />
             <h1 className="text-lg font-semibold text-slate-800">数据质量监控</h1>
           </div>
-          <p className="text-[13px] text-slate-400 ml-7 mb-4">检查记录</p>
+          <p className="text-[13px] text-slate-400 ml-7">检查记录</p>
+        </div>
+      </div>
+      <div className="bg-white border-b border-slate-100 px-8">
+        <div className="max-w-6xl mx-auto">
           <DqcTabs />
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-8 py-6">
+      <div className="px-8 py-6">
+        <div className="max-w-6xl mx-auto">
         {/* 筛选栏 */}
         <div className="flex items-center gap-3 mb-4">
           <select
@@ -169,6 +172,7 @@ export default function DqcCheckRecordsPage() {
             </tbody>
           </table>
         </div>
+      </div>
       </div>
     </div>
   );

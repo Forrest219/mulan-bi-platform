@@ -1,6 +1,6 @@
 # 认证与权限 (Auth/RBAC) 技术规格书
 
-> 版本：v1.0 | 状态：已完成 | 日期：2026-04-03
+> 版本：v1.1 | 状态：已完成 | 日期：2026-05-07
 
 ---
 
@@ -10,7 +10,7 @@
 定义木兰 BI 平台的完整认证授权机制，包括用户管理、用户组、权限配置、JWT 会话管理和 RBAC 权限控制。
 
 ### 1.2 范围
-- **包含**：登录/注册/登出、JWT 会话、RBAC 四级角色、用户 CRUD、用户组管理、权限配置、活动标签
+- **包含**：登录/注册/登出、JWT 会话、RBAC 四级角色、用户 CRUD、用户组管理、权限配置、活动标签、个人中心（用户自助编辑个人信息）
 - **不含**：OAuth2/SSO 集成（规划中）；MFA 已实现（见 §6.3）
 
 ### 1.3 关联文档
@@ -36,6 +36,11 @@
 | is_active | BOOLEAN | DEFAULT true | 是否激活 |
 | created_at | TIMESTAMP | NOT NULL, DEFAULT now() | 创建时间 |
 | last_login | TIMESTAMP | NULLABLE | 最后登录时间 |
+| position | VARCHAR(128) | NULLABLE | 职位 |
+| department | VARCHAR(128) | NULLABLE | 部门 |
+| phone | VARCHAR(32) | NULLABLE | 手机号 |
+
+> 迁移文件：`20260507_220000_add_user_profile_fields.py`
 
 #### auth_user_groups
 | 列名 | 类型 | 约束 | 说明 |
@@ -74,6 +79,9 @@ erDiagram
         string role
         jsonb permissions
         bool is_active
+        string position
+        string department
+        string phone
     }
     auth_user_groups {
         int id PK
@@ -99,6 +107,7 @@ erDiagram
 | POST | `/api/auth/refresh` | Cookie | 使用 Refresh Token 刷新 Access Token（Sliding Window） |
 | POST | `/api/auth/refresh/revoke-all` | Cookie | 撤销当前用户所有 Refresh Token |
 | GET | `/api/auth/me` | Cookie | 获取当前用户信息 |
+| PATCH | `/api/auth/me` | Cookie | 更新当前用户个人信息（display_name / email / position / department / phone） |
 | GET | `/api/auth/verify` | Cookie | 验证会话有效性 |
 | GET | `/api/auth/mfa/status` | Cookie | 查询 MFA 启用状态 |
 | POST | `/api/auth/mfa/setup` | Cookie | 生成 TOTP Secret 和 QR Code |
@@ -135,7 +144,10 @@ erDiagram
     "is_active": true,
     "mfa_enabled": false,
     "created_at": "2026-04-01 00:00:00",
-    "last_login": "2026-04-03 10:30:00"
+    "last_login": "2026-04-03 10:30:00",
+    "position": "BI 总监",
+    "department": "BI 中心",
+    "phone": "138xxxx0000"
   }
 }
 ```
@@ -223,6 +235,27 @@ type LoginResponse =
 }
 ```
 同时颁发 `refresh_token` Cookie 完成登录流程。
+
+#### PATCH /api/auth/me
+
+**Request（所有字段可选，仅传变更字段）:**
+```json
+{
+  "display_name": "Forrest",
+  "email": "forrest@example.com",
+  "position": "BI 总监",
+  "department": "BI 中心",
+  "phone": "138xxxx0000"
+}
+```
+
+**Response (200):** 同 GET /api/auth/me，返回完整更新后的 user 对象（含新字段）。
+
+**Response (404):** `AUTH_007` 用户不存在。
+
+**约束**：
+- 任一字段传 `null` 不做清空，传空字符串等价于不更新（服务层按 `if value is not None` 判断）
+- `email` 变更后若与其他用户冲突，返回 `409 AUTH_006`
 
 ### 3.2 用户管理端点 (`/api/users`) — 仅 admin
 
@@ -433,6 +466,16 @@ admin 角色自动拥有全部权限，无需额外检查。
 
 **备用码**：8个一次性备用码，加密存储，使用后标记为 `None`
 
+### 6.4 个人中心（`/account/profile`）
+
+**实现状态**：✅ 已实现（2026-05-07）
+
+- 前端路由：`/account/profile`（AppShellLayout 内，`ProtectedRoute`，所有已登录用户可访问）
+- 可编辑字段：`display_name`（必填）、`position`、`department`、`email`（必填）、`phone`
+- 只读字段：`username`、`role`（系统角色）、`created_at`
+- 头像：本地文件选择 + `ObjectURL` 预览，暂不持久化到后端
+- 保存调用：`PATCH /api/auth/me`；成功后调用 `AuthContext.updateUser()` 同步全局状态（顶部导航用户名实时更新）
+
 ---
 
 ## 7. 集成点
@@ -534,3 +577,4 @@ sequenceDiagram
 | 3 | JWT Token 刷新机制（当前 7 天一刀切） | ✅ 已实现 Refresh Token（Sprint 3） |
 | 4 | 密码策略是否需要加强（复杂度、过期） | 待讨论 |
 | 5 | 权限键是否需要细粒度化（如 `tableau:read` vs `tableau:write`） | 待讨论 |
+| 6 | 头像上传是否需要持久化到后端（目前仅本地 ObjectURL 预览） | 待讨论 |

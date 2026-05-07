@@ -261,7 +261,6 @@ export default function DqcTemplateDetailPage() {
     if (defaults.match_scope) {
       setMatchForm(m => ({ ...m, scope: defaults.match_scope! }));
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.rule_type, isNew]);
 
   const handleAiParse = async () => {
@@ -335,7 +334,11 @@ export default function DqcTemplateDetailPage() {
               <i className="ri-list-check text-slate-500 text-base" />
               <h1 className="text-lg font-semibold text-slate-800">数据质量监控</h1>
             </div>
-            <p className="text-[13px] text-slate-400 ml-7 mb-4">规则模板</p>
+            <p className="text-[13px] text-slate-400 ml-7">规则模板</p>
+          </div>
+        </div>
+        <div className="bg-white border-b border-slate-100 px-8">
+          <div className="max-w-6xl mx-auto">
             <DqcTabs />
           </div>
         </div>
@@ -355,7 +358,11 @@ export default function DqcTemplateDetailPage() {
               <i className="ri-list-check text-slate-500 text-base" />
               <h1 className="text-lg font-semibold text-slate-800">数据质量监控</h1>
             </div>
-            <p className="text-[13px] text-slate-400 ml-7 mb-4">规则模板</p>
+            <p className="text-[13px] text-slate-400 ml-7">规则模板</p>
+          </div>
+        </div>
+        <div className="bg-white border-b border-slate-100 px-8">
+          <div className="max-w-6xl mx-auto">
             <DqcTabs />
           </div>
         </div>

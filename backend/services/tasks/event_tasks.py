@@ -23,6 +23,51 @@ logger = logging.getLogger(__name__)
 # 事件 / 通知清理任务
 # =============================================================================
 
+def _update_email_log_for_outbox_record(
+    db,
+    outbox_record,
+    status: str,
+    error_detail: str = None,
+    attempt_count: int = None,
+):
+    """
+    根据 outbox 记录查找并更新对应的邮件发送日志。
+
+    outbox_record: BiNotificationOutbox 实例
+    status: "enqueued" | "sent" | "permanent_failed"
+    """
+    try:
+        from services.events.models import BiEmailSendLog
+        from datetime import datetime
+
+        # 查找该 outbox_id 对应的最新日志记录
+        log = (
+            db.query(BiEmailSendLog)
+            .filter(BiEmailSendLog.outbox_id == outbox_record.id)
+            .order_by(BiEmailSendLog.id.desc())
+            .first()
+        )
+        if not log:
+            return
+
+        log.status = status
+        if error_detail:
+            log.error_detail = error_detail[:512]
+        if attempt_count is not None:
+            log.attempt_count = attempt_count
+        if status == "sent":
+            log.sent_at = datetime.utcnow()
+
+        db.commit()
+    except Exception:
+        # 日志更新失败不影响主流程，仅记录
+        logger.exception(
+            "[email_log] 更新邮件日志失败: outbox_id=%s, status=%s",
+            outbox_record.id if outbox_record else None,
+            status,
+        )
+
+
 @shared_task(bind=True)
 def purge_old_events(self):
     """清理 90 天前的事件和孤儿通知（Celery Beat 每日执行）"""
@@ -148,11 +193,20 @@ def _process_outbox_record(db, record, email_channel, webhook_channel, trace_id,
 
     # 调用渠道发送
     if record.channel == "email":
-        result = email_channel.send(
-            notification=notification,
-            recipient=record.target,
-            trace_id=trace_id,
-        )
+        if record.event_type == "auth.password_reset" and not record.notification_id:
+            # 直接发送路径：从 outbox.payload_json 恢复发送参数
+            stored = record.payload_json or {}
+            result = email_channel.deliver_password_reset_email(
+                recipient=stored.get("recipient") or record.target,
+                display_name=stored.get("display_name", "用户"),
+                reset_link=stored.get("reset_link", ""),
+            )
+        else:
+            result = email_channel.send(
+                notification=notification,
+                recipient=record.target,
+                trace_id=trace_id,
+            )
     elif record.channel == "webhook" and webhook_endpoint:
         result = webhook_channel.send(
             notification=notification,
@@ -177,12 +231,24 @@ def _process_outbox_record(db, record, email_channel, webhook_channel, trace_id,
             next_attempt_at=None,
             last_error=None,
         )
+        # 更新邮件发送日志
+        _update_email_log_for_outbox_record(db, record, "sent")
+    elif result.status == "permanent_failed":
+        outbox_svc.update_status(
+            db, record.id, "dead",
+            attempt_count=record.attempt_count + 1,
+            next_attempt_at=None,
+            last_error=result.detail,
+        )
+        # 更新邮件发送日志为永久失败
+        _update_email_log_for_outbox_record(db, record, "permanent_failed", error_detail=result.detail)
     elif result.status == "retryable_failed":
         attempt_count = record.attempt_count + 1
         max_retries = 5 if record.channel == "email" else 3
         if attempt_count > max_retries:
             # 超过最大重试次数 → 死信
             outbox_svc.to_dead_letter(db, record, result.detail)
+            _update_email_log_for_outbox_record(db, record, "permanent_failed", error_detail=result.detail)
         else:
             next_at = outbox_svc.get_next_attempt_at(record.channel, attempt_count)
             outbox_svc.update_status(
@@ -191,6 +257,8 @@ def _process_outbox_record(db, record, email_channel, webhook_channel, trace_id,
                 next_attempt_at=next_at,
                 last_error=result.detail,
             )
+            # 更新重试次数
+            _update_email_log_for_outbox_record(db, record, "enqueued", attempt_count=attempt_count)
     else:  # permanent_failed → 直接死信
         outbox_svc.to_dead_letter(db, record, result.detail)
 

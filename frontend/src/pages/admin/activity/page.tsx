@@ -125,15 +125,27 @@ export default function ActivityPage() {
     return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
-  if (loading) return <div className="p-8 text-center text-slate-400">加载中...</div>;
+  if (loading) return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <span className="text-slate-400 text-[13px]">加载中…</span>
+    </div>
+  );
 
   return (
-    <div className="p-6">
-      {/* 页面标题栏 */}
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-slate-800">访问日志</h1>
-        <p className="text-sm text-slate-400 mt-0.5">用户活动统计和登录记录</p>
+    <div className="min-h-screen bg-slate-50">
+      {/* 页头 */}
+      <div className="bg-white border-b border-slate-200 px-8 py-5">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center gap-2 mb-0.5">
+            <i className="ri-history-line text-slate-500 text-base" />
+            <h1 className="text-lg font-semibold text-slate-800">操作日志</h1>
+          </div>
+          <p className="text-[13px] text-slate-400 ml-7">用户活动统计和登录记录</p>
+        </div>
       </div>
+
+      <div className="px-8 py-7">
+        <div className="max-w-6xl mx-auto">
 
       {/* 筛选栏 */}
       <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
@@ -340,6 +352,8 @@ export default function ActivityPage() {
               )}
             </div>
           </div>
+        </div>
+      </div>
         </div>
       </div>
     </div>

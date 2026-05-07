@@ -71,7 +71,7 @@ function formatDate(ts: string) {
   }
 }
 
-export default function DatasourceListRenderer({ payload, raw }: Props) {
+export default function DatasourceListRenderer({ payload, raw: _raw }: Props) {
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<keyof Datasource>('updatedAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');

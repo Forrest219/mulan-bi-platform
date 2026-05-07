@@ -284,7 +284,8 @@ export default function MaintenanceWindowsPage() {
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-8 py-6">
+      <div className="px-8 py-6">
+        <div className="max-w-6xl mx-auto">
         {/* Filter bar */}
         <div className="flex items-center gap-4 mb-4">
           <div className="flex items-center gap-2">
@@ -459,6 +460,7 @@ export default function MaintenanceWindowsPage() {
             </>
           )}
         </div>
+      </div>
       </div>
 
       {/* Create/Edit Modal */}

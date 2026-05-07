@@ -28,6 +28,18 @@ export default function DatasourcesPage() {
   // List actions
   const [testingId, setTestingId] = useState<number | null>(null);
   const [modalNotify, setModalNotify] = useState<{ success: boolean; message: string } | null>(null);
+  const [copyToast, setCopyToast] = useState<string | null>(null);
+
+  const handleCopyHost = (host: string, port: number) => {
+    const text = `${host}:${port}`;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopyToast(`已复制 ${text}`);
+      setTimeout(() => setCopyToast(null), 2000);
+    }).catch(() => {
+      setCopyToast('复制失败，请手动复制');
+      setTimeout(() => setCopyToast(null), 2000);
+    });
+  };
   const [confirmModal, setConfirmModal] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void } | null>(null);
 
   // AI Parse
@@ -423,7 +435,11 @@ export default function DatasourcesPage() {
                   </div>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
                     {ds.last_tested_at && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full flex items-center gap-1 ${ds.last_test_success ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                      <span className={`text-xs px-2 py-0.5 rounded-full flex items-center gap-1 border ${
+                        ds.last_test_success
+                          ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
+                          : 'bg-red-50 text-red-600 border-red-200'
+                      }`}>
                         <i className={ds.last_test_success ? 'ri-check-line' : 'ri-close-line'} />
                         {ds.last_test_success ? '连通' : '断连'}
                       </span>
@@ -436,7 +452,17 @@ export default function DatasourcesPage() {
                   </div>
                 </div>
                 <div className="text-xs text-slate-500 space-y-1 mb-4 flex-1">
-                  <div className="truncate" title={`${ds.host}:${ds.port}`}><span className="text-slate-400">主机：</span>{ds.host}:{ds.port}</div>
+                  <div className="flex items-center gap-1" title={`${ds.host}:${ds.port}`}>
+                    <span className="text-slate-400 flex-shrink-0">主机：</span>
+                    <span className="truncate">{ds.host}:{ds.port}</span>
+                    <button
+                      onClick={e => { e.stopPropagation(); handleCopyHost(ds.host, ds.port); }}
+                      className="flex-shrink-0 text-slate-300 hover:text-slate-600 transition-colors"
+                      title="复制主机地址"
+                    >
+                      <i className="ri-file-copy-line text-[11px]" />
+                    </button>
+                  </div>
                   {ds.database_name && <div><span className="text-slate-400">数据库：</span>{ds.database_name}</div>}
                   <div><span className="text-slate-400">用户：</span>{ds.username}</div>
                   {ds.description && <div className="text-slate-400 italic truncate" title={ds.description}>{ds.description}</div>}
@@ -469,6 +495,14 @@ export default function DatasourcesPage() {
           </div>
         )}
       </div>
+
+      {/* Copy Toast */}
+      {copyToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-white text-xs px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 pointer-events-none">
+          <i className="ri-check-line text-emerald-400" />
+          {copyToast}
+        </div>
+      )}
 
       {/* Notification */}
       {modalNotify && (

@@ -160,7 +160,7 @@ export default function QueryPage() {
   const canSend = !!selectedConnectionId && !!selectedDatasource && !asking;
 
   return (
-    <div className="flex flex-row h-screen bg-white text-gray-900">
+    <div className="flex flex-row h-screen bg-white text-slate-900">
       {/* 左侧边栏 */}
       <SessionSidebar
         sessions={sessions}
@@ -180,9 +180,9 @@ export default function QueryPage() {
           title="展开侧边栏"
           aria-label="展开侧边栏"
           className="fixed top-1/2 -translate-y-1/2 left-0 z-50 w-6 h-12 flex items-center justify-center
-                     bg-gray-100 hover:bg-gray-200 rounded-r-lg shadow-md transition-colors"
+                     bg-slate-100 hover:bg-slate-200 rounded-r-lg shadow-md transition-colors"
         >
-          <i className="ri-sidebar-fold-line text-gray-500 text-sm" />
+          <i className="ri-sidebar-fold-line text-slate-500 text-sm" />
         </button>
       )}
 

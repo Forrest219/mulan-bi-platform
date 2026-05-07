@@ -366,12 +366,10 @@ function ConnectedAppPanel({
       .finally(() => setLoadingStatus(false));
   }, [connection.id]);
 
-  // 展开时加载状态
+  // 展开时加载状态 → 改为挂载即加载，确保折叠态也能显示徽标
   useEffect(() => {
-    if (expanded && status === null) {
-      loadStatus();
-    }
-  }, [expanded, status, loadStatus]);
+    loadStatus();
+  }, [loadStatus]);
 
   const handleSave = async () => {
     if (!clientId.trim()) {
@@ -418,7 +416,7 @@ function ConnectedAppPanel({
   };
 
   return (
-    <div className="border border-slate-200 rounded-lg overflow-hidden">
+    <div className="bg-white">
       {/* 折叠标题行 */}
       <button
         type="button"
@@ -431,11 +429,14 @@ function ConnectedAppPanel({
             <span className="text-sm font-medium text-slate-700">{connection.name}</span>
             <span className="ml-2 text-xs text-slate-400">{connection.server_url}</span>
           </div>
-          {/* 已配置徽标 */}
+          {/* 状态徽标 */}
+          {loadingStatus && status === null && (
+            <span className="w-3 h-3 border border-slate-300 border-t-slate-500 rounded-full animate-spin" />
+          )}
           {status?.configured === true && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
               <i className="ri-checkbox-circle-line" />
-              已配置
+              已配置密钥
             </span>
           )}
           {status?.configured === false && (
@@ -649,7 +650,7 @@ function ConnectedAppSection({ onToast }: { onToast: (msg: string, variant?: 'su
       )}
 
       {!loading && connections.length > 0 && (
-        <div className="space-y-2">
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
           {connections.map((conn) => (
             <ConnectedAppPanel key={conn.id} connection={conn} onToast={onToast} />
           ))}
@@ -701,6 +702,10 @@ export default function McpConfigsPage() {
   const [deleteTarget, setDeleteTarget] = useState<McpServerItem | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Tableau 连接列表（用于测试联动 CA 状态）
+  const [tableauConnections, setTableauConnections] = useState<TableauConnectionItem[]>([]);
+  const [caCheckResults, setCaCheckResults] = useState<Record<number, { configured: boolean | null; loading: boolean }>>({});
+
   const loadServers = useCallback(() => {
     setLoading(true);
     setError(null);
@@ -713,6 +718,15 @@ export default function McpConfigsPage() {
   useEffect(() => {
     loadServers();
   }, [loadServers]);
+
+  useEffect(() => {
+    fetch('/api/tableau/connections?include_inactive=false', { credentials: 'include' })
+      .then(res => res.ok ? res.json() : null)
+      .then((data: { connections: TableauConnectionItem[] } | null) => {
+        if (data?.connections) setTableauConnections(data.connections);
+      })
+      .catch(() => {});
+  }, []);
 
   // 仅 admin 可见
   if (!isAdmin) {
@@ -833,14 +847,35 @@ export default function McpConfigsPage() {
   // 列表行内测试
   const handleTestInline = async (server: McpServerItem) => {
     setTestingId(server.id);
+    if (server.type === 'tableau') {
+      setCaCheckResults(prev => ({ ...prev, [server.id]: { configured: null, loading: true } }));
+    }
     try {
       const result = await apiTest(server.id);
       setTestResults(prev => ({ ...prev, [server.id]: result }));
+      if (server.type === 'tableau') {
+        const matched = tableauConnections.find(
+          c => c.name.toLowerCase() === server.name.toLowerCase()
+        );
+        if (matched) {
+          try {
+            const caStatus = await apiGetConnectedApp(matched.id);
+            setCaCheckResults(prev => ({ ...prev, [server.id]: { configured: caStatus.configured, loading: false } }));
+          } catch {
+            setCaCheckResults(prev => ({ ...prev, [server.id]: { configured: null, loading: false } }));
+          }
+        } else {
+          setCaCheckResults(prev => ({ ...prev, [server.id]: { configured: null, loading: false } }));
+        }
+      }
     } catch (e: unknown) {
       setTestResults(prev => ({
         ...prev,
         [server.id]: { status: 'offline', latency_ms: 0, error: e instanceof Error ? e.message : String(e) },
       }));
+      if (server.type === 'tableau') {
+        setCaCheckResults(prev => ({ ...prev, [server.id]: { configured: null, loading: false } }));
+      }
     } finally {
       setTestingId(null);
     }
@@ -931,7 +966,8 @@ export default function McpConfigsPage() {
       </div>
 
       {/* Content */}
-      <div className="max-w-7xl mx-auto px-8 py-7">
+      <div className="px-8 py-7">
+        <div className="max-w-7xl mx-auto">
         {/* ── 列表视图 ──────────────────────────────────────────────── */}
         {!showForm && (
           <>
@@ -1070,6 +1106,24 @@ export default function McpConfigsPage() {
                                   : testResult.status === 'auth_failed'
                                     ? `PAT 认证失败: ${testResult.error ?? '凭证无效或已过期'}`
                                     : `无法连接: ${friendlyError(testResult.error)}`}
+                              </div>
+                            )}
+                            {/* Connected App 联动检查（Tableau 类型） */}
+                            {server.type === 'tableau' && caCheckResults[server.id] && (
+                              <div className={`mt-0.5 text-xs px-2 py-0.5 rounded text-left ${
+                                caCheckResults[server.id].loading
+                                  ? 'text-slate-400'
+                                  : caCheckResults[server.id].configured === true
+                                    ? 'text-emerald-600'
+                                    : 'text-amber-600'
+                              }`}>
+                                {caCheckResults[server.id].loading
+                                  ? '检查 Connected App 密钥...'
+                                  : caCheckResults[server.id].configured === true
+                                    ? 'Connected App 密钥已配置 · 问数可用'
+                                    : caCheckResults[server.id].configured === false
+                                      ? 'Connected App 密钥未配置 · 问数功能受限'
+                                      : 'Connected App 状态未知'}
                               </div>
                             )}
                           </td>
@@ -1423,6 +1477,7 @@ export default function McpConfigsPage() {
             </div>
           </div>
         )}
+        </div>
       </div>
 
       {/* 删除确认弹窗 */}

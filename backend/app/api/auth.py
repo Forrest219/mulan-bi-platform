@@ -494,6 +494,31 @@ async def get_me(request: Request):
     return user
 
 
+class UpdateMeRequest(BaseModel):
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+    position: Optional[str] = None
+    department: Optional[str] = None
+    phone: Optional[str] = None
+
+
+@router.patch("/me")
+async def update_me(request: Request, body: UpdateMeRequest):
+    """更新当前登录用户的个人信息"""
+    user_info = _get_current_user(request)
+    updated = auth_service.update_user_info(
+        user_info["id"],
+        display_name=body.display_name,
+        email=body.email,
+        position=body.position,
+        department=body.department,
+        phone=body.phone,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return updated
+
+
 @router.post("/forgot-password", status_code=200)
 async def forgot_password(request: ForgotPasswordRequest):
     """请求密码重置链接（防枚举：无论邮箱是否存在均返回相同信息）"""
@@ -501,9 +526,13 @@ async def forgot_password(request: ForgotPasswordRequest):
     if token is None:
         # 邮箱不存在或请求过于频繁
         return {"message": "如果该邮箱已注册，我们将发送重置说明。"}
-    # TODO: 实际发送邮件（本期由管理员中转），token 可通过日志输出便于测试
-    import logging
-    logging.getLogger("auth").info(f"[Spec27] Password reset token for {request.email}: {token}")
+    # 尝试发送邮件（即使发送失败也返回相同信息，防止枚举攻击）
+    success, detail = auth_service.send_password_reset_email(request.email, token)
+    if not success:
+        import logging
+        logging.getLogger("auth").warning(
+            f"[Spec27] 密码重置邮件发送失败 for {request.email}: {detail}"
+        )
     return {"message": "如果该邮箱已注册，我们将发送重置说明。"}
 
 

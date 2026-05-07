@@ -9,7 +9,7 @@ function renderMarkdown(text: string): string {
     .replace(/^## (.+)$/gm, '<h3 class="font-semibold text-slate-800 mt-5 mb-2 text-base">$1</h3>')
     .replace(/^# (.+)$/gm, '<h2 class="font-bold text-slate-800 mt-5 mb-2 text-lg">$1</h2>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/^\- (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
+    .replace(/^- (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
     .replace(/^\d+\. (.+)$/gm, '<li class="ml-4 list-decimal">$1</li>')
     .replace(/\n\n/g, '<br/><br/>');
 }

@@ -105,7 +105,8 @@ export default function DqcAssetDetailPage() {
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-8 py-7 space-y-6">
+      <div className="px-8 py-7">
+        <div className="max-w-6xl mx-auto space-y-6">
         {/* KPI Cards */}
         <div className="grid grid-cols-4 gap-4">
           <KpiCard label="置信分" value={Math.round(confidenceScore)} sub="/100" icon="ri-bar-chart-box-line" />
@@ -284,6 +285,7 @@ export default function DqcAssetDetailPage() {
         )}
       </div>
     </div>
+      </div>
   );
 }
 

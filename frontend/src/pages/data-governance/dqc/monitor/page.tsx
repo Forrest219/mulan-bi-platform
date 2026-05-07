@@ -8,7 +8,7 @@ import {
   listDatasourceTables, batchImportAssets,
   DqcAsset, DqcRule,
   DIMENSION_LABELS, RULE_TYPE_LABELS, SIGNAL_CONFIG, DIMENSION_RULE_COMPATIBILITY,
-  type Dimension, type RuleType, type SignalLevel,
+  type Dimension, type RuleType,
   type CreateAssetInput, type CreateRuleInput, type UpdateRuleInput,
 } from '../../../../api/dqc';
 import { listDataSources, DataSource } from '../../../../api/datasources';
@@ -412,12 +412,15 @@ export default function DqcMonitorPage() {
             </div>
           )}
         </div>
+      </div>
+      <div className="bg-white border-b border-slate-100 px-8">
         <div className="max-w-6xl mx-auto">
           <DqcTabs />
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-8 py-7">
+      <div className="px-8 py-7">
+        <div className="max-w-6xl mx-auto">
         {error && (
           <div className="mb-4 px-4 py-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm flex items-center justify-between">
             <span>{error}</span>
@@ -515,7 +518,7 @@ export default function DqcMonitorPage() {
                       isSelected={selectedIds.has(asset.id)}
                       onToggleSelect={() => setSelectedIds(prev => {
                         const next = new Set(prev);
-                        next.has(asset.id) ? next.delete(asset.id) : next.add(asset.id);
+                        if (next.has(asset.id)) { next.delete(asset.id); } else { next.add(asset.id); }
                         return next;
                       })}
                       rulesLoading={rulesLoading}
@@ -544,6 +547,7 @@ export default function DqcMonitorPage() {
             )}
           </div>
         )}
+      </div>
       </div>
 
       {/* ── 添加监控 Modal ────────────────────────────────── */}
@@ -872,7 +876,7 @@ function AssetRow({ asset, isExpanded, sigCfg, onToggle, onDetail, onDelete, isD
                                 checked={selectedRuleIds.has(rule.id)}
                                 onChange={() => setSelectedRuleIds(prev => {
                                   const next = new Set(prev);
-                                  next.has(rule.id) ? next.delete(rule.id) : next.add(rule.id);
+                                  if (next.has(rule.id)) { next.delete(rule.id); } else { next.add(rule.id); }
                                   return next;
                                 })}
                               />
@@ -967,7 +971,7 @@ function MultiSelectFilter<T extends { id: string | number; name: string }>({
                     checked={checked}
                     onChange={() => {
                       const next = new Set(selected);
-                      checked ? next.delete(toValue(key)) : next.add(toValue(key));
+                      if (checked) { next.delete(toValue(key)); } else { next.add(toValue(key)); }
                       onChange(next);
                     }}
                   />
@@ -1194,7 +1198,7 @@ function BatchImportModal({ onClose, onImported }: { onClose: () => void; onImpo
                           className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-slate-50 cursor-pointer select-none"
                           onClick={() => setCollapsed(prev => {
                             const next = new Set(prev);
-                            isCollapsed ? next.delete(schema) : next.add(schema);
+                            if (isCollapsed) { next.delete(schema); } else { next.add(schema); }
                             return next;
                           })}
                         >
@@ -1209,7 +1213,7 @@ function BatchImportModal({ onClose, onImported }: { onClose: () => void; onImpo
                         {/* 表节点（缩进 + 左边框连线） */}
                         {!isCollapsed && (
                           <div className="ml-[22px] border-l border-slate-200">
-                            {tables.map((t, idx) => (
+                            {tables.map((t) => (
                               <div
                                 key={t.table_name}
                                 onClick={() => toggleItem(t)}

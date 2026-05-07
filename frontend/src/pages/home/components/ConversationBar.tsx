@@ -152,7 +152,7 @@ export function ConversationBar({ collapsed: _collapsed, onToggleCollapse: _onTo
           {/* Search box */}
           <div className="px-2 pb-2">
             <div className="relative">
-              <i className="ri-search-line absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm" />
+              <i className="ri-search-line absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm" />
               <input
                 type="text"
                 value={search}
@@ -161,8 +161,8 @@ export function ConversationBar({ collapsed: _collapsed, onToggleCollapse: _onTo
                   setPage(1);
                 }}
                 placeholder="搜索对话..."
-                className="w-full pl-7 pr-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-900 border border-transparent
-                           rounded-xl focus:outline-none focus:bg-white dark:focus:bg-gray-800 focus:border-gray-200 dark:focus:border-gray-700 placeholder-gray-400"
+                className="w-full pl-7 pr-3 py-1.5 text-sm bg-slate-100 dark:bg-slate-900 border border-transparent
+                           rounded-xl focus:outline-none focus:bg-white dark:focus:bg-slate-800 focus:border-slate-200 dark:focus:border-slate-700 placeholder-slate-400"
               />
             </div>
           </div>
@@ -175,7 +175,7 @@ export function ConversationBar({ collapsed: _collapsed, onToggleCollapse: _onTo
             if (!items || items.length === 0) return null;
             return (
               <div key={group} className="mb-3">
-                <div className="text-xs text-gray-400 dark:text-gray-500 font-medium px-2 py-1">{group}</div>
+                <div className="text-xs text-slate-400 dark:text-slate-500 font-medium px-2 py-1">{group}</div>
                 {items.map((conv) => (
                   <ConversationItem
                     key={conv.id}
@@ -200,7 +200,7 @@ export function ConversationBar({ collapsed: _collapsed, onToggleCollapse: _onTo
           {hasMore && (
             <button
               onClick={() => setPage((p) => p + 1)}
-              className="w-full py-2 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-900
+              className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-900
                          rounded-xl transition-colors"
             >
               加载更多（剩余 {filtered.length - page * PAGE_SIZE} 条）
@@ -208,7 +208,7 @@ export function ConversationBar({ collapsed: _collapsed, onToggleCollapse: _onTo
           )}
 
           {filtered.length === 0 && (
-            <div className="text-xs text-gray-400 dark:text-gray-500 text-center py-8">
+            <div className="text-xs text-slate-400 dark:text-slate-500 text-center py-8">
               {search ? '无匹配对话' : '暂无对话记录'}
             </div>
           )}

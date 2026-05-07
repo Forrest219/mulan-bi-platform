@@ -206,10 +206,10 @@ export default function SemanticDatasourceDetailPage() {
             <i className="ri-arrow-left-line text-slate-500" />
           </button>
           <div>
-            <h1 className="text-xl font-semibold text-slate-800">
+            <h1 className="text-lg font-semibold text-slate-800">
               {ds.semantic_name_zh || `数据源 ${ds.id}`}
             </h1>
-            <p className="text-sm text-slate-400 mt-0.5 font-mono">{ds.tableau_datasource_id}</p>
+            <p className="text-[13px] text-slate-400 font-mono">{ds.tableau_datasource_id}</p>
           </div>
           <div className="flex items-center gap-2 ml-4">
             <span className={`text-xs px-2 py-0.5 rounded-full ${statusBadge.className}`}>{statusBadge.text}</span>

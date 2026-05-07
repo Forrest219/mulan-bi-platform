@@ -1251,3 +1251,51 @@ cd backend && alembic upgrade head
 4. 创建 `bi_notification_outbox` 表 + 索引（v1.1）
 5. 创建 `bi_notification_dead_letters` 表 + 索引 + 月分区（v1.1）
 6. `downgrade()` 中 DROP 上述五张表
+
+---
+
+## §14 前端组件（落地注记）
+
+> 本节记录前端实现与 spec 原始设计的对应关系，补充 spec 原文未覆盖的 UI 交付内容。
+> 落地日期：2026-05-07
+
+### 14.1 通知铃铛 Dropdown
+
+**实现位置**：`frontend/src/components/layout/AppHeader.tsx`
+
+| 行为 | 实现说明 |
+|------|---------|
+| 未读角标 | 每 60 秒轮询 `GET /api/notifications/unread-count`，超过 99 显示"99+" |
+| 打开弹窗 | 触发 `GET /api/notifications?page=1&page_size=15`，取最新 15 条 |
+| 点击单条 | 调用 `PUT /api/notifications/{id}/read`，本地更新 `is_read`，有 `link` 则跳转对应路由 |
+| 全部标为已读 | 调用 `PUT /api/notifications/batch-read`，始终可见；无未读时禁用 |
+| 底部入口 | "查看全部消息"链接，跳转 `/notifications`，全宽背景 `#F9FAFB`，视觉上与消息列表区分 |
+
+**图标自动匹配规则**（`getNotifIconStyle`）：
+
+| 条件 | 图标 | 颜色 |
+|------|------|------|
+| 标题含 `[P0]` 或 `level=error` | `ri-alarm-warning-fill` | 红色，行背景 `bg-red-50` |
+| 标题含"巡检"/"完成"/"成功" | `ri-checkbox-circle-fill` | 绿色 |
+| 标题含"审核" | `ri-information-fill` | 蓝色 |
+| `level=warning` | `ri-error-warning-fill` | 琥珀色 |
+| 其他 | `ri-notification-3-line` | 灰色 |
+
+### 14.2 消息中心页面
+
+**路由**：`/notifications`（受 `ProtectedRoute` 保护，嵌套在 `AppShellLayout` 下）
+
+**实现位置**：`frontend/src/pages/notifications/page.tsx`
+
+**过滤 Tab 与 API 参数映射**：
+
+| Tab | 中文标签 | API 参数 |
+|-----|---------|---------|
+| `all` | 全部 | （无额外参数） |
+| `unread` | 未读 | `is_read=false` |
+| `read` | 已读 | `is_read=true` |
+| `alert` | 告警 | `level=error` |
+
+**分页**：每页 20 条，切换 Tab 时重置为第 1 页。
+
+**交互**：点击单条 → 标为已读 + 跳转 `link`（若存在）；顶部"全部标为已读"按钮与 Dropdown 共用同一 batch-read 接口。

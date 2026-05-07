@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   listConnections, testConnection, syncConnection,
-  checkWorkerHealth, TableauConnection
+  checkWorkerHealth, updateConnection, TableauConnection
 } from '../../../api/tableau';
 
 export default function TableauConnectionsPage() {
@@ -14,6 +14,12 @@ export default function TableauConnectionsPage() {
   const [testingId, setTestingId] = useState<number | null>(null);
   const [syncingId, setSyncingId] = useState<number | null>(null);
   const [modalNotify, setModalNotify] = useState<{ success: boolean; message: string } | null>(null);
+  const [settingsConn, setSettingsConn] = useState<TableauConnection | null>(null);
+  const [settingsForm, setSettingsForm] = useState<{
+    name: string; server_url: string; site: string; api_version: string;
+    token_name: string; token_value: string; auto_sync_enabled: boolean; is_active: boolean;
+  } | null>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
 
   const fetchConnections = async () => {
     try {
@@ -130,6 +136,45 @@ export default function TableauConnectionsPage() {
 
   const formatDate = (d: string | null | undefined) => d ? new Date(d).toLocaleString('zh-CN') : '—';
 
+  const openSettings = (conn: TableauConnection) => {
+    setSettingsConn(conn);
+    setSettingsForm({
+      name: conn.name, server_url: conn.server_url, site: conn.site,
+      api_version: conn.api_version, token_name: conn.token_name,
+      token_value: '', auto_sync_enabled: conn.auto_sync_enabled, is_active: conn.is_active,
+    });
+  };
+
+  const handleSettingsSave = async () => {
+    if (!settingsConn || !settingsForm) return;
+    setSettingsSaving(true);
+    try {
+      const payload: Parameters<typeof updateConnection>[1] = {
+        name: settingsForm.name, server_url: settingsForm.server_url,
+        site: settingsForm.site, api_version: settingsForm.api_version,
+        token_name: settingsForm.token_name, is_active: settingsForm.is_active,
+        auto_sync_enabled: settingsForm.auto_sync_enabled,
+      };
+      if (settingsForm.token_value) payload.token_value = settingsForm.token_value;
+      await updateConnection(settingsConn.id, payload);
+      setModalNotify({ success: true, message: '连接已更新' });
+      setSettingsConn(null);
+      fetchConnections();
+    } catch (e: unknown) {
+      setModalNotify({ success: false, message: e instanceof Error ? e.message : '保存失败' });
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const getSyncDot = (conn: TableauConnection) => {
+    if (conn.sync_status === 'running') return { color: 'bg-blue-500', pulse: true };
+    if (conn.sync_status === 'failed' || conn.last_test_success === false) return { color: 'bg-red-500', pulse: false };
+    if (!conn.is_active) return { color: 'bg-slate-300', pulse: false };
+    if (conn.last_test_success === true) return { color: 'bg-emerald-500', pulse: false };
+    return null;
+  };
+
   const getStatusBadge = (conn: TableauConnection) => {
     if (!conn.is_active) return { text: '已禁用', className: 'bg-slate-100 text-slate-500 border border-slate-200' };
     if (conn.last_test_success === false) return { text: '连接失败', className: 'bg-red-50 text-red-600 border border-red-200' };
@@ -141,13 +186,17 @@ export default function TableauConnectionsPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <div className="max-w-7xl mx-auto px-6 py-8">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3 text-sm text-slate-500">
-          <span className="font-semibold text-slate-700">Tableau 连接</span>
-          <span>共 {connections.length} 个</span>
+      <div className="bg-white border-b border-slate-200 px-8 py-5">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex items-center gap-2 mb-0.5">
+            <i className="ri-links-line text-slate-500 text-base" />
+            <h1 className="text-lg font-semibold text-slate-800">Tableau 连接</h1>
+          </div>
+          <p className="text-[13px] text-slate-400 ml-7">查看 Tableau 连接状态、触发同步和查看日志</p>
         </div>
       </div>
+      <div className="px-8 py-7">
+        <div className="max-w-7xl mx-auto">
 
       {/* MCP 自动管理提示 */}
       <div className="mb-4 flex items-center gap-2 px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700">
@@ -178,14 +227,25 @@ export default function TableauConnectionsPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {connections.map(conn => {
           const status = getStatusBadge(conn);
+          const dot = getSyncDot(conn);
           return (
             <div key={conn.id} className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col">
               <div className="flex items-start justify-between mb-3">
                 <div>
-                  <h3 className="font-semibold text-slate-800">{conn.name}</h3>
+                  <div className="flex items-center gap-1.5">
+                    {dot && <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dot.color}${dot.pulse ? ' animate-pulse' : ''}`} />}
+                    <h3 className="font-semibold text-slate-800">{conn.name}</h3>
+                  </div>
                   <p className="text-xs text-slate-400 mt-0.5">{conn.server_url}</p>
                 </div>
                 <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => openSettings(conn)}
+                    className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md transition-colors"
+                    title="编辑连接"
+                  >
+                    <i className="ri-settings-3-line text-base" />
+                  </button>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${
                     conn.connection_type === 'tsc'
                       ? 'bg-amber-50 text-amber-600 border border-amber-200'
@@ -246,7 +306,7 @@ export default function TableauConnectionsPage() {
                   disabled={syncingId === conn.id}
                   className="flex-1 px-3 py-1.5 text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center gap-1">
                   {syncingId === conn.id ? <i className="ri-loader-4-line animate-spin" /> : <i className="ri-refresh-line" />}
-                  同步
+                  {syncingId === conn.id ? '同步中...' : '同步'}
                 </button>
                 <button onClick={() => navigate(`/assets/tableau-connections/${conn.id}/sync-logs`)}
                   className="flex-1 px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center justify-center gap-1">
@@ -267,6 +327,7 @@ export default function TableauConnectionsPage() {
           </div>
         )}
       </div>
+        </div>
       </div>
 
       {/* 中央 Modal 通知 */}
@@ -293,6 +354,73 @@ export default function TableauConnectionsPage() {
             >
               关闭
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Settings modal */}
+      {settingsConn && settingsForm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setSettingsConn(null)}>
+          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-base font-semibold text-slate-800">编辑连接</h3>
+              <button onClick={() => setSettingsConn(null)} className="text-slate-400 hover:text-slate-600">
+                <i className="ri-close-line text-xl" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              {([['连接名称', 'name'], ['服务器地址', 'server_url'], ['站点', 'site'], ['API 版本', 'api_version'], ['Token 名称', 'token_name']] as [string, keyof typeof settingsForm][]).map(([label, field]) => (
+                <div key={field}>
+                  <label className="block text-xs text-slate-500 mb-1">{label}</label>
+                  <input
+                    type="text"
+                    value={settingsForm[field] as string}
+                    onChange={e => setSettingsForm(f => ({ ...f!, [field]: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+                  />
+                </div>
+              ))}
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Token 值（留空保持不变）</label>
+                <input
+                  type="password"
+                  value={settingsForm.token_value}
+                  onChange={e => setSettingsForm(f => ({ ...f!, token_value: e.target.value }))}
+                  placeholder="••••••••"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+                />
+              </div>
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-xs text-slate-500">启用连接</span>
+                <button
+                  onClick={() => setSettingsForm(f => ({ ...f!, is_active: !f!.is_active }))}
+                  className={`w-10 h-5 rounded-full transition-colors relative ${settingsForm.is_active ? 'bg-blue-500' : 'bg-slate-200'}`}
+                >
+                  <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${settingsForm.is_active ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-500">自动同步</span>
+                <button
+                  onClick={() => setSettingsForm(f => ({ ...f!, auto_sync_enabled: !f!.auto_sync_enabled }))}
+                  className={`w-10 h-5 rounded-full transition-colors relative ${settingsForm.auto_sync_enabled ? 'bg-blue-500' : 'bg-slate-200'}`}
+                >
+                  <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${settingsForm.auto_sync_enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={() => setSettingsConn(null)} className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg">
+                取消
+              </button>
+              <button
+                disabled={settingsSaving}
+                onClick={handleSettingsSave}
+                className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg disabled:opacity-50"
+              >
+                {settingsSaving ? '保存中...' : '保存'}
+              </button>
+            </div>
           </div>
         </div>
       )}

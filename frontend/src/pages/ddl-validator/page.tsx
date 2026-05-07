@@ -127,15 +127,15 @@ export default function DDLValidatorPage() {
                 <i className="ri-code-box-line text-slate-400 text-base" />
               </span>
               <h1 className="text-lg font-semibold text-slate-500">DDL 预览</h1>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-gray-600 font-medium uppercase tracking-wide ml-1">
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium uppercase tracking-wide ml-1">
                 Preview
               </span>
             </div>
-            <p className="text-[13px] text-gray-500 ml-7">
+            <p className="text-[13px] text-slate-500 ml-7">
               参考工具 — 建议使用统一的 DDL 生成器进行建表
             </p>
           </div>
-          <div className="flex items-center gap-2 text-[12px] text-gray-500">
+          <div className="flex items-center gap-2 text-[12px] text-slate-500">
             <i className="ri-information-line" />
             <span>预览工具，仅供参考</span>
           </div>
@@ -210,11 +210,11 @@ export default function DDLValidatorPage() {
                   value={sql}
                   onChange={(e) => setSql(e.target.value)}
                   placeholder={`-- 粘贴你的 CREATE TABLE 语句\nCREATE TABLE your_table (\n  ...\n);`}
-                  className="w-full h-72 text-[12px] font-mono text-slate-800 bg-slate-50 border border-slate-200 rounded-lg p-3 resize-none focus:outline-none focus:border-slate-400 focus:bg-white transition-colors placeholder-gray-500 leading-relaxed"
+                  className="w-full h-72 text-[12px] font-mono text-slate-800 bg-slate-50 border border-slate-200 rounded-lg p-3 resize-none focus:outline-none focus:border-slate-400 focus:bg-white transition-colors placeholder-slate-500 leading-relaxed"
                 />
                 <div className="flex justify-between mt-1">
-                  <span className="text-[10px] text-gray-500">支持多个 CREATE TABLE 语句</span>
-                  <span className="text-[10px] text-gray-500">{sql.length} chars</span>
+                  <span className="text-[10px] text-slate-500">支持多个 CREATE TABLE 语句</span>
+                  <span className="text-[10px] text-slate-500">{sql.length} chars</span>
                 </div>
               </div>
 

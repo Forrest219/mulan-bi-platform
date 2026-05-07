@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import DqcTabs from '../DqcTabs';
 
@@ -136,8 +136,9 @@ export default function CreateRulePage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  const initialCapKey = useRef(searchParams.get('capability'));
   useEffect(() => {
-    const key = searchParams.get('capability');
+    const key = initialCapKey.current;
     if (key) {
       const cap = CAPABILITIES.find(c => c.key === key);
       if (cap) selectCapability(cap);
@@ -221,7 +222,11 @@ export default function CreateRulePage() {
             <i className="ri-list-check text-slate-500 text-base" />
             <h1 className="text-lg font-semibold text-slate-800">数据质量监控</h1>
           </div>
-          <p className="text-[13px] text-slate-400 ml-7 mb-4">数据质量规则与检查管理</p>
+          <p className="text-[13px] text-slate-400 ml-7">数据质量规则与检查管理</p>
+        </div>
+      </div>
+      <div className="bg-white border-b border-slate-100 px-8">
+        <div className="max-w-6xl mx-auto">
           <DqcTabs />
         </div>
       </div>

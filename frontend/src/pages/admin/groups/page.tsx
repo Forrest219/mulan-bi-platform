@@ -168,22 +168,34 @@ export default function GroupsPage() {
     (g.description || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  if (loading) return <div className="p-8 text-center text-slate-400">加载中...</div>;
+  if (loading) return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <span className="text-slate-400 text-[13px]">加载中…</span>
+    </div>
+  );
 
   return (
-    <div className="p-6">
-      {message && <div className="mb-4 px-4 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-sm">{message}</div>}
-      {/* 页面标题栏 */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold text-slate-800">用户组管理</h1>
-          <p className="text-sm text-slate-400 mt-0.5">创建用户组，批量配置权限</p>
+    <div className="min-h-screen bg-slate-50">
+      {/* 页头 */}
+      <div className="bg-white border-b border-slate-200 px-8 py-5">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-0.5">
+              <i className="ri-team-line text-slate-500 text-base" />
+              <h1 className="text-lg font-semibold text-slate-800">用户组</h1>
+            </div>
+            <p className="text-[13px] text-slate-400 ml-7">创建用户组，批量配置权限</p>
+          </div>
+          <button onClick={() => setShowCreateModal(true)}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 text-white text-[12px] font-medium rounded-lg hover:bg-blue-500 transition-colors">
+            <i className="ri-add-line" /> 创建用户组
+          </button>
         </div>
-        <button onClick={() => setShowCreateModal(true)}
-          className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 flex items-center gap-1.5">
-          <i className="ri-add-line" /> 创建用户组
-        </button>
       </div>
+
+      <div className="px-8 py-7">
+        <div className="max-w-6xl mx-auto">
+      {message && <div className="mb-4 px-4 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-[12px]">{message}</div>}
 
       {/* 搜索栏 */}
       <div className="mb-4">
@@ -418,6 +430,8 @@ export default function GroupsPage() {
           onCancel={() => setConfirmModal(null)}
         />
       )}
+        </div>
+      </div>
     </div>
   );
 }

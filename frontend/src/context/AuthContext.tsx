@@ -41,6 +41,9 @@ interface User {
   is_active: boolean;
   created_at: string;
   last_login: string | null;
+  position?: string | null;
+  department?: string | null;
+  phone?: string | null;
 }
 
 interface AuthContextType {

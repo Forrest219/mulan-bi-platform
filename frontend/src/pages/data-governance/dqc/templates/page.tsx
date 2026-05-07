@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import DqcTabs from '../DqcTabs';
 import {
   listTemplates, updateTemplate, deleteTemplate,
-  getTemplateCoverage, toggleTemplateCoverage, batchToggleTemplateCoverage,
+  getTemplateCoverage, batchToggleTemplateCoverage,
   type DqcRuleTemplate, type TemplateCoverageItem,
   RULE_PACKAGE_LABELS,
 } from '../../../../api/dqc';
@@ -148,12 +148,17 @@ export default function DqcTemplatesPage() {
             <i className="ri-list-check text-slate-500 text-base" />
             <h1 className="text-lg font-semibold text-slate-800">数据质量监控</h1>
           </div>
-          <p className="text-[13px] text-slate-400 ml-7 mb-4">数据质量规则与检查管理</p>
+          <p className="text-[13px] text-slate-400 ml-7">数据质量规则与检查管理</p>
+        </div>
+      </div>
+      <div className="bg-white border-b border-slate-100 px-8">
+        <div className="max-w-6xl mx-auto">
           <DqcTabs />
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-8 py-7">
+      <div className="px-8 py-7">
+        <div className="max-w-6xl mx-auto">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-lg px-4 py-2 mb-4 flex items-center justify-between">
             <span>{error}</span>
@@ -348,6 +353,7 @@ export default function DqcTemplatesPage() {
           </div>
         )}
       </div>
+      </div>
 
       <ConfirmModal
         open={confirm.open}
@@ -411,7 +417,7 @@ function CoverageModal({ template, onClose }: { template: DqcRuleTemplate; onClo
   }, [filtered]);
 
   const toggleItem = (id: number) =>
-    setSelected(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+    setSelected(prev => { const s = new Set(prev); if (s.has(id)) { s.delete(id); } else { s.add(id); } return s; });
 
   const toggleSchema = (schema: string, schemaItems: TemplateCoverageItem[]) => {
     const ids = schemaItems.map(i => i.asset_id);
@@ -525,7 +531,7 @@ function CoverageModal({ template, onClose }: { template: DqcRuleTemplate; onClo
                       className="flex items-center gap-1.5 flex-1 text-left"
                       onClick={() => setCollapsed(prev => {
                         const s = new Set(prev);
-                        s.has(schema) ? s.delete(schema) : s.add(schema);
+                        if (s.has(schema)) { s.delete(schema); } else { s.add(schema); }
                         return s;
                       })}
                     >

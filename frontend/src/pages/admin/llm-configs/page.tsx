@@ -173,16 +173,23 @@ function getRunState(
 }
 
 function RunStatusBadge({ state }: { state: RunState }) {
-  const variants: Record<RunState, { dot: string; pill: string; label: string }> = {
+  const variants: Record<RunState, { dot: string; pill: string; label: string; ping?: boolean }> = {
     running:  { dot: 'bg-emerald-500',              pill: 'bg-emerald-50 text-emerald-700 border-emerald-200', label: '运行中' },
-    checking: { dot: 'bg-slate-400 animate-pulse',  pill: 'bg-slate-100 text-slate-600 border-slate-200',     label: '检测中…' },
+    checking: { dot: 'bg-slate-400',                pill: 'bg-slate-100 text-slate-600 border-slate-200',     label: '检测中…', ping: true },
     error:    { dot: 'bg-red-500',                  pill: 'bg-red-50 text-red-700 border-red-200',            label: '连接异常' },
     disabled: { dot: 'bg-slate-300',                pill: 'bg-slate-100 text-slate-500 border-slate-200',     label: '未启用' },
   };
   const v = variants[state];
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium ${v.pill}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${v.dot}`} />
+      {v.ping ? (
+        <span className="relative flex w-1.5 h-1.5">
+          <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${v.dot} opacity-60`} />
+          <span className={`relative inline-flex rounded-full w-1.5 h-1.5 ${v.dot}`} />
+        </span>
+      ) : (
+        <span className={`w-1.5 h-1.5 rounded-full ${v.dot}`} />
+      )}
       {v.label}
     </span>
   );
@@ -197,6 +204,7 @@ function ApiKeyCell({
   cfg: LLMConfigItem;
   onSetupKey: () => void;
 }) {
+  const [revealed, setRevealed] = useState(false);
   const hasKey = cfg.has_api_key === true;
   const decryptionOk = cfg.api_key_decryption_ok !== false;
 
@@ -224,9 +232,18 @@ function ApiKeyCell({
   return (
     <div className="space-y-0.5">
       {cfg.has_api_key && (
-        <code className="block truncate max-w-full text-xs font-mono text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
-          {cfg.api_key_preview || '••••••••'}
-        </code>
+        <div className="flex items-center gap-1">
+          <code className="block truncate max-w-full text-xs font-mono text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
+            {revealed ? (cfg.api_key_preview || '(无预览)') : '••••••••'}
+          </code>
+          <button
+            onClick={() => setRevealed(v => !v)}
+            className="shrink-0 text-slate-400 hover:text-slate-600 transition-colors"
+            title={revealed ? '隐藏' : '查看'}
+          >
+            <i className={`text-xs ${revealed ? 'ri-eye-off-line' : 'ri-eye-line'}`} />
+          </button>
+        </div>
       )}
       <div className="flex items-center gap-1.5 flex-wrap">
         {cfg.api_key_updated_at && (
@@ -624,8 +641,25 @@ export default function LLMConfigsPage() {
     }
   };
 
+  const getPriorityStyle = (p: number) => {
+    if (p === 0) return 'bg-slate-100 text-slate-400';
+    if (p <= 2)  return 'bg-blue-50 text-blue-500';
+    if (p <= 5)  return 'bg-blue-100 text-blue-600';
+    if (p <= 9)  return 'bg-blue-200 text-blue-700';
+    return 'bg-blue-500 text-white';
+  };
+
+  const handlePriorityChange = async (cfg: LLMConfigItem, delta: number) => {
+    const next = Math.max(0, cfg.priority + delta);
+    setConfigs(prev => prev.map(c => c.id === cfg.id ? { ...c, priority: next } : c));
+    try {
+      await apiUpdateConfig(cfg.id, { priority: next });
+    } catch {
+      setConfigs(prev => prev.map(c => c.id === cfg.id ? { ...c, priority: cfg.priority } : c));
+    }
+  };
+
   const providerLabel = (p: string) => ({
-    minimax: 'MiniMax',
     openai: 'OpenAI',
     anthropic: 'Anthropic',
     'openai-compatible': 'OpenAI Compatible',
@@ -684,7 +718,8 @@ export default function LLMConfigsPage() {
       </div>
 
       {/* Content */}
-      <div className="max-w-7xl mx-auto px-8 py-7">
+      <div className="px-8 py-7">
+        <div className="max-w-7xl mx-auto">
         {/* ── 列表视图 ──────────────────────────────────────────────── */}
         {!showForm && <>
 
@@ -693,6 +728,14 @@ export default function LLMConfigsPage() {
           <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg flex items-center gap-2">
             <i className="ri-error-warning-line" />
             {error}
+          </div>
+        )}
+
+        {/* 无可用模型警告 */}
+        {!loading && configs.length > 0 && !configs.some(c => c.is_active) && (
+          <div className="mb-4 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-2 text-sm text-amber-700">
+            <i className="ri-alert-line text-base" />
+            当前无可用模型，AI 分析功能将受限
           </div>
         )}
 
@@ -762,7 +805,22 @@ export default function LLMConfigsPage() {
                             onSetupKey={() => handleOpenEdit(cfg, true)}
                           />
                         </td>
-                        <td className="px-4 py-3 align-middle text-center text-slate-500 w-20">{cfg.priority}</td>
+                        <td className="px-4 py-3 align-middle text-center w-20">
+                          <div className="flex items-center justify-center gap-0.5">
+                            <button
+                              onClick={() => handlePriorityChange(cfg, -1)}
+                              disabled={cfg.priority <= 0}
+                              className="w-5 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded disabled:opacity-30 transition-colors text-sm leading-none"
+                            >−</button>
+                            <span className={`px-1.5 py-0.5 rounded text-xs font-medium min-w-[22px] text-center ${getPriorityStyle(cfg.priority)}`}>
+                              {cfg.priority}
+                            </span>
+                            <button
+                              onClick={() => handlePriorityChange(cfg, 1)}
+                              className="w-5 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded transition-colors text-sm leading-none"
+                            >+</button>
+                          </div>
+                        </td>
                         <td className="px-4 py-3 align-middle min-w-[120px]">
                           <RunStatusBadge state={runState} />
                         </td>
@@ -1209,6 +1267,7 @@ export default function LLMConfigsPage() {
           </div>
         )}
 
+        </div>
       </div>{/* Content end */}
 
       {/* 删除确认弹窗 */}

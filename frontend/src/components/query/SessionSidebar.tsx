@@ -69,35 +69,35 @@ export default function SessionSidebar({
       className={[
         'h-screen max-h-[100dvh] min-h-screen select-none',
         'fixed top-0 left-0 z-50 shrink-0 overflow-x-hidden',
-        'text-sm text-gray-900',
+        'text-sm text-slate-900',
         collapsed
           ? 'w-0 invisible'
-          : 'w-[260px] bg-gray-50/70 border-r border-gray-100',
+          : 'w-[260px] bg-slate-50/70 border-r border-slate-100',
         'transition-[width] duration-300',
       ].join(' ')}
     >
       <div className="flex flex-col h-screen max-h-[100dvh] w-[260px] overflow-x-hidden">
         {/* 顶部操作栏 */}
-        <div className="sticky top-0 px-2 pt-2 pb-2 z-10 bg-gray-50/70">
+        <div className="sticky top-0 px-2 pt-2 pb-2 z-10 bg-slate-50/70">
           <div className="flex items-center justify-between h-12 px-1">
             <div className="flex items-center gap-2">
               <button
                 onClick={onToggleCollapse}
                 title="折叠侧边栏"
                 aria-label="折叠侧边栏"
-                className="w-8 h-8 flex items-center justify-center rounded-xl text-gray-400
-                           hover:bg-gray-100 transition-colors duration-150"
+                className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400
+                           hover:bg-slate-100 transition-colors duration-150"
               >
                 <i className="ri-sidebar-fold-line text-base" />
               </button>
-              <span className="text-sm font-semibold text-gray-800">问数历史</span>
+              <span className="text-sm font-medium text-slate-700">问数历史</span>
             </div>
             <button
               onClick={onNewSession}
               title="新对话"
               aria-label="新对话"
-              className="w-8 h-8 flex items-center justify-center rounded-xl text-gray-400
-                         hover:bg-gray-100 transition-colors duration-150"
+              className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400
+                         hover:bg-slate-100 transition-colors duration-150"
             >
               <i className="ri-edit-box-line text-base" />
             </button>
@@ -114,7 +114,7 @@ export default function SessionSidebar({
           )}
 
           {!loading && sessions.length === 0 && (
-            <div className="text-xs text-gray-400 text-center py-8">
+            <div className="text-xs text-slate-400 text-center py-8">
               暂无问数记录
             </div>
           )}
@@ -124,7 +124,7 @@ export default function SessionSidebar({
             if (!items || items.length === 0) return null;
             return (
               <div key={group} className="mb-3">
-                <div className="text-xs text-gray-400 font-medium px-2 py-1">{group}</div>
+                <div className="text-xs text-slate-400 font-medium px-2 py-1">{group}</div>
                 {items.map((session) => (
                   <SessionItem
                     key={session.session_id}

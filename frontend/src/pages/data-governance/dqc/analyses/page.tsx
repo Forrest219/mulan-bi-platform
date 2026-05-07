@@ -4,7 +4,7 @@ import {
   listAssets, listAnalyses,
   type DqcAsset, type DqcLlmAnalysis,
   SIGNAL_CONFIG, TRIGGER_LABELS,
-  type SignalLevel, type LlmTrigger,
+  type LlmTrigger,
 } from '../../../../api/dqc';
 
 const getErrorMessage = (error: unknown, fallback = '操作失败'): string =>
@@ -99,7 +99,8 @@ export default function DqcAnalysesPage() {
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-8 py-7">
+      <div className="px-8 py-7">
+        <div className="max-w-6xl mx-auto">
         {error && (
           <div className="mb-4 px-4 py-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm flex items-center justify-between">
             <span>{error}</span>
@@ -178,6 +179,7 @@ export default function DqcAnalysesPage() {
             </table>
           )}
         </div>
+      </div>
       </div>
     </div>
   );

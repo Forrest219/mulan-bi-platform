@@ -72,6 +72,7 @@ class OutboxService:
             event_type=event_type,
             status=status,
             signature_payload_hash=payload_hash,
+            payload_json=payload,
             attempt_count=0,
             next_attempt_at=datetime.utcnow(),
         )

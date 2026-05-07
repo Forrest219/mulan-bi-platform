@@ -267,8 +267,9 @@ class AuthService:
         """删除用户"""
         return self._db.delete_user(user_id)
 
-    def update_user_info(self, user_id: int, display_name: str = None, email: str = None) -> Optional[Dict[str, Any]]:
-        """更新用户基础信息（display_name / email）"""
+    def update_user_info(self, user_id: int, display_name: str = None, email: str = None,
+                         position: str = None, department: str = None, phone: str = None) -> Optional[Dict[str, Any]]:
+        """更新用户基础信息（display_name / email / position / department / phone）"""
         user = self._db.get_user(user_id)
         if not user:
             return None
@@ -276,6 +277,12 @@ class AuthService:
             user.display_name = display_name
         if email is not None:
             user.email = email
+        if position is not None:
+            user.position = position
+        if department is not None:
+            user.department = department
+        if phone is not None:
+            user.phone = phone
         self._db.update_user(user)
         return user.to_dict()
 
@@ -629,6 +636,89 @@ class AuthService:
         self._db.revoke_all_user_refresh_tokens(user.id)
 
         return True, "密码已重置，请使用新密码登录"
+
+    def send_password_reset_email(self, email: str, raw_token: str) -> tuple[bool, str]:
+        """
+        将密码重置邮件任务写入 outbox 队列（异步发送）。
+
+        优先从 DB 读取 SMTP 配置（platform_settings.extra_settings["smtp"]），
+        fallback 到 .env SMTP 配置。
+
+        返回 (success, detail)。SMTP 未配置时返回 (False, "SMTP 配置缺失")。
+        即使 outbox 写入失败，也不暴露给客户端（anti-enumeration）。
+        """
+        import os
+        from datetime import datetime
+
+        # 1. 获取用户信息
+        user = self._db.get_user_by_email(email)
+        if not user:
+            return False, "用户不存在"
+
+        display_name = user.display_name or user.username
+
+        # 2. 构建重置链接
+        frontend_base_url = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000")
+        reset_link = f"{frontend_base_url.rstrip('/')}/reset-password?token={raw_token}"
+
+        # 3. 获取 SMTP 配置（优先 DB，fallback .env）
+        #    get_smtp_config() 已支持 DB 优先 + 自动解密
+        from services.common.settings import get_smtp_config
+
+        smtp_cfg = get_smtp_config()
+        _configured = bool(
+            smtp_cfg.get("host") and smtp_cfg.get("user") and smtp_cfg.get("password")
+        )
+        if not _configured:
+            return False, "SMTP 配置缺失"
+
+        # 4. 构造 outbox payload
+        from services.events.outbox_service import OutboxService
+
+        payload = {
+            "email_type": "password_reset",
+            "recipient": email,
+            "display_name": display_name,
+            "reset_link": reset_link,
+            "subject": "【木兰 BI 平台】密码重置请求",
+        }
+
+        try:
+            outbox_svc = OutboxService()
+            outbox_record = outbox_svc.enqueue(
+                db=self._db,
+                notification_id=None,
+                channel="email",
+                target=email,
+                event_type="auth.password_reset",
+                payload=payload,
+            )
+        except Exception as e:
+            logger.exception("[password_reset] outbox enqueue 失败: email=%s", email)
+            return False, "邮件任务入队失败"
+
+        # 5. 写入邮件发送日志
+        try:
+            from services.platform_settings.service import PlatformSettingsService
+            settings_svc = PlatformSettingsService(self._db)
+            log_id = settings_svc.create_email_send_log(
+                email_type="password_reset",
+                recipient=email,
+                from_addr=smtp_cfg.get("from_addr") or "",
+                subject=payload["subject"],
+                outbox_id=outbox_record.id,
+                scheduled_at=outbox_record.next_attempt_at,
+            )
+            # 关联 log_id 到 outbox 的 extra 字段（通过 update）
+            # 注意：outbox 本身没有 log_id 字段，这里用日志表的 outbox_id 关联即可
+        except Exception as e:
+            logger.warning("[password_reset] 邮件日志创建失败（不影响发送）: %s", e)
+
+        logger.info(
+            "[password_reset] 密码重置邮件已入队: email=%s, outbox_id=%s, log_id=%s",
+            email, outbox_record.id, log_id if 'log_id' in dir() else 'N/A'
+        )
+        return True, "邮件发送任务已加入队列"
 
     # ========== 用户标签 ==========
 

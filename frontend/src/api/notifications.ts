@@ -19,8 +19,15 @@ export async function getUnreadCount(): Promise<number> {
 export async function listNotifications(
   page = 1,
   pageSize = 15,
+  filters?: { is_read?: boolean; level?: string },
 ): Promise<{ items: AppNotification[]; total: number }> {
-  const resp = await fetch(`/api/notifications?page=${page}&page_size=${pageSize}`, {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  if (filters?.is_read !== undefined) params.set('is_read', String(filters.is_read));
+  if (filters?.level) params.set('level', filters.level);
+  const resp = await fetch(`/api/notifications?${params}`, {
     credentials: 'include',
   });
   if (!resp.ok) throw new Error('获取通知失败');

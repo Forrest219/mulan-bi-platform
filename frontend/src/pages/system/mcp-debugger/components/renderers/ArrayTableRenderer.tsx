@@ -34,7 +34,7 @@ function isIdLike(key: string, val: unknown): boolean {
   const str = String(val ?? '');
   return (
     /(id|ID$|luid|Luid|token|Token|key|Key)$/.test(key) ||
-    (str.length > 24 && /^[a-zA-Z0-9_\-]+$/.test(str))
+    (str.length > 24 && /^[a-zA-Z0-9_-]+$/.test(str))
   );
 }
 
@@ -59,7 +59,7 @@ function formatCell(val: unknown, isId: boolean, isDate: boolean): string {
   return str;
 }
 
-export default function ArrayTableRenderer({ rows, toolName, hint }: Props) {
+export default function ArrayTableRenderer({ rows, toolName: _toolName, hint }: Props) {
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<string>('');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');

@@ -116,7 +116,7 @@ const blankForm = (): FormData => ({
 });
 
 export default function MetricsPage() {
-  const { user, isDataAdmin } = useAuth();
+  const { isDataAdmin } = useAuth();
 
   // ── list state ──
   const [items, setItems] = useState<MetricItem[]>([]);
@@ -208,7 +208,7 @@ export default function MetricsPage() {
     setShowModal(true);
   };
 
-  const resetForm = () => {
+  const _resetForm = () => {
     setFormData(blankForm());
     setFormError('');
   };
@@ -331,7 +331,8 @@ export default function MetricsPage() {
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-8 py-7">
+      <div className="px-8 py-7">
+        <div className="max-w-6xl mx-auto">
         {/* Error banner */}
         {loadError && (
           <div className="mb-4 px-4 py-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm flex items-center justify-between">
@@ -522,6 +523,7 @@ export default function MetricsPage() {
             </div>
           </div>
         )}
+      </div>
       </div>
 
       {/* Create / Edit Modal */}

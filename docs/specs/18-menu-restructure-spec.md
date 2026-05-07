@@ -1,8 +1,13 @@
 # 菜单重构技术规格书
 
-> 版本：**v0.3** | 状态：已完成 | 日期：2026-04-30
+> 版本：**v0.5** | 状态：已完成 | 日期：2026-05-07
 >
-> 更新说明（v0.2 → v0.3）：
+> 更新说明（v0.4 → v0.5）：
+> - 新增 §5.4 全局搜索：功能导航搜索（AppHeader）完整规格
+> - 新增 `src/config/sitemap.ts`：搜索条目派生 + 关键词扩展 + 权限过滤
+> - §5.1 AppHeader 职责补全
+>
+> 更新说明（v0.3 → v0.4）：
 > - 新增域 1"问数"（Query）：问数界面（Spec 38）、NL 查询（Spec 14）
 > - 删除域"实验室"，其内容归入配置域
 > - 删除域"运维"，其功能已合并到首页工作台
@@ -104,10 +109,9 @@ graph TD
         C2[MCP 配置]
         C3[MCP 调试器]
         C4[任务管理]
-        C5[问数告警]
-        C6[DDL 检查]
-        C7[数据质量规则]
-        C8[知识库]
+        C5[DDL 检查]
+        C6[数据质量规则]
+        C7[知识库]
     end
 
     subgraph 管理域["域 6：管理"]
@@ -184,10 +188,9 @@ graph TD
 | MCP 配置 | `/system/mcp-configs` | `pages/admin/mcp-configs/page.tsx` | `ri-plug-line` | admin |
 | MCP 调试器 | `/system/mcp-debugger` | `pages/system/mcp-debugger/page.tsx` | `ri-bug-line` | admin |
 | 任务管理 | `/system/tasks` | `pages/admin/tasks/page.tsx` | `ri-task-line` | admin |
-| 问数告警 | `/system/query-alerts` | `pages/admin/query-alerts/page.tsx` | `ri-alarm-warning-line` | admin |
 
 **域图标**：`ri-server-line`
-**域描述**：数据源连接、LLM/MCP 配置、任务调度与告警
+**域描述**：数据源连接、LLM/MCP 配置、任务调度
 **默认展开**：否
 
 ---
@@ -300,12 +303,12 @@ interface MenuPermission {
 | `/agents/data/history` | `pages/agents/data-workbench/history/page.tsx` | 智能体 | ✅ | Spec 28 |
 | `/agents/sql` | `pages/agents/sql-agent/page.tsx` | 智能体 | ✅ | Spec 29 |
 | `/agents/metrics` | `pages/agents/metrics-agent/page.tsx` | 智能体 | ✅ | Spec 30 |
-| `/agents/agent-monitor` | `pages/agents/monitor/page.tsx` | 智能体 | ✅ | |
+| `/agents/agent-monitor` | `pages/admin/agent-monitor/page.tsx` | 智能体 | ✅ | 总览 Tab 内含 NLQ 查询日志视图（运行记录/查询日志切换） |
 | `/system/llm-configs` | `pages/admin/llm-configs/page.tsx` | 配置 | ✅ | admin |
 | `/system/mcp-configs` | `pages/admin/mcp-configs/page.tsx` | 配置 | ✅ | admin |
 | `/system/mcp-debugger` | `pages/system/mcp-debugger/page.tsx` | 配置 | ✅ | admin |
 | `/system/tasks` | `pages/admin/tasks/page.tsx` | 配置 | ✅ | admin |
-| `/system/query-alerts` | `pages/admin/query-alerts/page.tsx` | 配置 | ✅ | admin |
+| `/system/query-alerts` | ~~`pages/admin/query-alerts/page.tsx`~~ | ~~配置~~ | ❌ 已退役 | 已合并至 `/agents/agent-monitor` 总览 Tab |
 | `/dev/ddl-validator` | `pages/ddl-validator/page.tsx` | 配置 | ✅ | |
 | `/dev/rule-config` | `pages/rule-config/page.tsx` | 配置 | ✅ | data_admin+ |
 | `/analytics/knowledge` | `pages/knowledge/page.tsx` | 配置 | ✅ | Spec 17 |
@@ -330,7 +333,7 @@ interface MenuPermission {
 | 资产 | `chunk-assets` | Tableau 资产、连接总览、数据源、StarRocks 巡检 |
 | 治理 | `chunk-governance` | 健康中心、DQC、语义治理、指标管理 |
 | 智能体 | `chunk-agents` | Data Agent、SQL Agent、Metrics Agent、Agent 监控 |
-| 配置 | `chunk-config` | LLM/MCP 配置、MCP 调试器、任务管理、问数告警、规则配置、知识库 |
+| 配置 | `chunk-config` | LLM/MCP 配置、MCP 调试器、任务管理、规则配置、知识库 |
 | 管理 | `chunk-admin` | 用户管理、用户组、权限配置、操作日志、平台设置 |
 
 ---
@@ -355,12 +358,13 @@ graph TB
 | 组件 | 职责 | 替代对象 |
 |------|------|---------|
 | `AppShellLayout` | 统一页面骨架（Header + Sidebar + Content） | `MainLayout` + `AdminSidebarLayout` |
-| `AppHeader` | Logo、全局搜索、用户信息 | `Navbar.tsx` |
+| `AppHeader` | Logo、功能导航搜索（§5.4）、通知、用户信息 | `Navbar.tsx` |
 | `AppSidebar` | 7 域菜单树、折叠状态、权限过滤 | `AdminSidebarLayout` 的侧边栏 |
 
 ### 5.2 菜单配置数据结构
 
-> 完整配置：`frontend/src/config/menu.ts`
+> 菜单配置：`frontend/src/config/menu.ts`
+> 搜索条目：`frontend/src/config/sitemap.ts`（由 `menuConfig` 派生，详见 §5.4）
 
 ```typescript
 interface MenuItem {
@@ -401,7 +405,90 @@ interface MenuDomain {
 
 ---
 
-## 6. 变更记录
+### 5.4 全局搜索（AppHeader 功能导航搜索）
+
+#### 5.4.1 定位与范围
+
+- **职责**：功能页面快速导航，让用户通过关键词直达任意菜单页面
+- **本版本 scope 边界**：纯前端本地匹配，不调用后端 NL 检索或全文索引 API
+- **位置**：`AppHeader` 中部搜索框，宽度 `max-w-md`，随窗口自适应
+
+#### 5.4.2 数据来源（`src/config/sitemap.ts`）
+
+搜索条目分两类：
+
+**主条目**：由 `buildSearchEntries()` 从 `menuConfig` 自动派生，每次调用时动态生成，无需手动维护。条目字段：
+
+```typescript
+interface SitemapEntry {
+  key: string;      // 与 menuItem.key 对应
+  label: string;    // 菜单标签（中文）
+  group: string;    // 所属域标签（如"治理"、"管理"）
+  path: string;     // 路由跳转路径
+  icon: string;     // Remix Icon 类名
+  keywords: string[]; // 额外搜索关键词
+}
+```
+
+**虚拟条目**：4 条手动定义，覆盖 `menuConfig` 中缺失的子页面功能：
+
+| key | label | group | path | 主要关键词 | 权限 |
+|-----|-------|-------|------|-----------|------|
+| `platform-smtp` | 邮件通知 | 平台设置 | `/system/platform-settings` | 邮件、smtp、邮箱 | adminOnly |
+| `account-password` | 修改密码 | 账户 | `/account/password` | 密码、改密 | 无限制 |
+| `account-profile` | 个人中心 | 账户 | `/account/profile` | 个人、资料 | 无限制 |
+| `home` | 首页 | （空） | `/` | 首页、主页、问数 | 无限制 |
+
+#### 5.4.3 关键词扩展策略
+
+`sitemap.ts` 中为每个 `menuItem.key` 维护一组 `EXTRA_KEYWORDS`，涵盖：
+- 技术术语（`postgresql`、`smtp`、`llm`、`mcp`）
+- 中文同义词（`数仓` / `数据库`、`告警` / `监控`）
+- 英文缩写（`db`、`rbac`、`ai`、`dqc`）
+
+**匹配算法**：将 `label + group + keywords` 拼接为小写字符串，执行 `String.includes(query)`，返回前 7 条命中结果。
+
+#### 5.4.4 权限过滤规则
+
+`buildSearchEntries()` 内部应用与 `AppSidebar` 完全一致的可见性规则：
+
+| 条件 | 行为 |
+|------|------|
+| `domain.permission.requiredRole` 不满足 | 跳过整个域 |
+| `item.permission.adminOnly = true` 且用户非 admin | 跳过该条目 |
+| `item.permission.requiredRole` 不满足 | 跳过该条目 |
+| `item.disabled = true` | 跳过（不在搜索结果中显示） |
+| `item.hidden = true` | 跳过 |
+
+#### 5.4.5 交互行为
+
+| 动作 | 结果 |
+|------|------|
+| 聚焦输入框 + 输入查询词 | 显示下拉浮层 |
+| 点击结果项（`onMouseDown`） | `navigate(path)`，清空 query，关闭下拉 |
+| 失焦（`onBlur`） | 关闭下拉（`onMouseDown + preventDefault` 确保点击先于 blur 执行） |
+| 按 `Escape` | 清空 query，blur 输入框，关闭下拉 |
+| 无匹配结果 | 不显示下拉浮层（不显示空状态） |
+
+#### 5.4.6 UI 规格
+
+```
+┌─────────────────────────────────────────┐
+│ 🔍 搜索功能页面…                          │  ← input, bg-slate-50, border-slate-200
+└─────────────────────────────────────────┘
+┌─────────────────────────────────────────┐
+│  功能操作                               │  ← 分类头, text-[10px], uppercase, tracking-wider
+├─────────────────────────────────────────┤
+│  [icon]  域名 / 条目名           ↗      │  ← 每条结果，hover: bg-slate-50
+│  [icon]  域名 / 条目名           ↗      │  ← ↗ = ri-arrow-right-up-line
+│  ...                                    │
+└─────────────────────────────────────────┘
+```
+
+- 浮层：`rounded-xl / border-slate-200 / shadow-xl / z-50`
+- 条目图标：继承 `menuConfig` 的 `item.icon`
+- 跳转标识：`ri-arrow-right-up-line`（右上角，表示"页面跳转"）
+- 最大显示：7 条结果
 
 ### v0.1 → v0.2（2026-04-24）
 
@@ -438,3 +525,12 @@ interface MenuDomain {
 | 3 | "发布日志"从独立菜单项并入"语义治理" | 发布日志是语义治理的审计子功能，脱离上下文无意义 |
 | 4 | "健康中心"更名为"数仓巡检"（与实际功能对齐） | 用户看到"健康中心"不知要做什么，"数仓巡检"直击场景 |
 | 5 | Tableau 巡检独立为二级菜单项 | v0.3 已拆出独立路由，但菜单配置未同步 |
+
+### v0.4 → v0.5（2026-05-07）
+
+| # | 变更内容 | 原因 |
+|---|---------|------|
+| 1 | 新增 §5.4 全局搜索：AppHeader 功能导航搜索完整规格 | 搜索功能从占位 input 升级为可用功能，需 spec 锚点 |
+| 2 | 新增 `src/config/sitemap.ts`：搜索条目派生、关键词扩展、权限过滤、虚拟条目 | 新文件须在 spec 中有明确引用和职责说明 |
+| 3 | §5.1 AppHeader 职责描述从"Logo、全局搜索、用户信息"补全为"Logo、功能导航搜索（§5.4）、通知、用户信息" | 原描述为空占位，未反映实际实现 |
+| 4 | 版本头部从 v0.3 修正为 v0.5（合并 v0.4 漏更） | v0.3→v0.4 变更已实施但头部未同步 |

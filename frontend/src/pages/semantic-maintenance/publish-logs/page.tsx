@@ -90,8 +90,8 @@ export default function SemanticPublishLogsPage() {
     <div className="p-6 min-h-screen bg-slate-50">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-xl font-semibold text-slate-800">语义发布记录</h1>
-        <p className="text-sm text-slate-400 mt-0.5">
+        <h1 className="text-lg font-semibold text-slate-800">语义发布记录</h1>
+        <p className="text-[13px] text-slate-400">
           查看历史发布操作及字段变更详情
         </p>
       </div>

@@ -193,7 +193,8 @@ export default function CompliancePage() {
   const lowCount = rules.filter((r) => normalizeLevel(r.level) === 'LOW').length;
 
   return (
-    <div className="max-w-6xl mx-auto px-8 py-7">
+    <div className="px-8 py-7">
+      <div className="max-w-6xl mx-auto">
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-lg px-4 py-2 mb-4">
           {error}
@@ -542,6 +543,7 @@ export default function CompliancePage() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -144,30 +144,34 @@ export default function QueryLogsPage() {
   // ── 渲染 ────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="p-6">
+    <div className="min-h-screen bg-slate-50">
+      {/* 页头 */}
+      <div className="bg-white border-b border-slate-200 px-8 py-5">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-0.5">
+              <i className="ri-file-list-3-line text-slate-500 text-base" />
+              <h1 className="text-lg font-semibold text-slate-800">查数日志</h1>
+            </div>
+            <p className="text-[13px] text-slate-400 ml-7">NL→SQL 问数请求记录与状态</p>
+          </div>
+          <button
+            onClick={() => fetchLogs()}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+          >
+            <i className="ri-refresh-line" />
+            刷新
+          </button>
+        </div>
+      </div>
+
+      <div className="max-w-6xl mx-auto px-8 py-7">
       {/* 错误提示 */}
       {errorMsg && (
-        <div className="mb-4 px-4 py-2 border rounded-lg text-sm bg-red-50 text-red-700 border-red-200">
+        <div className="mb-4 px-4 py-2 border rounded-lg text-[12px] bg-red-50 text-red-700 border-red-200">
           {errorMsg}
         </div>
       )}
-
-      {/* 页面标题栏 */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold text-slate-800">查数日志</h1>
-          <p className="text-sm text-slate-400 mt-0.5">
-            所有用户的问数记录，共 {total} 条
-          </p>
-        </div>
-        <button
-          onClick={() => fetchLogs()}
-          className="px-3 py-2 text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg flex items-center gap-1.5 transition-colors"
-        >
-          <i className="ri-refresh-line" />
-          刷新
-        </button>
-      </div>
 
       {/* 筛选栏 */}
       <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
@@ -332,6 +336,7 @@ export default function QueryLogsPage() {
             </div>
           </div>
         )}
+      </div>
       </div>
     </div>
   );

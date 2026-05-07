@@ -18,13 +18,70 @@ import {
   type AgentToolMetadata,
   type AgentSessionItem,
 } from '../../../api/agent';
+import { API_BASE } from '../../../config';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type StatusFilter = 'all' | 'running' | 'completed' | 'failed';
 type ActiveTab = 'overview' | 'tools' | 'sessions';
+type OverviewTable = 'runs' | 'nlq';
+
+interface NlqLogItem {
+  id: number;
+  username: string | null;
+  question: string;
+  intent: string | null;
+  response_type: string | null;
+  datasource_luid: string | null;
+  execution_time_ms: number | null;
+  error_code: string | null;
+  success: boolean;
+  created_at: string;
+}
+
+interface NlqLogListResponse {
+  items: NlqLogItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+const INTENT_OPTIONS = [
+  { value: '', label: '全部意图' },
+  { value: 'vizql', label: 'VizQL 查询' },
+  { value: 'text', label: '文本回答' },
+  { value: 'clarification', label: '澄清追问' },
+];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function toDatetimeLocal(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function defaultRange(): { start: string; end: string } {
+  const now = new Date();
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  return { start: toDatetimeLocal(yesterday), end: toDatetimeLocal(now) };
+}
+
+function formatDateTime(dateStr: string): string {
+  if (!dateStr) return '-';
+  try {
+    const d = new Date(dateStr);
+    return d.toLocaleString('zh-CN', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
+function truncate(text: string, maxLen = 80): string {
+  return text.length > maxLen ? text.slice(0, maxLen) + '...' : text;
+}
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return '-';
@@ -77,6 +134,7 @@ function stepTypeBadge(stepType: string) {
 
 export default function AgentMonitorPage() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
+  const [overviewTable, setOverviewTable] = useState<OverviewTable>('runs');
   const [stats, setStats] = useState<AgentStats | null>(null);
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [runsTotal, setRunsTotal] = useState(0);
@@ -96,6 +154,19 @@ export default function AgentMonitorPage() {
   const [sessionsTotal, setSessionsTotal] = useState(0);
   const [sessionsOffset, setSessionsOffset] = useState(0);
   const [sessionsLoading, setSessionsLoading] = useState(false);
+
+  // Query logs state
+  const [queryItems, setQueryItems] = useState<NlqLogItem[]>([]);
+  const [queryTotal, setQueryTotal] = useState(0);
+  const [queryLoading, setQueryLoading] = useState(false);
+  const [queryErrorMsg, setQueryErrorMsg] = useState('');
+  const [queryStatus, setQueryStatus] = useState<'all' | 'success' | 'failed'>('all');
+  const [queryIntent, setQueryIntent] = useState('');
+  const { start: defaultStart, end: defaultEnd } = defaultRange();
+  const [queryStartTime, setQueryStartTime] = useState(defaultStart);
+  const [queryEndTime, setQueryEndTime] = useState(defaultEnd);
+  const [queryPage, setQueryPage] = useState(1);
+  const queryPageSize = 20;
 
   const LIMIT = 20;
 
@@ -162,6 +233,37 @@ export default function AgentMonitorPage() {
     }
   }, [sessionsOffset]);
 
+  const fetchQueryLogs = useCallback(async () => {
+    setQueryLoading(true);
+    setQueryErrorMsg('');
+    try {
+      const params = new URLSearchParams({
+        page: String(queryPage),
+        page_size: String(queryPageSize),
+      });
+      if (queryStatus !== 'all') params.set('status', queryStatus);
+      if (queryIntent) params.set('intent', queryIntent);
+      if (queryStartTime) params.set('start_time', queryStartTime);
+      if (queryEndTime) params.set('end_time', queryEndTime);
+
+      const resp = await fetch(`${API_BASE}/api/admin/query/logs?${params}`, {
+        credentials: 'include',
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        setQueryErrorMsg(err.detail?.message || err.detail || '获取查数日志失败');
+        return;
+      }
+      const data: NlqLogListResponse = await resp.json();
+      setQueryItems(data.items);
+      setQueryTotal(data.total);
+    } catch {
+      setQueryErrorMsg('网络错误，请稍后重试');
+    } finally {
+      setQueryLoading(false);
+    }
+  }, [queryStatus, queryIntent, queryStartTime, queryEndTime, queryPage]);
+
   useEffect(() => {
     Promise.all([fetchStats(), fetchRuns()]).finally(() => setLoading(false));
   }, [fetchStats, fetchRuns]);
@@ -179,6 +281,18 @@ export default function AgentMonitorPage() {
       fetchSessions();
     }
   }, [activeTab, fetchSessions]);
+
+  // 切换到查询日志视图时加载，筛选变化时重新加载
+  useEffect(() => {
+    if (activeTab === 'overview' && overviewTable === 'nlq') {
+      fetchQueryLogs();
+    }
+  }, [activeTab, overviewTable, fetchQueryLogs]);
+
+  // 筛选变化时重置页码
+  useEffect(() => {
+    setQueryPage(1);
+  }, [queryStatus, queryIntent, queryStartTime, queryEndTime]);
 
   // 点击行展开/折叠步骤
   const toggleExpand = (runId: string) => {
@@ -203,41 +317,57 @@ export default function AgentMonitorPage() {
   const currentPage = Math.floor(offset / LIMIT) + 1;
 
   if (loading) {
-    return <div className="p-8 text-center text-slate-400">加载中...</div>;
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-slate-400 text-sm">加载中...</div>
+      </div>
+    );
   }
 
+  const TABS_CONFIG: [ActiveTab, string][] = [
+    ['overview', '总览'],
+    ['tools', '工具列表'],
+    ['sessions', '会话管理'],
+  ];
+
   return (
-    <div className="p-6">
+    <div className="min-h-screen bg-slate-50">
       {/* 页面标题 */}
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-slate-800">Agent 监控</h1>
-        <p className="text-sm text-slate-400 mt-0.5">
-          Data Agent 调用量、成功率、耗时与反馈统计
-        </p>
+      <div className="bg-white border-b border-slate-200 px-8 py-5">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center gap-2 mb-0.5">
+            <i className="ri-robot-line text-slate-500 text-base" />
+            <h1 className="text-lg font-semibold text-slate-800">Agent 监控</h1>
+          </div>
+          <p className="text-[13px] text-slate-400 ml-7">
+            Data Agent 调用量、成功率、耗时与反馈统计
+          </p>
+        </div>
       </div>
 
       {/* Tab 导航 */}
-      <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit mb-6">
-        {(
-          [
-            ['overview', '总览'],
-            ['tools', '工具列表'],
-            ['sessions', '会话管理'],
-          ] as [ActiveTab, string][]
-        ).map(([value, label]) => (
-          <button
-            key={value}
-            onClick={() => setActiveTab(value)}
-            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-              activeTab === value
-                ? 'bg-white text-slate-700 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="bg-white border-b border-slate-100 px-8">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex gap-1 py-2">
+            {TABS_CONFIG.map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => setActiveTab(value)}
+                className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
+                  activeTab === value
+                    ? 'bg-slate-800 text-white'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
+
+      <div className="px-8 py-7">
+        <div className="max-w-6xl mx-auto">
 
       {/* Tab: 总览 */}
       {activeTab === 'overview' && (
@@ -402,14 +532,30 @@ export default function AgentMonitorPage() {
         </div>
       )}
 
-      {/* 运行列表 */}
+      {/* 运行记录 / 查询日志 */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        {/* 标题 + 筛选 */}
-        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h3 className="text-sm font-semibold text-slate-700">近期运行</h3>
-            <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
-              {/* Keep filter values aligned with backend statuses: running/completed/failed. */}
+        {/* 标题栏：视图切换 + 条件筛选 */}
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-3 flex-wrap">
+          {/* 视图切换 */}
+          <div className="flex gap-1">
+            {([['runs', '运行记录'], ['nlq', '查询日志']] as [OverviewTable, string][]).map(([v, label]) => (
+              <button
+                key={v}
+                onClick={() => setOverviewTable(v)}
+                className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors ${
+                  overviewTable === v
+                    ? 'bg-slate-800 text-white'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* runs 视图：状态筛选 */}
+          {overviewTable === 'runs' && (
+            <div className="flex gap-1">
               {(
                 [
                   ['all', '全部'],
@@ -421,167 +567,310 @@ export default function AgentMonitorPage() {
                 <button
                   key={value}
                   onClick={() => handleStatusChange(value)}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors ${
                     statusFilter === value
-                      ? 'bg-white text-slate-700 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-700'
+                      ? 'bg-slate-700 text-white'
+                      : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
                   }`}
                 >
                   {label}
                 </button>
               ))}
             </div>
-          </div>
-          <span className="text-xs text-slate-400">共 {runsTotal} 条</span>
+          )}
+
+          <span className="ml-auto text-xs text-slate-400">
+            共 {overviewTable === 'runs' ? runsTotal : queryTotal} 条
+          </span>
         </div>
 
-        {/* 表格 */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-slate-50 text-slate-500 text-xs">
-                <th className="text-left px-4 py-2.5 font-medium">时间</th>
-                <th className="text-left px-4 py-2.5 font-medium">用户</th>
-                <th className="text-left px-4 py-2.5 font-medium">问题</th>
-                <th className="text-left px-4 py-2.5 font-medium">状态</th>
-                <th className="text-left px-4 py-2.5 font-medium">耗时</th>
-                <th className="text-left px-4 py-2.5 font-medium">工具</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {runs.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
-                    <i className="ri-robot-line text-3xl mb-2 block" />
-                    暂无运行记录
-                  </td>
+        {/* nlq 视图：筛选栏 */}
+        {overviewTable === 'nlq' && (
+          <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/50 flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-0.5">
+              {(['all', 'success', 'failed'] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setQueryStatus(s)}
+                  className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors ${
+                    queryStatus === s
+                      ? 'bg-slate-800 text-white'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  {s === 'all' ? '全部' : s === 'success' ? '成功' : '失败'}
+                </button>
+              ))}
+            </div>
+            <select
+              value={queryIntent}
+              onChange={(e) => setQueryIntent(e.target.value)}
+              className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:border-blue-400"
+            >
+              {INTENT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="datetime-local"
+                value={queryStartTime}
+                onChange={(e) => setQueryStartTime(e.target.value)}
+                className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:border-blue-400"
+              />
+              <span className="text-slate-400 text-xs">至</span>
+              <input
+                type="datetime-local"
+                value={queryEndTime}
+                onChange={(e) => setQueryEndTime(e.target.value)}
+                className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:border-blue-400"
+              />
+            </div>
+            <button
+              onClick={() => { const r = defaultRange(); setQueryStartTime(r.start); setQueryEndTime(r.end); }}
+              className="text-xs text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              过去24小时
+            </button>
+            <button
+              onClick={() => fetchQueryLogs()}
+              className="ml-auto text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 transition-colors"
+            >
+              <i className="ri-refresh-line" />刷新
+            </button>
+          </div>
+        )}
+
+        {/* nlq 错误提示 */}
+        {overviewTable === 'nlq' && queryErrorMsg && (
+          <div className="mx-4 mt-3 px-3 py-2 border rounded-lg text-xs bg-red-50 text-red-700 border-red-200">
+            {queryErrorMsg}
+          </div>
+        )}
+
+        {/* 表格：runs */}
+        {overviewTable === 'runs' && (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 text-slate-500 text-xs">
+                    <th className="text-left px-4 py-2.5 font-medium">时间</th>
+                    <th className="text-left px-4 py-2.5 font-medium">用户</th>
+                    <th className="text-left px-4 py-2.5 font-medium">问题</th>
+                    <th className="text-left px-4 py-2.5 font-medium">状态</th>
+                    <th className="text-left px-4 py-2.5 font-medium">耗时</th>
+                    <th className="text-left px-4 py-2.5 font-medium">工具</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {runs.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                        <i className="ri-robot-line text-3xl mb-2 block" />
+                        暂无运行记录
+                      </td>
+                    </tr>
+                  ) : (
+                    runs.map((run) => (
+                      <>
+                        <tr
+                          key={run.id}
+                          className={`hover:bg-slate-50/50 cursor-pointer transition-colors ${
+                            expandedRunId === run.id ? 'bg-cyan-50/30' : ''
+                          }`}
+                          onClick={() => toggleExpand(run.id)}
+                        >
+                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
+                            {formatDate(run.created_at)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700 whitespace-nowrap">
+                            #{run.user_id}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700 max-w-xs truncate" title={run.question}>
+                            {run.question}
+                          </td>
+                          <td className="px-4 py-3">{statusBadge(run.status)}</td>
+                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
+                            {formatMs(run.execution_time_ms)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {run.tools_used && run.tools_used.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {run.tools_used.slice(0, 3).map((t) => (
+                                  <span key={t} className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                                    {t}
+                                  </span>
+                                ))}
+                                {run.tools_used.length > 3 && (
+                                  <span className="text-xs text-slate-400">+{run.tools_used.length - 3}</span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                        {expandedRunId === run.id && (
+                          <tr key={`${run.id}-steps`}>
+                            <td colSpan={6} className="px-0 py-0">
+                              <div className="bg-slate-50/80 border-t border-slate-200 px-6 py-4">
+                                <h4 className="text-xs font-semibold text-slate-500 mb-3">执行步骤</h4>
+                                {stepsLoading ? (
+                                  <div className="text-sm text-slate-400 py-2">加载中...</div>
+                                ) : steps.length === 0 ? (
+                                  <div className="text-sm text-slate-400 py-2">暂无步骤记录</div>
+                                ) : (
+                                  <div className="space-y-2">
+                                    {steps.map((step) => (
+                                      <div key={step.id} className="bg-white rounded-lg border border-slate-200 p-3">
+                                        <div className="flex items-center gap-3 mb-1.5">
+                                          <span className="text-xs text-slate-400 w-6 text-center">#{step.step_number}</span>
+                                          {stepTypeBadge(step.step_type)}
+                                          {step.tool_name && (
+                                            <span className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
+                                              {step.tool_name}
+                                            </span>
+                                          )}
+                                          <span className="text-xs text-slate-400 ml-auto">{formatMs(step.execution_time_ms)}</span>
+                                        </div>
+                                        {step.content && (
+                                          <div className="text-xs text-slate-600 ml-9 whitespace-pre-wrap break-words max-h-32 overflow-y-auto">
+                                            {step.content}
+                                          </div>
+                                        )}
+                                        {step.tool_result_summary && (
+                                          <div className="text-xs text-slate-500 ml-9 mt-1 whitespace-pre-wrap break-words max-h-24 overflow-y-auto bg-slate-50 rounded p-2">
+                                            {step.tool_result_summary}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {totalPages > 1 && (
+              <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between">
+                <span className="text-xs text-slate-400">第 {currentPage} / {totalPages} 页</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    disabled={offset === 0}
+                    onClick={() => setOffset(Math.max(0, offset - LIMIT))}
+                    className="px-3 py-1.5 text-xs rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    上一页
+                  </button>
+                  <button
+                    disabled={offset + LIMIT >= runsTotal}
+                    onClick={() => setOffset(offset + LIMIT)}
+                    className="px-3 py-1.5 text-xs rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    下一页
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* 表格：nlq */}
+        {overviewTable === 'nlq' && (
+          <>
+            <table className="w-full">
+              <thead>
+                <tr className="bg-slate-50 text-slate-500 text-xs">
+                  <th className="text-left px-4 py-2.5 font-medium whitespace-nowrap">时间</th>
+                  <th className="text-left px-4 py-2.5 font-medium whitespace-nowrap">用户</th>
+                  <th className="text-left px-4 py-2.5 font-medium">问题</th>
+                  <th className="text-left px-4 py-2.5 font-medium whitespace-nowrap">意图</th>
+                  <th className="text-left px-4 py-2.5 font-medium whitespace-nowrap">耗时</th>
+                  <th className="text-left px-4 py-2.5 font-medium whitespace-nowrap">状态</th>
                 </tr>
-              ) : (
-                runs.map((run) => (
-                  <>
-                    <tr
-                      key={run.id}
-                      className={`hover:bg-slate-50/50 cursor-pointer transition-colors ${
-                        expandedRunId === run.id ? 'bg-cyan-50/30' : ''
-                      }`}
-                      onClick={() => toggleExpand(run.id)}
-                    >
-                      <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
-                        {formatDate(run.created_at)}
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {queryLoading ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-12 text-center text-slate-400">
+                      <i className="ri-loader-4-line text-2xl animate-spin mb-2 block" />加载中...
+                    </td>
+                  </tr>
+                ) : queryItems.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-12 text-center text-slate-400">
+                      <i className="ri-file-list-3-line text-3xl mb-2 block" />暂无记录
+                    </td>
+                  </tr>
+                ) : (
+                  queryItems.map((log) => (
+                    <tr key={log.id} className="hover:bg-slate-50/50">
+                      <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
+                        {formatDateTime(log.created_at)}
                       </td>
-                      <td className="px-4 py-3 text-slate-700 whitespace-nowrap">
-                        #{run.user_id}
-                      </td>
-                      <td className="px-4 py-3 text-slate-700 max-w-xs truncate" title={run.question}>
-                        {run.question}
-                      </td>
-                      <td className="px-4 py-3">{statusBadge(run.status)}</td>
-                      <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
-                        {formatMs(run.execution_time_ms)}
+                      <td className="px-4 py-3 text-sm font-medium text-slate-700">{log.username ?? '-'}</td>
+                      <td className="px-4 py-3 max-w-sm">
+                        <span className="text-sm text-slate-800 block truncate" title={log.question}>
+                          {truncate(log.question)}
+                        </span>
                       </td>
                       <td className="px-4 py-3">
-                        {run.tools_used && run.tools_used.length > 0 ? (
-                          <div className="flex flex-wrap gap-1">
-                            {run.tools_used.slice(0, 3).map((t) => (
-                              <span
-                                key={t}
-                                className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded"
-                              >
-                                {t}
-                              </span>
-                            ))}
-                            {run.tools_used.length > 3 && (
-                              <span className="text-xs text-slate-400">
-                                +{run.tools_used.length - 3}
-                              </span>
-                            )}
-                          </div>
+                        {log.intent ? (
+                          <span className="text-xs px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-full">
+                            {log.intent}
+                          </span>
                         ) : (
                           <span className="text-xs text-slate-400">-</span>
                         )}
                       </td>
+                      <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
+                        {log.execution_time_ms == null ? '-' : log.execution_time_ms < 1000 ? `${log.execution_time_ms}ms` : `${(log.execution_time_ms / 1000).toFixed(1)}s`}
+                      </td>
+                      <td className="px-4 py-3">
+                        {log.success ? (
+                          <span className="text-xs font-medium px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">成功</span>
+                        ) : (
+                          <span className="text-xs font-medium px-2 py-1 rounded-full bg-red-50 text-red-600" title={log.error_code ?? undefined}>
+                            失败{log.error_code ? `·${log.error_code}` : ''}
+                          </span>
+                        )}
+                      </td>
                     </tr>
-                    {/* 展开的步骤详情 */}
-                    {expandedRunId === run.id && (
-                      <tr key={`${run.id}-steps`}>
-                        <td colSpan={6} className="px-0 py-0">
-                          <div className="bg-slate-50/80 border-t border-slate-200 px-6 py-4">
-                            <h4 className="text-xs font-semibold text-slate-500 mb-3">
-                              执行步骤
-                            </h4>
-                            {stepsLoading ? (
-                              <div className="text-sm text-slate-400 py-2">加载中...</div>
-                            ) : steps.length === 0 ? (
-                              <div className="text-sm text-slate-400 py-2">暂无步骤记录</div>
-                            ) : (
-                              <div className="space-y-2">
-                                {steps.map((step) => (
-                                  <div
-                                    key={step.id}
-                                    className="bg-white rounded-lg border border-slate-200 p-3"
-                                  >
-                                    <div className="flex items-center gap-3 mb-1.5">
-                                      <span className="text-xs text-slate-400 w-6 text-center">
-                                        #{step.step_number}
-                                      </span>
-                                      {stepTypeBadge(step.step_type)}
-                                      {step.tool_name && (
-                                        <span className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
-                                          {step.tool_name}
-                                        </span>
-                                      )}
-                                      <span className="text-xs text-slate-400 ml-auto">
-                                        {formatMs(step.execution_time_ms)}
-                                      </span>
-                                    </div>
-                                    {step.content && (
-                                      <div className="text-xs text-slate-600 ml-9 whitespace-pre-wrap break-words max-h-32 overflow-y-auto">
-                                        {step.content}
-                                      </div>
-                                    )}
-                                    {step.tool_result_summary && (
-                                      <div className="text-xs text-slate-500 ml-9 mt-1 whitespace-pre-wrap break-words max-h-24 overflow-y-auto bg-slate-50 rounded p-2">
-                                        {step.tool_result_summary}
-                                      </div>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* 分页 */}
-        {totalPages > 1 && (
-          <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between">
-            <span className="text-xs text-slate-400">
-              第 {currentPage} / {totalPages} 页
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                disabled={offset === 0}
-                onClick={() => setOffset(Math.max(0, offset - LIMIT))}
-                className="px-3 py-1.5 text-xs rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                上一页
-              </button>
-              <button
-                disabled={offset + LIMIT >= runsTotal}
-                onClick={() => setOffset(offset + LIMIT)}
-                className="px-3 py-1.5 text-xs rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                下一页
-              </button>
-            </div>
-          </div>
+                  ))
+                )}
+              </tbody>
+            </table>
+            {Math.ceil(queryTotal / queryPageSize) > 1 && (
+              <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between">
+                <span className="text-xs text-slate-400">
+                  共 {queryTotal} 条，第 {queryPage} / {Math.ceil(queryTotal / queryPageSize)} 页
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setQueryPage((p) => Math.max(1, p - 1))}
+                    disabled={queryPage === 1}
+                    className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-slate-50 transition-colors"
+                  >
+                    上一页
+                  </button>
+                  <button
+                    onClick={() => setQueryPage((p) => Math.min(Math.ceil(queryTotal / queryPageSize), p + 1))}
+                    disabled={queryPage === Math.ceil(queryTotal / queryPageSize)}
+                    className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-slate-50 transition-colors"
+                  >
+                    下一页
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
         </>
@@ -723,6 +1012,9 @@ export default function AgentMonitorPage() {
           )}
         </div>
       )}
+
+      </div>
     </div>
+      </div>
   );
 }

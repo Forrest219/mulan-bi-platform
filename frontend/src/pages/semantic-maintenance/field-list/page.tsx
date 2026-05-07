@@ -186,8 +186,8 @@ export default function SemanticFieldListPage() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-slate-800">字段语义管理</h1>
-          <p className="text-sm text-slate-400 mt-0.5">批量管理和审核字段语义</p>
+          <h1 className="text-lg font-semibold text-slate-800">字段语义管理</h1>
+          <p className="text-[13px] text-slate-400">批量管理和审核字段语义</p>
         </div>
         <div className="flex items-center gap-2">
           <button

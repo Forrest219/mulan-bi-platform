@@ -36,7 +36,7 @@ function StatusBadge({ status }: { status: string }) {
     active: '有效', deprecated: '已弃用', archived: '已归档',
   };
   return (
-    <span className={`inline-block px-2 py-0.5 text-xs rounded border ${map[status] ?? map.active}`}>
+    <span className={`inline-block px-2 py-0.5 text-[11px] rounded border ${map[status] ?? map.active}`}>
       {labels[status] ?? status}
     </span>
   );
@@ -93,44 +93,44 @@ function DocumentModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
         <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
-              <label className="block text-xs font-medium text-slate-600 mb-1">标题 *</label>
+              <label className="block text-[12px] font-medium text-slate-600 mb-1">标题 *</label>
               <input value={form.title} onChange={set('title')} placeholder="文档标题"
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">分类</label>
+              <label className="block text-[12px] font-medium text-slate-600 mb-1">分类</label>
               <select value={form.category} onChange={set('category')}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
                 {DOC_CATEGORIES.map(c => (
                   <option key={c.value} value={c.value}>{c.label}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">格式</label>
+              <label className="block text-[12px] font-medium text-slate-600 mb-1">格式</label>
               <select value={form.format} onChange={set('format')}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
                 <option value="markdown">Markdown</option>
                 <option value="text">纯文本</option>
               </select>
             </div>
             <div className="col-span-2">
-              <label className="block text-xs font-medium text-slate-600 mb-1">标签（逗号分隔）</label>
+              <label className="block text-[12px] font-medium text-slate-600 mb-1">标签（逗号分隔）</label>
               <input value={form.tags} onChange={set('tags')}
-                placeholder="如：BI, 规范" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                placeholder="如：BI, 规范" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">内容 *</label>
+            <label className="block text-[12px] font-medium text-slate-600 mb-1">内容 *</label>
             <textarea value={form.content} onChange={set('content')} rows={10}
-              placeholder="在此输入文档内容..." className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-mono" />
+              placeholder="在此输入文档内容..." className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-mono" />
           </div>
-          {error && <p className="text-sm text-red-500">{error}</p>}
+          {error && <p className="text-[12px] text-red-500">{error}</p>}
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={onClose}
-              className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800">取消</button>
+              className="px-4 py-2 text-[12px] text-slate-600 hover:text-slate-800">取消</button>
             <button type="submit" disabled={saving}
-              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              className="px-4 py-2 text-[12px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
               {saving ? '保存中…' : '保存'}
             </button>
           </div>
@@ -142,6 +142,8 @@ function DocumentModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
 
 // ── 主页面 ─────────────────────────────────────────────────────────────────────
 
+const PAGE_SIZE = 20;
+
 export default function KnowledgePage() {
   const { user } = useAuth();
   const [items, setItems] = useState<DocumentItem[]>([]);
@@ -151,8 +153,6 @@ export default function KnowledgePage() {
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DocumentItem | null>(null);
-
-  const PAGE_SIZE = 20;
 
   const roleRank: Record<string, number> = { user: 0, analyst: 1, data_admin: 2, admin: 3 };
   const canWrite = (roleRank[user?.role ?? 'user'] ?? 0) >= 2;
@@ -179,77 +179,121 @@ export default function KnowledgePage() {
     load();
   }
 
+  const totalPages = Math.ceil(total / PAGE_SIZE) || 1;
+
   return (
-    <div className="p-6">
-      {/* 筛选栏 */}
-      <div className="flex items-center gap-3 mb-4">
-        <select value={category} onChange={e => { setCategory(e.target.value); setPage(1); }}
-          className="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-          <option value="">全部分类</option>
-          {DOC_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-        </select>
-        {canWrite && (
-          <button onClick={() => setShowCreate(true)}
-            className="ml-auto flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
-            <i className="ri-add-line" />新建文档
-          </button>
+    <div className="min-h-screen bg-slate-50">
+      {/* 页头 */}
+      <div className="bg-white border-b border-slate-200 px-8 py-5">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-0.5">
+              <i className="ri-book-open-line text-slate-500 text-base" />
+              <h1 className="text-lg font-semibold text-slate-800">知识库</h1>
+            </div>
+            <p className="text-[13px] text-slate-400 ml-7">管理业务知识文档与术语，为 NL→SQL 提供语义上下文</p>
+          </div>
+          {canWrite && (
+            <button
+              onClick={() => setShowCreate(true)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 text-white text-[12px] font-medium rounded-lg hover:bg-blue-500 transition-colors"
+            >
+              <i className="ri-add-line" />
+              新建文档
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="px-8 py-7">
+        <div className="max-w-6xl mx-auto">
+        {/* 筛选栏 */}
+        <div className="flex items-center gap-3 mb-4">
+          <select
+            value={category}
+            onChange={e => { setCategory(e.target.value); setPage(1); }}
+            className="border border-slate-200 rounded-lg px-3 py-1.5 text-[13px] bg-white focus:outline-none focus:border-slate-400"
+          >
+            <option value="">全部分类</option>
+            {DOC_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
+        </div>
+
+        {/* 表格 */}
+        {loading ? (
+          <div className="text-center py-20 text-slate-400 text-[13px]">加载中…</div>
+        ) : items.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-100 flex items-center justify-center">
+              <i className="ri-book-open-line text-2xl text-slate-400" />
+            </div>
+            <p className="text-slate-500 text-[13px] mb-4">暂无文档</p>
+            {canWrite && (
+              <button onClick={() => setShowCreate(true)}
+                className="px-4 py-2 bg-blue-600 text-white text-[12px] rounded-lg hover:bg-blue-500">
+                新建文档
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  {['标题', '分类', '格式', '向量块数', '状态', '更新时间'].map(h => (
+                    <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-3 whitespace-nowrap">
+                      {h}
+                    </th>
+                  ))}
+                  {canWrite && <th className="px-4 py-3" />}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {items.map(item => (
+                  <tr key={item.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 text-[12px] font-medium text-slate-800">{item.title}</td>
+                    <td className="px-4 py-3 text-[12px] text-slate-500">{CATEGORY_LABEL[item.category] ?? item.category}</td>
+                    <td className="px-4 py-3 text-[11px] text-slate-500 uppercase">{item.format}</td>
+                    <td className="px-4 py-3 text-[12px] text-slate-500">{item.chunk_count > 0 ? item.chunk_count : '—'}</td>
+                    <td className="px-4 py-3"><StatusBadge status={item.status} /></td>
+                    <td className="px-4 py-3 text-[12px] text-slate-400">{fmtDate(item.updated_at)}</td>
+                    {canWrite && (
+                      <td className="px-4 py-3 text-right">
+                        <button onClick={() => setDeleteTarget(item)}
+                          className="text-slate-400 hover:text-red-500 transition-colors">
+                          <i className="ri-delete-bin-line" />
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* 分页 */}
+        {total > PAGE_SIZE && (
+          <div className="flex items-center justify-center gap-2 mt-6">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-default transition-colors"
+            >
+              <i className="ri-arrow-left-s-line" />
+            </button>
+            <span className="text-[12px] text-slate-500">{page} / {totalPages}</span>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-default transition-colors"
+            >
+              <i className="ri-arrow-right-s-line" />
+            </button>
+          </div>
         )}
       </div>
-
-      {/* 表格 */}
-      <div className="border border-slate-200 rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 border-b border-slate-200">
-            <tr>
-              <th className="text-left px-4 py-3 font-medium text-slate-600">标题</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-600">分类</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-600">格式</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-600">向量块数</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-600">状态</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-600">更新时间</th>
-              {canWrite && <th className="px-4 py-3" />}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {loading ? (
-              <tr><td colSpan={canWrite ? 7 : 6} className="px-4 py-8 text-center text-slate-400">加载中…</td></tr>
-            ) : items.length === 0 ? (
-              <tr><td colSpan={canWrite ? 7 : 6} className="px-4 py-8 text-center text-slate-400">暂无文档</td></tr>
-            ) : items.map(item => (
-              <tr key={item.id} className="hover:bg-slate-50">
-                <td className="px-4 py-3 font-medium text-slate-800">{item.title}</td>
-                <td className="px-4 py-3 text-slate-500">{CATEGORY_LABEL[item.category] ?? item.category}</td>
-                <td className="px-4 py-3 text-slate-500 uppercase text-xs">{item.format}</td>
-                <td className="px-4 py-3 text-slate-500">{item.chunk_count > 0 ? item.chunk_count : '—'}</td>
-                <td className="px-4 py-3"><StatusBadge status={item.status} /></td>
-                <td className="px-4 py-3 text-slate-400">{fmtDate(item.updated_at)}</td>
-                {canWrite && (
-                  <td className="px-4 py-3 text-right">
-                    <button onClick={() => setDeleteTarget(item)}
-                      className="text-slate-400 hover:text-red-500 transition-colors">
-                      <i className="ri-delete-bin-line" />
-                    </button>
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
       </div>
-
-      {/* 分页 */}
-      {total > PAGE_SIZE && (
-        <div className="flex items-center justify-between mt-4 text-sm text-slate-500">
-          <span>共 {total} 条</span>
-          <div className="flex gap-2">
-            <button disabled={page === 1} onClick={() => setPage(p => p - 1)}
-              className="px-3 py-1 border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-slate-50">上一页</button>
-            <span className="px-3 py-1">第 {page} / {Math.ceil(total / PAGE_SIZE)} 页</span>
-            <button disabled={page >= Math.ceil(total / PAGE_SIZE)} onClick={() => setPage(p => p + 1)}
-              className="px-3 py-1 border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-slate-50">下一页</button>
-          </div>
-        </div>
-      )}
 
       {showCreate && (
         <DocumentModal onClose={() => setShowCreate(false)} onSaved={() => { setShowCreate(false); load(); }} />

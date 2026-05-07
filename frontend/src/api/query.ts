@@ -180,19 +180,14 @@ export async function askQueryStream(
   onError: (code: string, message: string) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  let resp: Response;
-  try {
-    resp = await fetch('/api/query/ask', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req),
-      signal,
-    });
-  } catch (err) {
-    // AbortError / TimeoutError 穿透，让 useQuerySession 的 try/catch 接收并处理
-    throw err;
-  }
+  // AbortError / TimeoutError 穿透，让 useQuerySession 的 try/catch 接收并处理
+  const resp = await fetch('/api/query/ask', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+    signal,
+  });
 
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));

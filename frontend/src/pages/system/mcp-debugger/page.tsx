@@ -127,124 +127,131 @@ export default function McpDebuggerPage() {
   }, []);
 
   return (
-    <div className="flex flex-col h-full p-4 gap-4">
+    <div className="flex flex-col h-full bg-slate-50">
       {/* 页头 */}
-      <div className="shrink-0 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
-            <i className="ri-bug-line text-blue-600" />
-            MCP 调试器
-          </h1>
-          <p className="text-sm text-slate-400 mt-0.5">
-            在线调用 MCP 工具并查看原始响应，仅限管理员使用
-          </p>
+      <div className="bg-white border-b border-slate-200 px-8 py-5 shrink-0">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-0.5">
+              <i className="ri-bug-line text-slate-500 text-base" />
+              <h1 className="text-lg font-semibold text-slate-800">MCP 调试器</h1>
+            </div>
+            <p className="text-[13px] text-slate-400 ml-7">在线调用 MCP 工具并查看原始响应，仅限管理员使用</p>
+          </div>
+          {servers.length > 0 && (
+            <select
+              value={serverId ?? ''}
+              onChange={(e) => {
+                const id = e.target.value ? Number(e.target.value) : undefined;
+                setServerId(id);
+                setSelectedTool(null);
+                setResult(null);
+                setCallError(null);
+                setToolsLoaded(false);
+              }}
+              className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white focus:outline-none focus:border-blue-500"
+            >
+              {servers.map(s => (
+                <option key={s.id} value={s.id}>{s.name} ({s.type})</option>
+              ))}
+            </select>
+          )}
         </div>
-        {servers.length > 0 && (
-          <select
-            value={serverId ?? ''}
-            onChange={(e) => {
-              const id = e.target.value ? Number(e.target.value) : undefined;
-              setServerId(id);
-              setSelectedTool(null);
-              setResult(null);
-              setCallError(null);
-              setToolsLoaded(false);
-            }}
-            className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white focus:outline-none focus:border-blue-500"
-          >
-            {servers.map(s => (
-              <option key={s.id} value={s.id}>{s.name} ({s.type})</option>
-            ))}
-          </select>
-        )}
       </div>
 
       {/* Tab 切换 */}
-      <div className="shrink-0 flex items-center gap-1 px-1 py-1 bg-slate-100 rounded-lg w-fit">
-        <button
-          onClick={() => switchView('debugger')}
-          className={`px-4 py-1.5 rounded-md text-[12px] font-medium transition-colors cursor-pointer ${
-            view === 'debugger' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          调试器
-        </button>
-        <button
-          onClick={() => switchView('logs')}
-          className={`px-4 py-1.5 rounded-md text-[12px] font-medium transition-colors cursor-pointer ${
-            view === 'logs' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          审计日志
-        </button>
+      <div className="bg-white border-b border-slate-100 px-8 shrink-0">
+        <div className="max-w-6xl mx-auto flex items-center gap-1 py-2">
+          <button
+            onClick={() => switchView('debugger')}
+            className={`px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors cursor-pointer ${
+              view === 'debugger' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+            }`}
+          >
+            调试器
+          </button>
+          <button
+            onClick={() => switchView('logs')}
+            className={`px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors cursor-pointer ${
+              view === 'logs' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+            }`}
+          >
+            审计日志
+          </button>
+        </div>
       </div>
 
-      {view === 'logs' ? (
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <AuditLogPage />
-        </div>
-      ) : (
-        <>
-          {/* 三栏主体 */}
-          <div className="flex flex-1 gap-4 min-h-0">
-            {/* 左栏：工具选择器 */}
-            <div className="w-64 shrink-0 bg-white border border-slate-200 rounded-xl p-3 flex flex-col overflow-hidden">
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                工具列表
-              </div>
-              <div className="flex-1 min-h-0">
-                <ToolSelector selectedTool={selectedTool} onSelect={handleToolSelect} serverId={serverId} />
-              </div>
+      {/* 主内容区 */}
+      <div className="flex-1 min-h-0 overflow-hidden px-8 py-4">
+        <div className="max-w-6xl mx-auto h-full flex flex-col gap-4">
+          {view === 'logs' ? (
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <AuditLogPage />
             </div>
-
-            {/* 中栏：参数表单 */}
-            <div className="w-72 shrink-0 bg-white border border-slate-200 rounded-xl p-4 overflow-y-auto">
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
-                参数配置
-              </div>
-              {selectedTool ? (
-                <>
-                  <div className="mb-3 p-2 bg-slate-50 rounded-lg">
-                    <div className="text-sm font-medium text-slate-700">{selectedTool.name}</div>
-                    {selectedTool.description && (
-                      <div className="text-xs text-slate-400 mt-0.5">{selectedTool.description}</div>
-                    )}
+          ) : (
+            <>
+              {/* 三栏主体 */}
+              <div className="flex flex-1 gap-4 min-h-0">
+                {/* 左栏：工具选择器 */}
+                <div className="w-64 shrink-0 bg-white border border-slate-200 rounded-xl p-3 flex flex-col overflow-hidden">
+                  <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                    工具列表
                   </div>
-                  <ParamForm
-                    tool={selectedTool}
-                    initialValues={restoredArgs}
-                    onSubmit={handleSubmit}
-                    loading={loading}
-                  />
-                </>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-32 text-slate-400 text-sm">
-                  <i className="ri-arrow-left-line text-2xl mb-2" />
-                  请先选择工具
+                  <div className="flex-1 min-h-0">
+                    <ToolSelector selectedTool={selectedTool} onSelect={handleToolSelect} serverId={serverId} />
+                  </div>
                 </div>
-              )}
-            </div>
 
-            {/* 右栏：结果展示 */}
-            <div className="flex-1 bg-white border border-slate-200 rounded-xl p-4 flex flex-col overflow-hidden min-w-0">
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3 shrink-0">
-                执行结果
-              </div>
-              <div className="flex-1 min-h-0">
-                <ResultViewer result={result} error={callError} />
-              </div>
-            </div>
-          </div>
+                {/* 中栏：参数表单 */}
+                <div className="w-72 shrink-0 bg-white border border-slate-200 rounded-xl p-4 overflow-y-auto">
+                  <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
+                    参数配置
+                  </div>
+                  {selectedTool ? (
+                    <>
+                      <div className="mb-3 p-2 bg-slate-50 rounded-lg">
+                        <div className="text-sm font-medium text-slate-700">{selectedTool.name}</div>
+                        {selectedTool.description && (
+                          <div className="text-xs text-slate-400 mt-0.5">{selectedTool.description}</div>
+                        )}
+                      </div>
+                      <ParamForm
+                        tool={selectedTool}
+                        initialValues={restoredArgs}
+                        onSubmit={handleSubmit}
+                        loading={loading}
+                      />
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-32 text-slate-400 text-sm">
+                      <i className="ri-arrow-left-line text-2xl mb-2" />
+                      请先选择工具
+                    </div>
+                  )}
+                </div>
 
-          {/* 下方：调用历史 */}
-          <div className="shrink-0 bg-white border border-slate-200 rounded-xl p-4">
-            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
-              本会话调用历史
-            </div>
-            <CallHistory history={history} onRestore={handleRestore} />
-          </div>
-        </>
-      )}
+                {/* 右栏：结果展示 */}
+                <div className="flex-1 bg-white border border-slate-200 rounded-xl p-4 flex flex-col overflow-hidden min-w-0">
+                  <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3 shrink-0">
+                    执行结果
+                  </div>
+                  <div className="flex-1 min-h-0">
+                    <ResultViewer result={result} error={callError} />
+                  </div>
+                </div>
+              </div>
+
+              {/* 下方：调用历史 */}
+              <div className="shrink-0 bg-white border border-slate-200 rounded-xl p-4">
+                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
+                  本会话调用历史
+                </div>
+                <CallHistory history={history} onRestore={handleRestore} />
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

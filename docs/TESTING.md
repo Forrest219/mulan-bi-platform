@@ -65,7 +65,7 @@ await expect(page.locator('text=答案是 42')).toBeVisible();
 
 ### 冒烟测试用例索引
 
-> 共 **36 个** `.spec.ts` 文件，覆盖前端所有已开发页面。`npm run smoke` 运行全部。
+> 共 **37 个** `.spec.ts` 文件，覆盖前端所有已开发页面。`npm run smoke` 运行全部。
 
 #### 回归冒烟单元测试（Vitest）
 | 文件 | 覆盖链路 | 关键断言 |
@@ -73,11 +73,12 @@ await expect(page.locator('text=答案是 42')).toBeVisible();
 | `frontend/tests/unit/regression/ConversationBar.smoke.test.tsx` | 首页侧边栏对话列表 | 点击“新对话”不写库；`message_count=0` 或旧缓存无消息的“新对话”占位不展示；有消息/有标题的真实对话仍展示 |
 | `frontend/tests/unit/regression/HomeLayout.smoke.test.tsx` | 首页快捷键 | `⌘N` / `Ctrl+N` 只导航到 `/`，不创建空对话 |
 
-#### 认证模块（2 个）
+#### 认证模块（3 个）
 | 文件 | 覆盖链路 | 关键断言 |
 |------|---------|---------|
 | `login.spec.ts` | 登录页 + 注册页 | 登录成功跳转、错误密码提示、loading 状态、键盘交互、注册页表单校验 |
 | `logout.spec.ts` | 登出 | 登出后回到登录页 |
+| `account-profile.spec.ts` | 个人中心 `/account/profile` — 表单渲染、姓名修改保存、刷新持久化 | 成功 toast 含"个人信息已保存"进入 DOM；reload 后 `input.value` 等于新姓名（验证后端真实落库） |
 
 #### 首页模块（4 个）
 | 文件 | 覆盖链路 | 关键断言 |

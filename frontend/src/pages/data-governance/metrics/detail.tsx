@@ -280,7 +280,8 @@ export default function MetricDetailPage() {
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-8 py-6">
+      <div className="px-8 py-6">
+        <div className="max-w-6xl mx-auto">
         {/* Error banner */}
         {error && (
           <div className="mb-4 px-4 py-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm flex items-center justify-between">
@@ -325,6 +326,7 @@ export default function MetricDetailPage() {
         {activeTab === 'anomalies' && (
           <AnomaliesTabWithMw items={anomalyItems} total={anomalyTotal} loading={anomalyLoading} />
         )}
+      </div>
       </div>
     </div>
   );

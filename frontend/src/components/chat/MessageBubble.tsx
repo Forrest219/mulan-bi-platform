@@ -163,7 +163,6 @@ export default function MessageBubble({
   isStreaming = false,
   isError = false,
   thinking,
-  traceId,
   tableData,
   chartData,
 }: MessageBubbleProps) {

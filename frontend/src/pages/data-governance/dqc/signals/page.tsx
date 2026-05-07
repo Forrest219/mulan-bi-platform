@@ -93,11 +93,16 @@ export default function DqcSignalsPage() {
             <h1 className="text-lg font-semibold text-slate-800">数据质量监控</h1>
           </div>
           <p className="text-[13px] text-slate-400 ml-7">数据质量状态可视化与告警信号</p>
+        </div>
+      </div>
+      <div className="bg-white border-b border-slate-100 px-8">
+        <div className="max-w-6xl mx-auto">
           <DqcTabs />
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-8 py-7">
+      <div className="px-8 py-7">
+        <div className="max-w-6xl mx-auto">
         {error && (
           <div className="mb-4 px-4 py-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm flex items-center justify-between">
             <span>{error}</span>
@@ -217,6 +222,7 @@ export default function DqcSignalsPage() {
         )}
       </div>
     </div>
+      </div>
   );
 }
 

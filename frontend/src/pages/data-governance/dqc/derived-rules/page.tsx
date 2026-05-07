@@ -4,7 +4,6 @@ import DqcTabs from '../DqcTabs';
 import {
   listDerivedRules, updateDerivedRule,
   type DqcDerivedRule,
-  RULE_PACKAGE_LABELS,
 } from '../../../../api/dqc';
 
 const severityConfig: Record<string, { label: string; bg: string; text: string }> = {
@@ -70,12 +69,17 @@ export default function DqcDerivedRulesPage() {
             <i className="ri-list-check text-slate-500 text-base" />
             <h1 className="text-lg font-semibold text-slate-800">数据质量监控</h1>
           </div>
-          <p className="text-[13px] text-slate-400 ml-7 mb-4">检查规则</p>
+          <p className="text-[13px] text-slate-400 ml-7">检查规则</p>
+        </div>
+      </div>
+      <div className="bg-white border-b border-slate-100 px-8">
+        <div className="max-w-6xl mx-auto">
           <DqcTabs />
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-8 py-6">
+      <div className="px-8 py-6">
+        <div className="max-w-6xl mx-auto">
         {/* 筛选栏 */}
         <div className="flex items-center gap-3 mb-4">
           <select
@@ -215,6 +219,7 @@ export default function DqcDerivedRulesPage() {
             </tbody>
           </table>
         </div>
+      </div>
       </div>
     </div>
   );

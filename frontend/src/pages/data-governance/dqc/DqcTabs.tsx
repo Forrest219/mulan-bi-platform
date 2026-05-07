@@ -13,7 +13,7 @@ export default function DqcTabs() {
   const navigate = useNavigate();
 
   return (
-    <div className="flex gap-1 mt-4">
+    <div className="flex gap-1 py-2">
       {TABS.map(({ key, label }) => {
         const active =
           pathname === key ||

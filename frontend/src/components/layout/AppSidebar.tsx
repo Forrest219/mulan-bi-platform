@@ -68,7 +68,7 @@ function SidebarItem({
         <i className={`${item.icon} text-[15px] shrink-0`} />
       )}
       {!collapsed && (
-        <span className={`text-[13px] truncate flex-1 ${isActive ? 'font-semibold' : 'font-medium'}`}>
+        <span className={`text-sm truncate flex-1 ${isActive ? 'font-medium' : 'font-normal'}`}>
           {item.label}
         </span>
       )}
@@ -176,7 +176,7 @@ function DomainGroup({
         `}
       >
         <i className={`${domain.icon} text-lg`} />
-        <span className="text-[13px] font-semibold flex-1 text-left truncate">
+        <span className="text-sm font-medium flex-1 text-left truncate">
           {domain.label}
         </span>
         <i
@@ -261,7 +261,7 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
         <div className="flex items-center gap-2 shrink-0">
           <img src={platformSettings.logo_url} alt={platformSettings.platform_name} className="h-7 w-auto object-contain" />
           {!collapsed && (
-            <span className="text-sm font-semibold text-slate-700 tracking-wide">
+            <span className={`text-sm font-medium text-slate-700 tracking-wide`}>
               {platformSettings.platform_name}
             </span>
           )}
@@ -295,7 +295,7 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
           {collapsed ? (
             <span className="text-[10px] mt-1 leading-tight text-center px-1">首页</span>
           ) : (
-            <span className={`text-[13px] truncate ${location.pathname === '/' ? 'font-semibold' : 'font-medium'}`}>首页</span>
+            <span className={`text-sm truncate ${location.pathname === '/' ? 'font-medium' : 'font-normal'}`}>首页</span>
           )}
         </Link>
 

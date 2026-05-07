@@ -17,7 +17,7 @@ from services.data_agent.routes.causation import router as causation_router
 from services.data_agent.routes.dau_churn import router as dau_churn_router
 from app.api.governance import api_contract_routes, dqc
 from app.api.semantic_maintenance import datasources as sm_datasources, fields as sm_fields, review as sm_review, sync as sm_sync, publish as sm_publish
-from app.api import audit, governance_runtime, connection_hub, agent_admin
+from app.api import audit, governance_runtime, connection_hub, agent_admin, sql_agent
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +110,7 @@ app.include_router(governance_runtime.router, prefix="/api/governance", tags=["�
 app.include_router(connection_hub.router, prefix="/api/connection-hub", tags=["连接中心"])
 app.include_router(platform_settings.router, prefix="/api/platform-settings", tags=["平台设置"])
 app.include_router(agent_admin.router, prefix="/api/admin/agent", tags=["Agent 监控"])
+app.include_router(sql_agent.router)  # prefix="/api/sql-agent" 已在 router 内部定义
 
 
 @app.get("/")

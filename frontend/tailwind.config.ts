@@ -11,20 +11,6 @@ export default {
   theme: {
     extend: {
       colors: {
-        gray: {
-          50: 'oklch(0.98 0 0)',
-          100: 'oklch(0.94 0 0)',
-          200: 'oklch(0.92 0 0)',
-          300: 'oklch(0.85 0 0)',
-          400: 'oklch(0.77 0 0)',
-          500: 'oklch(0.69 0 0)',
-          600: 'oklch(0.51 0 0)',
-          700: 'oklch(0.42 0 0)',
-          800: 'oklch(0.32 0 0)',
-          850: 'oklch(0.27 0 0)',
-          900: 'oklch(0.2 0 0)',
-          950: 'oklch(0.16 0 0)',
-        },
         'text-primary': '#1A202C',
         'text-secondary': '#374151',
         'text-placeholder': '#6B7280',
@@ -46,26 +32,18 @@ export default {
       },
       fontFamily: {
         sans: [
+          'Inter',
           '-apple-system',
           'BlinkMacSystemFont',
-          'Inter',
-          'Vazirmatn',
           'ui-sans-serif',
           'system-ui',
           'Segoe UI',
-          'Roboto',
-          'Ubuntu',
-          'Cantarell',
           'Noto Sans',
           'sans-serif',
-          'Helvetica Neue',
-          'Arial',
           'Apple Color Emoji',
           'Segoe UI Emoji',
-          'Segoe UI Symbol',
           'Noto Color Emoji',
         ],
-        primary: ['Archivo', 'Vazirmatn', 'sans-serif'],
       },
       typography: {
         DEFAULT: {

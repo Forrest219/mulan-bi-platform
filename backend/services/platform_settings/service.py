@@ -216,3 +216,221 @@ class PlatformSettingsService:
         self.db.commit()
         self.db.refresh(settings)
         return settings
+
+    # -------------------------------------------------------------------------
+    # SMTP 配置读写（存储在 extra_settings JSONB 中）
+    # -------------------------------------------------------------------------
+
+    def get_smtp_config_from_db(self) -> Optional[dict]:
+        """
+        从 DB 读取 SMTP 配置（extra_settings["smtp"]）。
+        返回 dict 或 None。
+        """
+        from sqlalchemy import text
+        import json
+
+        row = self.db.execute(
+            text("SELECT extra_settings FROM platform_settings WHERE id = 1")
+        ).fetchone()
+        if row is None:
+            return None
+        extra = row[0] or {}
+        if isinstance(extra, str):
+            extra = json.loads(extra)
+        return extra.get("smtp") if isinstance(extra, dict) else None
+
+    def put_smtp_config(self, smtp_config: dict) -> dict:
+        """
+        写入 SMTP 配置到 extra_settings["smtp"]。
+
+        smtp_config 格式：
+        {
+            "host": str,
+            "port": int,
+            "user": str,
+            "password": str,   # 明文，存储前用 Fernet 加密
+            "from_addr": str,
+            "use_tls": bool,
+        }
+
+        加密策略：
+        - password 字段用 SMTP_ENCRYPTION_KEY（或 DATASOURCE_ENCRYPTION_KEY）加密后存储
+        - 存储字段名为 password_encrypted
+        - password 明文字段不存储（前端传入明文，服务层加密）
+        """
+        import json
+        from sqlalchemy import text
+        from app.core.crypto import get_smtp_crypto
+
+        row = self.db.execute(
+            text("SELECT extra_settings FROM platform_settings WHERE id = 1")
+        ).fetchone()
+
+        extra = {}
+        if row and row[0]:
+            extra = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+
+        # 加密密码
+        # 支持两种 key 命名：API 层用 smtp_* 前缀，内部存储用无前缀
+        password_plain = smtp_config.get("smtp_password") or smtp_config.get("password") or ""
+        try:
+            crypto = get_smtp_crypto()
+            password_encrypted = crypto.encrypt(password_plain) if password_plain else ""
+        except RuntimeError:
+            # Encryption Key 未配置时，降级存明文（兼容旧 .env 模式）
+            password_encrypted = password_plain
+
+        db_record = {
+            "host": smtp_config.get("smtp_host") or smtp_config.get("host"),
+            "port": smtp_config.get("smtp_port") or smtp_config.get("port", 465),
+            "user": smtp_config.get("smtp_user") or smtp_config.get("user"),
+            "password_encrypted": password_encrypted,
+            "from_addr": smtp_config.get("smtp_from_addr") or smtp_config.get("from_addr"),
+            "use_tls": bool(smtp_config.get("smtp_use_tls") if "smtp_use_tls" in smtp_config else smtp_config.get("use_tls", True)),
+        }
+
+        extra["smtp"] = db_record
+
+        self.db.execute(
+            text("UPDATE platform_settings SET extra_settings = :extra WHERE id = 1"),
+            {"extra": json.dumps(extra)},
+        )
+        self.db.commit()
+        logger.info("SMTP 配置已保存（密码已加密）")
+        return smtp_config
+
+    def test_smtp_settings(self, smtp_config: dict) -> tuple[bool, str]:
+        """
+        测试 SMTP 配置是否可用。
+
+        使用临时 SMTP 连接尝试发送一封测试邮件。
+        返回 (success, detail)。
+        """
+        import json
+        from sqlalchemy import text
+        from app.core.crypto import get_smtp_crypto
+
+        # 加密后的配置构造测试用
+        password_plain = smtp_config.get("password") or ""
+        try:
+            crypto = get_smtp_crypto()
+            password_encrypted = crypto.encrypt(password_plain) if password_plain else ""
+        except RuntimeError:
+            password_encrypted = password_plain
+
+        test_cfg = {
+            "host": smtp_config.get("host"),
+            "port": smtp_config.get("port", 465),
+            "user": smtp_config.get("user"),
+            "password_encrypted": password_encrypted,
+            "from_addr": smtp_config.get("from_addr"),
+            "use_tls": bool(smtp_config.get("use_tls", True)),
+        }
+
+        from services.events.channels.email_channel import EmailChannel
+
+        channel = EmailChannel()
+        result = channel.deliver_password_reset_email(
+            recipient=smtp_config.get("test_recipient", smtp_config.get("from_addr") or ""),
+            display_name="管理员",
+            reset_link=f"{smtp_config.get('host')} (连接测试)",
+            smtp_config=test_cfg,
+        )
+
+        if result.status == "delivered":
+            return True, "邮件发送成功"
+        else:
+            return False, result.detail
+
+    # -------------------------------------------------------------------------
+    # 邮件发送日志查询
+    # -------------------------------------------------------------------------
+
+    def get_email_send_logs(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> dict:
+        """
+        查询最近的邮件发送记录（最多 page_size 条，page 从 1 开始）。
+        用于平台设置页"发送记录"表格。
+        """
+        from sqlalchemy import text
+        from services.events.models import BiEmailSendLog
+
+        try:
+            total = self.db.query(BiEmailSendLog).count()
+            items = (
+                self.db.query(BiEmailSendLog)
+                .order_by(BiEmailSendLog.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+                .all()
+            )
+            return {
+                "items": [log.to_dict() for log in items],
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+            }
+        except Exception as e:
+            # 表不存在或查询出错时返回空列表，避免 500
+            logger.warning("[get_email_send_logs] 查询失败: %s", e)
+            return {"items": [], "total": 0, "page": page, "page_size": page_size}
+
+    def create_email_send_log(
+        self,
+        email_type: str,
+        recipient: str,
+        from_addr: str,
+        subject: str,
+        outbox_id: int = None,
+        scheduled_at=None,
+    ) -> int:
+        """
+        创建一条邮件发送日志记录。
+
+        返回新记录的 id。
+        """
+        from sqlalchemy import text
+        from services.events.models import BiEmailSendLog
+        import json
+
+        log_entry = BiEmailSendLog(
+            email_type=email_type,
+            recipient=recipient,
+            from_addr=from_addr,
+            subject=(subject or "")[:128],
+            status="enqueued",
+            outbox_id=outbox_id,
+            scheduled_at=scheduled_at,
+            attempt_count=0,
+        )
+        self.db.add(log_entry)
+        self.db.commit()
+        self.db.refresh(log_entry)
+        return log_entry.id
+
+    def update_email_send_log(
+        self,
+        log_id: int,
+        status: str,
+        error_detail: str = None,
+        attempt_count: int = None,
+        sent_at=None,
+    ) -> None:
+        """更新邮件发送日志状态"""
+        from sqlalchemy import text
+        from services.events.models import BiEmailSendLog
+
+        log = self.db.query(BiEmailSendLog).filter(BiEmailSendLog.id == log_id).first()
+        if not log:
+            return
+        log.status = status
+        if error_detail:
+            log.error_detail = error_detail[:512]
+        if attempt_count is not None:
+            log.attempt_count = attempt_count
+        if sent_at:
+            log.sent_at = sent_at
+        self.db.commit()

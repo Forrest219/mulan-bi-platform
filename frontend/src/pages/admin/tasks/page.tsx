@@ -343,26 +343,62 @@ export default function AdminTasksPage() {
   }
 
   if (loading) {
-    return <div className="p-8 text-center text-slate-400">加载中...</div>;
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <span className="text-slate-400 text-[13px]">加载中…</span>
+      </div>
+    );
   }
 
   return (
-    <div className="p-6">
+    <div className="min-h-screen bg-slate-50">
+      {/* 页头 */}
+      <div className="bg-white border-b border-slate-200 px-8 py-5">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center gap-2 mb-0.5">
+            <i className="ri-task-line text-slate-500 text-base" />
+            <h1 className="text-lg font-semibold text-slate-800">任务管理</h1>
+          </div>
+          <p className="text-[13px] text-slate-400 ml-7">管理平台定时任务与执行历史</p>
+        </div>
+      </div>
+
+      {/* Tab strip */}
+      <div className="bg-white border-b border-slate-100 px-8">
+        <div className="flex gap-1 py-2">
+          <button
+            onClick={() => setActiveTab('schedules')}
+            className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
+              activeTab === 'schedules'
+                ? 'bg-slate-800 text-white'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+            }`}
+          >
+            定时任务
+          </button>
+          <button
+            onClick={() => setActiveTab('history')}
+            className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
+              activeTab === 'history'
+                ? 'bg-slate-800 text-white'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+            }`}
+          >
+            执行历史
+          </button>
+        </div>
+      </div>
+      <div className="px-8 py-7">
+        <div className="max-w-6xl mx-auto">
       {/* Error banner */}
       {error && (
-        <div className="bg-red-50 text-red-700 border border-red-200 rounded-lg p-3 mb-4 text-sm flex items-center justify-between">
+        <div className="bg-red-50 text-red-700 border border-red-200 rounded-lg p-3 mb-4 text-[12px] flex items-center justify-between">
           <span>{error}</span>
           <button onClick={() => setError('')} className="text-red-400 hover:text-red-600">
             <i className="ri-close-line" />
           </button>
         </div>
       )}
-
-      {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-slate-800">任务管理</h1>
-        <p className="text-sm text-slate-400 mt-0.5">管理平台定时任务与执行历史</p>
-      </div>
 
       {/* KPI Stats row */}
       {stats && (
@@ -430,31 +466,6 @@ export default function AdminTasksPage() {
         </div>
       )}
 
-      {/* Tab switcher */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
-        <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
-          <button
-            onClick={() => setActiveTab('schedules')}
-            className={`px-4 py-1.5 text-xs font-medium rounded-md transition-colors ${
-              activeTab === 'schedules'
-                ? 'bg-white text-slate-700 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            定时任务
-          </button>
-          <button
-            onClick={() => setActiveTab('history')}
-            className={`px-4 py-1.5 text-xs font-medium rounded-md transition-colors ${
-              activeTab === 'history'
-                ? 'bg-white text-slate-700 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            执行历史
-          </button>
-        </div>
-      </div>
 
       {/* Tab 1: Schedules table */}
       {activeTab === 'schedules' && (
@@ -692,6 +703,8 @@ export default function AdminTasksPage() {
           onSaved={handleCronSaved}
         />
       )}
+        </div>
+      </div>
     </div>
   );
 }

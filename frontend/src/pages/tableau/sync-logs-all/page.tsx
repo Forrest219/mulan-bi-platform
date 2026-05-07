@@ -72,12 +72,17 @@ export default function SyncLogsAllPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-6 text-sm text-slate-500">
-          <span className="font-semibold text-slate-700">Tableau 同步日志</span>
-          <span>共 {total} 条</span>
+      <div className="bg-white border-b border-slate-200 px-8 py-5">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex items-center gap-2 mb-0.5">
+            <i className="ri-refresh-line text-slate-500 text-base" />
+            <h1 className="text-lg font-semibold text-slate-800">Tableau 同步日志</h1>
+          </div>
+          <p className="text-[13px] text-slate-400 ml-7">查看所有 Tableau 连接的同步记录，共 {total} 条</p>
         </div>
+      </div>
+      <div className="px-8 py-7">
+        <div className="max-w-7xl mx-auto">
 
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3 mb-4 text-xs">
@@ -254,6 +259,7 @@ export default function SyncLogsAllPage() {
             </button>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

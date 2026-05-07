@@ -27,7 +27,7 @@
 
 | # | 文档 | 说明 | 状态 |
 |---|------|------|------|
-| 04 | [认证与 RBAC](04-auth-rbac-spec.md) | 4 角色权限矩阵 | :white_check_mark: |
+| 04 | [认证与 RBAC](04-auth-rbac-spec.md) | 4 角色权限矩阵 + 个人中心 | :white_check_mark: v1.1 |
 | 05 | [数据源管理](05-datasource-management-spec.md) | CRUD + 加密 + 6 DB 类型 | :white_check_mark: |
 | 06 | [DDL 合规检查](06-ddl-compliance-spec.md) | DDL 检查引擎 + 规则配置 | :construction: v1.1 |
 | 07 | [Tableau MCP V1](07-tableau-mcp-v1-spec.md) | Phase 1: 连接/同步/浏览 | :white_check_mark: |

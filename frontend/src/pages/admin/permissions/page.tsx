@@ -64,15 +64,27 @@ export default function PermissionsPage() {
     return group.permissions && group.permissions.includes(permKey);
   };
 
-  if (loading) return <div className="p-8 text-center text-slate-400">加载中...</div>;
+  if (loading) return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <span className="text-slate-400 text-[13px]">加载中…</span>
+    </div>
+  );
 
   return (
-    <div className="p-6">
-      {/* 页面标题栏 */}
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-slate-800">权限总览</h1>
-        <p className="text-sm text-slate-400 mt-0.5">查看各模块权限的用户和组分布</p>
+    <div className="min-h-screen bg-slate-50">
+      {/* 页头 */}
+      <div className="bg-white border-b border-slate-200 px-8 py-5">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center gap-2 mb-0.5">
+            <i className="ri-shield-keyhole-line text-slate-500 text-base" />
+            <h1 className="text-lg font-semibold text-slate-800">权限配置</h1>
+          </div>
+          <p className="text-[13px] text-slate-400 ml-7">查看各模块权限的用户和组分布</p>
+        </div>
       </div>
+
+      <div className="px-8 py-7">
+        <div className="max-w-6xl mx-auto">
 
       {/* 统计卡片 */}
       <div className="grid grid-cols-3 gap-4 mb-6">
@@ -175,6 +187,8 @@ export default function PermissionsPage() {
             })}
           </tbody>
         </table>
+      </div>
+        </div>
       </div>
     </div>
   );

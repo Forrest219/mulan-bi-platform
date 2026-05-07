@@ -34,6 +34,10 @@ class User(Base):
     mfa_enabled = Column(Boolean, default=False, server_default=sa_text('false'))
     mfa_secret_encrypted = Column(String(256), nullable=True)  # Fernet 加密存储
     mfa_backup_codes_encrypted = Column(String(1024), nullable=True)  # 加密 JSON 数组
+    # 个人信息扩展字段
+    position = Column(String(128), nullable=True)    # 职位
+    department = Column(String(128), nullable=True)  # 部门
+    phone = Column(String(32), nullable=True)        # 手机号
 
     __table_args__ = (
         CheckConstraint(
@@ -78,6 +82,9 @@ class User(Base):
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
             "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
             "last_login": self.last_login.strftime("%Y-%m-%d %H:%M:%S") if self.last_login else None,
+            "position": self.position,
+            "department": self.department,
+            "phone": self.phone,
         }
         return result
 
@@ -312,7 +319,10 @@ class UserDatabase:
 
     def update_user(self, user: User):
         """更新用户"""
-        self.session.commit()
+        from sqlalchemy.orm import object_session
+        s = object_session(user)
+        if s:
+            s.commit()
 
     def update_user_role(self, user_id: int, role: str) -> bool:
         """更新用户角色"""

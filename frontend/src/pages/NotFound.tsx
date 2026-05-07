@@ -35,7 +35,7 @@ export default function NotFound() {
           页面不存在
         </h2>
         <p className="text-lg text-[#607D8B] mb-10">
-          您访问的页面 <span className="font-mono bg-gray-100 px-2 py-1 rounded">{settings.platform_name}</span> 不存在或已被移除
+          您访问的页面 <span className="font-mono bg-slate-100 px-2 py-1 rounded">{settings.platform_name}</span> 不存在或已被移除
         </p>
         <div className="absolute inset-x-0 bottom-[-15%] sm:bottom-[-20%] md:bottom-[-25%] lg:bottom-[-30%] xl:bottom-[-35%]
                         text-[#34495E] opacity-20 font-extrabold

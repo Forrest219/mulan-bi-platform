@@ -59,7 +59,7 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
       <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-sm">
 
         {/* Logo */}
@@ -73,8 +73,8 @@ export default function RegisterPage() {
 
         {/* Title and Subtitle */}
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-gray-800 mb-2">注册账号</h1>
-          <p className="text-sm text-gray-500">加入 {settings.platform_name}</p>
+          <h1 className="text-2xl font-bold text-slate-800 mb-2">注册账号</h1>
+          <p className="text-sm text-slate-500">加入 {settings.platform_name}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
@@ -86,7 +86,7 @@ export default function RegisterPage() {
 
           {/* Username Field */}
           <div>
-            <label htmlFor="username" className="block text-sm font-medium text-gray-800 mb-2">
+            <label htmlFor="username" className="block text-sm font-medium text-slate-800 mb-2">
               用户名
             </label>
             <input
@@ -94,8 +94,8 @@ export default function RegisterPage() {
               id="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="block w-full px-4 py-3 border border-gray-300 rounded-md shadow-sm
-                         placeholder-gray-600 text-gray-800
+              className="block w-full px-4 py-3 border border-slate-300 rounded-md shadow-sm
+                         placeholder-slate-600 text-slate-800
                          focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-600
                          sm:text-sm"
               placeholder="请输入用户名"
@@ -105,7 +105,7 @@ export default function RegisterPage() {
 
           {/* Password Field with Show/Hide Toggle */}
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-800 mb-2">
+            <label htmlFor="password" className="block text-sm font-medium text-slate-800 mb-2">
               密码
             </label>
             <div className="relative">
@@ -114,8 +114,8 @@ export default function RegisterPage() {
                 id="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="block w-full pr-10 px-4 py-3 border border-gray-300 rounded-md shadow-sm
-                           placeholder-gray-600 text-gray-800
+                className="block w-full pr-10 px-4 py-3 border border-slate-300 rounded-md shadow-sm
+                           placeholder-slate-600 text-slate-800
                            focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-600
                            sm:text-sm"
                 placeholder="至少6位"
@@ -124,7 +124,7 @@ export default function RegisterPage() {
               <button
                 type="button"
                 aria-label="Toggle password visibility"
-                className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-500 hover:text-gray-700
+                className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-700
                            focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-600 rounded-r-md"
                 onClick={togglePasswordVisibility}
               >
@@ -145,7 +145,7 @@ export default function RegisterPage() {
 
           {/* Confirm Password Field with Show/Hide Toggle */}
           <div>
-            <label htmlFor="confirm-password" className="block text-sm font-medium text-gray-800 mb-2">
+            <label htmlFor="confirm-password" className="block text-sm font-medium text-slate-800 mb-2">
               确认密码
             </label>
             <div className="relative">
@@ -154,8 +154,8 @@ export default function RegisterPage() {
                 id="confirm-password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="block w-full pr-10 px-4 py-3 border border-gray-300 rounded-md shadow-sm
-                           placeholder-gray-600 text-gray-800
+                className="block w-full pr-10 px-4 py-3 border border-slate-300 rounded-md shadow-sm
+                           placeholder-slate-600 text-slate-800
                            focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-600
                            sm:text-sm"
                 placeholder="再次输入密码"
@@ -164,7 +164,7 @@ export default function RegisterPage() {
               <button
                 type="button"
                 aria-label="Toggle password visibility"
-                className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-500 hover:text-gray-700
+                className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-700
                            focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-600 rounded-r-md"
                 onClick={toggleConfirmPasswordVisibility}
               >
@@ -188,7 +188,7 @@ export default function RegisterPage() {
             type="submit"
             disabled={loading}
             className={`w-full flex justify-center py-3 px-6 border border-transparent rounded-md shadow-sm
-                       text-base font-medium text-white bg-gray-900 hover:bg-gray-800
+                       text-base font-medium text-white bg-slate-900 hover:bg-slate-800
                        focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600
                        ${loading ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
           >
@@ -198,7 +198,7 @@ export default function RegisterPage() {
 
         {/* Login Link */}
         <div className="mt-6 text-center">
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-slate-600">
             已有账号？
             <Link
               to="/login"

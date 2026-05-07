@@ -452,6 +452,8 @@ class BiNotificationOutbox(Base):
     signature_payload_hash = Column(String(64), nullable=True)
     # 原始事件类型（用于路由匹配）
     event_type = Column(String(64), nullable=True)
+    # 出站参数快照（如 reset_link、display_name），供 Celery task 重建发送上下文
+    payload_json = Column(JSONB, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
     updated_at = Column(DateTime, nullable=False, server_default=sa_func.now())
 
@@ -509,4 +511,68 @@ class BiNotificationDeadLetter(Base):
             "attempts": self.attempts,
             "first_failed_at": self.first_failed_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.first_failed_at else None,
             "last_failed_at": self.last_failed_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.last_failed_at else None,
+        }
+
+
+# =============================================================================
+# 邮件发送日志（bi_email_send_logs）
+# =============================================================================
+
+class BiEmailSendLog(Base):
+    """
+    邮件发送日志表（bi_email_send_logs）。
+
+    记录每次邮件发送的完整生命周期：
+    enqueued → sent（中间可能有多次 retry_failed）
+
+    用于：
+    - 平台设置页"发送记录"展示
+    - 审计追踪
+    - 调试邮件发送问题
+    """
+    __tablename__ = "bi_email_send_logs"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    # 关联的 outbox 记录 ID（可为 null，如直接发送的测试邮件）
+    outbox_id = Column(BigInteger, nullable=True, index=True)
+    # 邮件类型：password_reset / test_email
+    email_type = Column(String(32), nullable=False, index=True)
+    # 收件人
+    recipient = Column(String(256), nullable=False, index=True)
+    # 发件人（用于展示，不存密文）
+    from_addr = Column(String(256), nullable=True)
+    # 邮件主题（脱敏：仅截取前 128 字符存储）
+    subject = Column(String(128), nullable=True)
+    # 发送状态：enqueued / sent / permanent_failed
+    status = Column(String(32), nullable=False, server_default=sa_text("'enqueued'"))
+    # 最终错误信息（截断至 512 字符）
+    error_detail = Column(Text, nullable=True)
+    # 尝试次数
+    attempt_count = Column(Integer, nullable=False, server_default=sa_text("0"))
+    # 调度时间（outbox.next_attempt_at）
+    scheduled_at = Column(DateTime, nullable=True)
+    # 实际发送时间
+    sent_at = Column(DateTime, nullable=True)
+    # 记录创建时间
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
+
+    __table_args__ = (
+        Index("ix_email_log_status_created", "status", "created_at"),
+        Index("ix_email_log_recipient_created", "recipient", "created_at"),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "outbox_id": self.outbox_id,
+            "email_type": self.email_type,
+            "recipient": self.recipient,
+            "from_addr": self.from_addr,
+            "subject": self.subject,
+            "status": self.status,
+            "error_detail": self.error_detail,
+            "attempt_count": self.attempt_count,
+            "scheduled_at": self.scheduled_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.scheduled_at else None,
+            "sent_at": self.sent_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.sent_at else None,
+            "created_at": self.created_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.created_at else None,
         }

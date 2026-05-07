@@ -165,15 +165,9 @@ export const menuConfig: MenuDomain[] = [
     items: [
       {
         key: 'data-agent',
-        label: 'Data Agent 分析工作台',
+        label: 'Data Agent',
         icon: 'ri-bar-chart-2-line',
         path: '/agents/data',
-      },
-      {
-        key: 'data-agent-history',
-        label: 'Data Agent 执行历史',
-        icon: 'ri-history-line',
-        path: '/agents/data/history',
       },
       {
         key: 'sql-agent',
@@ -240,13 +234,6 @@ export const menuConfig: MenuDomain[] = [
         label: '任务管理',
         icon: 'ri-task-line',
         path: '/system/tasks',
-        permission: { adminOnly: true },
-      },
-      {
-        key: 'query-alerts',
-        label: '查数日志',
-        icon: 'ri-file-list-3-line',
-        path: '/system/query-alerts',
         permission: { adminOnly: true },
       },
     ],

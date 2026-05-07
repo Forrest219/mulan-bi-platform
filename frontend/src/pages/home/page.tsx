@@ -83,7 +83,7 @@ function HomePageInner() {
   const { user } = useAuth();
   const { settings } = usePlatformSettings();
   const { appendMessage, addConversation } = useConversations();
-  const { connectionId, selectedConvId } = useHomeUrlState();
+  const { selectedConvId } = useHomeUrlState();
 
   // Gap-05: streaming state 完全独立，不与 AskBar 的 input/loading state 共享
   const { messages: streamingMessages, isStreaming, sendMessage, abort, clearMessages } = useStreamingChat();
@@ -265,7 +265,7 @@ function HomePageInner() {
     appendMessage(convId, { role: 'assistant', content: answerText });
   };
 
-  const handleError = (err: { code: string; message: string }) => {
+  const _handleError = (err: { code: string; message: string }) => {
     setError(err);
     setResult(null);
     setHomeState('HOME_ERROR');

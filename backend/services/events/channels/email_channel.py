@@ -2,9 +2,10 @@
 import logging
 import os
 import smtplib
+import uuid
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from .base import BaseChannel, ChannelDeliveryResult
 from services.common.settings import get_smtp_config
@@ -164,3 +165,107 @@ class EmailChannel(BaseChannel):
                 server.starttls()
             server.login(self._user, self._password)
             return server
+
+    # ──────────────────────────────────────────────────────────────
+    # 直接发送方法（不依赖 Event/Notification 抽象）
+    # ──────────────────────────────────────────────────────────────
+
+    def deliver_password_reset_email(
+        self,
+        recipient: str,
+        display_name: str,
+        reset_link: str,
+        *,
+        smtp_config: Optional[Dict[str, Any]] = None,
+    ) -> ChannelDeliveryResult:
+        """
+        直接发送密码重置邮件。
+
+        Args:
+            recipient: 收件人邮箱
+            display_name: 收件人显示名
+            reset_link: 密码重置链接
+            smtp_config: 可选，覆盖默认 smtp 配置（用于从 DB 读取的配置）
+        """
+        # 允许外部传入配置覆盖
+        if smtp_config:
+            _host = smtp_config.get("smtp_host") or smtp_config.get("host")
+            _port = smtp_config.get("smtp_port") or smtp_config.get("port", 465)
+            _user = smtp_config.get("smtp_user") or smtp_config.get("user")
+            _password = smtp_config.get("smtp_password") or smtp_config.get("password")
+            _use_tls = smtp_config.get("smtp_use_tls", True)
+            _from_addr = smtp_config.get("smtp_from_addr") or smtp_config.get("from_addr")
+        else:
+            _host = self._host
+            _port = self._port
+            _user = self._user
+            _password = self._password
+            _use_tls = self._use_tls
+            _from_addr = self._from_addr
+
+        _configured = bool(_host and _user and _password and _from_addr)
+        if not _configured:
+            return ChannelDeliveryResult(
+                status="permanent_failed",
+                detail="SMTP 配置缺失",
+                error_code="EVT_010",
+            )
+
+        trace_id = str(uuid.uuid4())[:8]
+
+        # 构造 notification 对象（用于模板渲染）
+        class _FakeNotification:
+            title = "【木兰 BI 平台】密码重置请求"
+            content = f"您好，{display_name}，请在 15 分钟内点击以下链接重置密码：{reset_link}"
+
+        try:
+            payload = {"display_name": display_name, "reset_link": reset_link}
+            html_body = _render_template(
+                "auth_password_reset",
+                _FakeNotification(),
+                None,
+                payload,
+                "",
+            )
+
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = _FakeNotification.title
+            msg["From"] = _from_addr
+            msg["To"] = recipient
+            msg["X-Mulan-Trace-Id"] = trace_id
+            text_part = MIMEText(html_body, "html", "utf-8")
+            msg.attach(text_part)
+
+            # 发送
+            if _port == 465:
+                with smtplib.SMTP_SSL(_host, _port, timeout=10) as server:
+                    server.sendmail(_from_addr, [recipient], msg.as_bytes())
+            else:
+                with smtplib.SMTP(_host, _port, timeout=10) as server:
+                    if _use_tls:
+                        server.starttls()
+                    server.login(_user, _password)
+                    server.sendmail(_from_addr, [recipient], msg.as_bytes())
+
+            logger.info("[%s] 密码重置邮件已发送: to=%s", trace_id, recipient)
+            return ChannelDeliveryResult(
+                status="delivered",
+                detail="SMTP 250 OK",
+            )
+
+        except smtplib.SMTPAuthenticationError as e:
+            logger.warning("[%s] SMTP 认证失败: %s", trace_id, e)
+            return ChannelDeliveryResult(status="permanent_failed", detail=f"SMTP 认证失败: {e}", error_code="EVT_010")
+        except smtplib.SMTPRecipientsRefused as e:
+            logger.warning("[%s] 收件人被拒: %s", trace_id, e)
+            return ChannelDeliveryResult(status="permanent_failed", detail=f"收件人被拒: {e}", error_code="EVT_014")
+        except smtplib.SMTPServerDisconnected as e:
+            logger.warning("[%s] SMTP 服务器断开: %s", trace_id, e)
+            return ChannelDeliveryResult(status="retryable_failed", detail=f"SMTP 服务器断开: {e}", error_code="EVT_010")
+        except smtplib.SMTPException as e:
+            if e.smtp_code and 500 <= e.smtp_code < 600:
+                return ChannelDeliveryResult(status="permanent_failed", detail=f"SMTP 5xx 错误: {e}", error_code="EVT_010")
+            return ChannelDeliveryResult(status="retryable_failed", detail=f"SMTP 错误: {e}", error_code="EVT_010")
+        except Exception as e:
+            logger.error("[%s] 邮件发送异常: %s", trace_id, e)
+            return ChannelDeliveryResult(status="permanent_failed", detail=f"邮件发送异常: {e}", error_code="EVT_015")

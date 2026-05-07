@@ -50,19 +50,19 @@ export default function SyncLogsPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <div className="max-w-6xl mx-auto px-6 py-8">
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-6 text-sm text-slate-500">
-          <Link
-            to="/assets/tableau-connections"
-            className="flex items-center gap-1 hover:text-blue-600 shrink-0"
-          >
-            <i className="ri-arrow-left-line" />
-            Tableau 连接
-          </Link>
-          <span className="text-slate-300">|</span>
-          <span><span className="font-semibold text-slate-700">{connName ?? `连接 #${connId}`}</span>{"  "}的同步日志{"  "}共 {total} 条</span>
+      <div className="bg-white border-b border-slate-200 px-8 py-5">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center gap-2 mb-0.5">
+            <i className="ri-refresh-line text-slate-500 text-base" />
+            <h1 className="text-lg font-semibold text-slate-800">{connName ?? `连接 #${connId}`} · 同步日志</h1>
+          </div>
+          <p className="text-[13px] text-slate-400 ml-7">
+            <Link to="/assets/tableau-connections" className="hover:text-blue-600">← Tableau 连接</Link>
+            {"　·　"}共 {total} 条记录
+          </p>
         </div>
+      </div>
+      <div className="max-w-6xl mx-auto px-8 py-7">
 
         {/* Table */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">

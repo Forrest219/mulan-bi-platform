@@ -131,7 +131,7 @@ export default function SharedPermissionsPage() {
       } else {
         setMessage({ type: 'error', text: data.detail || '撤销失败' });
       }
-    } catch (e) {
+    } catch {
       setMessage({ type: 'error', text: '网络错误' });
     } finally {
       setRevoking(false);
@@ -149,12 +149,20 @@ export default function SharedPermissionsPage() {
   };
 
   return (
-    <div className="p-6">
-      {/* 页面标题栏 */}
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-slate-800">共享权限巡检</h1>
-        <p className="text-sm text-slate-400 mt-0.5">查看和管理资源共享权限（语义表 / 数据源）</p>
+    <div className="min-h-screen bg-slate-50">
+      {/* 页头 */}
+      <div className="bg-white border-b border-slate-200 px-8 py-5">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center gap-2 mb-0.5">
+            <i className="ri-share-line text-slate-500 text-base" />
+            <h1 className="text-lg font-semibold text-slate-800">共享权限</h1>
+          </div>
+          <p className="text-[13px] text-slate-400 ml-7">查看和管理资源共享权限（语义表 / 数据源）</p>
+        </div>
       </div>
+
+      <div className="px-8 py-7">
+        <div className="max-w-6xl mx-auto">
 
       {/* 消息提示 */}
       {message && (
@@ -346,6 +354,8 @@ export default function SharedPermissionsPage() {
           <span>标黄的行表示权限已过期，建议及时清理或更新</span>
         </div>
       )}
+        </div>
+      </div>
     </div>
   );
 }

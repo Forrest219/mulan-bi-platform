@@ -30,7 +30,7 @@ const OBJECT_TYPE_OPTIONS = [
   { value: 'field', label: '字段' },
 ];
 
-export function PublishLogFilter({ onFilterChange, isAdmin }: PublishLogFilterProps) {
+export function PublishLogFilter({ onFilterChange, isAdmin: _isAdmin }: PublishLogFilterProps) {
   const [connections, setConnections] = useState<TableauConnection[]>([]);
   const [filters, setFilters] = useState<PublishLogFilters>({
     connection_id: undefined,

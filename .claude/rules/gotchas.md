@@ -94,3 +94,23 @@ is_active = Column(Boolean, server_default=sa.true(), nullable=False)
 - `src/api/*.ts` 中的 `throw new Error()` 消息用中文（如 `'获取连接列表失败'`）
 - 冒烟测试中的文案断言也用中文匹配，防止回归
 - 唯一允许英文的场景：技术标识符（如 "Tableau"、"StarRocks"）、代码级日志（`console.log`）
+
+---
+
+## 陷阱 7：uvicorn `--reload` 进入 stale 状态导致 SYS_001
+
+**现象**：后端代码修改后，curl 请求返回 `SYS_001 服务器内部错误`，但 FastAPI `TestClient` 直接调用同一端点返回 200；服务进程看起来正常运行。
+
+**根因**：uvicorn `--reload` 模式依赖文件监听器触发重载。在某些情况下（如外部工具写入、大量文件变更、进程状态异常），监听器会静默失效——进程继续响应请求，但实际执行的是旧版代码，新代码的任何错误都可能以 SYS_001 形式出现。
+
+**正确做法**：遇到"代码看起来没问题但 HTTP 请求报 500"时，**第一步先强制重载**，再排查代码：
+
+```bash
+# 方法一：touch 任意被监听的文件触发重载
+touch backend/app/main.py
+
+# 方法二：重启 uvicorn 进程（彻底干净）
+kill $(lsof -ti:8000) && cd backend && uvicorn app.main:app --reload --port 8000 --env-file .env
+```
+
+**诊断顺序**：SYS_001 排查顺序应为：① 强制重载 → ② 查 uvicorn 终端 stderr → ③ 加临时 debug 日志 → ④ 逐层组件隔离测试。不要跳过步骤 ①②直接进入代码排查。

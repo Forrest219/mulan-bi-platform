@@ -34,32 +34,36 @@ export default function HealthCenterPage() {
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="bg-white border-b border-slate-200 px-8 py-5">
-        <div className="max-w-6xl mx-auto">
-          <div className="flex items-center gap-2 mb-1">
-            <i className="ri-heart-pulse-line text-slate-500 text-base" />
-            <h1 className="text-lg font-semibold text-slate-800">数仓巡检</h1>
-          </div>
-          <p className="text-[13px] text-slate-400 ml-7 mb-4">
-            数仓体检 · DDL 合规规则
-          </p>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
-              {TABS.map((t) => (
-                <button
-                  key={t.key}
-                  onClick={() => handleTabChange(t.key)}
-                  className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                    activeTab === t.key
-                      ? 'bg-white text-slate-800 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  <i className={t.icon} />
-                  {t.label}
-                </button>
-              ))}
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <i className="ri-heart-pulse-line text-slate-500 text-base" />
+              <h1 className="text-lg font-semibold text-slate-800">数仓巡检</h1>
             </div>
-            <div ref={headerControlsRef} className="flex items-center gap-2" />
+            <p className="text-[13px] text-slate-400 ml-7">
+              数仓体检 · DDL 合规规则
+            </p>
+          </div>
+          <div ref={headerControlsRef} className="flex items-center gap-2" />
+        </div>
+      </div>
+      <div className="bg-white border-b border-slate-100 px-8">
+        <div className="max-w-6xl mx-auto py-2">
+          <div className="flex gap-1">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => handleTabChange(t.key)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
+                  activeTab === t.key
+                    ? 'bg-slate-800 text-white'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                }`}
+              >
+                <i className={t.icon} />
+                {t.label}
+              </button>
+            ))}
           </div>
         </div>
       </div>

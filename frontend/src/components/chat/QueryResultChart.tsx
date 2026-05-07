@@ -73,8 +73,6 @@ export default function QueryResultChart({ data }: Props) {
     return <p className="text-sm text-slate-400 mt-3 italic">暂无图表数据</p>;
   }
 
-  const margin = { top: 8, right: 20, left: 0, bottom: 4 };
-
   // ── Pie ─────────────────────────────────────────────────────────────────────
   if (chart_type === 'pie') {
     const pieRows = chartRows.map((d) => ({

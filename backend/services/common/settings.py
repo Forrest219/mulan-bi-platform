@@ -147,7 +147,31 @@ def get_admin_password() -> Optional[str]:
 # =============================================================================
 
 def get_smtp_config() -> dict:
-    """获取 SMTP 配置字典（用于邮件出站）"""
+    """
+    获取 SMTP 配置字典（用于邮件出站）。
+
+    读取顺序：
+    1. DB: platform_settings.extra_settings["smtp"]（已加密存储）
+    2. .env: SMTP_* 环境变量
+
+    返回 dict 格式（统一 key 名）：
+        host, port, user, password(解密后), from_addr, use_tls
+    """
+    # 1. 尝试从 DB 读取（platform_settings.extra_settings["smtp"]）
+    db_cfg = _get_smtp_config_from_db()
+    if db_cfg:
+        # DB 中 password 已加密存储，需要解密
+        password_plaintext = _decrypt_smtp_password(db_cfg.get("password_encrypted"))
+        return {
+            "host": db_cfg.get("host"),
+            "port": int(db_cfg.get("port", 465)),
+            "user": db_cfg.get("user"),
+            "password": password_plaintext,
+            "from_addr": db_cfg.get("from_addr"),
+            "use_tls": bool(db_cfg.get("use_tls", True)),
+        }
+
+    # 2. Fallback 到 .env
     return {
         "host": os.environ.get("SMTP_HOST"),
         "port": int(os.environ.get("SMTP_PORT", "465")),
@@ -156,6 +180,39 @@ def get_smtp_config() -> dict:
         "use_tls": os.environ.get("SMTP_USE_TLS", "true").lower() == "true",
         "from_addr": os.environ.get("SMTP_FROM_ADDR"),
     }
+
+
+def _get_smtp_config_from_db() -> Optional[dict]:
+    """
+    从 platform_settings.extra_settings["smtp"] 读取 SMTP 配置。
+    若 DB 中无配置或 Encryption Key 未设置，返回 None。
+    """
+    try:
+        from app.core.database import SessionLocal
+        from services.platform_settings.service import PlatformSettingsService
+        db = SessionLocal()
+        try:
+            svc = PlatformSettingsService(db)
+            return svc.get_smtp_config_from_db()
+        finally:
+            db.close()
+    except Exception:
+        # Encryption Key 未设置或 DB 连接失败，降级到 .env
+        return None
+
+
+def _decrypt_smtp_password(password_encrypted: Optional[str]) -> Optional[str]:
+    """从 DB 读取加密密码后解密；无加密内容时返回原文（兼容旧 .env 降级）"""
+    if not password_encrypted:
+        return None
+    # 判断是否为密文（非 base64url 标准 Fernet 格式则为明文旧数据）
+    try:
+        from app.core.crypto import get_smtp_crypto
+        crypto = get_smtp_crypto()
+        return crypto.decrypt(password_encrypted)
+    except Exception:
+        # 旧版明文或解密失败，返回原文
+        return password_encrypted
 
 
 def get_fernet_master_key() -> Optional[str]:
