@@ -213,7 +213,7 @@ function HomePageInner() {
           <img src={settings.logo_url} alt={`${settings.platform_name} Logo`} className="w-14 h-14 object-contain mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-slate-800 mb-2">{settings.platform_name}</h1>
           <p className="text-sm text-slate-400 mb-8">{settings.platform_subtitle}</p>
-          <p className="text-slate-500 mb-6">请先登录以访问平台功能</p>
+          <p className="text-sm text-slate-500 mb-6">请先登录以访问平台功能</p>
           <Link
             to="/login"
             className="inline-block w-full py-2.5 bg-blue-700 text-white rounded-lg text-sm font-semibold hover:bg-blue-800 transition-colors"

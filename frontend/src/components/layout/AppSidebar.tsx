@@ -172,7 +172,7 @@ function DomainGroup({
           w-full flex items-center gap-2 px-3 py-2 rounded-lg mb-1 transition-colors
           ${isAnyActive
             ? 'bg-cyan-50/50 text-cyan-600'
-            : 'bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-600'}
+            : 'text-slate-500 hover:bg-slate-50 hover:text-slate-600'}
         `}
       >
         <i className={`${domain.icon} text-lg`} />
@@ -261,7 +261,7 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
         <div className="flex items-center gap-2 shrink-0">
           <img src={platformSettings.logo_url} alt={platformSettings.platform_name} className="h-7 w-auto object-contain" />
           {!collapsed && (
-            <span className="text-[13px] font-semibold text-slate-600 tracking-wide">
+            <span className="text-sm font-semibold text-slate-700 tracking-wide">
               {platformSettings.platform_name}
             </span>
           )}
@@ -285,8 +285,8 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
           w-full flex rounded-lg transition-all duration-150
             ${collapsed ? 'flex-col items-center justify-center py-3 gap-0 mb-1' : 'items-center gap-2.5 px-3 py-2.5 mb-3'}
             ${location.pathname === '/'
-              ? 'bg-cyan-50 text-cyan-600'
-              : 'text-slate-400 hover:bg-slate-50 hover:text-slate-500'
+              ? 'bg-cyan-50/50 text-cyan-600'
+              : 'text-slate-500 hover:bg-slate-50 hover:text-slate-600'
             }
           `}
           title={collapsed ? '首页' : undefined}
