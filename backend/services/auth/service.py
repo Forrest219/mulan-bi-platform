@@ -268,8 +268,9 @@ class AuthService:
         return self._db.delete_user(user_id)
 
     def update_user_info(self, user_id: int, display_name: str = None, email: str = None,
-                         position: str = None, department: str = None, phone: str = None) -> Optional[Dict[str, Any]]:
-        """更新用户基础信息（display_name / email / position / department / phone）"""
+                         position: str = None, department: str = None, phone: str = None,
+                         avatar_url: str = None) -> Optional[Dict[str, Any]]:
+        """更新用户基础信息（display_name / email / position / department / phone / avatar_url）"""
         user = self._db.get_user(user_id)
         if not user:
             return None
@@ -283,6 +284,8 @@ class AuthService:
             user.department = department
         if phone is not None:
             user.phone = phone
+        if avatar_url is not None:
+            user.avatar_url = avatar_url
         self._db.update_user(user)
         return user.to_dict()
 

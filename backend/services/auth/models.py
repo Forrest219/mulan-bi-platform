@@ -38,6 +38,7 @@ class User(Base):
     position = Column(String(128), nullable=True)    # 职位
     department = Column(String(128), nullable=True)  # 部门
     phone = Column(String(32), nullable=True)        # 手机号
+    avatar_url = Column(Text, nullable=True)         # 头像（base64 data URI）
 
     __table_args__ = (
         CheckConstraint(
@@ -85,6 +86,7 @@ class User(Base):
             "position": self.position,
             "department": self.department,
             "phone": self.phone,
+            "avatar_url": self.avatar_url,
         }
         return result
 

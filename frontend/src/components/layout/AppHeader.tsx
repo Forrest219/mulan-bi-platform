@@ -264,11 +264,19 @@ export default function AppHeader() {
           onClick={() => { setMenuOpen(o => !o); setNotifOpen(false); }}
           className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 transition-colors"
         >
-          <div className={`w-7 h-7 rounded-full bg-gradient-to-br ${avatarGradient} flex items-center justify-center shrink-0`}>
-            <span className="text-white text-xs font-bold">
-              {user?.display_name?.charAt(0) ?? 'A'}
-            </span>
-          </div>
+          {user?.avatar_url ? (
+            <img
+              src={user.avatar_url}
+              alt="头像"
+              className="w-7 h-7 rounded-full object-cover shrink-0"
+            />
+          ) : (
+            <div className={`w-7 h-7 rounded-full bg-gradient-to-br ${avatarGradient} flex items-center justify-center shrink-0`}>
+              <span className="text-white text-xs font-bold">
+                {user?.display_name?.charAt(0) ?? 'A'}
+              </span>
+            </div>
+          )}
           <span className="hidden sm:block text-[12px] font-medium text-slate-600 leading-none">
             {user?.display_name ?? '用户'}
           </span>

@@ -500,6 +500,7 @@ class UpdateMeRequest(BaseModel):
     position: Optional[str] = None
     department: Optional[str] = None
     phone: Optional[str] = None
+    avatar_url: Optional[str] = None
 
 
 @router.patch("/me")
@@ -513,6 +514,7 @@ async def update_me(request: Request, body: UpdateMeRequest):
         position=body.position,
         department=body.department,
         phone=body.phone,
+        avatar_url=body.avatar_url,
     )
     if not updated:
         raise HTTPException(status_code=404, detail="用户不存在")

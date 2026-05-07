@@ -44,6 +44,7 @@ interface User {
   position?: string | null;
   department?: string | null;
   phone?: string | null;
+  avatar_url?: string | null;
 }
 
 interface AuthContextType {
