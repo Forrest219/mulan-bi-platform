@@ -49,6 +49,7 @@ class AdminResetPasswordRequest(BaseModel):
     """管理员重置用户密码请求"""
 
     new_password: str
+    totp_code: Optional[str] = None
 
 
 @router.get("/", dependencies=[Depends(get_current_admin)])
@@ -214,9 +215,23 @@ async def delete_user(user_id: int, http_request: Request):
     return {"message": "用户已删除"}
 
 
-@router.post("/{user_id}/reset-password", dependencies=[Depends(get_current_admin)])
-async def admin_reset_password(user_id: int, request: AdminResetPasswordRequest, http_request: Request):
+@router.post("/{user_id}/reset-password")
+async def admin_reset_password(user_id: int, request: AdminResetPasswordRequest, http_request: Request, current_user: dict = Depends(get_current_admin)):
     """管理员重置用户密码"""
+    target_user = auth_service.get_user(user_id)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    # 安全门控：Admin 重置另一 Admin 的密码需要 TOTP 二次验证
+    if target_user["role"] == "admin" and target_user["id"] != current_user["id"]:
+        if not request.totp_code:
+            raise HTTPException(status_code=403, detail="重置管理员密码需要提供您的 TOTP 验证码")
+        current_user_detail = auth_service.get_user(current_user["id"])
+        if not current_user_detail or not current_user_detail.get("mfa_enabled"):
+            raise HTTPException(status_code=403, detail="重置管理员密码需要先为您的账户启用 MFA（两步验证）")
+        if not auth_service.verify_mfa_code(current_user["id"], request.totp_code):
+            raise HTTPException(status_code=403, detail="TOTP 验证码不正确，请重试")
+
     success, message = auth_service.admin_reset_password(user_id, request.new_password)
     if not success:
         raise HTTPException(status_code=400, detail=message)

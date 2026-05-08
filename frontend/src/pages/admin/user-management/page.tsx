@@ -72,7 +72,7 @@ export default function UserManagementPage() {
     role: 'user'
   });
   const [editUserData, setEditUserData] = useState({ display_name: '', email: '' });
-  const [resetPwdData, setResetPwdData] = useState({ new_password: '', confirm_password: '' });
+  const [resetPwdData, setResetPwdData] = useState({ new_password: '', confirm_password: '', totp_code: '' });
   const [resetPwdError, setResetPwdError] = useState('');
   const [formError, setFormError] = useState('');
   const [message, setMessage] = useState('');
@@ -240,7 +240,7 @@ export default function UserManagementPage() {
   // 打开重置密码弹窗
   const openResetPwdModal = (user: User) => {
     setEditingUser(user);
-    setResetPwdData({ new_password: '', confirm_password: '' });
+    setResetPwdData({ new_password: '', confirm_password: '', totp_code: '' });
     setResetPwdError('');
     setShowResetPwdModal(true);
   };
@@ -251,11 +251,16 @@ export default function UserManagementPage() {
     if (!resetPwdData.new_password) { setResetPwdError('请输入新密码'); return; }
     if (resetPwdData.new_password.length < 8) { setResetPwdError('密码长度至少为8位'); return; }
     if (resetPwdData.new_password !== resetPwdData.confirm_password) { setResetPwdError('两次输入的密码不一致'); return; }
+    if (editingUser.role === 'admin' && !resetPwdData.totp_code) { setResetPwdError('重置管理员密码需要输入您的 TOTP 验证码'); return; }
+    const body: Record<string, string> = { new_password: resetPwdData.new_password };
+    if (editingUser.role === 'admin' && resetPwdData.totp_code) {
+      body.totp_code = resetPwdData.totp_code;
+    }
     const response = await fetch(`${API_BASE}/api/users/${editingUser.id}/reset-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ new_password: resetPwdData.new_password }),
+      body: JSON.stringify(body),
     });
     if (response.ok) {
       setShowResetPwdModal(false);
@@ -574,6 +579,23 @@ export default function UserManagementPage() {
                   onChange={(e) => setResetPwdData({ ...resetPwdData, confirm_password: e.target.value })}
                   className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500" placeholder="再次输入新密码" />
               </div>
+              {editingUser.role === 'admin' && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-1.5">
+                    您的 TOTP 验证码 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={resetPwdData.totp_code}
+                    onChange={(e) => setResetPwdData({ ...resetPwdData, totp_code: e.target.value.replace(/\D/g, '') })}
+                    className="w-full px-4 py-2.5 border border-amber-300 rounded-lg text-sm focus:outline-none focus:border-amber-500 tracking-widest text-center font-mono"
+                    placeholder="6 位动态验证码"
+                  />
+                  <p className="text-xs text-amber-600 mt-1">重置管理员密码需要验证您自己的身份认证器动态码</p>
+                </div>
+              )}
               <p className="text-xs text-slate-400">重置后该用户所有设备将被强制登出，需使用新密码重新登录。</p>
             </div>
             <div className="flex justify-end gap-3 mt-6">

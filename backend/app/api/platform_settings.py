@@ -195,9 +195,12 @@ async def read_smtp_config(
     current_user=Depends(get_current_user),
 ):
     """
-    获取当前 SMTP 配置（密码字段隐藏）。
+    获取当前 SMTP 配置（密码字段隐藏）。仅 admin 可读。
     优先返回 DB 配置，不存在则返回 .env 配置（只读标记）。
     """
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可查看邮件设置")
+
     cfg = _load_smtp_config_with_fallback(svc)
     # 隐藏密码
     cfg["smtp_password"] = "***" if cfg.get("smtp_password") else ""

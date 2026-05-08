@@ -318,6 +318,21 @@ async def update_connection(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # IDOR 检查：data_admin 只能修改自己创建的连接
+    if current_user.get("role") == "data_admin":
+        if conn_type == ConnectionType.SQL_DATABASE:
+            conn = manager.get_sql_connection(conn_id)
+            if not conn:
+                raise HTTPException(status_code=404, detail="连接不存在")
+            if conn.owner_id != current_user.get("id"):
+                raise HTTPException(status_code=403, detail="无权修改他人创建的连接")
+        elif conn_type == ConnectionType.TABLEAU_SITE:
+            conn = manager.get_tableau_connection(conn_id)
+            if not conn:
+                raise HTTPException(status_code=404, detail="连接不存在")
+            if conn.owner_id != current_user.get("id"):
+                raise HTTPException(status_code=403, detail="无权修改他人创建的连接")
+
     if conn_type == ConnectionType.SQL_DATABASE:
         body = await request.json()
         req = UpdateSQLConnectionRequest(**body)
@@ -400,6 +415,27 @@ async def delete_connection(
         raise HTTPException(status_code=403, detail="需要 admin 或 data_admin 权限")
 
     manager = ConnectionManager(db)
+
+    try:
+        conn_type, conn_id = manager.parse_connection_id(connection_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # IDOR 检查：data_admin 只能删除自己创建的连接
+    if current_user.get("role") == "data_admin":
+        if conn_type == ConnectionType.SQL_DATABASE:
+            conn = manager.get_sql_connection(conn_id)
+            if not conn:
+                raise HTTPException(status_code=404, detail="连接不存在")
+            if conn.owner_id != current_user.get("id"):
+                raise HTTPException(status_code=403, detail="无权删除他人创建的连接")
+        elif conn_type == ConnectionType.TABLEAU_SITE:
+            conn = manager.get_tableau_connection(conn_id)
+            if not conn:
+                raise HTTPException(status_code=404, detail="连接不存在")
+            if conn.owner_id != current_user.get("id"):
+                raise HTTPException(status_code=403, detail="无权删除他人创建的连接")
+
     success, error = manager.delete_connection(connection_id)
 
     if not success:

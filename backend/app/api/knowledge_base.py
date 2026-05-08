@@ -1,5 +1,5 @@
 """知识库 API（PRD §7 + §8 + §9）"""
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -20,6 +20,27 @@ class RagEnrichRequest(BaseModel):
 
     question: str
     scenario: str = "default"
+
+
+class CreateDocumentBody(BaseModel):
+    """创建文档请求体（PRD §7.7）"""
+
+    title: str
+    content: str
+    format: str = "markdown"
+    category: str = "general"
+    tags: Optional[List[str]] = []
+
+
+class UpdateDocumentBody(BaseModel):
+    """更新文档请求体"""
+
+    title: Optional[str] = None
+    content: Optional[str] = None
+    format: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[List[str]] = None
+    status: Optional[str] = None
 
 router = APIRouter()
 
@@ -250,11 +271,7 @@ async def list_documents(
 
 @router.post("/documents")
 async def create_document(
-    title: str,
-    content: str,
-    format: str = "markdown",
-    category: str = "general",
-    tags: str = "",
+    body: CreateDocumentBody,
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -263,23 +280,20 @@ async def create_document(
     """
     _require_role(user, "data_admin")
 
-    if not content or not content.strip():
+    if not body.content or not body.content.strip():
         raise _error_response(KBErrorCode.DOC_EMPTY_CONTENT, 400)
 
     supported_formats = {"markdown", "text"}
-    if format not in supported_formats:
-        raise _error_response(KBErrorCode.DOC_UNSUPPORTED_FORMAT, 400, format=format)
-
-    import json
-    tags_list = json.loads(tags) if tags else []
+    if body.format not in supported_formats:
+        raise _error_response(KBErrorCode.DOC_UNSUPPORTED_FORMAT, 400, format=body.format)
 
     doc = document_service.create_document(
         db,
-        title=title,
-        content=content,
-        format=format,
-        category=category,
-        tags=tags_list,
+        title=body.title,
+        content=body.content,
+        format=body.format,
+        category=body.category,
+        tags=body.tags or [],
         created_by=user.get("id"),
     )
     return {"id": doc.id, "message": "文档创建成功"}
@@ -299,40 +313,34 @@ async def get_document(doc_id: int, db: Session = Depends(get_db), user=Depends(
 @router.put("/documents/{doc_id}")
 async def update_document(
     doc_id: int,
-    title: Optional[str] = None,
-    content: Optional[str] = None,
-    format: Optional[str] = None,
-    category: Optional[str] = None,
-    tags: Optional[str] = None,
-    status: Optional[str] = None,
+    body: UpdateDocumentBody,
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
     """更新文档（PRD §7.x）PUT /api/knowledge-base/documents/{id} — data_admin+"""
     _require_role(user, "data_admin")
 
-    if content is not None and not content.strip():
+    if body.content is not None and not body.content.strip():
         raise _error_response(KBErrorCode.DOC_EMPTY_CONTENT, 400)
 
-    if format is not None:
+    if body.format is not None:
         supported_formats = {"markdown", "text"}
-        if format not in supported_formats:
-            raise _error_response(KBErrorCode.DOC_UNSUPPORTED_FORMAT, 400, format=format)
+        if body.format not in supported_formats:
+            raise _error_response(KBErrorCode.DOC_UNSUPPORTED_FORMAT, 400, format=body.format)
 
-    import json
     kwargs = {}
-    if title is not None:
-        kwargs["title"] = title
-    if content is not None:
-        kwargs["content"] = content
-    if format is not None:
-        kwargs["format"] = format
-    if category is not None:
-        kwargs["category"] = category
-    if tags is not None:
-        kwargs["tags_json"] = json.loads(tags) if tags else []
-    if status is not None:
-        kwargs["status"] = status
+    if body.title is not None:
+        kwargs["title"] = body.title
+    if body.content is not None:
+        kwargs["content"] = body.content
+    if body.format is not None:
+        kwargs["format"] = body.format
+    if body.category is not None:
+        kwargs["category"] = body.category
+    if body.tags is not None:
+        kwargs["tags_json"] = body.tags
+    if body.status is not None:
+        kwargs["status"] = body.status
 
     result = document_service.update_document(db, doc_id, **kwargs)
     if not result:

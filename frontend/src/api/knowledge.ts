@@ -46,16 +46,17 @@ export async function createDocument(data: {
   category?: string;
   tags?: string[];
 }): Promise<{ id: number; message: string }> {
-  const q = new URLSearchParams({
-    title: data.title,
-    content: data.content,
-    format: data.format ?? 'markdown',
-    category: data.category ?? 'general',
-    tags: JSON.stringify(data.tags ?? []),
-  });
-  const res = await fetch(`${BASE}/documents?${q}`, {
+  const res = await fetch(`${BASE}/documents`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
+    body: JSON.stringify({
+      title: data.title,
+      content: data.content,
+      format: data.format ?? 'markdown',
+      category: data.category ?? 'general',
+      tags: data.tags ?? [],
+    }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
