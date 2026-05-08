@@ -6,7 +6,6 @@ import re
 from celery.result import AsyncResult
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
-from sqlalchemy import text
 
 from app.core.database import SessionLocal
 from app.core.dependencies import get_current_user
@@ -242,66 +241,17 @@ async def cleanup_dry_run(request: Request):
     return result
 
 
-# ─── 临时接口：初始化表结构 & 种子数据 ──────────────────────
+# ─── 接口：写入种子数据 ──────────────────────────────────────
 
 @router.post("/seed")
 async def seed_tasks(request: Request):
-    """创建 task 相关表（如不存在）并写入种子调度数据"""
+    """写入 task 调度种子数据（表结构由 Alembic 迁移 20260508_task_ddl 管理）"""
     _require_admin(request)
 
-    migration_sql = """
-    CREATE TABLE IF NOT EXISTS bi_task_runs (
-        id BIGSERIAL PRIMARY KEY,
-        celery_task_id VARCHAR(256),
-        task_name VARCHAR(256) NOT NULL,
-        task_label VARCHAR(128),
-        trigger_type VARCHAR(16) NOT NULL DEFAULT 'beat',
-        status VARCHAR(16) NOT NULL DEFAULT 'pending',
-        started_at TIMESTAMP,
-        finished_at TIMESTAMP,
-        duration_ms INTEGER,
-        result_summary JSONB,
-        error_message TEXT,
-        retry_count INTEGER NOT NULL DEFAULT 0,
-        parent_run_id BIGINT REFERENCES bi_task_runs(id) ON DELETE SET NULL,
-        triggered_by BIGINT REFERENCES auth_users(id) ON DELETE SET NULL,
-        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        CONSTRAINT chk_trigger_type CHECK (trigger_type IN ('beat', 'manual', 'api')),
-        CONSTRAINT chk_status CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'cancelled'))
-    );
-
-    CREATE TABLE IF NOT EXISTS bi_task_schedules (
-        id SERIAL PRIMARY KEY,
-        schedule_key VARCHAR(128) UNIQUE NOT NULL,
-        task_name VARCHAR(256) NOT NULL,
-        description TEXT,
-        schedule_expr VARCHAR(256) NOT NULL,
-        is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-        last_run_at TIMESTAMP,
-        last_run_status VARCHAR(16),
-        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-    );
-
-    CREATE INDEX IF NOT EXISTS ix_task_runs_task_name_started ON bi_task_runs(task_name, started_at);
-    CREATE INDEX IF NOT EXISTS ix_task_runs_status_started ON bi_task_runs(status, started_at);
-    CREATE INDEX IF NOT EXISTS ix_task_runs_started_at ON bi_task_runs(started_at);
-    CREATE INDEX IF NOT EXISTS ix_task_runs_parent ON bi_task_runs(parent_run_id);
-    CREATE INDEX IF NOT EXISTS ix_task_runs_celery_task_id ON bi_task_runs(celery_task_id);
-    CREATE INDEX IF NOT EXISTS ix_task_schedules_task_name ON bi_task_schedules(task_name);
-    CREATE INDEX IF NOT EXISTS ix_task_schedules_is_enabled ON bi_task_schedules(is_enabled);
-    """
-
     with SessionLocal() as db:
-        for stmt in migration_sql.strip().split(";"):
-            stmt = stmt.strip()
-            if stmt:
-                db.execute(text(stmt))
-        db.commit()
-
         seed_task_schedules(db)
 
-    return {"message": "表结构已创建，种子数据已写入"}
+    return {"message": "种子数据已写入"}
 
 
 # ─── 废弃端点（保留原路径避免 404） ─────────────────────────

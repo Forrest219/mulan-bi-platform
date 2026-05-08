@@ -85,6 +85,7 @@ const TableauHealthPage = lazy(() => import('../pages/tableau/health/page'));
 
 // 资产模块
 const StarRocksInspectionPage = lazy(() => import('../pages/assets/starrocks-inspection/page'));
+const ConnectionCenterPage = lazy(() => import('../pages/assets/connection-center/page'));
 
 // ──────────────────────────────────────────────────────────────
 // 路由定义
@@ -380,6 +381,14 @@ const routes: RouteObject[] = [
             ),
           },
           {
+            path: 'connection-center',
+            element: (
+              <ProtectedRoute requiredPermission="database_monitor">
+                <ConnectionCenterPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
             path: 'starrocks-inspection',
             element: (
               <ProtectedRoute requiredPermission="database_monitor">
@@ -602,11 +611,7 @@ const routes: RouteObject[] = [
           },
           {
             path: 'agent-monitor',
-            element: (
-              <ProtectedRoute adminOnly>
-                <AgentMonitorPage />
-              </ProtectedRoute>
-            ),
+            element: <Navigate to="/agents/agent-monitor" replace />,
           },
           {
             path: 'platform-settings',

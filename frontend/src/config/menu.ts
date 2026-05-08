@@ -82,6 +82,13 @@ export const menuConfig: MenuDomain[] = [
     permission: { requiredRole: 'analyst' },
     items: [
       {
+        key: 'connection-center',
+        label: '连接中心',
+        icon: 'ri-server-line',
+        path: '/assets/connection-center',
+        permission: { requiredRole: 'data_admin' },
+      },
+      {
         key: 'tableau-assets',
         label: 'Tableau 资产',
         icon: 'ri-bar-chart-box-line',
