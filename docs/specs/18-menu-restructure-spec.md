@@ -200,7 +200,7 @@ graph TD
 | 菜单项 | 路由路径 | 现有页面 | 图标 | 权限 | 状态 |
 |--------|---------|---------|------|------|------|
 | DDL 检查 | `/dev/ddl-validator` | `pages/ddl-validator/page.tsx` | `ri-code-s-slash-line` | analyst+ | 正常 |
-| 规则配置 | `/dev/rule-config` | `pages/rule-config/page.tsx` | `ri-settings-3-line` | data_admin+ | 正常 |
+| 规则配置 | ~~`/dev/rule-config`~~ / ~~`/system/rules`~~ | ~~`pages/rule-config/page.tsx`~~ | — | — | **已退役** — 功能并入 `/governance/dw-audit` DDL 合规 Tab，勿重建独立页面 |
 | 知识库 | `/analytics/knowledge` | `pages/knowledge/page.tsx` | `ri-book-open-line` | user+ | hidden（待迁出） |
 | DDL 生成器 | — | 待开发 | `ri-file-code-line` | analyst+ | hidden |
 | 自然语言查询 | — | 待开发 | `ri-chat-search-line` | analyst+ | hidden |
@@ -310,7 +310,7 @@ interface MenuPermission {
 | `/system/tasks` | `pages/admin/tasks/page.tsx` | 配置 | ✅ | admin |
 | `/system/query-alerts` | ~~`pages/admin/query-alerts/page.tsx`~~ | ~~配置~~ | ❌ 已退役 | 已合并至 `/agents/agent-monitor` 总览 Tab |
 | `/dev/ddl-validator` | `pages/ddl-validator/page.tsx` | 配置 | ✅ | |
-| `/dev/rule-config` | `pages/rule-config/page.tsx` | 配置 | ✅ | data_admin+ |
+| ~~`/dev/rule-config`~~ / ~~`/system/rules`~~ | ~~`pages/rule-config/page.tsx`~~ | — | ❌ 已退役 | 功能并入 `/governance/dw-audit` DDL 合规 Tab，勿重建独立页面 |
 | `/analytics/knowledge` | `pages/knowledge/page.tsx` | 配置 | ✅ | Spec 17 |
 | `/system/users` | `pages/admin/user-management/page.tsx` | 管理 | ✅ | admin |
 | `/system/groups` | `pages/admin/groups/page.tsx` | 管理 | ✅ | admin |

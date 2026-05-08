@@ -56,7 +56,6 @@ const ResetPasswordPage    = lazy(() => import('../pages/reset-password/page'));
 const EmptyStatePage        = lazy(() => import('../pages/empty/EmptyStatePage'));
 const AgentMonitorPage      = lazy(() => import('../pages/admin/agent-monitor/page'));
 const TokenStatsPage        = lazy(() => import('../pages/admin/token-stats/page'));
-const RulesConfigPage       = lazy(() => import('../pages/config/rules/page'));
 const QueryPage             = lazy(() => import('../pages/query/page'));
 const AccountSecurityPage   = lazy(() => import('../pages/account/security/page'));
 const AccountPasswordPage   = lazy(() => import('../pages/account/password/page'));
@@ -626,14 +625,6 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute adminOnly>
                 <TokenStatsPage />
-              </ProtectedRoute>
-            ),
-          },
-          {
-            path: 'rules',
-            element: (
-              <ProtectedRoute>
-                <RulesConfigPage />
               </ProtectedRoute>
             ),
           },

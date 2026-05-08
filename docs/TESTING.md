@@ -118,7 +118,6 @@ await expect(page.locator('text=答案是 42')).toBeVisible();
 |------|---------|---------|
 | `debug-mcp.spec.ts` | MCP 调试器（工具调试） | 工具执行、结果展示 |
 | `datasource-to-mcp-debugger.spec.ts` | 数据源/视图/仪表板 → MCP 调试器 | 三种资产类型参数填充、概览渲染 |
-| `rule-config.spec.ts` | 规则配置 | 规则列表、分类/级别筛选、新建入口 |
 | `permission-redirect.spec.ts` | 任务管理、查询告警、Agent 监控、平台设置 | adminOnly 权限校验 |
 
 #### 资产管理 — Tableau（5 个）

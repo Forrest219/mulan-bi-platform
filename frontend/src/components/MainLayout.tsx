@@ -18,7 +18,6 @@ const mainMenuSections: MenuSection[] = [
     section: '数据治理',
     items: [
       { path: '/data-governance/health', label: '数据仓库体检', icon: 'ri-heart-pulse-line' },
-      { path: '/rule-config', label: '规则配置', icon: 'ri-file-settings-line' },
     ],
   },
   {
@@ -60,7 +59,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         // 知识库占位页所有人都可看
         if (item.path.startsWith('/knowledge')) return true;
         // 数据治理需要对应权限
-        if (item.path.startsWith('/data-governance') || item.path.startsWith('/rule-config')) {
+        if (item.path.startsWith('/data-governance')) {
           return hasPermission('database_monitor') || hasPermission('rule_config') || isAdmin;
         }
         // BI语义需要 tableau 权限

@@ -113,20 +113,6 @@ test.describe('RBAC 权限隔离', () => {
       expect(isForbidden || hasForbiddenText).toBe(true);
     });
 
-    test('smoke_analyst 无 rule_config 权限，访问规则配置应被拒绝', async ({ page }) => {
-      await loginAsSmokeUser(page);
-      const loginFailed = await page.locator('text=用户名或密码错误').isVisible({ timeout: 1000 }).catch(() => false);
-      if (loginFailed) { test.skip(); return; }
-
-      await page.goto('/dev/rule-config');
-      await page.waitForTimeout(1500);
-
-      const url = page.url();
-      const isForbidden = url.includes('/403');
-      const hasForbiddenText = await page.locator('text=无权限').isVisible().catch(() => false)
-        || await page.locator('text=访问被拒绝').isVisible().catch(() => false);
-      expect(isForbidden || hasForbiddenText).toBe(true);
-    });
   });
 
   // ── 特定权限路由（正向：smoke_analyst 有 database_monitor）─────────

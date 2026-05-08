@@ -64,7 +64,6 @@ test.describe('权限重定向', () => {
     const protectedPages = [
       // dev 前缀路由（router config 中在 /dev 下）
       { path: '/dev/ddl-validator',   name: 'DDL 检查',       permission: 'ddl_check' },
-      { path: '/dev/rule-config',     name: '规则配置',       permission: 'rule_config' },
       { path: '/dev/dw-audit',        name: '数仓巡检',       permission: 'database_monitor' },
       // tableau 语义层路由
       { path: '/semantic/datasources', name: '语义数据源列表', permission: 'tableau' },
@@ -95,15 +94,6 @@ test.describe('权限重定向', () => {
       if (!ok) return;
 
       await page.goto('/dev/ddl-validator');
-      await page.waitForTimeout(1500);
-      await expectForbidden(page);
-    });
-
-    test('访问规则配置（需 rule_config 权限）应被拒绝', async ({ page }) => {
-      const ok = await loginAs(page, SMOKE_USER, SMOKE_PASS);
-      if (!ok) return;
-
-      await page.goto('/dev/rule-config');
       await page.waitForTimeout(1500);
       await expectForbidden(page);
     });
@@ -191,15 +181,6 @@ test.describe('权限重定向', () => {
       await page.goto('/dev/ddl-validator');
       await page.waitForTimeout(1500);
       expect(page.url()).toContain('/dev/ddl-validator');
-    });
-
-    test('admin 可访问规则配置', async ({ page }) => {
-      const ok = await loginAs(page, ADMIN_USER, ADMIN_PASS);
-      if (!ok) return;
-
-      await page.goto('/dev/rule-config');
-      await page.waitForTimeout(1500);
-      expect(page.url()).toContain('/dev/rule-config');
     });
 
     test('admin 可访问语义数据源', async ({ page }) => {

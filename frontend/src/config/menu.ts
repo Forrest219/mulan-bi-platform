@@ -243,13 +243,6 @@ export const menuConfig: MenuDomain[] = [
         path: '/system/tasks',
         permission: { adminOnly: true },
       },
-      {
-        key: 'rules',
-        label: '规则配置',
-        icon: 'ri-shield-check-line',
-        path: '/system/rules',
-        permission: { requiredRole: 'data_admin' },
-      },
     ],
   },
 
@@ -260,7 +253,7 @@ export const menuConfig: MenuDomain[] = [
     key: 'admin',
     label: '管理',
     icon: 'ri-settings-2-line',
-    description: '用户管理、权限配置、共享权限、操作日志、平台设置',
+    description: '用户管理、权限配置、操作日志、用量统计',
     defaultOpen: false,
     permission: { requiredRole: 'admin' },
     items: [
@@ -271,22 +264,10 @@ export const menuConfig: MenuDomain[] = [
         path: '/system/users',
       },
       {
-        key: 'groups',
-        label: '用户组',
-        icon: 'ri-team-line',
-        path: '/system/groups',
-      },
-      {
         key: 'permissions',
         label: '权限配置',
         icon: 'ri-shield-keyhole-line',
         path: '/system/permissions',
-      },
-      {
-        key: 'shared-permissions',
-        label: '共享权限',
-        icon: 'ri-share-line',
-        path: '/system/shared-permissions',
       },
       {
         key: 'activity',
@@ -295,28 +276,16 @@ export const menuConfig: MenuDomain[] = [
         path: '/system/activity',
       },
       {
+        key: 'usage-stats',
+        label: '用量统计',
+        icon: 'ri-bar-chart-line',
+        path: '/system/usage-stats',
+      },
+      {
         key: 'platform-settings',
         label: '平台设置',
         icon: 'ri-image-line',
         path: '/system/platform-settings',
-      },
-      {
-        key: 'token-stats',
-        label: 'Token 统计',
-        icon: 'ri-coin-line',
-        path: '/system/token-stats',
-      },
-      {
-        key: 'query-alerts',
-        label: '查数日志',
-        icon: 'ri-file-list-3-line',
-        path: '/system/query-alerts',
-      },
-      {
-        key: 'account-security',
-        label: '账户安全',
-        icon: 'ri-lock-line',
-        path: '/account/security',
       },
     ],
   },
