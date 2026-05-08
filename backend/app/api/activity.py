@@ -18,12 +18,20 @@ async def get_access_logs(
     user_id: Optional[int] = None,
     operation_type: Optional[str] = None
 ):
-    """获取访问日志"""
-    get_current_user(request)
+    """获取访问日志（admin 可查所有人，其他角色仅能查自己的）"""
+    current_user = get_current_user(request)
     limit = min(limit, 1000)
+
+    # 非管理员强制只读自身记录，防止信息泄露
+    if current_user.get("role") != "admin":
+        user_id = current_user["id"]
 
     db = LogDatabase()
     logs = db.get_operation_logs(limit=limit, operation_type=operation_type if operation_type else None)
+
+    # 非管理员在内存中二次过滤（get_operation_logs 若不支持 user_id 参数时兜底）
+    if current_user.get("role") != "admin":
+        logs = [log for log in logs if getattr(log, "user_id", None) == user_id]
 
     result = [log.to_dict() for log in logs]
     return {"logs": result, "total": len(result)}

@@ -290,3 +290,61 @@ def log_nlq_query(
         # fire-and-forget，审计失败不干扰主流程
         pass
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Token 消耗日志
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TokenUsageLog(Base):
+    """
+    LLM Token 消耗记录表。
+
+    每次 LLM complete 调用成功后写入一条（fire-and-forget）。
+    用于统计各 Agent / 模型的 Token 消耗趋势，支持成本分析。
+    """
+    __tablename__ = "ai_token_usage_logs"
+    __table_args__ = (
+        Index("ix_token_usage_user_created", "user_id", "created_at"),
+        Index("ix_token_usage_purpose_model", "purpose", "model"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=True, index=True)  # nullable: 系统内部调用无用户上下文
+    purpose = Column(String(50), nullable=False)            # agent / nlq / default / embedding
+    provider = Column(String(32), nullable=False)           # openai / anthropic / minimax
+    model = Column(String(200), nullable=False)
+    prompt_tokens = Column(Integer, nullable=False, server_default=sa_func.cast(0, Integer()))
+    completion_tokens = Column(Integer, nullable=False, server_default=sa_func.cast(0, Integer()))
+    total_tokens = Column(Integer, nullable=False, server_default=sa_func.cast(0, Integer()))
+    created_at = Column(DateTime, server_default=sa_func.now(), nullable=False)
+
+
+def write_token_usage_log(
+    purpose: str,
+    provider: str,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+    user_id: Optional[int] = None,
+) -> None:
+    """写入一条 Token 消耗日志（fire-and-forget）。"""
+    try:
+        from app.core.database import SessionLocal
+        session = SessionLocal()
+        try:
+            session.add(TokenUsageLog(
+                user_id=user_id,
+                purpose=purpose,
+                provider=provider,
+                model=model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+            ))
+            session.commit()
+        finally:
+            session.close()
+    except Exception:
+        pass
+

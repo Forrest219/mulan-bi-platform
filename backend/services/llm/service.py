@@ -1,4 +1,5 @@
 """LLM 调用服务（异步）"""
+import contextvars
 import logging
 import time
 from typing import Optional, Tuple
@@ -7,7 +8,13 @@ from app.core.config import get_settings
 from app.core.errors import MulanError
 from services.common.crypto import CryptoHelper
 
-from .models import LLMConfigDatabase
+from .models import LLMConfigDatabase, write_token_usage_log
+
+# 请求级 ContextVar：API 层在处理请求时设置，LLMService 读取用于 token 日志
+# 每个 async task 拥有独立副本，天然线程/协程安全
+llm_user_id_var: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar(
+    "llm_user_id", default=None
+)
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +125,47 @@ class LLMService:
 
     def _load_config(self, purpose: str = "default"):
         return self._config_db.get_config(purpose=purpose)
+
+    @staticmethod
+    def _extract_usage(response, provider: str) -> dict:
+        """从 LLM 响应提取 token 计数，兼容 OpenAI 和 Anthropic 格式。
+
+        OpenAI 格式（非流式）：response.usage.prompt_tokens / completion_tokens / total_tokens
+        OpenAI 流式：最后一个 chunk.usage（需调用方传入 stream_options={"include_usage": True}）
+        Anthropic 格式（非流式）：response.usage.input_tokens / output_tokens
+        Anthropic 流式：message_start.usage.input_tokens + message_delta.usage.output_tokens
+        当前 LLMService 全部使用非流式完成调用，两者均在响应对象上直接可用。
+        """
+        usage = getattr(response, "usage", None)
+        if not usage:
+            return {}
+        if provider in ("anthropic", "minimax") or hasattr(usage, "input_tokens"):
+            prompt = getattr(usage, "input_tokens", 0) or 0
+            completion = getattr(usage, "output_tokens", 0) or 0
+            return {"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": prompt + completion}
+        return {
+            "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+            "completion_tokens": getattr(usage, "completion_tokens", 0) or 0,
+            "total_tokens": getattr(usage, "total_tokens", 0) or 0,
+        }
+
+    def _record_usage(self, config, response, provider: str) -> None:
+        """提取并异步写入 token 消耗日志（fire-and-forget，不阻塞主流程）。"""
+        try:
+            usage = self._extract_usage(response, provider)
+            if not usage or usage.get("total_tokens", 0) == 0:
+                return
+            write_token_usage_log(
+                purpose=getattr(config, "purpose", "default"),
+                provider=provider,
+                model=getattr(config, "model", "unknown"),
+                prompt_tokens=usage.get("prompt_tokens", 0),
+                completion_tokens=usage.get("completion_tokens", 0),
+                total_tokens=usage.get("total_tokens", 0),
+                user_id=llm_user_id_var.get(),
+            )
+        except Exception:
+            pass
 
     def _get_openai_client(self, api_key: str, base_url: str, model: str, timeout: int):
         from openai import AsyncOpenAI
@@ -314,6 +362,7 @@ class LLMService:
         if "openai" in (config.base_url or "").lower() or "gpt" in (config.model or "").lower():
             create_kwargs["response_format"] = {"type": "json_object"}
         response = await client.chat.completions.create(**create_kwargs)
+        self._record_usage(config, response, provider="openai")
         content = response.choices[0].message.content.strip()
         return {"content": content}
 
@@ -335,6 +384,7 @@ class LLMService:
             temperature=temperature,
             max_tokens=config.max_tokens,
         )
+        self._record_usage(config, response, provider="openai")
         content = response.choices[0].message.content.strip()
         return {"content": content}
 
@@ -365,6 +415,7 @@ class LLMService:
             logger.error("Anthropic API 调用失败 [%s]: %s", error_type, error_msg, exc_info=True)
             return {"error": f"Anthropic API 错误: {error_msg}"}
 
+        self._record_usage(config, response, provider="anthropic")
         from anthropic.types import TextBlock
         text_blocks = [block for block in response.content if isinstance(block, TextBlock)]
         if not text_blocks:
@@ -386,6 +437,7 @@ class LLMService:
             temperature=config.temperature,
             max_tokens=config.max_tokens,
         )
+        self._record_usage(config, response, provider="openai")
         content = response.choices[0].message.content.strip()
         return {"content": content}
 
@@ -411,6 +463,7 @@ class LLMService:
             logger.error("Anthropic API 调用失败 [%s]: %s", error_type, error_msg, exc_info=True)
             return {"error": f"Anthropic API 错误: {error_msg}"}
 
+        self._record_usage(config, response, provider="anthropic")
         # 兼容 MiniMax 的 ThinkingBlock（思维链），提取第一个 TextBlock
         from anthropic.types import TextBlock
         text_blocks = [block for block in response.content if isinstance(block, TextBlock)]

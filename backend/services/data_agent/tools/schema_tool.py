@@ -174,10 +174,11 @@ class SchemaTool(BaseTool):
                 "name": a.name,
                 "project": a.project_name,
                 "tableau_id": a.tableau_id,
+                "web_url": a.web_url,
             })
 
         tables = [
-            {"name": a.name, "type": a.asset_type, "project": a.project_name}
+            {"name": a.name, "type": a.asset_type, "project": a.project_name, "web_url": a.web_url}
             for a in assets
         ]
 

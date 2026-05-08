@@ -64,6 +64,8 @@ class AgentConversationMessage(Base):
     trace_id = Column(String(64), nullable=True)
     steps_count = Column(Integer, nullable=True)
     execution_time_ms = Column(Integer, nullable=True)
+    sources_count = Column(Integer, nullable=True)
+    top_sources = Column(JSONB, nullable=True)  # list[str]
     created_at = Column(DateTime, server_default=sa_func.now(), nullable=False)
 
     def to_dict(self) -> dict:
@@ -78,6 +80,8 @@ class AgentConversationMessage(Base):
             "trace_id": self.trace_id,
             "steps_count": self.steps_count,
             "execution_time_ms": self.execution_time_ms,
+            "sources_count": self.sources_count,
+            "top_sources": self.top_sources,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

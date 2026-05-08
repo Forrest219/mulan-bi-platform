@@ -1,19 +1,40 @@
 import { render, screen } from '@testing-library/react'
 import MessageBubble from '../../../src/components/chat/MessageBubble'
 
-it('isError 时渲染实际 content 而非硬编码文案', () => {
+it('AGENT_003 显示"工具执行失败"标签', () => {
+  render(<MessageBubble role="assistant" content="" isError errorCode="AGENT_003" />)
+  expect(screen.getByText('工具执行失败')).toBeInTheDocument()
+})
+
+it('AGENT_001 显示"查询超时"标签', () => {
+  render(<MessageBubble role="assistant" content="" isError errorCode="AGENT_001" />)
+  expect(screen.getByText('查询超时')).toBeInTheDocument()
+})
+
+it('STREAM_ERROR 显示"连接中断，请重试"标签', () => {
+  render(<MessageBubble role="assistant" content="" isError errorCode="STREAM_ERROR" />)
+  expect(screen.getByText('连接中断，请重试')).toBeInTheDocument()
+})
+
+it('无 errorCode 时显示通用文案', () => {
+  render(<MessageBubble role="assistant" content="" isError />)
+  expect(screen.getByText('出现错误，请重试')).toBeInTheDocument()
+})
+
+it('有 errorHint 时渲染次要说明文字', () => {
   render(
     <MessageBubble
       role="assistant"
-      content="⚠️ LLM 服务暂时不可用"
+      content=""
       isError
+      errorCode="AGENT_003"
+      errorHint="MCP 工具执行失败: 字段 profit_rate 不存在"
     />
   )
-  expect(screen.getByText('⚠️ LLM 服务暂时不可用')).toBeInTheDocument()
-  expect(screen.queryByText('连接中断，请重试。')).not.toBeInTheDocument()
+  expect(screen.getByText('MCP 工具执行失败: 字段 profit_rate 不存在')).toBeInTheDocument()
 })
 
-it('isError 且 content 为空时回退到默认文案', () => {
-  render(<MessageBubble role="assistant" content="" isError />)
-  expect(screen.getByText('连接中断，请重试。')).toBeInTheDocument()
+it('无 errorHint 时不渲染次要说明文字', () => {
+  render(<MessageBubble role="assistant" content="" isError errorCode="AGENT_003" />)
+  expect(screen.queryByText(/MCP/)).not.toBeInTheDocument()
 })

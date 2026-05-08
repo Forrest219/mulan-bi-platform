@@ -18,6 +18,13 @@ except ImportError:
 from .tool_base import ToolContext, ToolRegistry, ToolResult
 from .response import AgentEvent
 from .prompts import build_react_system_prompt
+
+
+def _extract_user_hint(exc: Exception) -> Optional[str]:
+    """从异常中提取用户可读的提示，优先取自定义异常的 message 属性。"""
+    if hasattr(exc, "message") and isinstance(exc.message, str) and exc.message:
+        return exc.message[:120]
+    return None
 from .intent.keyword_match import is_chart_request as _is_chart_request
 
 logger = logging.getLogger(__name__)
@@ -565,6 +572,7 @@ class ReActEngine:
                 return {
                     "error_code": "AGENT_001",
                     "message": f"工具执行超时: {tool_name}",
+                    "user_hint": "数据源响应超时，请稍后重试",
                     "detail": {
                         "tool": tool_name,
                         "timeout_seconds": self.step_timeout,
@@ -578,6 +586,7 @@ class ReActEngine:
                 return {
                     "error_code": "AGENT_003",
                     "message": "工具执行失败",
+                    "user_hint": _extract_user_hint(e),
                     "detail": {
                         "tool": tool_name,
                         "reason": "工具执行异常",

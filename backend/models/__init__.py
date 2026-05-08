@@ -28,3 +28,9 @@ from models.conversations import (  # noqa: F401
     Conversation,
     ConversationMessage,
 )
+
+from services.llm.models import (  # noqa: F401
+    LLMConfig,
+    NlqQueryLog,
+    TokenUsageLog,
+)

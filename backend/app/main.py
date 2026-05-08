@@ -18,6 +18,7 @@ from services.data_agent.routes.dau_churn import router as dau_churn_router
 from app.api.governance import api_contract_routes, dqc
 from app.api.semantic_maintenance import datasources as sm_datasources, fields as sm_fields, review as sm_review, sync as sm_sync, publish as sm_publish
 from app.api import audit, governance_runtime, connection_hub, agent_admin, sql_agent
+from app.api import token_stats
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,7 @@ from app.api import feedback
 app.include_router(feedback.router, prefix="/api/feedback", tags=["反馈"])
 from app.api import mcp_debug
 app.include_router(mcp_debug.router)
+app.include_router(token_stats.router, prefix="/api/admin/token-stats", tags=["Token 统计"])
 
 from app.api.metrics import router as metrics_router
 from app.api.metrics_templates import router as metrics_templates_router

@@ -121,6 +121,8 @@ class TableauAsset(Base):
     # Phase 2b: 数据源扩展
     field_count = Column(Integer, nullable=True)
     is_certified = Column(Boolean, nullable=True)
+    # 预计算的 Tableau Server 访问 URL（{server_url}/#[/site/{site}]{content_url}）
+    web_url = Column(String(1024), nullable=True)
 
     connection = relationship("TableauConnection", back_populates="assets")
     datasources = relationship("TableauAssetDatasource", back_populates="asset", cascade="all, delete-orphan")
@@ -165,6 +167,7 @@ class TableauAsset(Base):
             "health_score": self.health_score,
             "field_count": self.field_count,
             "is_certified": self.is_certified,
+            "web_url": self.web_url,
         }
 
 

@@ -1,6 +1,7 @@
 """语义维护 - 发布管理 API
 """
 
+import logging
 from datetime import datetime
 from typing import Optional
 
@@ -23,6 +24,7 @@ from services.tableau.models import TableauDatabase
 
 router = APIRouter()
 _crypto = get_tableau_crypto()
+logger = logging.getLogger(__name__)
 
 
 # _db_path 和 _tableau_db_path 不再需要
@@ -151,6 +153,7 @@ async def publish_datasource(req: PublishDatasourceRequest, request: Request, db
     try:
         from services.events import emit_event
         from services.events.constants import SEMANTIC_TABLE_PUBLISHED, SOURCE_MODULE_SEMANTIC
+        sm = SemanticMaintenanceService()
         ds = sm.db.get_datasource_semantics_by_id(req.ds_id)
         if ds:
             emit_event(
@@ -172,8 +175,8 @@ async def publish_datasource(req: PublishDatasourceRequest, request: Request, db
                     "connection_id": req.connection_id,
                 },
             )
-    except Exception:
-        pass  # 事件发布失败不影响主流程
+    except Exception as e:
+        logger.warning("语义发布事件发射失败: %s", e)
 
     return result
 

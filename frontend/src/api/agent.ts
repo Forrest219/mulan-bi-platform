@@ -26,6 +26,8 @@ export interface AgentMessageItem {
   trace_id: string | null;
   steps_count: number | null;
   execution_time_ms: number | null;
+  sources_count: number | null;
+  top_sources: string[] | null;
   created_at: string;
 }
 
@@ -45,7 +47,7 @@ export type AgentStreamEvent =
   | { type: 'table_data'; fields: string[]; rows: (string | number | null)[][]; col_types: ('numeric' | 'string')[] }
   | { type: 'chart_data'; chart_type: 'bar' | 'line' | 'pie'; x_field: string | null; y_fields: string[]; series_field: string | null; data: Record<string, string | number | null>[] }
   | { type: 'done'; answer: string; trace_id: string; run_id: string; tools_used: string[]; response_type: string; response_data: unknown; steps_count: number; execution_time_ms: number; sources_count: number; top_sources: string[] }
-  | { type: 'error'; error_code: string; message: string };
+  | { type: 'error'; error_code: string; message: string; user_hint?: string };
 
 // ─── SSE Stream ──────────────────────────────────────────────────────────────
 
@@ -166,6 +168,7 @@ export function streamAgent(
                   type: 'error',
                   error_code: raw['error_code'] as string ?? 'AGENT_ERROR',
                   message: raw['message'] as string ?? '未知错误',
+                  user_hint: raw['user_hint'] as string | undefined,
                 });
               }
             } catch {
@@ -262,12 +265,14 @@ export interface AgentStats {
 export interface AgentRun {
   id: string;
   user_id: number;
+  username: string | null;
   question: string;
   /** Run status returned by admin API: running / completed / failed (legacy error may still appear in old data). */
   status: string;
   execution_time_ms: number | null;
   tools_used: string[] | null;
   created_at: string | null;
+  feedback: 'up' | 'down' | null;
 }
 
 export interface AgentRunsResponse {

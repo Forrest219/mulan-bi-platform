@@ -228,6 +228,8 @@ async def run_agent(
                     trace_id=trace_id,
                     steps_count=steps_count,
                     execution_time_ms=execution_time_ms,
+                    sources_count=sources_count,
+                    top_sources=top_sources,
                 )
 
             elif event.type == "error":

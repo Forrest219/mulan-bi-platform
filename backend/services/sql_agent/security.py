@@ -1,5 +1,6 @@
 """SQL Agent — 安全校验模块（基于 sqlglot AST）"""
 
+import re
 import sqlglot
 from sqlglot import exp
 from dataclasses import dataclass
@@ -91,11 +92,21 @@ class SQLSecurityValidator:
         self.sqlglot_dialect = SQLGLOT_DIALECT_MAP.get(db_type, db_type)
         self.limits = DIALECT_LIMITS[db_type]
 
+    def strip_comments(self, sql: str) -> str:
+        """去除 SQL 注释，防止 DR/* x */OP TABLE 等注释绕过黑名单检测"""
+        # 去除块注释 /* ... */
+        sql = re.sub(r'/\*.*?\*/', ' ', sql, flags=re.DOTALL)
+        # 去除单行注释 -- ... 和 # ...
+        sql = re.sub(r'(--[^\r\n]*|#[^\r\n]*)', ' ', sql)
+        return sql.strip()
+
     def validate(self, sql: str) -> ValidationResult:
         """
         执行完整的安全校验。
-        顺序：语法解析 → 白名单扫描 → MySQL 写拦截 → 连表/子查询限制
+        顺序：注释剥离 → 语法解析 → 白名单扫描 → MySQL 写拦截 → 连表/子查询限制
         """
+        # Step 0: 剥离注释，防止注释绕过黑名单（如 DR/**/OP TABLE）
+        sql = self.strip_comments(sql)
         # Step 1: 语法解析
         try:
             ast = sqlglot.parse(sql, dialect=self.sqlglot_dialect)

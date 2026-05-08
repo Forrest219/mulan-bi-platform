@@ -20,7 +20,7 @@ from typing import AsyncGenerator, Any, Dict, List, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db, get_db_context
@@ -40,6 +40,7 @@ from services.data_agent.tool_base import ToolContext, ToolRegistry
 from services.data_agent.context import build_session_context
 from services.datasources.models import DataSource
 from services.llm.models import log_nlq_query
+from services.llm.service import llm_user_id_var
 from services.tableau.models import TableauConnection
 # Spec 36 §15: Agent 驱动首页相关导入
 from services.agent.dual_write import (
@@ -115,6 +116,8 @@ class MessageItem(BaseModel):
     trace_id: Optional[str]
     steps_count: Optional[int]
     execution_time_ms: Optional[int]
+    sources_count: Optional[int] = None
+    top_sources: Optional[List[str]] = None
     created_at: str
 
 
@@ -229,6 +232,7 @@ async def agent_stream(
     _require_agent_role(current_user.get("role", "user"))
     _validate_connection_access(req.connection_id, current_user, db)
 
+    llm_user_id_var.set(current_user["id"])  # 为 token 消耗日志注入用户上下文
     session_mgr = SessionManager(db)
     trace_id = f"t-{uuid_lib.uuid4().hex[:8]}"
 
@@ -353,7 +357,14 @@ async def agent_stream(
             elif event.type == "error":
                 error_content = event.content if isinstance(event.content, dict) else {"message": str(event.content)}
                 err_code = error_content.get("error_code", "AGENT_003")
-                yield f"data: {json.dumps({'type': 'error', 'error_code': err_code, 'message': error_content.get('message', '未知错误')}, ensure_ascii=False)}\n\n"
+                payload: dict = {
+                    "type": "error",
+                    "error_code": err_code,
+                    "message": error_content.get("message", "未知错误"),
+                }
+                if error_content.get("user_hint"):
+                    payload["user_hint"] = error_content["user_hint"]
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                 log_nlq_query(
                     user_id=current_user.get("id"),
                     question=req.question,
@@ -495,6 +506,8 @@ def get_conversation_messages(
             trace_id=m.trace_id,
             steps_count=m.steps_count,
             execution_time_ms=m.execution_time_ms,
+            sources_count=m.sources_count,
+            top_sources=m.top_sources,
             created_at=m.created_at.isoformat() if m.created_at else "",
         )
         for m in msgs
@@ -690,6 +703,31 @@ async def submit_agent_feedback_v2(
             status_code=500,
             detail={"error_code": "AGENT_008", "message": "反馈写入失败"},
         )
+
+
+@router.get("/feedback")
+def get_agent_feedback(
+    conversation_id: str,
+    message_index: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """GET /api/agent/feedback — 查询当前用户对指定消息的已有评分"""
+    _require_agent_role(current_user.get("role", "user"))
+    row = db.execute(
+        text(
+            "SELECT rating FROM message_feedback "
+            "WHERE user_id = :user_id AND conversation_id = :conversation_id "
+            "AND message_index = :message_index "
+            "ORDER BY created_at DESC LIMIT 1"
+        ),
+        {
+            "user_id": current_user["id"],
+            "conversation_id": conversation_id,
+            "message_index": message_index,
+        },
+    ).fetchone()
+    return {"rating": row[0] if row else None}
 
 
 # ============================================================================

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface MessageActionsProps {
   content: string;
@@ -16,6 +16,16 @@ interface MessageActionsProps {
 export function MessageActions({ content, conversationId, messageIndex, question, traceId, onRegenerate, onEdit, onDelete }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
   const [rated, setRated] = useState<'up' | 'down' | null>(null);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    fetch(`/api/agent/feedback?conversation_id=${encodeURIComponent(conversationId)}&message_index=${messageIndex}`, {
+      credentials: 'include',
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.rating) setRated(data.rating as 'up' | 'down'); })
+      .catch(() => {});
+  }, [conversationId, messageIndex]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(content);

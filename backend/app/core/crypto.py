@@ -38,3 +38,11 @@ def get_smtp_crypto() -> CryptoHelper:
     if not key:
         raise RuntimeError("SMTP_ENCRYPTION_KEY or DATASOURCE_ENCRYPTION_KEY must be set")
     return CryptoHelper(key)
+
+
+def get_mcp_crypto() -> CryptoHelper:
+    """获取 MCP 凭证加密工具（优先 MCP_ENCRYPTION_KEY，回退到 DATASOURCE_ENCRYPTION_KEY）"""
+    key = os.environ.get("MCP_ENCRYPTION_KEY") or os.environ.get("DATASOURCE_ENCRYPTION_KEY")
+    if not key:
+        raise RuntimeError("MCP_ENCRYPTION_KEY or DATASOURCE_ENCRYPTION_KEY environment variable must be set")
+    return CryptoHelper(key)

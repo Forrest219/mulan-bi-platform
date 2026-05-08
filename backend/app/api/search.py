@@ -17,6 +17,7 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from services.capability.audit import InvocationRecord, new_trace_id, write_audit
 from services.llm.models import log_nlq_query
+from services.llm.service import llm_user_id_var
 from services.common.redis_cache import check_rate_limit
 from services.tableau.models import TableauAsset, TableauDatabase
 from services.knowledge_base.glossary_service import glossary_service
@@ -1686,6 +1687,7 @@ async def query(
 
     user = get_current_user(request=request, db=db)
     _require_role(user, "analyst")
+    llm_user_id_var.set(user["id"])  # 为 token 消耗日志注入用户上下文
 
     question = body.question
     datasource_luid = body.datasource_luid

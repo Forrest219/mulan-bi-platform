@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   listAssets,
   searchAssets,
@@ -43,6 +43,7 @@ const LS_KEY = 'tableau-explorer-connection';
 
 export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: AssetExplorerProps) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [connectionId, setConnectionId] = useState<number>(connectionIdProp ?? 0);
   const [connections, setConnections] = useState<TableauConnection[]>([]);
@@ -50,7 +51,7 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
   const [assets, setAssets] = useState<TableauAsset[]>([]);
   const [projects, setProjects] = useState<ProjectNode[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(searchParams.get('q') ?? '');
   const [projectSearch, setProjectSearch] = useState('');
   const [assetTypeFilter, setAssetTypeFilter] = useState<string>('');
   const [page, setPage] = useState(1);

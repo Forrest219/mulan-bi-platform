@@ -53,6 +53,8 @@ export interface TableauAsset {
   health_score: number | null;
   field_count: number | null;
   is_certified: boolean | null;
+  // Pre-computed Tableau Server URL
+  web_url?: string | null;
   // Detail enrichment
   datasources?: TableauAssetDatasource[];
   server_url?: string;

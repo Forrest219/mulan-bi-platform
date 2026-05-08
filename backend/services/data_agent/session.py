@@ -173,10 +173,12 @@ class SessionManager:
         trace_id: Optional[str] = None,
         steps_count: Optional[int] = None,
         execution_time_ms: Optional[int] = None,
+        sources_count: Optional[int] = None,
+        top_sources: Optional[list[str]] = None,
     ) -> AgentConversationMessage:
         """
         Persist a message to the database.
-        
+
         Args:
             session: AgentSession
             role: 'user' or 'assistant'
@@ -187,7 +189,9 @@ class SessionManager:
             trace_id: Trace ID for debugging
             steps_count: Number of ReAct steps taken
             execution_time_ms: Total execution time
-            
+            sources_count: Number of data sources referenced
+            top_sources: List of data source names referenced
+
         Returns:
             Created AgentConversationMessage
         """
@@ -201,6 +205,8 @@ class SessionManager:
             trace_id=trace_id,
             steps_count=steps_count,
             execution_time_ms=execution_time_ms,
+            sources_count=sources_count,
+            top_sources=top_sources,
         )
         self.db.add(message)
 

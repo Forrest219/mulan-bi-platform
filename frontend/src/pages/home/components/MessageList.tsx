@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import MessageBubble from '../../../components/chat/MessageBubble';
 import { MessageActions } from './MessageActions';
-import SourceCard from './SourceCard';
 import type { StreamingMessage, TableData } from '../../../hooks/useStreamingChat';
 
 interface HistoryMessage {
@@ -10,6 +9,9 @@ interface HistoryMessage {
   created_at?: string;
   response_type?: string | null;
   response_data?: unknown;
+  trace_id?: string | null;
+  sources_count?: number | null;
+  top_sources?: string[] | null;
 }
 
 interface MessageListProps {
@@ -19,23 +21,90 @@ interface MessageListProps {
   lastQuestion?: string;
   onRegenerate?: () => void;
   historyMessages?: HistoryMessage[];
+  /** conversation_id for history messages — enables feedback via conversation_id alone */
+  historyConversationId?: string | null;
 }
 
-function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onRegenerate, historyMessages }: MessageListProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+interface RenderItemOpts {
+  key: string;
+  role: 'user' | 'assistant';
+  content: string;
+  isStreaming?: boolean;
+  isError?: boolean;
+  errorCode?: string;
+  errorHint?: string;
+  thinking?: string;
+  traceId?: string | null;
+  tableData?: TableData;
+  chartData?: StreamingMessage['chartData'];
+  sourcesCount?: number | null;
+  topSources?: string[] | null;
+  timestamp?: number | string | null;
+  conversationId?: string | null;
+  messageIndex?: number;
+  question?: string;
+  isLastAssistant?: boolean;
+  onRegenerate?: () => void;
+}
 
-  /** Reconstruct TableData from a history message's persisted response_data. */
-  function histTableData(msg: HistoryMessage): TableData | undefined {
-    if (msg.response_type !== 'table' || !msg.response_data || typeof msg.response_data !== 'object') return undefined;
-    const rd = msg.response_data as { fields?: string[]; rows?: (string | number | null)[][] };
-    const { fields, rows } = rd;
-    if (!fields?.length || !rows?.length) return undefined;
-    const col_types = fields.map((_, i) => {
-      const sample = rows!.slice(0, 5).map((r) => r[i]).filter((v) => v != null && v !== '');
-      return sample.length > 0 && sample.every((v) => typeof v === 'number') ? 'numeric' : 'string';
-    }) as ('numeric' | 'string')[];
-    return { fields, rows: rows!, col_types };
-  }
+function renderMessageItem(opts: RenderItemOpts) {
+  const {
+    key, role, content, isStreaming, isError, errorCode, errorHint, thinking,
+    traceId, tableData, chartData, sourcesCount, topSources,
+    timestamp, conversationId, messageIndex, question, isLastAssistant, onRegenerate,
+  } = opts;
+  const timeStr = timestamp
+    ? new Date(timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    : null;
+  return (
+    <div key={key} className="group">
+      <MessageBubble
+        role={role}
+        content={content}
+        isStreaming={isStreaming}
+        isError={isError}
+        errorCode={errorCode}
+        errorHint={errorHint}
+        thinking={thinking}
+        traceId={traceId ?? undefined}
+        tableData={tableData}
+        chartData={chartData}
+        sourcesCount={sourcesCount ?? undefined}
+        topSources={topSources ?? undefined}
+      />
+      {timeStr && !isStreaming && (
+        <p className={`text-[10px] text-slate-400 mt-1 ${role === 'user' ? 'text-right' : 'ml-1'}`}>
+          {timeStr}
+        </p>
+      )}
+      {role === 'assistant' && !isStreaming && (traceId || conversationId) && (
+        <MessageActions
+          content={content}
+          conversationId={conversationId ?? null}
+          messageIndex={messageIndex ?? 0}
+          question={question ?? ''}
+          traceId={traceId}
+          onRegenerate={isLastAssistant ? onRegenerate : undefined}
+        />
+      )}
+    </div>
+  );
+}
+
+function histTableData(msg: HistoryMessage): TableData | undefined {
+  if (msg.response_type !== 'table' || !msg.response_data || typeof msg.response_data !== 'object') return undefined;
+  const rd = msg.response_data as { fields?: string[]; rows?: (string | number | null)[][] };
+  const { fields, rows } = rd;
+  if (!fields?.length || !rows?.length) return undefined;
+  const col_types = fields.map((_, i) => {
+    const sample = rows!.slice(0, 5).map((r) => r[i]).filter((v) => v != null && v !== '');
+    return sample.length > 0 && sample.every((v) => typeof v === 'number') ? 'numeric' : 'string';
+  }) as ('numeric' | 'string')[];
+  return { fields, rows: rows!, col_types };
+}
+
+function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onRegenerate, historyMessages, historyConversationId }: MessageListProps) {
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -56,25 +125,36 @@ function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onR
   }
 
   return (
-    <div className="max-w-4xl mx-auto w-full px-4">
+    <div className="max-w-5xl mx-auto w-full px-4">
       <div className="flex flex-col gap-4 py-6">
 
         {/* 历史消息（URL conv= 恢复） */}
-        {historyMessages && historyMessages.length > 0 && historyMessages.map((msg, idx) => (
-          <div key={`history-${idx}`} className="group">
-            <MessageBubble
-              role={msg.role}
-              content={msg.content}
-              isStreaming={false}
-              tableData={histTableData(msg)}
-            />
-            {msg.created_at && (
-              <p className={`text-[10px] text-slate-400 mt-1 ${msg.role === 'user' ? 'text-right' : 'ml-1'}`}>
-                {new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-              </p>
-            )}
-          </div>
-        ))}
+        {historyMessages && historyMessages.length > 0 && (() => {
+          const lastHistAssistantIdx = historyMessages.reduce(
+            (acc, m, i) => (m.role === 'assistant' ? i : acc),
+            -1
+          );
+          let lastHistUserQuestion = '';
+          return historyMessages.map((msg, idx) => {
+            if (msg.role === 'user') lastHistUserQuestion = msg.content;
+            const q = lastHistUserQuestion;
+            return renderMessageItem({
+              key: `history-${idx}`,
+              role: msg.role,
+              content: msg.content,
+              isStreaming: false,
+              tableData: histTableData(msg),
+              conversationId: historyConversationId ?? null,
+              sourcesCount: msg.sources_count,
+              topSources: msg.top_sources,
+              timestamp: msg.created_at,
+              messageIndex: idx,
+              question: q,
+              isLastAssistant: idx === lastHistAssistantIdx,
+              onRegenerate,
+            });
+          });
+        })()}
 
         {/* 真实路径：遍历 SSE 流消息 */}
         {messages.length > 0 && (() => {
@@ -84,47 +164,29 @@ function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onR
           );
           let lastUserQuestion = '';
           return messages.map((msg, msgIndex) => {
-            if (msg.role === 'user') {
-              lastUserQuestion = msg.content;
-            }
+            if (msg.role === 'user') lastUserQuestion = msg.content;
             const questionForAction = lastUserQuestion;
-            return (
-              <div key={msg.id} className="group">
-                <MessageBubble
-                  role={msg.role}
-                  content={msg.content}
-                  isStreaming={msg.isStreaming}
-                  isError={msg.isError}
-                  thinking={msg.thinking}
-                  traceId={msg.traceId}
-                  tableData={msg.tableData}
-                  chartData={msg.chartData}
-                />
-                {msg.timestamp && !msg.isStreaming && (
-                  <p className={`text-[10px] text-slate-400 mt-1 ${msg.role === 'user' ? 'text-right' : 'ml-1'}`}>
-                    {new Date(msg.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                )}
-                {msg.role === 'assistant' && !msg.isStreaming && (
-                  <>
-                    {msg.metadata && msg.metadata.sources_count > 0 && (
-                      <SourceCard
-                        sourcesCount={msg.metadata.sources_count}
-                        topSources={msg.metadata.top_sources}
-                      />
-                    )}
-                    <MessageActions
-                      content={msg.content}
-                      conversationId={null}
-                      messageIndex={msgIndex}
-                      question={questionForAction}
-                      traceId={msg.traceId}
-                      onRegenerate={msgIndex === lastAssistantIndex ? onRegenerate : undefined}
-                    />
-                  </>
-                )}
-              </div>
-            );
+            return renderMessageItem({
+              key: msg.id,
+              role: msg.role,
+              content: msg.content,
+              isStreaming: msg.isStreaming,
+              isError: msg.isError,
+              errorCode: msg.errorCode,
+              errorHint: msg.errorHint,
+              thinking: msg.thinking,
+              traceId: msg.traceId,
+              tableData: msg.tableData,
+              chartData: msg.chartData,
+              sourcesCount: msg.metadata?.sources_count,
+              topSources: msg.metadata?.top_sources,
+              timestamp: msg.timestamp,
+              conversationId: msg.conversationId,
+              messageIndex: msgIndex,
+              question: questionForAction,
+              isLastAssistant: msgIndex === lastAssistantIndex,
+              onRegenerate,
+            });
           });
         })()}
 

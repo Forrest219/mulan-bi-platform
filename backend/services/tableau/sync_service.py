@@ -116,6 +116,12 @@ class TableauSyncService:
         except (ValueError, TypeError):
             return None
 
+    def _build_web_url(self, content_url: str) -> str:
+        """计算资产在 Tableau Server 的完整访问 URL"""
+        site_part = f"/site/{self.site}" if self.site else ""
+        path = content_url.lstrip("/")
+        return f"{self.server_url}/#{site_part}/{path}"
+
     def sync_all_assets(self, db, connection_id: int,
                         trigger_type: str = "manual",
                         sync_log_id: Optional[int] = None) -> Dict[str, Any]:
@@ -150,6 +156,7 @@ class TableauSyncService:
                     owner_name=getattr(wb, 'owner_name', None),
                     thumbnail_url=None,
                     content_url=content_url,
+                    web_url=self._build_web_url(content_url),
                     raw_metadata=json.dumps({
                         "created_at": str(wb.created_at) if hasattr(wb, 'created_at') else None,
                         "updated_at": str(wb.updated_at) if hasattr(wb, 'updated_at') else None,
@@ -207,6 +214,7 @@ class TableauSyncService:
                     owner_name=getattr(view, 'owner_name', None),
                     thumbnail_url=None,
                     content_url=content_url,
+                    web_url=self._build_web_url(content_url),
                     raw_metadata=json.dumps({
                         "sheet_type": sheet_type,
                         "workbook_id": workbook_id,
@@ -238,6 +246,7 @@ class TableauSyncService:
                     owner_name=getattr(ds, 'owner_name', None),
                     thumbnail_url=None,
                     content_url=content_url,
+                    web_url=self._build_web_url(content_url),
                     raw_metadata=None,
                     created_on_server=self._parse_server_datetime(getattr(ds, 'created_at', None)),
                     updated_on_server=self._parse_server_datetime(getattr(ds, 'updated_at', None)),
@@ -647,6 +656,12 @@ class TableauRestSyncService:
             logger.warning("Metadata API query failed (%s), falling back to all-view classification", e)
             return set()
 
+    def _build_web_url(self, content_url: str) -> str:
+        """计算资产在 Tableau Server 的完整访问 URL"""
+        site_part = f"/site/{self.site}" if self.site else ""
+        path = content_url.lstrip("/")
+        return f"{self.server_url}/#{site_part}/{path}"
+
     def sync_all_assets(self, db, connection_id: int,
                         trigger_type: str = "manual",
                         sync_log_id: Optional[int] = None) -> Dict[str, Any]:
@@ -686,6 +701,7 @@ class TableauRestSyncService:
                     owner_name=wb.get("owner", {}).get("name") if isinstance(wb.get("owner"), dict) else wb.get("ownerName"),
                     thumbnail_url=None,
                     content_url=content_url,
+                    web_url=self._build_web_url(content_url),
                     raw_metadata=json.dumps({"created_at": wb.get("createdAt"), "updated_at": wb.get("updatedAt")}),
                     created_on_server=self._parse_iso_datetime(wb.get("createdAt")),
                     updated_on_server=self._parse_iso_datetime(wb.get("updatedAt")),
@@ -727,6 +743,7 @@ class TableauRestSyncService:
                     owner_name=view.get("owner", {}).get("name") if isinstance(view.get("owner"), dict) else view.get("ownerName"),
                     thumbnail_url=None,
                     content_url=content_url,
+                    web_url=self._build_web_url(content_url),
                     raw_metadata=json.dumps({"sheet_type": sheet_type, "workbook_id": workbook_id}),
                     sheet_type=sheet_type or None,
                     parent_workbook_id=workbook_id or None,
@@ -756,6 +773,7 @@ class TableauRestSyncService:
                     owner_name=ds.get("owner", {}).get("name") if isinstance(ds.get("owner"), dict) else ds.get("ownerName"),
                     thumbnail_url=None,
                     content_url=content_url,
+                    web_url=self._build_web_url(content_url),
                     raw_metadata=None,
                     created_on_server=self._parse_iso_datetime(ds.get("createdAt")),
                     updated_on_server=self._parse_iso_datetime(ds.get("updatedAt")),

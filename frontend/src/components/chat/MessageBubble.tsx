@@ -2,13 +2,16 @@
  * MessageBubble — 带 Markdown 渲染的消息气泡（Gap-04）
  *
  * - user 消息：右对齐，蓝底白字，whitespace-pre-wrap 纯文本
- * - assistant 消息：左对齐，白底，react-markdown + remark-gfm 渲染
+ * - assistant 消息：左对齐，全宽白卡，react-markdown + remark-gfm 渲染
  *   - 代码块：react-syntax-highlighter (oneLight) + 一键复制
  *   - 表格：横向滚动容器包裹
  *   - 链接：新标签打开
+ *   - 简单无序列表：自动渲染为资产卡片 Grid
  *   - isStreaming：末尾打字光标动画
+ *   - 引用源：泡泡内底部脚注
  */
 import React, { useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -18,6 +21,7 @@ import ThinkingBlock from '../../pages/home/components/ThinkingBlock';
 import QueryResultTable from './QueryResultTable';
 import QueryResultChart from './QueryResultChart';
 import type { TableData, ChartData } from '../../hooks/useStreamingChat';
+import { searchAssets } from '../../api/tableau';
 
 
 // ─── CodeBlock ────────────────────────────────────────────────────────────────
@@ -58,6 +62,89 @@ function CodeBlock({ language, children }: CodeBlockProps) {
   );
 }
 
+// ─── Asset Card Grid（简单无序列表 → 卡片） ────────────────────────────────────
+
+function getTextFromNode(node: React.ReactNode): string {
+  if (typeof node === 'string') return node;
+  if (typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(getTextFromNode).join('');
+  if (React.isValidElement(node)) {
+    return getTextFromNode((node.props as { children?: React.ReactNode }).children);
+  }
+  return '';
+}
+
+function getUrlFromNode(node: React.ReactNode): string | undefined {
+  if (React.isValidElement(node)) {
+    const p = node.props as { href?: string; children?: React.ReactNode };
+    if (p.href) return p.href;
+    return getUrlFromNode(p.children);
+  }
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const url = getUrlFromNode(child);
+      if (url) return url;
+    }
+  }
+  return undefined;
+}
+
+interface AssetCardItem { text: string; url?: string }
+
+function AssetCardGrid({ items }: { items: AssetCardItem[] }) {
+  const navigate = useNavigate();
+  const [loadingIdx, setLoadingIdx] = useState<number | null>(null);
+
+  const handleClick = useCallback(async (item: AssetCardItem, idx: number) => {
+    if (item.url) {
+      window.open(item.url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    setLoadingIdx(idx);
+    try {
+      const result = await searchAssets({ q: item.text, page_size: 1 });
+      const asset = result.assets[0];
+      if (asset?.web_url) {
+        window.open(asset.web_url, '_blank', 'noopener,noreferrer');
+      } else if (asset?.content_url && asset.server_url) {
+        const sitePart = asset.site ? `/site/${asset.site}` : '';
+        window.open(`${asset.server_url}/#${sitePart}${asset.content_url}`, '_blank', 'noopener,noreferrer');
+      } else {
+        navigate(`/assets/tableau?q=${encodeURIComponent(item.text)}`);
+      }
+    } catch {
+      navigate(`/assets/tableau?q=${encodeURIComponent(item.text)}`);
+    } finally {
+      setLoadingIdx(null);
+    }
+  }, [navigate]);
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 my-3 not-prose">
+      {items.map((item, i) => (
+        <div
+          key={i}
+          onClick={() => handleClick(item, i)}
+          className="group flex items-center gap-2 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg
+                     hover:bg-blue-50 hover:border-blue-200 cursor-pointer transition-all duration-150"
+        >
+          {loadingIdx === i ? (
+            <i className="ri-loader-4-line animate-spin text-blue-400 flex-shrink-0 text-[11px]" />
+          ) : (
+            <i className="ri-bookmark-line text-slate-400 group-hover:text-blue-500 flex-shrink-0 text-[11px]" />
+          )}
+          <span className="text-xs text-slate-700 group-hover:text-blue-700 truncate flex-1 leading-tight">
+            {item.text}
+          </span>
+          <span className="text-[10px] text-blue-400 opacity-0 group-hover:opacity-100 whitespace-nowrap transition-opacity">
+            {loadingIdx === i ? '查询中' : '点击查看'}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── MarkdownComponents ───────────────────────────────────────────────────────
 
 const markdownComponents: Components = {
@@ -66,10 +153,8 @@ const markdownComponents: Components = {
     const codeContent = String(children).replace(/\n$/, '');
 
     if (match) {
-      // 围栏代码块（有语言标识）
       return <CodeBlock language={match[1]}>{codeContent}</CodeBlock>;
     }
-    // 行内代码
     return (
       <code
         className="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded text-xs font-mono"
@@ -130,6 +215,27 @@ const markdownComponents: Components = {
       </td>
     );
   },
+
+  ul({ children }) {
+    const items = React.Children.toArray(children).filter(
+      (c): c is React.ReactElement => React.isValidElement(c) && c.type === 'li'
+    );
+
+    if (items.length >= 2 && items.length <= 15) {
+      const cardItems = items.map(item => ({
+        text: getTextFromNode(item).trim(),
+        url: getUrlFromNode((item.props as { children?: React.ReactNode }).children),
+      }));
+      const isSimpleList = cardItems.every(
+        ({ text }) => text.length > 0 && text.length <= 80 && !text.includes('\n')
+      );
+      if (isSimpleList) {
+        return <AssetCardGrid items={cardItems} />;
+      }
+    }
+
+    return <ul className="list-disc pl-5 my-2 space-y-1 text-slate-700">{children}</ul>;
+  },
 };
 
 // ─── parseThought ─────────────────────────────────────────────────────────────
@@ -140,6 +246,29 @@ function parseThought(content: string): { thought: string | null; body: string }
   return { thought: match[1], body: match[2] };
 }
 
+// ─── SourceFootnote ───────────────────────────────────────────────────────────
+
+function SourceFootnote({ sourcesCount, topSources }: { sourcesCount: number; topSources: string[] }) {
+  return (
+    <div className="mt-4 pt-3 border-t border-slate-100">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <i className="ri-database-2-line text-[10px] text-slate-400" />
+        <span className="text-[10px] text-slate-400">
+          基于 <strong className="text-slate-500 font-medium">{sourcesCount}</strong> 个数据源
+        </span>
+        {topSources.map(name => (
+          <span
+            key={name}
+            className="px-1.5 py-0.5 bg-slate-50 border border-slate-100 rounded text-[10px] text-slate-500"
+          >
+            {name}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── MessageBubble ────────────────────────────────────────────────────────────
 
 export interface MessageBubbleProps {
@@ -147,6 +276,10 @@ export interface MessageBubbleProps {
   content: string;
   isStreaming?: boolean;
   isError?: boolean;
+  /** error_code from SSE error event — controls icon choice */
+  errorCode?: string;
+  /** user-readable hint from backend — shown as secondary text */
+  errorHint?: string;
   /** ReAct reasoning text from SSE thinking event (Spec 29/30) */
   thinking?: string;
   /** trace_id for feedback/rating (Spec 36 §5) */
@@ -155,6 +288,9 @@ export interface MessageBubbleProps {
   tableData?: TableData;
   /** Structured chart data from chart_data SSE event */
   chartData?: ChartData;
+  /** Source metadata — rendered as inline footnote inside assistant bubble */
+  sourcesCount?: number;
+  topSources?: string[];
 }
 
 export default function MessageBubble({
@@ -162,23 +298,49 @@ export default function MessageBubble({
   content,
   isStreaming = false,
   isError = false,
+  errorCode,
+  errorHint,
   thinking,
   tableData,
   chartData,
+  sourcesCount,
+  topSources,
 }: MessageBubbleProps) {
   const isUser = role === 'user';
+
+  function errorIcon(code: string | undefined): string {
+    if (code === 'AGENT_001') return 'ri-timer-line';
+    if (code === 'AGENT_003') return 'ri-tools-line';
+    if (code === 'STREAM_ERROR') return 'ri-wifi-off-line';
+    return 'ri-error-warning-line';
+  }
+
+  function errorLabel(code: string | undefined): string {
+    if (code === 'AGENT_001') return '查询超时';
+    if (code === 'AGENT_003') return '工具执行失败';
+    if (code === 'STREAM_ERROR') return '连接中断，请重试';
+    return '出现错误，请重试';
+  }
+
+  const hasSourceFootnote = !isStreaming && !isUser && !isError
+    && sourcesCount != null && sourcesCount > 0
+    && topSources && topSources.length > 0;
 
   return (
     <div className={`flex ${isUser ? 'flex-row-reverse' : 'justify-start'} mb-4 group`}>
       <div
-        className={`${isUser ? 'self-end max-w-[85%]' : 'self-start max-w-[80%]'} rounded-2xl px-4 py-3 text-sm ${
+        className={`${
+          isUser
+            ? 'self-end max-w-[72%]'
+            : 'self-start w-full'
+        } rounded-2xl px-4 py-3 text-sm ${
           isUser
             ? 'bg-blue-600 text-white'
             : 'bg-white border border-slate-200 text-slate-800 shadow-sm'
         }`}
       >
         {!isUser && (
-          <div className="flex items-center gap-1 mb-1">
+          <div className="flex items-center gap-1 mb-2">
             <span className="w-5 h-5 rounded-full bg-slate-200 flex items-center justify-center">
               <i className="ri-robot-2-line text-[10px] text-slate-500" />
             </span>
@@ -188,9 +350,14 @@ export default function MessageBubble({
         {isUser ? (
           <p className="whitespace-pre-wrap break-words">{content}</p>
         ) : isError ? (
-          <div className="flex items-center gap-2 text-sm text-red-500 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
-            <i className="ri-wifi-off-line flex-shrink-0" />
-            <span>{content.trim() || '连接中断，请重试。'}</span>
+          <div className="flex flex-col gap-1 text-sm text-red-500 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+            <div className="flex items-center gap-2">
+              <i className={`${errorIcon(errorCode)} flex-shrink-0`} />
+              <span>{errorLabel(errorCode)}</span>
+            </div>
+            {errorHint && (
+              <p className="text-xs text-red-400 ml-6 leading-relaxed">{errorHint}</p>
+            )}
           </div>
         ) : isStreaming ? (
           <div className="prose prose-sm max-w-none prose-slate">
@@ -200,7 +367,6 @@ export default function MessageBubble({
         ) : (
           <div className="prose prose-sm max-w-none prose-slate">
             {(() => {
-              // Prefer SSE-provided thinking over content parsing (Spec 29/30)
               const showThought = thinking ?? (parseThought(content).thought ?? null);
               const bodyText = thinking ? content : parseThought(content).body;
               return (
@@ -211,6 +377,9 @@ export default function MessageBubble({
                   </ReactMarkdown>
                   {tableData && <QueryResultTable data={tableData} />}
                   {chartData && <QueryResultChart data={chartData} />}
+                  {hasSourceFootnote && (
+                    <SourceFootnote sourcesCount={sourcesCount!} topSources={topSources!} />
+                  )}
                 </>
               );
             })()}

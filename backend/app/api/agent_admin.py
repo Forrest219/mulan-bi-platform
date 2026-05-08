@@ -15,13 +15,14 @@ from typing import Optional, List, Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, case, desc
+from sqlalchemy import func, case, desc, text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import require_roles
 from services.data_agent.models import BiAgentRun, BiAgentStep, BiAgentFeedback
 from services.data_agent.models import AgentConversation, AgentConversationMessage
+from services.auth.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +58,13 @@ class AgentStatsResponse(BaseModel):
 class AgentRunItem(BaseModel):
     id: str
     user_id: int
+    username: Optional[str] = None
     question: str
     status: str
     execution_time_ms: Optional[int] = None
     tools_used: Optional[List[str]] = None
     created_at: Optional[str] = None
+    feedback: Optional[str] = None  # 'up' | 'down' | None
 
 
 class AgentRunsResponse(BaseModel):
@@ -172,19 +175,29 @@ def get_agent_stats(
     except Exception as exc:
         logger.warning("统计热门工具失败: %s", exc)
 
-    # 反馈汇总
-    up_count: int = (
+    # 反馈汇总：bi_agent_feedback（v1）+ message_feedback（v2）两表合计
+    legacy_up: int = (
         db.query(func.count(BiAgentFeedback.id))
         .filter(BiAgentFeedback.rating == "up")
         .scalar()
         or 0
     )
-    down_count: int = (
+    legacy_down: int = (
         db.query(func.count(BiAgentFeedback.id))
         .filter(BiAgentFeedback.rating == "down")
         .scalar()
         or 0
     )
+    mf_row = db.execute(
+        text(
+            "SELECT "
+            "COUNT(*) FILTER (WHERE rating='up') AS up, "
+            "COUNT(*) FILTER (WHERE rating='down') AS down "
+            "FROM message_feedback"
+        )
+    ).one()
+    up_count: int = legacy_up + (mf_row.up or 0)
+    down_count: int = legacy_down + (mf_row.down or 0)
 
     return AgentStatsResponse(
         total_runs=total_runs,
@@ -229,15 +242,44 @@ def list_agent_runs(
         .all()
     )
 
+    # 批量查用户名
+    user_ids = list({r.user_id for r in runs})
+    username_map: dict = {}
+    if user_ids:
+        for u in db.query(User.id, User.username).filter(User.id.in_(user_ids)).all():
+            username_map[u.id] = u.username
+
+    # 批量查反馈：v1 (bi_agent_feedback.run_id) + v2 (message_feedback.conversation_id)
+    run_ids = [r.id for r in runs]
+    conv_ids = [str(r.conversation_id) for r in runs if r.conversation_id]
+    v1_map: dict = {}
+    v2_map: dict = {}
+    if run_ids:
+        for fb in db.query(BiAgentFeedback.run_id, BiAgentFeedback.rating).filter(
+            BiAgentFeedback.run_id.in_(run_ids)
+        ).all():
+            v1_map[str(fb.run_id)] = fb.rating
+    if conv_ids:
+        from sqlalchemy import bindparam
+        stmt = text(
+            "SELECT DISTINCT ON (conversation_id) conversation_id, rating "
+            "FROM message_feedback WHERE conversation_id IN :ids "
+            "ORDER BY conversation_id, created_at DESC"
+        ).bindparams(bindparam("ids", expanding=True))
+        for row in db.execute(stmt, {"ids": conv_ids}).all():
+            v2_map[row.conversation_id] = row.rating
+
     items = [
         AgentRunItem(
             id=str(run.id),
             user_id=run.user_id,
+            username=username_map.get(run.user_id),
             question=(run.question[:100] + "...") if len(run.question) > 100 else run.question,
             status=run.status,
             execution_time_ms=run.execution_time_ms,
             tools_used=run.tools_used,
             created_at=run.created_at.isoformat() if run.created_at else None,
+            feedback=v1_map.get(str(run.id)) or v2_map.get(str(run.conversation_id)),
         )
         for run in runs
     ]

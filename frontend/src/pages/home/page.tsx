@@ -76,7 +76,16 @@ function HomePageInner() {
   const [lastQuestion, setLastQuestion] = useState('');
   const lastQuestionRef = useRef('');
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
-  const [historyMessages, setHistoryMessages] = useState<Array<{role: 'user'|'assistant'; content: string; created_at?: string; response_type?: string | null; response_data?: unknown}>>([]);
+  const [historyMessages, setHistoryMessages] = useState<Array<{
+    role: 'user' | 'assistant';
+    content: string;
+    created_at?: string;
+    response_type?: string | null;
+    response_data?: unknown;
+    trace_id?: string | null;
+    sources_count?: number | null;
+    top_sources?: string[] | null;
+  }>>([]);
 
   const { connectionId: scopeConnectionId, setConnectionId: setScopeConnectionId } = useScope();
 
@@ -111,6 +120,9 @@ function HomePageInner() {
         created_at: m.created_at,
         response_type: m.response_type,
         response_data: m.response_data,
+        trace_id: m.trace_id,
+        sources_count: m.sources_count,
+        top_sources: m.top_sources,
       }));
       setHistoryMessages(history);
       setCurrentConversationId(convId);
@@ -342,6 +354,7 @@ function HomePageInner() {
           lastQuestion={lastQuestion}
           onRegenerate={handleRegenerate}
           historyMessages={historyMessages}
+          historyConversationId={currentConversationId}
         />
       )}
       {/* SuggestionGrid */}
@@ -360,6 +373,7 @@ function HomePageInner() {
           lastQuestion={lastQuestion}
           onRegenerate={handleRegenerate}
           historyMessages={historyMessages}
+          historyConversationId={currentConversationId}
         />
       )}
       {/* SearchResult */}
@@ -393,6 +407,7 @@ function HomePageInner() {
           lastQuestion={lastQuestion}
           onRegenerate={handleRegenerate}
           historyMessages={historyMessages}
+          historyConversationId={currentConversationId}
         />
       )}
     </>

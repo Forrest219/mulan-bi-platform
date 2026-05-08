@@ -50,6 +50,10 @@ export interface StreamingMessage {
   stepsCount?: number;
   /** ISO timestamp of when the message was created locally */
   timestamp?: string;
+  /** error_code when isError=true — used by MessageBubble to pick icon */
+  errorCode?: string;
+  /** user-readable error hint from backend — shown as secondary text */
+  errorHint?: string;
 }
 
 export interface UseStreamingChatReturn {
@@ -145,7 +149,7 @@ export function useStreamingChat(): UseStreamingChatReturn {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === id
-                    ? { ...m, conversationId: event.conversation_id }
+                    ? { ...m, conversationId: event.conversation_id, traceId: event.run_id }
                     : m,
                 ),
               );
@@ -218,7 +222,7 @@ export function useStreamingChat(): UseStreamingChatReturn {
                   m.id === id
                     ? {
                         ...m,
-                        traceId: event.trace_id,
+                        traceId: event.run_id,
                         executionTimeMs: event.execution_time_ms,
                         responseType: event.response_type,
                         stepsCount: event.steps_count,
@@ -230,12 +234,13 @@ export function useStreamingChat(): UseStreamingChatReturn {
             }
             done = true;
           } else if (event.type === 'error') {
-            bufferRef.current += `\n\n⚠️ ${event.message}`;
             const id = streamingIdRef.current;
             if (id) {
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === id ? { ...m, isError: true } : m,
+                  m.id === id
+                    ? { ...m, isError: true, errorCode: event.error_code, errorHint: event.user_hint }
+                    : m,
                 ),
               );
             }

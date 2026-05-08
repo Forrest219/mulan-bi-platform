@@ -456,31 +456,25 @@ export default function AgentMonitorPage() {
             <div className="px-4 py-3 border-b border-slate-100">
               <h3 className="text-sm font-semibold text-slate-700">用户反馈</h3>
             </div>
-            <div className="p-4 flex items-center gap-6">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-full">
-                  <i className="ri-thumb-up-line text-emerald-600 text-sm" />
-                </div>
-                <div>
-                  <div className="text-lg font-bold text-slate-800">
-                    {stats.feedback_summary.up}
+            <div className="flex flex-col">
+              <div className="grid grid-cols-2 divide-x divide-slate-100">
+                <div className="py-5 flex flex-col items-center gap-1.5">
+                  <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-full">
+                    <i className="ri-thumb-up-line text-emerald-600 text-sm" />
                   </div>
+                  <div className="text-lg font-bold text-slate-800">{stats.feedback_summary.up}</div>
                   <div className="text-xs text-slate-500">点赞</div>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 flex items-center justify-center bg-red-100 rounded-full">
-                  <i className="ri-thumb-down-line text-red-600 text-sm" />
-                </div>
-                <div>
-                  <div className="text-lg font-bold text-slate-800">
-                    {stats.feedback_summary.down}
+                <div className="py-5 flex flex-col items-center gap-1.5">
+                  <div className="w-8 h-8 flex items-center justify-center bg-red-100 rounded-full">
+                    <i className="ri-thumb-down-line text-red-600 text-sm" />
                   </div>
-                  <div className="text-xs text-slate-500">点踩</div>
+                  <div className="text-lg font-bold text-slate-800">{stats.feedback_summary.down}</div>
+                  <div className="text-xs text-slate-500">报错</div>
                 </div>
               </div>
               {(stats.feedback_summary.up + stats.feedback_summary.down) > 0 && (
-                <div className="ml-auto text-sm text-slate-500">
+                <div className="px-4 py-2 border-t border-slate-100 text-xs text-center text-slate-500">
                   满意率{' '}
                   <span className="font-semibold text-slate-700">
                     {(
@@ -660,6 +654,7 @@ export default function AgentMonitorPage() {
                     <th className="text-left px-4 py-2.5 font-medium">问题</th>
                     <th className="text-left px-4 py-2.5 font-medium">状态</th>
                     <th className="text-left px-4 py-2.5 font-medium">耗时</th>
+                    <th className="text-left px-4 py-2.5 font-medium">反馈</th>
                     <th className="text-left px-4 py-2.5 font-medium">工具</th>
                   </tr>
                 </thead>
@@ -685,7 +680,7 @@ export default function AgentMonitorPage() {
                             {formatDate(run.created_at)}
                           </td>
                           <td className="px-4 py-3 text-slate-700 whitespace-nowrap">
-                            #{run.user_id}
+                            {run.username ?? `#${run.user_id}`}
                           </td>
                           <td className="px-4 py-3 text-slate-700 max-w-xs truncate" title={run.question}>
                             {run.question}
@@ -693,6 +688,19 @@ export default function AgentMonitorPage() {
                           <td className="px-4 py-3">{statusBadge(run.status)}</td>
                           <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
                             {formatMs(run.execution_time_ms)}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            {run.feedback === 'up' && (
+                              <span className="inline-flex items-center gap-1 text-xs text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">
+                                <i className="ri-thumb-up-line" />有用
+                              </span>
+                            )}
+                            {run.feedback === 'down' && (
+                              <span className="inline-flex items-center gap-1 text-xs text-red-500 bg-red-50 px-1.5 py-0.5 rounded">
+                                <i className="ri-error-warning-line" />报错
+                              </span>
+                            )}
+                            {!run.feedback && <span className="text-xs text-slate-300">-</span>}
                           </td>
                           <td className="px-4 py-3">
                             {run.tools_used && run.tools_used.length > 0 ? (
