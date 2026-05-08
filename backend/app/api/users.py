@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from app.core.constants import VALID_ROLES
 from app.core.dependencies import get_current_admin, get_current_user
+from services.audit.audit_service import log_action
 from services.auth import auth_service
 
 router = APIRouter()
@@ -57,8 +58,8 @@ async def get_users(role: Optional[str] = None):
     return {"users": users, "total": len(users)}
 
 
-@router.post("/", dependencies=[Depends(get_current_admin)])
-async def create_user(request: CreateUserRequest):
+@router.post("/")
+async def create_user(request: CreateUserRequest, current_user: dict = Depends(get_current_admin)):
     """创建用户（管理员）"""
     if request.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail="无效的角色")
@@ -74,6 +75,7 @@ async def create_user(request: CreateUserRequest):
     if not user:
         raise HTTPException(status_code=400, detail="用户名已存在")
 
+    log_action(current_user["id"], current_user.get("username", ""), "create", "user", user["id"], after_state=user)
     return {"user": user, "message": "用户创建成功"}
 
 
@@ -208,6 +210,7 @@ async def delete_user(user_id: int, http_request: Request):
     if not success:
         raise HTTPException(status_code=404, detail="用户不存在")
 
+    log_action(current_user["id"], current_user.get("username", ""), "delete", "user", user_id)
     return {"message": "用户已删除"}
 
 

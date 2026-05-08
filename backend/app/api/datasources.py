@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.crypto import get_datasource_crypto
 from app.core.database import get_db  # 导入中央数据库依赖
 from app.core.dependencies import get_current_user, require_roles
+from services.audit.audit_service import log_action
 from app.core.errors import MulanError, DSError
 from services.datasources.models import DataSourceDatabase
 from services.datasources.upload_service import UploadService
@@ -203,6 +204,7 @@ async def create_datasource(
         extra_config=extra_config,
     )
 
+    log_action(current_user["id"], current_user.get("username", ""), "create", "datasource", ds.id, after_state=ds.to_dict())
     return {"datasource": ds.to_dict(), "message": "数据源创建成功"}
 
 
@@ -250,7 +252,9 @@ async def update_datasource(
     if "extra_config" in update_data and update_data["extra_config"] is not None:
         update_data["extra_config"] = update_data["extra_config"]
 
+    before_state = ds.to_dict()
     _db.update(db, ds_id, **update_data)
+    log_action(current_user["id"], current_user.get("username", ""), "update", "datasource", ds_id, before_state=before_state)
     return {"message": "数据源更新成功"}
 
 
@@ -270,7 +274,9 @@ async def delete_datasource(
     if current_user["role"] != "admin" and ds.owner_id != current_user["id"]:
         raise DSError.not_owner()
 
+    before_state = ds.to_dict()
     _db.delete(db, ds_id)
+    log_action(current_user["id"], current_user.get("username", ""), "delete", "datasource", ds_id, before_state=before_state)
     return {"message": "数据源已删除"}
 
 
