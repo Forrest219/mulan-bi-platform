@@ -80,8 +80,6 @@ function friendlyError(raw?: string): string {
 const TYPE_META: Record<string, { icon: string; cls: string; label: string }> = {
   tableau:   { icon: 'ri-bar-chart-2-line', cls: 'bg-blue-100 text-blue-700',    label: 'Tableau' },
   starrocks: { icon: 'ri-database-2-line', cls: 'bg-orange-100 text-orange-700', label: 'StarRocks' },
-  mysql:     { icon: 'ri-database-line',   cls: 'bg-cyan-100 text-cyan-700',    label: 'MySQL' },
-  custom:    { icon: 'ri-plug-line',        cls: 'bg-slate-100 text-slate-600',  label: '自定义' },
 };
 
 const TYPE_META_FALLBACK = { icon: 'ri-plug-line', cls: 'bg-slate-100 text-slate-600', label: '未知' };
@@ -89,15 +87,11 @@ const TYPE_META_FALLBACK = { icon: 'ri-plug-line', cls: 'bg-slate-100 text-slate
 const URL_PLACEHOLDERS: Record<string, string> = {
   tableau:   'http://localhost:3927/tableau-mcp',
   starrocks: 'http://localhost:3928/starrocks-mcp',
-  mysql:     'http://localhost:3929/mysql-mcp',
-  custom:    'http://your-mcp-server/path',
 };
 
 const SERVER_URL_LABELS: Record<string, string> = {
   tableau: 'MCP HTTP Endpoint',
   starrocks: 'MCP HTTP Endpoint',
-  mysql: 'MCP HTTP Endpoint',
-  custom: 'Server URL',
 };
 
 const defaultForm: McpServerForm = {
@@ -1079,7 +1073,7 @@ export default function McpConfigsPage() {
                                       ? `${testResult.latency_ms}ms`
                                       : testResult.status === 'auth_failed'
                                         ? '认证失败'
-                                        : '离线'
+                                        : testResult.auth === 'ok' ? '认证正常' : '离线'
                                     : '测试'}
                               </button>
                               {/* 删除 */}
@@ -1105,7 +1099,9 @@ export default function McpConfigsPage() {
                                   ? `连接正常 · ${testResult.latency_ms}ms`
                                   : testResult.status === 'auth_failed'
                                     ? `PAT 认证失败: ${testResult.error ?? '凭证无效或已过期'}`
-                                    : `无法连接: ${friendlyError(testResult.error)}`}
+                                    : testResult.auth === 'ok'
+                                      ? `PAT 认证正常，但 MCP Gateway 无法连接: ${testResult.error ?? ''}`
+                                      : `无法连接: ${friendlyError(testResult.error)}`}
                               </div>
                             )}
                             {/* Connected App 联动检查（Tableau 类型） */}
@@ -1219,8 +1215,6 @@ export default function McpConfigsPage() {
                   >
                     <option value="tableau">Tableau</option>
                     <option value="starrocks">StarRocks</option>
-                    <option value="mysql">MySQL</option>
-                    <option value="custom">自定义</option>
                   </select>
                 </div>
 
@@ -1298,53 +1292,6 @@ export default function McpConfigsPage() {
                       label="Port"
                       fieldKey="port"
                       placeholder="9030"
-                      form={form}
-                      setForm={setForm}
-                      readOnly={false}
-                    />
-                    <CredentialField
-                      label="用户名"
-                      fieldKey="user"
-                      placeholder="root"
-                      form={form}
-                      setForm={setForm}
-                      readOnly={false}
-                    />
-                    <CredentialField
-                      label="密码"
-                      fieldKey="password"
-                      placeholder=""
-                      sensitive
-                      form={form}
-                      setForm={setForm}
-                      readOnly={false}
-                    />
-                    <CredentialField
-                      label="默认数据库（可选）"
-                      fieldKey="database"
-                      placeholder="可选"
-                      form={form}
-                      setForm={setForm}
-                      readOnly={false}
-                    />
-                  </CredentialSection>
-                )}
-
-                {/* 凭证字段 — MySQL */}
-                {form.type === 'mysql' && (
-                  <CredentialSection title="MySQL 连接">
-                    <CredentialField
-                      label="Host"
-                      fieldKey="host"
-                      placeholder="localhost"
-                      form={form}
-                      setForm={setForm}
-                      readOnly={false}
-                    />
-                    <CredentialField
-                      label="Port"
-                      fieldKey="port"
-                      placeholder="3306"
                       form={form}
                       setForm={setForm}
                       readOnly={false}

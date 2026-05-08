@@ -13,15 +13,15 @@ Endpoints：
     路由层只做：HTTP 参数解析 / 权限检查（get_current_user）/ 调用 service / 返回响应
     业务逻辑禁止写在路由层。
 
-自然语言 → VizQL JSON（占位说明）：
-    TODO (T-04 placeholder): 当前实现将 message 原样作为 vizql_query 的 question 字段透传，
-    未经 NLQ 引擎解析。正式版本应接入 NLQ 解析流水线（与 /api/search/query 路径对齐），
-    将自然语言 message 解析为 VizQL 结构化 JSON 后再传给 QueryService.ask()。
-    在该占位逻辑下，MCP 将以 fallback 空查询处理，返回结果可能为空。
+自然语言 → VizQL JSON（LLM One-Pass）：
+    _build_vizql_query 调用 llm_service.complete_with_temp 将自然语言解析为
+    VizQL 结构化 JSON，传给 QueryService.ask_stream()。解析失败时 fallback 到
+    {"question": message}，不阻断主流程。
 
 权限设计：
     仅登录即可（Depends(get_current_user)），不新增独立权限，不改动 Auth 模块。
 """
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from services.llm.service import llm_service
 from services.query.query_service import QueryService, QueryServiceError
 
 logger = logging.getLogger(__name__)
@@ -84,22 +85,61 @@ def _map_service_error(exc: QueryServiceError) -> HTTPException:
     )
 
 
-def _build_vizql_query(message: str) -> Dict[str, Any]:
-    """
-    TODO (T-04 placeholder): 将自然语言 message 解析为 VizQL 结构化 JSON。
+_NLQ_SYSTEM_PROMPT = (
+    "你是将自然语言问题转换为数据查询 JSON 的解析器。\n"
+    "输出格式（仅输出纯 JSON，不含任何 markdown 或额外文字）：\n"
+    "{\n"
+    '  "question": "原始自然语言问题",\n'
+    '  "fields": [\n'
+    '    {"fieldCaption": "字段名", "function": "SUM|AVG|COUNT|MAX|MIN|COUNTD|DAY|MONTH|YEAR|<留空>"},\n'
+    '    ...\n'
+    '  ],\n'
+    '  "filters": [\n'
+    '    {"field": {"fieldCaption": "字段名"}, "filterType": "SET", "values": ["值1", "值2"]},\n'
+    '    ...\n'
+    '  ],\n'
+    '  "limit": 100\n'
+    "}\n"
+    "规则：\n"
+    "1. fields 包含问题涉及的度量字段（需聚合时写 function）和维度字段（function 留空）\n"
+    "2. filters 仅在问题有明确过滤条件时填写，其余情况为空数组\n"
+    "3. limit 默认 100；用户要求 TOP N 时填写 N\n"
+    "4. question 必须保留原始问题"
+)
 
-    当前为占位实现：直接将 message 封装为 {"question": message}，
-    由 QueryService.ask() 以 fallback 空查询处理。
 
-    正式版本应调用 NLQ 解析流水线，生成符合 Tableau VizQL 规范的 JSON，例如：
-    {
-        "datasource": {"datasourceName": "..."},
-        "columns": [{"columnName": "Sales", "function": "SUM"}],
-        "filters": [...],
-        ...
-    }
+async def _build_vizql_query(message: str) -> Dict[str, Any]:
+    """将自然语言 message 解析为 VizQL 结构化 JSON（LLM One-Pass）。
+
+    调用 llm_service.complete_with_temp（temperature=0.0 保证输出稳定）。
+    任何错误均 fallback 到 {"question": message}，保证不阻断主流程。
     """
-    return {"question": message}
+    try:
+        result = await llm_service.complete_with_temp(
+            prompt=message,
+            system=_NLQ_SYSTEM_PROMPT,
+            temperature=0.0,
+            timeout=10,
+        )
+        if "error" in result or "content" not in result:
+            return {"question": message}
+
+        content = result["content"].strip()
+        # 去除可能的 markdown 代码块包装
+        if content.startswith("```"):
+            lines = content.split("\n")
+            # 去掉首行 ```json / ``` 和末行 ```
+            content = "\n".join(lines[1:-1]) if lines[-1].strip() == "```" else "\n".join(lines[1:])
+
+        parsed = json.loads(content)
+        if not isinstance(parsed, dict):
+            return {"question": message}
+        # 确保 question 字段始终存在
+        parsed.setdefault("question", message)
+        return parsed
+    except Exception:
+        logger.debug("NLQ 解析失败，使用 fallback 空查询", exc_info=True)
+        return {"question": message}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -162,8 +202,8 @@ async def ask(
         data: {"type": "done",   "session_id": "...", "answer": "...", "data_table": [...]}\n\n
         data: {"type": "error",  "code": "Q_XXX_NNN", "message": "..."}\n\n
     """
-    # 路由层将自然语言 message 解析为 VizQL JSON（当前为占位实现，详见 _build_vizql_query 注释）
-    vizql_query = _build_vizql_query(body.message)
+    # NL→VizQL: LLM One-Pass 解析（失败时 fallback 到 {"question": message}）
+    vizql_query = await _build_vizql_query(body.message)
 
     svc = QueryService(db=db)
 

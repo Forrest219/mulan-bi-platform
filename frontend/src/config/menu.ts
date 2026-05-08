@@ -300,6 +300,12 @@ export const menuConfig: MenuDomain[] = [
         path: '/system/token-stats',
       },
       {
+        key: 'query-alerts',
+        label: '查数日志',
+        icon: 'ri-file-list-3-line',
+        path: '/system/query-alerts',
+      },
+      {
         key: 'account-security',
         label: '账户安全',
         icon: 'ri-lock-line',

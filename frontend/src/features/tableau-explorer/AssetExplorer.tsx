@@ -58,6 +58,7 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   const filteredProjects = useMemo(() => {
     if (!projectSearch.trim()) return projects;
@@ -107,7 +108,7 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
         setSelectedConn(target);
         localStorage.setItem(LS_KEY, target.name);
       }
-    }).catch(() => { /* silently ignore */ });
+    }).catch(() => { setLoadError('无法加载连接列表，请刷新重试'); });
   }, []);
   /* eslint-enable react-hooks/exhaustive-deps */
 
@@ -119,6 +120,7 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
   useEffect(() => {
     if (!connectionId) return;
     setLoading(true);
+    setLoadError('');
     const promise = search
       ? searchAssets({ q: search, connection_id: connectionId, asset_type: assetTypeFilter || undefined, page, page_size: 24 })
       : listAssets({ connection_id: connectionId, asset_type: assetTypeFilter || undefined, page, page_size: 24 });
@@ -130,7 +132,7 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
       setAssets(assetsData.assets);
       setTotal(assetsData.total);
       setProjects(projectsData.projects || []);
-    }).catch(() => { /* silently ignore */ }).finally(() => setLoading(false));
+    }).catch((e: unknown) => { setLoadError(e instanceof Error ? e.message : '加载资产数据失败，请刷新重试'); }).finally(() => setLoading(false));
   }, [connectionId, search, assetTypeFilter, page]);
 
   const handleAssetClick = (asset: TableauAsset) => {
@@ -284,6 +286,15 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
 
           {/* Main Content */}
           <main className="flex-1 min-w-0">
+            {loadError && (
+              <div className="mb-4 flex items-start gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs">
+                <i className="ri-error-warning-line mt-0.5 flex-shrink-0" />
+                <span className="flex-1">{loadError}</span>
+                <button onClick={() => setLoadError('')} className="text-red-400 hover:text-red-600 flex-shrink-0">
+                  <i className="ri-close-line" />
+                </button>
+              </div>
+            )}
             {loading ? (
               <div className="flex flex-col items-center justify-center py-20">
                 <i className="ri-loader-4-line text-2xl text-blue-600 animate-spin" />

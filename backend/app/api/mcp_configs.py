@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.database import SessionLocal
 from app.core.dependencies import get_current_admin
+from app.core.crypto import get_mcp_crypto
 from services.mcp.models import McpServer
 from services.llm.service import llm_service
 from services.events import emit_event
@@ -20,6 +21,65 @@ from services.events.constants import (
 )
 
 logger = logging.getLogger(__name__)
+_mcp_crypto = get_mcp_crypto()
+
+_SENSITIVE_CRED_FIELDS = {"pat_value", "password", "secret", "token"}
+
+
+def _encrypt_credentials(creds: dict | None) -> dict | None:
+    """将凭证 dict 中的敏感字段加密，返回新 dict（其他字段保留明文以便读取）"""
+    if not creds:
+        return creds
+    result = {}
+    for k, v in creds.items():
+        if k in _SENSITIVE_CRED_FIELDS and isinstance(v, str) and v:
+            result[k] = _mcp_crypto.encrypt(v)
+            result[f"{k}_encrypted"] = True
+        else:
+            result[k] = v
+    return result
+
+
+def _decrypt_credentials(creds: dict | None) -> dict | None:
+    """解密凭证 dict 中已加密的敏感字段"""
+    if not creds:
+        return creds
+    result = {}
+    for k, v in creds.items():
+        if k.endswith("_encrypted"):
+            continue  # 跳过标记字段
+        base_key = k
+        if creds.get(f"{k}_encrypted") and isinstance(v, str) and v:
+            try:
+                result[base_key] = _mcp_crypto.decrypt(v)
+            except Exception:
+                result[base_key] = v  # 解密失败时原样返回（兼容旧明文数据）
+        else:
+            result[base_key] = v
+    return result
+
+
+def _mask_credentials(creds: dict | None) -> dict | None:
+    """对 API 响应中的凭证做脱敏处理，不向前端暴露明文密钥"""
+    if not creds:
+        return creds
+    result = {}
+    for k, v in creds.items():
+        if k.endswith("_encrypted"):
+            continue
+        if k in _SENSITIVE_CRED_FIELDS and v:
+            result[k] = "***"
+        else:
+            result[k] = v
+    return result
+
+
+def _to_masked_dict(record) -> dict:
+    """序列化 McpServer 并对凭证脱敏，用于所有 API 响应"""
+    d = record.to_dict()
+    if d.get("credentials"):
+        d["credentials"] = _mask_credentials(d["credentials"])
+    return d
 
 
 def _sync_mcp_to_tableau(mcp_name: str, mcp_server_url: str,
@@ -142,7 +202,7 @@ async def list_mcp_servers(request: Request):
     db = SessionLocal()
     try:
         records = db.query(McpServer).order_by(McpServer.created_at.desc()).all()
-        return [r.to_dict() for r in records]
+        return [_to_masked_dict(r) for r in records]
     finally:
         db.close()
 
@@ -167,7 +227,7 @@ async def create_mcp_server(req: McpServerCreateRequest, request: Request):
             server_url=req.server_url,
             description=req.description,
             is_active=req.is_active,
-            credentials=req.credentials,
+            credentials=_encrypt_credentials(req.credentials),
         )
         db.add(record)
         db.commit()
@@ -178,13 +238,13 @@ async def create_mcp_server(req: McpServerCreateRequest, request: Request):
                 _sync_mcp_to_tableau(
                     mcp_name=record.name,
                     mcp_server_url=record.server_url,
-                    credentials=record.credentials,
+                    credentials=_decrypt_credentials(record.credentials),
                     owner_id=user["id"],
                 )
             except Exception:
                 logger.exception("Sync bridge failed on CREATE for mcp '%s'", record.name)
 
-        return record.to_dict()
+        return _to_masked_dict(record)
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail=f"名称 '{req.name}' 已存在")
@@ -231,7 +291,7 @@ async def update_mcp_server(id: int, req: McpServerUpdateRequest, request: Reque
             record.is_active = req.is_active
         if req.credentials is not None:
             # 检查 credentials 中的特定字段是否变更
-            old_creds = old_credentials or {}
+            old_creds = _decrypt_credentials(old_credentials) or {}
             new_creds = req.credentials
             if old_creds.get("pat_value") != new_creds.get("pat_value"):
                 fields_changed.append("pat_value")
@@ -241,7 +301,7 @@ async def update_mcp_server(id: int, req: McpServerUpdateRequest, request: Reque
                 fields_changed.append("site_name")
             if old_creds.get("pat_name") != new_creds.get("pat_name"):
                 fields_changed.append("pat_name")
-            record.credentials = req.credentials
+            record.credentials = _encrypt_credentials(req.credentials)
 
         # 如果 name 变更，记录 old_name 在快照中
         mcp_snapshot = {
@@ -279,14 +339,14 @@ async def update_mcp_server(id: int, req: McpServerUpdateRequest, request: Reque
                 _sync_mcp_to_tableau(
                     mcp_name=record.name,
                     mcp_server_url=record.server_url,
-                    credentials=record.credentials,
+                    credentials=_decrypt_credentials(record.credentials),
                     owner_id=user["id"],
                     is_active=record.is_active,
                 )
             except Exception:
                 logger.exception("Sync bridge failed on UPDATE for mcp '%s'", record.name)
 
-        return record.to_dict()
+        return _to_masked_dict(record)
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="名称已存在")
@@ -439,6 +499,17 @@ async def _test_mcp_endpoint(url: str, start: float) -> dict:
                 "endpoint_status": "online",
                 "endpoint": endpoint,
             }
+    except _httpx.ConnectError:
+        latency_ms = int((_time.monotonic() - start) * 1000)
+        from urllib.parse import urlparse as _urlparse
+        netloc = _urlparse(endpoint).netloc or endpoint
+        return {
+            "status": "offline",
+            "latency_ms": latency_ms,
+            "endpoint_status": "offline",
+            "endpoint": endpoint,
+            "error": f"MCP Gateway 进程未运行（{netloc}）",
+        }
     except _httpx.HTTPError as e:
         latency_ms = int((_time.monotonic() - start) * 1000)
         return {
@@ -473,7 +544,7 @@ async def test_mcp_draft(request: Request):
                 **endpoint_result,
                 "auth": "ok",
                 "site_id": pat_result.get("site_id"),
-                "error": f"Tableau PAT 认证正常，但 {endpoint_result.get('error', 'MCP Endpoint 不可用')}",
+                "error": endpoint_result.get("error", "MCP Endpoint 不可用"),
             }
         return {
             **endpoint_result,
@@ -503,7 +574,7 @@ async def test_mcp_server(id: int, request: Request):
         if not record:
             raise HTTPException(status_code=404, detail="MCP server not found")
         server_type = record.type
-        credentials = record.credentials or {}
+        credentials = _decrypt_credentials(record.credentials or {})
         url = record.server_url
     finally:
         db.close()
@@ -522,7 +593,7 @@ async def test_mcp_server(id: int, request: Request):
                 **endpoint_result,
                 "auth": "ok",
                 "site_id": pat_result.get("site_id"),
-                "error": f"Tableau PAT 认证正常，但 {endpoint_result.get('error', 'MCP Endpoint 不可用')}",
+                "error": endpoint_result.get("error", "MCP Endpoint 不可用"),
             }
         return {
             **endpoint_result,

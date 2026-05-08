@@ -396,12 +396,7 @@ const routes: RouteObject[] = [
         children: [
           {
             path: 'nl-query',
-            // disabled: true，路由保留但菜单不可点击（Spec 18 §5.2）
-            element: (
-              <ProtectedRoute requiredPermission="database_monitor">
-                <DataHealthPage /> {/* 临时复用占位，待功能开发后替换 */}
-              </ProtectedRoute>
-            ),
+            element: <Navigate to="/query" replace />,
           },
           {
             path: 'knowledge',
