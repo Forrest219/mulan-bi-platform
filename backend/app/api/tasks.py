@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.database import SessionLocal
 from app.core.dependencies import get_current_user
+from services.audit.audit_service import log_action
 from services.tasks import celery_app
 from services.tasks.seed import seed_task_schedules
 
@@ -135,7 +136,7 @@ async def list_schedules(request: Request):
 @router.patch("/schedules/{schedule_key}")
 async def update_schedule_enabled(schedule_key: str, request: Request):
     """启用/禁用调度任务，或更新 cron 表达式"""
-    _require_admin(request)
+    user = _require_admin(request)
 
     body = await request.json()
     is_enabled = body.get("is_enabled")
@@ -179,6 +180,12 @@ async def update_schedule_enabled(schedule_key: str, request: Request):
                     detail={"error_code": "TASK_002", "message": "调度任务不存在"},
                 )
 
+        after = {"schedule_key": schedule_key}
+        if cron_expr is not None:
+            after["cron_expr"] = cron_expr
+        if is_enabled is not None:
+            after["is_enabled"] = is_enabled
+        log_action(user["id"], user.get("username", ""), "update", "task_schedule", schedule_key, after_state=after)
         return {
             "schedule_key": schedule_key,
             "is_enabled": result.is_enabled,
@@ -192,7 +199,7 @@ async def update_schedule_enabled(schedule_key: str, request: Request):
 @router.post("/trigger")
 async def trigger_task(request: Request):
     """手动触发任务（白名单限制）"""
-    _require_admin(request)
+    user = _require_admin(request)
 
     body = await request.json()
     task_name = body.get("task_name")
@@ -204,6 +211,8 @@ async def trigger_task(request: Request):
         )
 
     result = celery_app.send_task(task_name, headers={"trigger_type": "manual"})
+    log_action(user["id"], user.get("username", ""), "trigger", "task", task_name,
+               after_state={"celery_task_id": result.id, "task_name": task_name})
     return JSONResponse(
         status_code=202,
         content={

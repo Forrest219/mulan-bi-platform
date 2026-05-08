@@ -89,22 +89,25 @@ async def get_user(user_id: int):
     return user
 
 
-@router.put("/{user_id}", dependencies=[Depends(get_current_admin)])
-async def update_user(user_id: int, request: UpdateUserRequest, http_request: Request):
+@router.put("/{user_id}")
+async def update_user(user_id: int, request: UpdateUserRequest, current_user: dict = Depends(get_current_admin)):
     """更新用户基础信息（管理员）"""
+    changed = {}
+
     # 处理 role 变更
     if request.role is not None:
         if request.role not in VALID_ROLES:
             raise HTTPException(status_code=400, detail="无效的角色")
         # 防止把自己降级
-        current_user = get_current_user(http_request)
         if current_user["id"] == user_id and request.role != "admin":
             raise HTTPException(status_code=400, detail="不能将自己的角色降级")
         auth_service.update_user_role(user_id, request.role)
+        changed["role"] = request.role
 
     # 处理 is_active 变更
     if request.is_active is not None:
         auth_service.toggle_user_active(user_id)
+        changed["is_active"] = request.is_active
 
     # 处理 group_ids 变更
     if request.group_ids is not None:
@@ -122,6 +125,7 @@ async def update_user(user_id: int, request: UpdateUserRequest, http_request: Re
         for gid in desired_groups:
             if gid not in [g["id"] for g in current_groups]:
                 auth_service.add_user_to_group(user_id, gid)
+        changed["group_ids"] = request.group_ids
 
     # 处理 display_name / email 变更
     if request.display_name is not None or request.email is not None:
@@ -132,12 +136,19 @@ async def update_user(user_id: int, request: UpdateUserRequest, http_request: Re
         )
         if not updated:
             raise HTTPException(status_code=404, detail="用户不存在或邮箱已被使用")
+        if request.display_name is not None:
+            changed["display_name"] = request.display_name
+        if request.email is not None:
+            changed["email"] = request.email
 
+    if changed:
+        log_action(current_user["id"], current_user.get("username", ""), "update", "user", user_id,
+                   after_state=changed)
     return {"user": auth_service.get_user(user_id), "message": "用户信息已更新"}
 
 
 @router.put("/{user_id}/role")
-async def update_user_role(user_id: int, request: UpdateUserRoleRequest, http_request: Request, current_user: dict = Depends(get_current_admin)):
+async def update_user_role(user_id: int, request: UpdateUserRoleRequest, current_user: dict = Depends(get_current_admin)):
     """更新用户角色（管理员）"""
     if request.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail="无效的角色")
