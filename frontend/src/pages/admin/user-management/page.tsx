@@ -174,7 +174,7 @@ export default function UserManagementPage() {
     if (!newUser.display_name.trim()) { setFormError('请输入显示名称'); return; }
     if (!newUser.password) { setFormError('请输入密码'); return; }
     if (newUser.password !== newUser.confirm_password) { setFormError('两次输入的密码不一致'); return; }
-    if (newUser.password.length < 6) { setFormError('密码长度至少为6位'); return; }
+    if (newUser.password.length < 8) { setFormError('密码长度至少为8位'); return; }
 
     const response = await fetch(`${API_BASE}/api/users/`, {
       method: 'POST',
