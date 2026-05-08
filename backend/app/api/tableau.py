@@ -13,6 +13,7 @@ from app.core.dependencies import get_current_user, require_roles
 from app.utils.auth import verify_connection_access  # 导入统一的权限验证函数
 from services.tableau.models import TableauDatabase
 from services.tableau.sync_service import TableauSyncService
+from services.audit.audit_service import log_action
 
 router = APIRouter()
 
@@ -202,6 +203,8 @@ async def create_connection(
         connection_type=req.connection_type
     )
 
+    log_action(current_user["id"], current_user.get("username", ""), "create", "tableau_connection", conn.id,
+               after_state={"name": conn.name, "server_url": conn.server_url, "site": conn.site})
     return {"connection": conn.to_dict(), "message": "连接创建成功"}
 
 
@@ -230,6 +233,7 @@ async def update_connection(
         update_data.pop("token_name", None)
 
     _db.update_connection(conn_id, **update_data)
+    log_action(current_user["id"], current_user.get("username", ""), "update", "tableau_connection", conn_id)
     return {"message": "连接更新成功"}
 
 
@@ -246,6 +250,7 @@ async def delete_connection(
     verify_connection_access(conn_id, current_user, db)
 
     _db.delete_connection(conn_id)
+    log_action(current_user["id"], current_user.get("username", ""), "delete", "tableau_connection", conn_id)
     return {"message": "连接已删除"}
 
 
@@ -386,8 +391,25 @@ async def search_assets(
         owner_id=owner_id_filter,
     )
 
+    # 批量加载连接信息，为每个资产注入 server_url / site（供前端构造 Tableau 跳转链接）
+    from services.tableau.models import TableauConnection as _TC
+    conn_ids = list({a.connection_id for a in assets})
+    conn_map = {}
+    if conn_ids:
+        conns = db.query(_TC).filter(_TC.id.in_(conn_ids)).all()
+        conn_map = {c.id: c for c in conns}
+
+    asset_dicts = []
+    for a in assets:
+        d = a.to_dict()
+        conn = conn_map.get(a.connection_id)
+        if conn:
+            d['server_url'] = conn.server_url
+            d['site'] = conn.site or ''
+        asset_dicts.append(d)
+
     return {
-        "assets": [a.to_dict() for a in assets],
+        "assets": asset_dicts,
         "total": total,
         "page": page,
         "page_size": page_size
@@ -452,8 +474,15 @@ async def list_all_sync_logs(
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    """跨连接获取同步日志列表"""
-    get_current_user(request, db)
+    """跨连接获取同步日志列表（admin/data_admin 可查所有，其他角色须指定自己有权访问的 connection_id）"""
+    user = get_current_user(request, db)
+    is_privileged = user.get("role") in ("admin", "data_admin")
+
+    if not is_privileged:
+        if connection_id is None:
+            raise HTTPException(status_code=403, detail="查看全部同步日志需要管理员权限，请指定 connection_id")
+        # 验证当前用户对该连接有访问权
+        verify_connection_access(connection_id, user, db)
     _db = TableauDatabase(session=db)
     logs, total = _db.get_all_sync_logs(
         connection_id=connection_id,
@@ -615,6 +644,8 @@ async def sync_connection(
     if celery_available:
         from services.tasks.tableau_tasks import sync_connection_task
         task = sync_connection_task.delay(conn_id)
+        log_action(current_user["id"], current_user.get("username", ""), "sync", "tableau_connection", conn_id,
+                   after_state={"task_id": task.id, "mode": "celery"})
         return {"task_id": task.id, "message": "同步任务已提交", "status": "pending"}
 
     # Celery 不可用时回退到同步执行（开发环境兼容）
@@ -678,6 +709,7 @@ async def sync_connection(
     result = await asyncio.to_thread(_run_sync_inline)
     if result.get("status") == "error":
         raise HTTPException(status_code=500, detail={"message": result["message"]})
+    log_action(current_user["id"], current_user.get("username", ""), "sync", "tableau_connection", conn_id)
     return {
         "message": f"同步已完成，共处理 {result.get('total', 0)} 个资产",
         "status": "completed",

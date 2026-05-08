@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from app.core.dependencies import get_current_admin
 from app.core.errors import MulanError
 from services.auth import auth_service
+from services.audit.audit_service import log_action
 
 router = APIRouter(tags=["用户组管理"])
 
@@ -56,8 +57,8 @@ async def get_group(group_id: int):
     return group
 
 
-@router.post("/", dependencies=[Depends(get_current_admin)])
-async def create_group(request: CreateGroupRequest):
+@router.post("/")
+async def create_group(request: CreateGroupRequest, current_user: dict = Depends(get_current_admin)):
     """创建用户组（管理员）"""
     # 验证权限
     for perm in request.permissions:
@@ -73,11 +74,13 @@ async def create_group(request: CreateGroupRequest):
     if not group:
         raise MulanError("AUTH_005", "用户组名称已存在", 409)
 
+    log_action(current_user["id"], current_user.get("username", ""), "create", "user_group", group["id"],
+               after_state={"name": group["name"], "permissions": request.permissions})
     return {"group": group, "message": "用户组创建成功"}
 
 
-@router.put("/{group_id}", dependencies=[Depends(get_current_admin)])
-async def update_group(group_id: int, request: UpdateGroupRequest):
+@router.put("/{group_id}")
+async def update_group(group_id: int, request: UpdateGroupRequest, current_user: dict = Depends(get_current_admin)):
     """更新用户组（管理员）"""
     success = auth_service.update_group(
         group_id=group_id,
@@ -88,16 +91,19 @@ async def update_group(group_id: int, request: UpdateGroupRequest):
     if not success:
         raise MulanError("AUTH_007", "用户组不存在", 404)
 
+    log_action(current_user["id"], current_user.get("username", ""), "update", "user_group", group_id,
+               after_state={"name": request.name, "description": request.description})
     return {"message": "用户组更新成功"}
 
 
-@router.delete("/{group_id}", dependencies=[Depends(get_current_admin)])
-async def delete_group(group_id: int):
+@router.delete("/{group_id}")
+async def delete_group(group_id: int, current_user: dict = Depends(get_current_admin)):
     """删除用户组（管理员）"""
     success = auth_service.delete_group(group_id)
     if not success:
         raise MulanError("AUTH_007", "用户组不存在", 404)
 
+    log_action(current_user["id"], current_user.get("username", ""), "delete", "user_group", group_id)
     return {"message": "用户组已删除"}
 
 
@@ -108,23 +114,27 @@ async def get_group_members(group_id: int):
     return {"members": members, "total": len(members)}
 
 
-@router.post("/{group_id}/members", dependencies=[Depends(get_current_admin)])
-async def add_group_members(group_id: int, request: AddMembersRequest):
+@router.post("/{group_id}/members")
+async def add_group_members(group_id: int, request: AddMembersRequest, current_user: dict = Depends(get_current_admin)):
     """添加成员到组（管理员）"""
     for user_id in request.user_ids:
         auth_service.add_user_to_group(user_id, group_id)
 
     members = auth_service.get_group_members(group_id)
+    log_action(current_user["id"], current_user.get("username", ""), "add_members", "user_group", group_id,
+               after_state={"user_ids": request.user_ids})
     return {"members": members, "message": "成员已添加"}
 
 
-@router.delete("/{group_id}/members/{user_id}", dependencies=[Depends(get_current_admin)])
-async def remove_group_member(group_id: int, user_id: int):
+@router.delete("/{group_id}/members/{user_id}")
+async def remove_group_member(group_id: int, user_id: int, current_user: dict = Depends(get_current_admin)):
     """从组移除成员（管理员）"""
     success = auth_service.remove_user_from_group(user_id, group_id)
     if not success:
         raise MulanError("AUTH_007", "用户或用户组不存在", 404)
 
+    log_action(current_user["id"], current_user.get("username", ""), "remove_member", "user_group", group_id,
+               after_state={"removed_user_id": user_id})
     return {"message": "成员已移除"}
 
 
@@ -135,8 +145,8 @@ async def get_group_permissions(group_id: int):
     return {"permissions": permissions}
 
 
-@router.put("/{group_id}/permissions", dependencies=[Depends(get_current_admin)])
-async def set_group_permissions(group_id: int, request: SetPermissionsRequest):
+@router.put("/{group_id}/permissions")
+async def set_group_permissions(group_id: int, request: SetPermissionsRequest, current_user: dict = Depends(get_current_admin)):
     """设置组权限（管理员）"""
     # 验证权限
     for perm in request.permissions:
@@ -147,4 +157,6 @@ async def set_group_permissions(group_id: int, request: SetPermissionsRequest):
     if not success:
         raise MulanError("AUTH_007", "用户组不存在", 404)
 
+    log_action(current_user["id"], current_user.get("username", ""), "set_permissions", "user_group", group_id,
+               after_state={"permissions": request.permissions})
     return {"message": "权限已更新"}
