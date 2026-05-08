@@ -27,6 +27,8 @@ const ChatPage            = lazy(() => import('../pages/chat/page'));
 const LLMConfigsPage      = lazy(() => import('../pages/admin/llm-configs/page'));
 const McpConfigsPage      = lazy(() => import('../pages/admin/mcp-configs/page'));
 const McpDebuggerPage     = lazy(() => import('../pages/system/mcp-debugger/page'));
+const DataConnectionsPage = lazy(() => import('../pages/system/data-connections/page'));
+const ServiceConfigsPage  = lazy(() => import('../pages/system/service-configs/page'));
 const DataHealthPage      = lazy(() => import('../pages/data-governance/health/page'));
 const DwAuditPage         = lazy(() => import('../pages/data-governance/dw-audit/page'));
 const TableauAssetBrowserPage = lazy(() => import('../pages/tableau/assets/page'));
@@ -78,11 +80,16 @@ const DataWorkbenchPage = lazy(() => import('../pages/agents/data-workbench/page
 const DataWorkbenchHistoryPage = lazy(() => import('../pages/agents/data-workbench/history/page'));
 const SqlAgentPage = lazy(() => import('../pages/agents/sql-agent/page'));
 const MetricsAgentPage = lazy(() => import('../pages/agents/metrics-agent/page'));
+const SkillsPage = lazy(() => import('../pages/agents/skills/page'));
+const SkillDetailPage = lazy(() => import('../pages/agents/skills/detail'));
 
 // Tableau 巡检
 const TableauHealthPage = lazy(() => import('../pages/tableau/health/page'));
 
 // 资产模块
+const DwAssetsPage = lazy(() => import('../pages/assets/dw/page'));
+const DwAssetDetailPage = lazy(() => import('../pages/assets/dw/detail'));
+const DwTaxonomyPage = lazy(() => import('../pages/assets/dw/taxonomy/page'));
 const StarRocksInspectionPage = lazy(() => import('../pages/assets/starrocks-inspection/page'));
 const ConnectionCenterPage = lazy(() => import('../pages/assets/connection-center/page'));
 
@@ -322,11 +329,7 @@ const routes: RouteObject[] = [
           },
           {
             path: 'knowledge',
-            element: (
-              <ProtectedRoute>
-                <KnowledgePage />
-              </ProtectedRoute>
-            ),
+            element: <Navigate to="/assets/knowledge" replace />,
           },
         ],
       },
@@ -335,6 +338,30 @@ const routes: RouteObject[] = [
       {
         path: '/assets',
         children: [
+          {
+            path: 'dw',
+            element: (
+              <ProtectedRoute>
+                <DwAssetsPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'dw/taxonomy',
+            element: (
+              <ProtectedRoute>
+                <DwTaxonomyPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'dw/:tableId',
+            element: (
+              <ProtectedRoute>
+                <DwAssetDetailPage />
+              </ProtectedRoute>
+            ),
+          },
           {
             path: 'tableau',
             element: (
@@ -365,11 +392,7 @@ const routes: RouteObject[] = [
           },
           {
             path: 'tableau-connections',
-            element: (
-              <ProtectedRoute requiredPermission="tableau">
-                <TableauConnectionsPage />
-              </ProtectedRoute>
-            ),
+            element: <Navigate to="/system/data-connections?tab=tableau" replace />,
           },
           {
             path: 'tableau-connections/:connId/sync-logs',
@@ -381,11 +404,7 @@ const routes: RouteObject[] = [
           },
           {
             path: 'connection-center',
-            element: (
-              <ProtectedRoute requiredPermission="database_monitor">
-                <ConnectionCenterPage />
-              </ProtectedRoute>
-            ),
+            element: <Navigate to="/system/data-connections" replace />,
           },
           {
             path: 'starrocks-inspection',
@@ -395,10 +414,16 @@ const routes: RouteObject[] = [
               </ProtectedRoute>
             ),
           },
+          {
+            path: 'knowledge',
+            element: (
+              <ProtectedRoute>
+                <KnowledgePage />
+              </ProtectedRoute>
+            ),
+          },
         ],
       },
-
-      // ── 域 4：智能分析 /analytics ──
       {
         path: '/analytics',
         children: [
@@ -408,11 +433,7 @@ const routes: RouteObject[] = [
           },
           {
             path: 'knowledge',
-            element: (
-              <ProtectedRoute>
-                <KnowledgePage />
-              </ProtectedRoute>
-            ),
+            element: <Navigate to="/assets/knowledge" replace />,
           },
         ],
       },
@@ -502,6 +523,22 @@ const routes: RouteObject[] = [
               </ProtectedRoute>
             ),
           },
+          {
+            path: 'skills',
+            element: (
+              <ProtectedRoute>
+                <SkillsPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'skills/:skillId',
+            element: (
+              <ProtectedRoute>
+                <SkillDetailPage />
+              </ProtectedRoute>
+            ),
+          },
         ],
       },
 
@@ -525,7 +562,7 @@ const routes: RouteObject[] = [
             ),
           },
           {
-            path: 'groups',
+            path: 'users/groups',
             element: (
               <ProtectedRoute adminOnly>
                 <GroupsAdminPage />
@@ -541,12 +578,28 @@ const routes: RouteObject[] = [
             ),
           },
           {
-            path: 'shared-permissions',
+            path: 'permissions/shared',
             element: (
               <ProtectedRoute adminOnly>
                 <SharedPermissionsAdminPage />
               </ProtectedRoute>
             ),
+          },
+          {
+            path: 'usage-stats',
+            element: <Navigate to="/system/usage-stats/tokens" replace />,
+          },
+          {
+            path: 'usage-stats/tokens',
+            element: (
+              <ProtectedRoute adminOnly>
+                <TokenStatsPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'usage-stats/query-logs',
+            element: <Navigate to="/agents/agent-monitor" replace />,
           },
           {
             path: 'llm',
@@ -570,25 +623,29 @@ const routes: RouteObject[] = [
           },
           {
             path: 'llm-configs',
-            element: (
-              <ProtectedRoute adminOnly>
-                <LLMConfigsPage />
-              </ProtectedRoute>
-            ),
+            element: <Navigate to="/system/service-configs" replace />,
           },
           {
             path: 'mcp-configs',
+            element: <Navigate to="/system/service-configs?tab=mcp" replace />,
+          },
+          {
+            path: 'datasources',
+            element: <Navigate to="/system/data-connections" replace />,
+          },
+          {
+            path: 'data-connections',
             element: (
-              <ProtectedRoute adminOnly>
-                <McpConfigsPage />
+              <ProtectedRoute requiredPermission="database_monitor">
+                <DataConnectionsPage />
               </ProtectedRoute>
             ),
           },
           {
-            path: 'datasources',
+            path: 'service-configs',
             element: (
-              <ProtectedRoute requiredPermission="database_monitor">
-                <DatasourcesPage />
+              <ProtectedRoute adminOnly>
+                <ServiceConfigsPage />
               </ProtectedRoute>
             ),
           },
@@ -601,14 +658,6 @@ const routes: RouteObject[] = [
             ),
           },
           {
-            path: 'query-alerts',
-            element: (
-              <ProtectedRoute adminOnly>
-                <QueryAlertsPage />
-              </ProtectedRoute>
-            ),
-          },
-          {
             path: 'agent-monitor',
             element: <Navigate to="/agents/agent-monitor" replace />,
           },
@@ -617,14 +666,6 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute adminOnly>
                 <PlatformSettingsPage />
-              </ProtectedRoute>
-            ),
-          },
-          {
-            path: 'token-stats',
-            element: (
-              <ProtectedRoute adminOnly>
-                <TokenStatsPage />
               </ProtectedRoute>
             ),
           },
@@ -646,20 +687,29 @@ const routes: RouteObject[] = [
   { path: '/tableau/assets/:id',               element: <Navigate to="/assets/tableau/:id" replace /> },
   { path: '/tableau/health',                   element: <Navigate to="/governance/dw-audit?tab=tableau" replace /> },
   { path: '/admin/users',                      element: <Navigate to="/system/users" replace /> },
-  { path: '/admin/groups',                     element: <Navigate to="/system/groups" replace /> },
+  { path: '/admin/groups',                     element: <Navigate to="/system/users/groups" replace /> },
   { path: '/admin/permissions',                element: <Navigate to="/system/permissions" replace /> },
-  { path: '/admin/llm',                        element: <Navigate to="/system/llm-configs" replace /> },
-  { path: '/admin/llm-configs',                element: <Navigate to="/system/llm-configs" replace /> },
-  { path: '/system/llm',                       element: <Navigate to="/system/llm-configs" replace /> },
+  { path: '/system/groups',                    element: <Navigate to="/system/users/groups" replace /> },
+  { path: '/system/shared-permissions',        element: <Navigate to="/system/permissions/shared" replace /> },
+  { path: '/system/token-stats',               element: <Navigate to="/system/usage-stats/tokens" replace /> },
+  { path: '/system/query-alerts',              element: <Navigate to="/agents/agent-monitor" replace /> },
+  { path: '/admin/llm',                        element: <Navigate to="/system/service-configs" replace /> },
+  { path: '/admin/llm-configs',                element: <Navigate to="/system/service-configs" replace /> },
+  { path: '/system/llm',                       element: <Navigate to="/system/service-configs" replace /> },
+  { path: '/system/llm-configs',               element: <Navigate to="/system/service-configs" replace /> },
+  { path: '/system/mcp-configs',               element: <Navigate to="/system/service-configs?tab=mcp" replace /> },
   { path: '/admin/tasks',                      element: <Navigate to="/system/tasks" replace /> },
   { path: '/admin/activity',                    element: <Navigate to="/system/activity" replace /> },
   { path: '/admin/platform-settings',           element: <Navigate to="/system/platform-settings" replace /> },
-  { path: '/admin/datasources',                element: <Navigate to="/system/datasources" replace /> },
-  { path: '/assets/datasources',               element: <Navigate to="/system/datasources" replace /> },
-  { path: '/admin/tableau/connections',         element: <Navigate to="/assets/tableau-connections" replace /> },
-  { path: '/knowledge/:sub',                   element: <Navigate to="/governance/knowledge" replace /> },
-  { path: '/knowledge',                        element: <Navigate to="/governance/knowledge" replace /> },
-  { path: '/analytics/knowledge',              element: <Navigate to="/governance/knowledge" replace /> },
+  { path: '/admin/datasources',                element: <Navigate to="/system/data-connections" replace /> },
+  { path: '/assets/datasources',               element: <Navigate to="/system/data-connections" replace /> },
+  { path: '/system/datasources',               element: <Navigate to="/system/data-connections" replace /> },
+  { path: '/admin/tableau/connections',         element: <Navigate to="/system/data-connections?tab=tableau" replace /> },
+  { path: '/assets/tableau-connections',        element: <Navigate to="/system/data-connections?tab=tableau" replace /> },
+  { path: '/knowledge/:sub',                   element: <Navigate to="/assets/knowledge" replace /> },
+  { path: '/knowledge',                        element: <Navigate to="/assets/knowledge" replace /> },
+  { path: '/analytics/knowledge',              element: <Navigate to="/assets/knowledge" replace /> },
+  { path: '/governance/knowledge',             element: <Navigate to="/assets/knowledge" replace /> },
 
   // =====================
   // 遗留兼容（原有杂项 redirect）

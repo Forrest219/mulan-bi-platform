@@ -11,9 +11,10 @@
 import logging
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import List, Optional
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.errors import MulanError
@@ -56,118 +57,6 @@ _VALID_TRANSITIONS: dict[str, set[str]] = {
 
 def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-def _compute_direction(metric_value: float, expected_value: float) -> str:
-    """根据当前值和期望值的关系，计算异常方向。"""
-    return "up" if metric_value > expected_value else "down"
-
-
-def _compute_magnitude_bucket(deviation_score: float, threshold: float) -> str:
-    """
-    根据偏差分数与阈值的比率，将异常幅度分桶。
-
-    桶定义（基于 deviation_score / threshold 倍数）：
-    - tiny:     score <= 1.5x threshold
-    - small:    1.5x < score <= 2.5x threshold
-    - medium:   2.5x < score <= 4x threshold
-    - large:    4x < score <= 6x threshold
-    - extreme:  score > 6x threshold
-    """
-    if threshold <= 0:
-        ratio = 0.0
-    else:
-        ratio = deviation_score / threshold
-
-    if ratio <= 1.5:
-        return "tiny"
-    elif ratio <= 2.5:
-        return "small"
-    elif ratio <= 4.0:
-        return "medium"
-    elif ratio <= 6.0:
-        return "large"
-    else:
-        return "extreme"
-
-
-def _compute_dimension_context_hash(dimension_context: Optional[dict]) -> Optional[str]:
-    """
-    对 dimension_context JSON 计算 SHA256 哈希，用于去重窗口的唯一性标识。
-    如果 dimension_context 为空或 None，返回 None。
-    """
-    import hashlib
-    import json
-
-    if dimension_context is None:
-        return None
-    try:
-        ctx_str = json.dumps(dimension_context, sort_keys=True, default=str)
-        return hashlib.sha256(ctx_str.encode("utf-8")).hexdigest()
-    except Exception:
-        return None
-
-
-def _check_dedup_window(
-    session: Session,
-    metric_id: uuid.UUID,
-    algorithm: Optional[str],
-    direction: str,
-    dimension_context_hash: Optional[str],
-) -> bool:
-    """
-    Spec 30 §4.6 — 1小时去重窗口检查。
-
-    返回 True 表示命中去重窗口，应刷新 last_seen_at 并跳过 INSERT；
-    返回 False 表示可以写新 anomaly。
-
-    查找条件：
-    - 同 metric_id + algorithm + direction + dimension_context_hash
-    - detected_at 在 1 小时内
-    - status 为 detected 或 resolved
-    """
-    one_hour_ago = datetime.utcnow() - timedelta(hours=1)
-
-    query = session.query(BiMetricAnomaly).filter(
-        BiMetricAnomaly.metric_id == metric_id,
-        BiMetricAnomaly.algorithm == algorithm,
-        BiMetricAnomaly.direction == direction,
-        BiMetricAnomaly.dimension_context_hash == dimension_context_hash,
-        BiMetricAnomaly.detected_at >= one_hour_ago,
-        BiMetricAnomaly.status.in_(["detected", "resolved"]),
-    )
-    existing = query.first()
-
-    if existing:
-        # 命中去重窗口：刷新 last_seen_at，不写新记录
-        existing.last_seen_at = datetime.utcnow()
-        return True
-    return False
-
-
-def _auto_suppress_false_positives(
-    session: Session,
-    metric_id: uuid.UUID,
-    algorithm: Optional[str],
-    direction: str,
-    magnitude_bucket: str,
-) -> None:
-    """
-    Spec 30 §4.6 — 24h 误报反馈学习。
-
-    被标记 false_positive 后，24h 内相同 (metric_id, algorithm, direction, magnitude_bucket)
-    的 active anomaly 自动变更为 auto_suppressed。
-    """
-    twenty_four_hours_ago = datetime.utcnow() - timedelta(hours=24)
-
-    session.query(BiMetricAnomaly).filter(
-        BiMetricAnomaly.metric_id == metric_id,
-        BiMetricAnomaly.algorithm == algorithm,
-        BiMetricAnomaly.direction == direction,
-        BiMetricAnomaly.magnitude_bucket == magnitude_bucket,
-        BiMetricAnomaly.status == "detected",
-        BiMetricAnomaly.detected_at >= twenty_four_hours_ago,
-    ).update({"status": "auto_suppressed"}, synchronize_session=False)
 
 
 def _get_datasource_config(db: Session, datasource_id: int) -> tuple[str, dict]:
@@ -220,14 +109,6 @@ def _build_daily_sql(metric: BiMetricDefinition, window_days: int) -> str:
     _validate_identifier(metric.column_name, "column_name")
 
     formula = metric.formula or f"COUNT({metric.column_name})"
-
-    # P0-1：formula 安全校验（拦截 SQL 注入）
-    from services.metrics_agent.formula_validator import validate_formula
-    try:
-        validate_formula(formula)
-    except ValueError as e:
-        raise ValueError(f"异常检测 formula 安全校验失败：{e}")
-
     table_name = metric.table_name
 
     where_clauses = [f"created_at >= NOW() - INTERVAL '{window_days} days'"]
@@ -374,13 +255,6 @@ async def run_anomaly_detection(
     Returns:
         {"checked_count": int, "anomaly_count": int, "anomaly_ids": list[str]}
     """
-    # Spec 30 §4.2.1: 检测器在 maintenance window 内跳过检测，不写 anomaly，不发事件
-    from .maintenance_window_service import MaintenanceWindowService
-    mw_service = MaintenanceWindowService()
-    if mw_service.is_in_window(db):
-        logger.info("Anomaly detection skipped: in maintenance window")
-        return {"checked_count": 0, "anomaly_count": 0, "anomaly_ids": []}
-
     # 验证 detection_method 合法性（提前失败）
     valid_methods = {"zscore", "quantile", "trend_deviation", "threshold_breach"}
     if detection_method not in valid_methods:
@@ -431,48 +305,17 @@ async def run_anomaly_detection(
         if not result.is_anomaly:
             continue
 
-        # Spec 30 §4.6: 计算 direction, magnitude_bucket, dimension_context_hash
-        direction = _compute_direction(result.metric_value, result.expected_value)
-        magnitude_bucket = _compute_magnitude_bucket(result.deviation_score, threshold)
-        dimension_context_hash = _compute_dimension_context_hash(metric.filters)
-
-        # Spec 30 §4.6: 1小时去重窗口检查
-        # 将 algorithm 规范化为 detection_method 对应的算法名
-        algorithm_for_dedup = detection_method if detection_method in ("zscore", "quantile") else None
-
-        if _check_dedup_window(
-            session=db,
-            metric_id=metric.id,
-            algorithm=algorithm_for_dedup,
-            direction=direction,
-            dimension_context_hash=dimension_context_hash,
-        ):
-            logger.info(
-                "检测到异常（去重窗口命中，跳过INSERT）：metric_id=%s, method=%s, direction=%s, bucket=%s",
-                metric.id,
-                detection_method,
-                direction,
-                magnitude_bucket,
-            )
-            # 不写新记录，不计入 anomaly_count
-            continue
-
         # 写入异常记录
         anomaly = BiMetricAnomaly(
             tenant_id=tenant_id,
             metric_id=metric.id,
             datasource_id=metric.datasource_id,
             detection_method=detection_method,
-            algorithm=algorithm_for_dedup,
-            direction=direction,
-            dimension_context_hash=dimension_context_hash,
-            magnitude_bucket=magnitude_bucket,
             metric_value=result.metric_value,
             expected_value=result.expected_value,
             deviation_score=result.deviation_score,
             deviation_threshold=result.deviation_threshold,
             detected_at=_now(),
-            last_seen_at=_now(),
             status="detected",
         )
         db.add(anomaly)
@@ -505,16 +348,13 @@ async def run_anomaly_detection(
         db.commit()
     except Exception:
         db.rollback()
-        raise MulanError(
-            "MC_500",
-            "异常记录写入失败，请重试",
-            500,
-            {"error_code": "INTERNAL", "message": "异常记录写入失败，请重试"},
+        raise HTTPException(
+            status_code=500,
+            detail={"error_code": "INTERNAL", "message": "异常记录写入失败，请重试"},
         )
 
     # commit 成功后批量发射事件（失败不阻断）
     from services.metrics_agent.events import emit_anomaly_detected as _emit_anomaly
-    from services.metrics_agent.events import publish_anomaly_event as _publish_anomaly
     for _evt in _pending_anomaly_events:
         try:
             _emit_anomaly(
@@ -530,25 +370,6 @@ async def run_anomaly_detection(
             logger.warning(
                 "emit_anomaly_detected 失败（已忽略）：anomaly_id=%s, error=%s",
                 _evt["anomaly_id"],
-                _exc,
-            )
-        try:
-            # Spec 30: 额外发射 anomaly.detected 事件（含完整 extra_data）
-            _publish_anomaly(
-                db=db,
-                metric_id=_evt["metric_id"],
-                metric_name=_evt["metric_name"],
-                algorithm=_evt["detection_method"],
-                anomaly_count=1,
-                max_score=_evt["deviation_score"],
-                window_start="",
-                window_end="",
-                tenant_id=_evt["tenant_id"],
-            )
-        except Exception as _exc:
-            logger.warning(
-                "publish_anomaly_event 失败（已忽略）：metric_id=%s, error=%s",
-                _evt["metric_id"],
                 _exc,
             )
 
@@ -621,20 +442,8 @@ def update_anomaly_status(
         anomaly.resolved_by = resolved_by
         anomaly.resolved_at = _now()
         anomaly.resolution_note = resolution_note
-    elif new_status == "false_positive":
-        # Spec 30 §4.6: 24h 误报反馈学习
-        # 被标记 false_positive 后，24h 内相同特征的 active anomaly 自动抑制
-        _auto_suppress_false_positives(
-            session=db,
-            metric_id=anomaly.metric_id,
-            algorithm=anomaly.algorithm,
-            direction=anomaly.direction,
-            magnitude_bucket=anomaly.magnitude_bucket,
-        )
-        if resolution_note is not None:
-            anomaly.resolution_note = resolution_note
     elif resolution_note is not None:
-        # investigating 也可以记录备注
+        # false_positive / investigating 也可以记录备注
         anomaly.resolution_note = resolution_note
 
     db.commit()

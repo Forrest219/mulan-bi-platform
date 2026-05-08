@@ -1,10 +1,7 @@
 """LLM 配置数据模型"""
 from __future__ import annotations
 
-import logging
 from typing import Optional
-
-logger = logging.getLogger(__name__)
 
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, JSON, Index
 from app.core.database import Base, JSONB, sa_func, sa_text # 导入中央配置的 Base, JSONB, func, text
@@ -48,12 +45,10 @@ class LLMConfig(Base):
         """返回配置，隐藏 api_key，附带掩码预览和更新时间"""
         # 解密仅用于生成 preview，不在返回体中暴露明文
         decrypted: Optional[str] = None
-        decryption_ok: bool = False
         if self.api_key_encrypted:
             try:
                 from services.llm.service import _decrypt
                 decrypted = _decrypt(self.api_key_encrypted)
-                decryption_ok = True
             except Exception:
                 # 密钥轮换等场景解密失败时，降级为固定掩码
                 pass
@@ -73,7 +68,6 @@ class LLMConfig(Base):
             "max_tokens": self.max_tokens,
             "is_active": self.is_active,
             "has_api_key": bool(self.api_key_encrypted),
-            "api_key_decryption_ok": decryption_ok,
             "api_key_preview": api_key_preview,
             "api_key_updated_at": self.api_key_updated_at.isoformat() if self.api_key_updated_at else None,
             "purpose": self.purpose,
@@ -126,11 +120,6 @@ class LLMConfigDatabase:
 
             # Step 2: fallback 到 'default' purpose（仅当 purpose 本身不是 'default'）
             if purpose != "default":
-                logger.warning(
-                    "LLM purpose '%s' 无匹配配置，降级至 'default'。"
-                    "请检查 ai_llm_configs 表是否缺少 purpose='%s' 的有效记录",
-                    purpose, purpose,
-                )
                 config = (
                     session.query(LLMConfig)
                     .filter(LLMConfig.purpose == "default", LLMConfig.is_active == True)
@@ -138,32 +127,6 @@ class LLMConfigDatabase:
                     .first()
                 )
             return config
-        finally:
-            session.close()
-
-    def get_active_configs(self, purpose: str = "default") -> list:
-        """
-        获取指定 purpose 下所有活跃配置，按 priority DESC 排序。
-
-        用于 complete() fallback 链路：尝试所有活跃配置直到成功。
-        """
-        session = self.get_session()
-        try:
-            configs = (
-                session.query(LLMConfig)
-                .filter(LLMConfig.purpose == purpose, LLMConfig.is_active == True)
-                .order_by(LLMConfig.priority.desc())
-                .all()
-            )
-            if not configs and purpose != "default":
-                # Fallback to default purpose
-                configs = (
-                    session.query(LLMConfig)
-                    .filter(LLMConfig.purpose == "default", LLMConfig.is_active == True)
-                    .order_by(LLMConfig.priority.desc())
-                    .all()
-                )
-            return configs
         finally:
             session.close()
 
@@ -288,63 +251,5 @@ def log_nlq_query(
             session.close()
     except Exception:
         # fire-and-forget，审计失败不干扰主流程
-        pass
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Token 消耗日志
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TokenUsageLog(Base):
-    """
-    LLM Token 消耗记录表。
-
-    每次 LLM complete 调用成功后写入一条（fire-and-forget）。
-    用于统计各 Agent / 模型的 Token 消耗趋势，支持成本分析。
-    """
-    __tablename__ = "ai_token_usage_logs"
-    __table_args__ = (
-        Index("ix_token_usage_user_created", "user_id", "created_at"),
-        Index("ix_token_usage_purpose_model", "purpose", "model"),
-    )
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, nullable=True, index=True)  # nullable: 系统内部调用无用户上下文
-    purpose = Column(String(50), nullable=False)            # agent / nlq / default / embedding
-    provider = Column(String(32), nullable=False)           # openai / anthropic / minimax
-    model = Column(String(200), nullable=False)
-    prompt_tokens = Column(Integer, nullable=False, server_default=sa_func.cast(0, Integer()))
-    completion_tokens = Column(Integer, nullable=False, server_default=sa_func.cast(0, Integer()))
-    total_tokens = Column(Integer, nullable=False, server_default=sa_func.cast(0, Integer()))
-    created_at = Column(DateTime, server_default=sa_func.now(), nullable=False)
-
-
-def write_token_usage_log(
-    purpose: str,
-    provider: str,
-    model: str,
-    prompt_tokens: int,
-    completion_tokens: int,
-    total_tokens: int,
-    user_id: Optional[int] = None,
-) -> None:
-    """写入一条 Token 消耗日志（fire-and-forget）。"""
-    try:
-        from app.core.database import SessionLocal
-        session = SessionLocal()
-        try:
-            session.add(TokenUsageLog(
-                user_id=user_id,
-                purpose=purpose,
-                provider=provider,
-                model=model,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-            ))
-            session.commit()
-        finally:
-            session.close()
-    except Exception:
         pass
 
