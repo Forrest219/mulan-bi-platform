@@ -158,7 +158,7 @@ def execute_query(
         # 用于无预同步 TableauConnection 但有 MCP server 配置的场景（如首页问答 MCP fallback）
         from app.core.database import SessionLocal
         from services.mcp.models import McpServer
-        from app.core.crypto import get_tableau_crypto
+        from app.core.crypto import get_tableau_crypto, get_mcp_crypto
 
         db = SessionLocal()
         try:
@@ -170,13 +170,16 @@ def execute_query(
             if not mcp_record or not mcp_record.credentials:
                 raise NLQError("NLQ_005", message="无可用的 Tableau 连接配置")
 
-            creds = mcp_record.credentials
+            _mcp_c = get_mcp_crypto()
+            _raw = mcp_record.credentials or {}
+            creds = {
+                k: (_mcp_c.decrypt(v) if _raw.get(f"{k}_encrypted") and isinstance(v, str) and v else v)
+                for k, v in _raw.items() if not k.endswith("_encrypted")
+            }
             pat_value = creds.get("pat_value", "")
             if not pat_value:
                 raise NLQError("NLQ_005", message="Tableau PAT 未配置")
 
-            # 解密 PAT（PAT 在 MCP config 中是明文存储，MCP server 进程持有）
-            # 注意：这里 pat_value 是明文，直接传给 MCP
             result = _mcp_query_datasource_direct(
                 mcp_server_url=mcp_record.server_url,
                 site=creds.get("site_name", ""),

@@ -151,7 +151,7 @@ def sync_connection_task(self, conn_id: int, sync_log_id: int = None, trigger_ty
 def _bridge_mcp_to_connections(tableau_db, db_session):
     """将 mcp_servers 中 type='tableau' 的活跃记录桥接到 tableau_connections。"""
     from services.mcp.models import McpServer
-    from app.core.crypto import get_tableau_crypto
+    from app.core.crypto import get_tableau_crypto, get_mcp_crypto
 
     try:
         mcp_servers = db_session.query(McpServer).filter(
@@ -163,8 +163,13 @@ def _bridge_mcp_to_connections(tableau_db, db_session):
         return
 
     crypto = get_tableau_crypto()
+    _mcp_c = get_mcp_crypto()
     for mcp in mcp_servers:
-        creds = mcp.credentials or {}
+        _raw = mcp.credentials or {}
+        creds = {
+            k: (_mcp_c.decrypt(v) if _raw.get(f"{k}_encrypted") and isinstance(v, str) and v else v)
+            for k, v in _raw.items() if not k.endswith("_encrypted")
+        }
         pat_value = creds.get("pat_value", "")
         if not pat_value:
             logger.warning("Bridge: mcp_server '%s' has no pat_value, skipping", mcp.name)

@@ -19,6 +19,7 @@ from services.events.constants import (
     MCP_SERVER_DELETED,
     SOURCE_MODULE_MCP,
 )
+from services.audit.audit_service import log_action
 
 logger = logging.getLogger(__name__)
 _mcp_crypto = get_mcp_crypto()
@@ -233,6 +234,9 @@ async def create_mcp_server(req: McpServerCreateRequest, request: Request):
         db.commit()
         db.refresh(record)
 
+        log_action(user["id"], user.get("username", ""), "create", "mcp_server", record.id,
+                   after_state={"name": record.name, "type": record.type, "is_active": record.is_active})
+
         if record.type == "tableau":
             try:
                 _sync_mcp_to_tableau(
@@ -315,6 +319,10 @@ async def update_mcp_server(id: int, req: McpServerUpdateRequest, request: Reque
         db.commit()
         db.refresh(record)
 
+        log_action(user["id"], user.get("username", ""), "update", "mcp_server", record.id,
+                   before_state={"name": old_name, "is_active": old_is_active},
+                   after_state={"name": record.name, "is_active": record.is_active})
+
         # 发射 mcp.server.changed 事件（commit 之后）
         if record.type == "tableau" and fields_changed:
             emit_event(
@@ -377,6 +385,9 @@ async def delete_mcp_server(id: int, request: Request):
 
         db.delete(record)
         db.commit()
+
+        log_action(user["id"], user.get("username", ""), "delete", "mcp_server", id,
+                   before_state={"name": mcp_name, "type": mcp_type})
 
         # 发射 mcp.server.deleted 事件（commit 之后）
         if mcp_type == "tableau":

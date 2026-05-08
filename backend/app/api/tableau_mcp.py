@@ -17,6 +17,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import or_
 
+from app.core.crypto import get_mcp_crypto
 from app.core.database import SessionLocal
 from services.mcp.models import McpServer
 from services.semantic_maintenance.models import (
@@ -43,6 +44,17 @@ def _make_result(req_id, result: dict) -> dict:
     return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
 
+def _decrypt_mcp_creds(creds: dict | None) -> dict:
+    """解密 McpServer.credentials 中已加密的敏感字段"""
+    if not creds:
+        return {}
+    c = get_mcp_crypto()
+    return {
+        k: (c.decrypt(v) if creds.get(f"{k}_encrypted") and isinstance(v, str) and v else v)
+        for k, v in creds.items() if not k.endswith("_encrypted")
+    }
+
+
 def _get_tableau_config(server_id: Optional[int] = None) -> dict:
     """
     读取 Tableau 连接配置，优先级：
@@ -56,7 +68,7 @@ def _get_tableau_config(server_id: Optional[int] = None) -> dict:
             record = db.query(McpServer).filter(McpServer.id == server_id).first()
             if not record or not record.credentials:
                 return {}
-            return dict(record.credentials)
+            return _decrypt_mcp_creds(record.credentials)
         finally:
             db.close()
 
@@ -84,7 +96,7 @@ def _get_tableau_config(server_id: Optional[int] = None) -> dict:
         )
         if not record or not record.credentials:
             return {}
-        return dict(record.credentials)
+        return _decrypt_mcp_creds(record.credentials)
     finally:
         db.close()
 

@@ -9,6 +9,7 @@ from app.core.dependencies import get_current_user
 from app.core.database import get_db
 from services.platform_settings import PlatformSettingsService
 from services.common.settings import get_smtp_config
+from services.audit.audit_service import log_action
 
 router = APIRouter(redirect_slashes=False)
 
@@ -90,6 +91,8 @@ async def update_platform_settings(
         logo_url=request.logo_url,
         favicon_url=request.favicon_url,
     )
+    log_action(current_user.get("id"), current_user.get("username", ""), "update", "platform_settings", "global",
+               after_state={"platform_name": request.platform_name, "logo_url": request.logo_url})
     return settings.to_dict()
 
 
@@ -226,6 +229,8 @@ async def update_smtp_config(
         "smtp_use_tls": request.smtp_use_tls,
     }
     svc.put_smtp_config(smtp_config)
+    log_action(current_user.get("id"), current_user.get("username", ""), "update", "smtp_config", "global",
+               after_state={"smtp_host": request.smtp_host, "smtp_user": request.smtp_user})
     # 返回（密码隐藏）
     return {
         **smtp_config,

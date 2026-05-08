@@ -29,6 +29,7 @@ from app.core.dependencies import require_roles
 from app.core.errors import AuthError
 from services.connection_hub import get_unified_connections, UnifiedConnection, ConnectionType, HealthStatus
 from services.connection_hub.connection_manager import ConnectionManager
+from services.audit.audit_service import log_action
 
 
 router = APIRouter()
@@ -209,6 +210,8 @@ async def create_connection(
             extra_config=req.extra_config,
         )
 
+        log_action(current_user["id"], current_user.get("username", ""), "create", "sql_connection", ds.id,
+                   after_state={"name": ds.name, "db_type": ds.db_type, "host": ds.host})
         return {
             "connection": {
                 "id": f"sql-{ds.id}",
@@ -242,6 +245,8 @@ async def create_connection(
             mcp_server_url=req.mcp_server_url,
         )
 
+        log_action(current_user["id"], current_user.get("username", ""), "create", "tableau_connection", conn.id,
+                   after_state={"name": conn.name, "server_url": conn.server_url})
         return {
             "connection": {
                 "id": f"tableau-{conn.id}",
@@ -275,6 +280,8 @@ async def create_connection(
             priority=req.priority,
         )
 
+        log_action(current_user["id"], current_user.get("username", ""), "create", "llm_connection", config.id,
+                   after_state={"provider": config.provider, "model": config.model})
         return {
             "connection": {
                 "id": f"llm-{config.id}",
@@ -353,6 +360,7 @@ async def update_connection(
         if not success:
             raise HTTPException(status_code=404, detail="连接不存在")
 
+        log_action(current_user["id"], current_user.get("username", ""), "update", "sql_connection", conn_id)
         return {"message": "SQL 数据库连接更新成功"}
 
     elif conn_type == ConnectionType.TABLEAU_SITE:
@@ -374,6 +382,7 @@ async def update_connection(
         if not success:
             raise HTTPException(status_code=404, detail="连接不存在")
 
+        log_action(current_user["id"], current_user.get("username", ""), "update", "tableau_connection", conn_id)
         return {"message": "Tableau 连接更新成功"}
 
     elif conn_type == ConnectionType.LLM_PROVIDER:
@@ -397,6 +406,7 @@ async def update_connection(
         if not success:
             raise HTTPException(status_code=404, detail="连接不存在")
 
+        log_action(current_user["id"], current_user.get("username", ""), "update", "llm_connection", conn_id)
         return {"message": "LLM Provider 连接更新成功"}
 
     else:
@@ -441,6 +451,7 @@ async def delete_connection(
     if not success:
         raise HTTPException(status_code=404, detail=error or "连接不存在")
 
+    log_action(current_user["id"], current_user.get("username", ""), "delete", "connection", connection_id)
     return DeleteConnectionResponse(success=True, message="连接已删除")
 
 
@@ -508,6 +519,7 @@ async def rotate_secret(
     if not success:
         raise HTTPException(status_code=404, detail="连接不存在")
 
+    log_action(current_user["id"], current_user.get("username", ""), "rotate_secret", "llm_connection", connection_id)
     return {"message": "LLM Provider 凭据已更新"}
 
 

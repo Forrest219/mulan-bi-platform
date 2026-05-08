@@ -136,14 +136,13 @@ async def update_user(user_id: int, request: UpdateUserRequest, http_request: Re
     return {"user": auth_service.get_user(user_id), "message": "用户信息已更新"}
 
 
-@router.put("/{user_id}/role", dependencies=[Depends(get_current_admin)])
-async def update_user_role(user_id: int, request: UpdateUserRoleRequest, http_request: Request):
+@router.put("/{user_id}/role")
+async def update_user_role(user_id: int, request: UpdateUserRoleRequest, http_request: Request, current_user: dict = Depends(get_current_admin)):
     """更新用户角色（管理员）"""
     if request.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail="无效的角色")
 
     # 防止把自己降级
-    current_user = get_current_user(http_request)
     if current_user["id"] == user_id and request.role != "admin":
         raise HTTPException(status_code=400, detail="不能将自己的角色降级")
 
@@ -151,21 +150,24 @@ async def update_user_role(user_id: int, request: UpdateUserRoleRequest, http_re
     if not success:
         raise HTTPException(status_code=404, detail="用户不存在")
 
+    log_action(current_user["id"], current_user.get("username", ""), "update_role", "user", user_id,
+               after_state={"role": request.role})
     return {"message": "角色更新成功"}
 
 
-@router.put("/{user_id}/toggle-active", dependencies=[Depends(get_current_admin)])
-async def toggle_user_active(user_id: int):
+@router.put("/{user_id}/toggle-active")
+async def toggle_user_active(user_id: int, current_user: dict = Depends(get_current_admin)):
     """切换用户激活状态（管理员）"""
     success = auth_service.toggle_user_active(user_id)
     if not success:
         raise HTTPException(status_code=404, detail="用户不存在")
 
+    log_action(current_user["id"], current_user.get("username", ""), "toggle_active", "user", user_id)
     return {"message": "状态已切换"}
 
 
-@router.put("/{user_id}/permissions", dependencies=[Depends(get_current_admin)])
-async def update_user_permissions(user_id: int, request: UpdatePermissionsRequest):
+@router.put("/{user_id}/permissions")
+async def update_user_permissions(user_id: int, request: UpdatePermissionsRequest, current_user: dict = Depends(get_current_admin)):
     """更新用户权限（管理员）"""
     # 验证权限
     for perm in request.permissions:
@@ -176,6 +178,8 @@ async def update_user_permissions(user_id: int, request: UpdatePermissionsReques
     if not success:
         raise HTTPException(status_code=404, detail="用户不存在")
 
+    log_action(current_user["id"], current_user.get("username", ""), "update_permissions", "user", user_id,
+               after_state={"permissions": request.permissions})
     return {"message": "权限更新成功"}
 
 
@@ -235,4 +239,5 @@ async def admin_reset_password(user_id: int, request: AdminResetPasswordRequest,
     success, message = auth_service.admin_reset_password(user_id, request.new_password)
     if not success:
         raise HTTPException(status_code=400, detail=message)
+    log_action(current_user["id"], current_user.get("username", ""), "reset_password", "user", user_id)
     return {"message": message}
