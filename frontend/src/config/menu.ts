@@ -148,7 +148,7 @@ export const menuConfig: MenuDomain[] = [
         key: 'knowledge',
         label: '知识库',
         icon: 'ri-book-open-line',
-        path: '/analytics/knowledge',
+        path: '/governance/knowledge',
       },
     ],
   },
@@ -236,6 +236,13 @@ export const menuConfig: MenuDomain[] = [
         path: '/system/tasks',
         permission: { adminOnly: true },
       },
+      {
+        key: 'rules',
+        label: '规则配置',
+        icon: 'ri-shield-check-line',
+        path: '/system/rules',
+        permission: { requiredRole: 'data_admin' },
+      },
     ],
   },
 
@@ -285,6 +292,12 @@ export const menuConfig: MenuDomain[] = [
         label: '平台设置',
         icon: 'ri-image-line',
         path: '/system/platform-settings',
+      },
+      {
+        key: 'token-stats',
+        label: 'Token 统计',
+        icon: 'ri-coin-line',
+        path: '/system/token-stats',
       },
       {
         key: 'account-security',

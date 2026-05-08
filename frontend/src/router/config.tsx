@@ -55,6 +55,8 @@ const ForgotPasswordPage    = lazy(() => import('../pages/forgot-password/page')
 const ResetPasswordPage    = lazy(() => import('../pages/reset-password/page'));
 const EmptyStatePage        = lazy(() => import('../pages/empty/EmptyStatePage'));
 const AgentMonitorPage      = lazy(() => import('../pages/admin/agent-monitor/page'));
+const TokenStatsPage        = lazy(() => import('../pages/admin/token-stats/page'));
+const RulesConfigPage       = lazy(() => import('../pages/config/rules/page'));
 const QueryPage             = lazy(() => import('../pages/query/page'));
 const AccountSecurityPage   = lazy(() => import('../pages/account/security/page'));
 const AccountPasswordPage   = lazy(() => import('../pages/account/password/page'));
@@ -315,6 +317,14 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute>
                 <DqcAssetDetailPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'knowledge',
+            element: (
+              <ProtectedRoute>
+                <KnowledgePage />
               </ProtectedRoute>
             ),
           },
@@ -611,6 +621,22 @@ const routes: RouteObject[] = [
               </ProtectedRoute>
             ),
           },
+          {
+            path: 'token-stats',
+            element: (
+              <ProtectedRoute adminOnly>
+                <TokenStatsPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'rules',
+            element: (
+              <ProtectedRoute>
+                <RulesConfigPage />
+              </ProtectedRoute>
+            ),
+          },
         ],
       },
 
@@ -640,8 +666,9 @@ const routes: RouteObject[] = [
   { path: '/admin/datasources',                element: <Navigate to="/system/datasources" replace /> },
   { path: '/assets/datasources',               element: <Navigate to="/system/datasources" replace /> },
   { path: '/admin/tableau/connections',         element: <Navigate to="/assets/tableau-connections" replace /> },
-  { path: '/knowledge/:sub',                   element: <Navigate to="/analytics/knowledge" replace /> },
-  { path: '/knowledge',                        element: <Navigate to="/analytics/knowledge" replace /> },
+  { path: '/knowledge/:sub',                   element: <Navigate to="/governance/knowledge" replace /> },
+  { path: '/knowledge',                        element: <Navigate to="/governance/knowledge" replace /> },
+  { path: '/analytics/knowledge',              element: <Navigate to="/governance/knowledge" replace /> },
 
   // =====================
   // 遗留兼容（原有杂项 redirect）
