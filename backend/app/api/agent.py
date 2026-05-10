@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db, get_db_context
 from app.core.dependencies import get_current_user
 
-from services.data_agent.factory import create_engine
+from services.data_agent.factory import create_engine, create_engine_with_skills
 from services.data_agent.models import (
     AgentConversation,
     AgentConversationMessage,
@@ -290,8 +290,8 @@ async def agent_stream(
         db=db,
     )
 
-    # 构建引擎
-    engine, _registry = create_engine()
+    # 构建引擎（含 DB skill meta 覆盖）
+    engine, _registry = await create_engine_with_skills(db)
 
     # 保存用户消息
     session_mgr.persist_message(
