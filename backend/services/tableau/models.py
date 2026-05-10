@@ -21,7 +21,8 @@ class TableauConnection(Base):
     is_active = Column(Boolean, default=True, server_default=sa_text('true')) # Boolean 默认值
     # 自动同步设置
     auto_sync_enabled = Column(Boolean, default=False, server_default=sa_text('false')) # Boolean 默认值
-    sync_interval_hours = Column(Integer, default=24, server_default=sa_func.cast(24, Integer()))
+    sync_interval_hours = Column(Integer, default=24, server_default=sa_func.cast(24, Integer()))  # deprecated: 被 bi_sync_schedules 替代
+    schedule_id = Column(Integer, ForeignKey("bi_sync_schedules.id", ondelete="SET NULL"), nullable=True)  # 关联同步计划
     # 连接健康状态
     last_test_at = Column(DateTime, nullable=True)
     last_test_success = Column(Boolean, nullable=True)
@@ -37,16 +38,28 @@ class TableauConnection(Base):
     updated_at = Column(DateTime, server_default=sa_func.now(), onupdate=sa_func.now()) # DateTime 默认值和更新
 
     assets = relationship("TableauAsset", back_populates="connection", cascade="all, delete-orphan")
+    schedule = relationship("BiSyncSchedule")
 
     def to_dict(self) -> Dict[str, Any]:
         next_sync_at = None
         if self.auto_sync_enabled:
-            from datetime import timedelta # 局部导入，避免循环依赖
-            if self.last_sync_at:
-                next_dt = self.last_sync_at + timedelta(hours=self.sync_interval_hours or 24)
-                next_sync_at = next_dt.strftime("%Y-%m-%d %H:%M:%S")
+            if self.schedule_id and self.schedule:
+                # 优先用关联计划的 cron 计算下次执行时间
+                from croniter import croniter
+                from datetime import datetime
+                try:
+                    cron = croniter(self.schedule.cron_expr, datetime.now())
+                    next_dt = cron.get_next(datetime)
+                    next_sync_at = next_dt.strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    next_sync_at = "调度异常"
             else:
-                next_sync_at = "即将执行"
+                from datetime import timedelta  # 局部导入，避免循环依赖
+                if self.last_sync_at:
+                    next_dt = self.last_sync_at + timedelta(hours=self.sync_interval_hours or 24)
+                    next_sync_at = next_dt.strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    next_sync_at = "即将执行"
 
         return {
             "id": self.id,
@@ -60,6 +73,7 @@ class TableauConnection(Base):
             "is_active": self.is_active,
             "auto_sync_enabled": self.auto_sync_enabled,
             "sync_interval_hours": self.sync_interval_hours,
+            "schedule_id": self.schedule_id,
             "last_test_at": self.last_test_at.strftime("%Y-%m-%d %H:%M:%S") if self.last_test_at else None,
             "last_test_success": self.last_test_success,
             "last_test_message": self.last_test_message,

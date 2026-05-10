@@ -120,6 +120,10 @@ def _build_link(source_module: str, event_type: str, payload: dict) -> Optional[
         scan_id = payload.get("scan_id")
         if scan_id:
             return f"/governance/health/scans/{scan_id}"
+    elif source_module == "dqc":
+        asset_id = payload.get("asset_id")
+        if asset_id is not None:
+            return f"/governance/dqc/assets/{asset_id}"
     elif event_type == "anomaly.detected":
         # anomaly.detected 专用链接（Spec 30）
         metric_id = payload.get("metric_id")

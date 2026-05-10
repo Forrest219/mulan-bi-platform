@@ -296,6 +296,7 @@ class DwDomainTaxonomy(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     l1 = Column(String(64), nullable=False)
     l2 = Column(String(64), nullable=True)       # NULL 表示仅 L1 无 L2
+    description = Column(String(200), nullable=True)  # L1 建设重点描述
     display_order = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
     created_at = Column(DateTime, server_default=sa_func.now())
 
@@ -304,6 +305,7 @@ class DwDomainTaxonomy(Base):
             "id": self.id,
             "l1": self.l1,
             "l2": self.l2,
+            "description": self.description,
             "display_order": self.display_order,
         }
 
@@ -358,16 +360,19 @@ class DwDomainTaxonomyDatabase:
             session.close()
 
     def get_l1_l2_tree(self) -> list[dict]:
-        """返回 {items: [{l1, l2_list}], has_taxonomy: bool}"""
+        """返回 [{l1, l2_list, description}]"""
         rows = self.list_all()
         tree: dict = {}
+        descs: dict = {}
         for r in rows:
             if r.l1 not in tree:
                 tree[r.l1] = []
             if r.l2 and r.l2 not in tree[r.l1]:
                 tree[r.l1].append(r.l2)
+            if not r.l2 and r.description:
+                descs[r.l1] = r.description
         items = [
-            {"l1": l1, "l2_list": sorted(l2s)}
+            {"l1": l1, "l2_list": sorted(l2s), "description": descs.get(l1)}
             for l1, l2s in sorted(tree.items())
         ]
         return items

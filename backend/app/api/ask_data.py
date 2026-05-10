@@ -100,7 +100,7 @@ async def _stream_via_agent_direct(
     Call the Data Agent engine in-process and yield ask_data-format SSE strings.
     """
     import uuid as uuid_lib
-    from services.data_agent.factory import create_engine
+    from services.data_agent.factory import create_engine_with_skills
     from services.data_agent.runner import run_agent
     from services.data_agent.session import SessionManager
     from services.data_agent.tool_base import ToolContext
@@ -134,7 +134,7 @@ async def _stream_via_agent_direct(
         tenant_id=str(current_user["tenant_id"]) if current_user.get("tenant_id") else None,
     )
 
-    engine, _registry = create_engine()
+    engine, _registry = await create_engine_with_skills(db)
 
     session_mgr.persist_message(
         session=session,

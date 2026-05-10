@@ -1,4 +1,5 @@
 import { menuConfig, hasRoleLevel, type MenuPermission } from './menu';
+import EXTRA_DESCRIPTIONS from './sitemap-descriptions.json';
 
 export interface SitemapEntry {
   key: string;
@@ -7,6 +8,7 @@ export interface SitemapEntry {
   path: string;
   icon: string;
   keywords: string[];
+  description?: string;
 }
 
 // Extra search keywords per menu item key
@@ -115,13 +117,17 @@ export function buildSearchEntries(
         path: item.path,
         icon: item.icon ?? 'ri-pages-line',
         keywords: EXTRA_KEYWORDS[item.key] ?? [],
+        description: EXTRA_DESCRIPTIONS[item.key],
       });
     }
   }
 
   for (const { permission, ...entry } of VIRTUAL_ENTRIES) {
     if (isVisible(permission, role, hasPermission)) {
-      entries.push(entry);
+      entries.push({
+        ...entry,
+        description: EXTRA_DESCRIPTIONS[entry.key] ?? entry.description,
+      });
     }
   }
 
@@ -130,11 +136,11 @@ export function buildSearchEntries(
 
 export function searchEntries(entries: SitemapEntry[], query: string): SitemapEntry[] {
   if (!query.trim()) return [];
-  const q = query.toLowerCase().trim();
+  const terms = query.toLowerCase().trim().split(/\s+/);
   return entries
     .filter(entry => {
       const haystack = [entry.label, entry.group, ...entry.keywords].join(' ').toLowerCase();
-      return haystack.includes(q);
+      return terms.every(term => haystack.includes(term));
     })
     .slice(0, 7);
 }

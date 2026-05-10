@@ -260,7 +260,7 @@ export default function MaintenanceWindowsPage() {
         <div className="max-w-6xl mx-auto">
           {/* Breadcrumb */}
           <div className="flex items-center gap-1.5 text-[12px] text-slate-400 mb-3">
-            <Link to="/governance/metrics" className="hover:text-slate-600">指标管理</Link>
+            <Link to="/governance/metrics" className="hover:text-slate-600">指标治理</Link>
             <span>/</span>
             <span className="text-slate-600">维护窗口</span>
           </div>

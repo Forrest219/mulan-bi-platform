@@ -164,6 +164,8 @@ class BiAgentStep(Base):
     tool_result_summary = Column(Text, nullable=True)  # first 500 chars
     content = Column(Text, nullable=True)
     execution_time_ms = Column(Integer, nullable=True)
+    # 记录调用时使用的 agent_skill_versions.id（Track B LLM 集成，DB 表由 Track A 迁移创建）
+    skill_version_id = Column(UUID(as_uuid=True), nullable=True)
     created_at = Column(DateTime, server_default=sa_func.now(), nullable=False)
 
     def to_dict(self) -> dict:
@@ -177,6 +179,7 @@ class BiAgentStep(Base):
             "tool_result_summary": self.tool_result_summary,
             "content": self.content,
             "execution_time_ms": self.execution_time_ms,
+            "skill_version_id": str(self.skill_version_id) if self.skill_version_id else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

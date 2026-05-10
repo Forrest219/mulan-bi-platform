@@ -17,7 +17,6 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import or_
 
-from app.core.crypto import get_mcp_crypto
 from app.core.database import SessionLocal
 from services.mcp.models import McpServer
 from services.semantic_maintenance.models import (
@@ -44,17 +43,6 @@ def _make_result(req_id, result: dict) -> dict:
     return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
 
-def _decrypt_mcp_creds(creds: dict | None) -> dict:
-    """解密 McpServer.credentials 中已加密的敏感字段"""
-    if not creds:
-        return {}
-    c = get_mcp_crypto()
-    return {
-        k: (c.decrypt(v) if creds.get(f"{k}_encrypted") and isinstance(v, str) and v else v)
-        for k, v in creds.items() if not k.endswith("_encrypted")
-    }
-
-
 def _get_tableau_config(server_id: Optional[int] = None) -> dict:
     """
     读取 Tableau 连接配置，优先级：
@@ -68,7 +56,7 @@ def _get_tableau_config(server_id: Optional[int] = None) -> dict:
             record = db.query(McpServer).filter(McpServer.id == server_id).first()
             if not record or not record.credentials:
                 return {}
-            return _decrypt_mcp_creds(record.credentials)
+            return dict(record.credentials)
         finally:
             db.close()
 
@@ -96,7 +84,7 @@ def _get_tableau_config(server_id: Optional[int] = None) -> dict:
         )
         if not record or not record.credentials:
             return {}
-        return _decrypt_mcp_creds(record.credentials)
+        return dict(record.credentials)
     finally:
         db.close()
 
@@ -762,8 +750,8 @@ async def _reset_consent(credentials: dict) -> dict:
 
 # ── P3 新增工具实现函数 ────────────────────────────────────────────────────────
 
-from app.core.config import get_settings as _get_settings
-_MULAN_INTERNAL_BASE_URL: str = _get_settings().INTERNAL_API_BASE
+# 用于调用内部 Mulan API 的 base URL，优先从环境变量读取
+_MULAN_INTERNAL_BASE_URL: str = os.environ.get("MULAN_INTERNAL_API_BASE_URL", "http://localhost:8000")
 
 # GraphQL 查询：完整字段 schema（含 formula 等大字段）
 _GQL_FULL_FIELDS = """

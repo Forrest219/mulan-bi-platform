@@ -95,6 +95,37 @@ class LLMConfigDatabase:
         s.expire_all()
         return s
 
+    def get_active_configs(self, purpose: str = "default") -> List[LLMConfig]:
+        """
+        获取所有活跃的 LLM 配置（支持同 purpose 多配置降级）。
+
+        路由规则：
+        1. 先查 purpose=<purpose> AND is_active=True，按 priority DESC 排序（取全部）
+        2. 找不到则 fallback 查 purpose='default' AND is_active=True
+        3. 仍找不到返回空列表
+        """
+        session = self.get_session()
+        try:
+            configs = (
+                session.query(LLMConfig)
+                .filter(LLMConfig.purpose == purpose, LLMConfig.is_active == True)
+                .order_by(LLMConfig.priority.desc())
+                .all()
+            )
+            if configs:
+                return configs
+
+            if purpose != "default":
+                configs = (
+                    session.query(LLMConfig)
+                    .filter(LLMConfig.purpose == "default", LLMConfig.is_active == True)
+                    .order_by(LLMConfig.priority.desc())
+                    .all()
+                )
+            return configs
+        finally:
+            session.close()
+
     def get_config(self, purpose: str = "default") -> Optional[LLMConfig]:
         """
         获取 LLM 配置。
@@ -215,6 +246,25 @@ class NlqQueryLog(Base):
     created_at = Column(DateTime, server_default=sa_func.now(), nullable=False)
 
 
+class TokenUsageLog(Base):
+    """Token 消耗日志，用于按 purpose/model/用户汇总 LLM 成本。"""
+    __tablename__ = "ai_token_usage_logs"
+    __table_args__ = (
+        Index("ix_token_usage_user_created", "user_id", "created_at"),
+        Index("ix_token_usage_purpose_model", "purpose", "model"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=True)
+    purpose = Column(String(50), nullable=False)
+    provider = Column(String(32), nullable=False)
+    model = Column(String(200), nullable=False)
+    prompt_tokens = Column(Integer, nullable=False, server_default=sa_text("0"))
+    completion_tokens = Column(Integer, nullable=False, server_default=sa_text("0"))
+    total_tokens = Column(Integer, nullable=False, server_default=sa_text("0"))
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
+
+
 def log_nlq_query(
     user_id: int,
     question: str,
@@ -251,5 +301,43 @@ def log_nlq_query(
             session.close()
     except Exception:
         # fire-and-forget，审计失败不干扰主流程
+        pass
+
+
+def write_token_usage_log(
+    purpose: str,
+    provider: str,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+    user_id: int = None,
+) -> None:
+    """写入一条 Token 消耗日志（fire-and-forget，异常不向上抛出）。"""
+    try:
+        from app.core.database import SessionLocal
+        from sqlalchemy import text as _text
+        session = SessionLocal()
+        try:
+            session.execute(
+                _text(
+                    "INSERT INTO ai_token_usage_logs "
+                    "(user_id, purpose, provider, model, prompt_tokens, completion_tokens, total_tokens) "
+                    "VALUES (:user_id, :purpose, :provider, :model, :prompt_tokens, :completion_tokens, :total_tokens)"
+                ),
+                {
+                    "user_id": user_id,
+                    "purpose": purpose,
+                    "provider": provider,
+                    "model": model,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                },
+            )
+            session.commit()
+        finally:
+            session.close()
+    except Exception:
         pass
 

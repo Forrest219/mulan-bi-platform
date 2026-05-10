@@ -10,77 +10,10 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.database import SessionLocal
 from app.core.dependencies import get_current_admin
-from app.core.crypto import get_mcp_crypto
 from services.mcp.models import McpServer
 from services.llm.service import llm_service
-from services.events import emit_event
-from services.events.constants import (
-    MCP_SERVER_CHANGED,
-    MCP_SERVER_DELETED,
-    SOURCE_MODULE_MCP,
-)
-from services.audit.audit_service import log_action
 
 logger = logging.getLogger(__name__)
-_mcp_crypto = get_mcp_crypto()
-
-_SENSITIVE_CRED_FIELDS = {"pat_value", "password", "secret", "token"}
-
-
-def _encrypt_credentials(creds: dict | None) -> dict | None:
-    """将凭证 dict 中的敏感字段加密，返回新 dict（其他字段保留明文以便读取）"""
-    if not creds:
-        return creds
-    result = {}
-    for k, v in creds.items():
-        if k in _SENSITIVE_CRED_FIELDS and isinstance(v, str) and v:
-            result[k] = _mcp_crypto.encrypt(v)
-            result[f"{k}_encrypted"] = True
-        else:
-            result[k] = v
-    return result
-
-
-def _decrypt_credentials(creds: dict | None) -> dict | None:
-    """解密凭证 dict 中已加密的敏感字段"""
-    if not creds:
-        return creds
-    result = {}
-    for k, v in creds.items():
-        if k.endswith("_encrypted"):
-            continue  # 跳过标记字段
-        base_key = k
-        if creds.get(f"{k}_encrypted") and isinstance(v, str) and v:
-            try:
-                result[base_key] = _mcp_crypto.decrypt(v)
-            except Exception:
-                result[base_key] = v  # 解密失败时原样返回（兼容旧明文数据）
-        else:
-            result[base_key] = v
-    return result
-
-
-def _mask_credentials(creds: dict | None) -> dict | None:
-    """对 API 响应中的凭证做脱敏处理，不向前端暴露明文密钥"""
-    if not creds:
-        return creds
-    result = {}
-    for k, v in creds.items():
-        if k.endswith("_encrypted"):
-            continue
-        if k in _SENSITIVE_CRED_FIELDS and v:
-            result[k] = "***"
-        else:
-            result[k] = v
-    return result
-
-
-def _to_masked_dict(record) -> dict:
-    """序列化 McpServer 并对凭证脱敏，用于所有 API 响应"""
-    d = record.to_dict()
-    if d.get("credentials"):
-        d["credentials"] = _mask_credentials(d["credentials"])
-    return d
 
 
 def _sync_mcp_to_tableau(mcp_name: str, mcp_server_url: str,
@@ -203,7 +136,7 @@ async def list_mcp_servers(request: Request):
     db = SessionLocal()
     try:
         records = db.query(McpServer).order_by(McpServer.created_at.desc()).all()
-        return [_to_masked_dict(r) for r in records]
+        return [r.to_dict() for r in records]
     finally:
         db.close()
 
@@ -228,27 +161,24 @@ async def create_mcp_server(req: McpServerCreateRequest, request: Request):
             server_url=req.server_url,
             description=req.description,
             is_active=req.is_active,
-            credentials=_encrypt_credentials(req.credentials),
+            credentials=req.credentials,
         )
         db.add(record)
         db.commit()
         db.refresh(record)
-
-        log_action(user["id"], user.get("username", ""), "create", "mcp_server", record.id,
-                   after_state={"name": record.name, "type": record.type, "is_active": record.is_active})
 
         if record.type == "tableau":
             try:
                 _sync_mcp_to_tableau(
                     mcp_name=record.name,
                     mcp_server_url=record.server_url,
-                    credentials=_decrypt_credentials(record.credentials),
+                    credentials=record.credentials,
                     owner_id=user["id"],
                 )
             except Exception:
                 logger.exception("Sync bridge failed on CREATE for mcp '%s'", record.name)
 
-        return _to_masked_dict(record)
+        return record.to_dict()
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail=f"名称 '{req.name}' 已存在")
@@ -267,18 +197,11 @@ async def update_mcp_server(id: int, req: McpServerUpdateRequest, request: Reque
             raise HTTPException(status_code=404, detail="MCP server not found")
 
         old_name = record.name
-        old_is_active = record.is_active
-        old_credentials = record.credentials
-
-        # 收集变更字段列表（用于反向同步事件）
-        fields_changed = []
 
         if req.name is not None:
             if not req.name.strip():
                 raise HTTPException(status_code=422, detail="name 不能为空")
-            if record.name != req.name.strip():
-                fields_changed.append("name")
-                record.name = req.name.strip()
+            record.name = req.name.strip()
         if req.type is not None:
             if req.type not in MCP_TYPE_VALUES:
                 raise HTTPException(status_code=422, detail=f"type 必须为 {MCP_TYPE_VALUES} 之一")
@@ -290,54 +213,12 @@ async def update_mcp_server(id: int, req: McpServerUpdateRequest, request: Reque
         if req.description is not None:
             record.description = req.description
         if req.is_active is not None:
-            if record.is_active != req.is_active:
-                fields_changed.append("is_active")
             record.is_active = req.is_active
         if req.credentials is not None:
-            # 检查 credentials 中的特定字段是否变更
-            old_creds = _decrypt_credentials(old_credentials) or {}
-            new_creds = req.credentials
-            if old_creds.get("pat_value") != new_creds.get("pat_value"):
-                fields_changed.append("pat_value")
-            if old_creds.get("tableau_server") != new_creds.get("tableau_server"):
-                fields_changed.append("tableau_server")
-            if old_creds.get("site_name") != new_creds.get("site_name"):
-                fields_changed.append("site_name")
-            if old_creds.get("pat_name") != new_creds.get("pat_name"):
-                fields_changed.append("pat_name")
-            record.credentials = _encrypt_credentials(req.credentials)
-
-        # 如果 name 变更，记录 old_name 在快照中
-        mcp_snapshot = {
-            "id": record.id,
-            "name": record.name,
-            "old_name": old_name if "name" in fields_changed else None,
-            "is_active": record.is_active,
-            "credentials": record.credentials,
-        }
+            record.credentials = req.credentials
 
         db.commit()
         db.refresh(record)
-
-        log_action(user["id"], user.get("username", ""), "update", "mcp_server", record.id,
-                   before_state={"name": old_name, "is_active": old_is_active},
-                   after_state={"name": record.name, "is_active": record.is_active})
-
-        # 发射 mcp.server.changed 事件（commit 之后）
-        if record.type == "tableau" and fields_changed:
-            emit_event(
-                db=db,
-                event_type=MCP_SERVER_CHANGED,
-                source_module=SOURCE_MODULE_MCP,
-                payload={
-                    "mcp_id": record.id,
-                    "change_type": "update",
-                    "fields_changed": fields_changed,
-                    "mcp_name": record.name,
-                    "mcp_snapshot": mcp_snapshot,
-                },
-                actor_id=user["id"],
-            )
 
         if record.type == "tableau":
             try:
@@ -347,14 +228,14 @@ async def update_mcp_server(id: int, req: McpServerUpdateRequest, request: Reque
                 _sync_mcp_to_tableau(
                     mcp_name=record.name,
                     mcp_server_url=record.server_url,
-                    credentials=_decrypt_credentials(record.credentials),
+                    credentials=record.credentials,
                     owner_id=user["id"],
                     is_active=record.is_active,
                 )
             except Exception:
                 logger.exception("Sync bridge failed on UPDATE for mcp '%s'", record.name)
 
-        return _to_masked_dict(record)
+        return record.to_dict()
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="名称已存在")
@@ -365,43 +246,18 @@ async def update_mcp_server(id: int, req: McpServerUpdateRequest, request: Reque
 @router.delete("/{id}")
 async def delete_mcp_server(id: int, request: Request):
     """删除 MCP 服务器配置"""
-    user = get_current_admin(request)
+    get_current_admin(request)
     db = SessionLocal()
     try:
         record = db.query(McpServer).filter(McpServer.id == id).first()
         if not record:
             raise HTTPException(status_code=404, detail="MCP server not found")
-
-        # 保存删除前快照
-        mcp_snapshot = {
-            "id": record.id,
-            "name": record.name,
-            "type": record.type,
-            "is_active": record.is_active,
-            "credentials": record.credentials,
-        }
         mcp_name = record.name
         mcp_type = record.type
-
         db.delete(record)
         db.commit()
 
-        log_action(user["id"], user.get("username", ""), "delete", "mcp_server", id,
-                   before_state={"name": mcp_name, "type": mcp_type})
-
-        # 发射 mcp.server.deleted 事件（commit 之后）
         if mcp_type == "tableau":
-            emit_event(
-                db=db,
-                event_type=MCP_SERVER_DELETED,
-                source_module=SOURCE_MODULE_MCP,
-                payload={
-                    "mcp_id": id,
-                    "snapshot": mcp_snapshot,
-                },
-                actor_id=user["id"],
-            )
-
             try:
                 from services.tableau.models import TableauDatabase
                 tab_db = TableauDatabase()
@@ -415,177 +271,37 @@ async def delete_mcp_server(id: int, request: Request):
         db.close()
 
 
-async def _test_tableau_pat(credentials: dict, start: float) -> dict:
-    """验证 Tableau PAT 凭证有效性，返回测试结果 dict。"""
-    import time as _time
-    from app.api.tableau_mcp import _tableau_signin
-
-    tableau_server = (credentials.get("tableau_server") or "").rstrip("/")
-    pat_name = credentials.get("pat_name") or ""
-    pat_value = credentials.get("pat_value") or ""
-    site_name = credentials.get("site_name") or ""
-
-    if not (tableau_server and pat_name and pat_value):
-        return {"status": "auth_failed", "latency_ms": 0, "error": "凭证不完整，请填写 Tableau Server、PAT 名称和密钥"}
-
-    try:
-        _, site_id = await _tableau_signin(tableau_server, pat_name, pat_value, site_name)
-        latency_ms = int((_time.monotonic() - start) * 1000)
-        return {"status": "online", "latency_ms": latency_ms, "auth": "ok", "site_id": site_id}
-    except RuntimeError as e:
-        latency_ms = int((_time.monotonic() - start) * 1000)
-        return {"status": "auth_failed", "latency_ms": latency_ms, "error": str(e)}
-    except Exception:
-        latency_ms = int((_time.monotonic() - start) * 1000)
-        return {"status": "offline", "latency_ms": latency_ms, "error": "ConnectError"}
-
-
-async def _test_mcp_endpoint(url: str, start: float) -> dict:
-    """Verify a streamable-http MCP endpoint can complete initialize."""
-    import time as _time
-    import httpx as _httpx
-    from services.common.settings import get_tableau_mcp_protocol_version
-
-    endpoint = (url or "").strip()
-    if not endpoint:
-        return {"status": "offline", "latency_ms": 0, "error": "MCP Endpoint 不能为空"}
-
-    payload = {
-        "jsonrpc": "2.0",
-        "id": "mcp-config-test",
-        "method": "initialize",
-        "params": {
-            "protocolVersion": get_tableau_mcp_protocol_version(),
-            "capabilities": {},
-            "clientInfo": {"name": "mulan-bi-config-test", "version": "1.0.0"},
-        },
-    }
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json, text/event-stream",
-        "MCP-Protocol-Version": get_tableau_mcp_protocol_version(),
-    }
-
-    try:
-        async with _httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.post(endpoint, json=payload, headers=headers)
-            latency_ms = int((_time.monotonic() - start) * 1000)
-            if resp.status_code >= 400:
-                return {
-                    "status": "offline",
-                    "latency_ms": latency_ms,
-                    "endpoint_status": "offline",
-                    "endpoint": endpoint,
-                    "error": f"MCP Endpoint 返回 HTTP {resp.status_code}",
-                }
-
-            session_id = None
-            for k, v in resp.headers.items():
-                if k.lower() == "mcp-session-id":
-                    session_id = v
-                    break
-            if not session_id:
-                try:
-                    body = resp.json()
-                    session_id = body.get("sessionId") or body.get("session_id")
-                except Exception:
-                    pass
-            if not session_id:
-                return {
-                    "status": "offline",
-                    "latency_ms": latency_ms,
-                    "endpoint_status": "invalid",
-                    "endpoint": endpoint,
-                    "error": "MCP Endpoint 未返回 mcp-session-id，请确认这里不是 Tableau Server URL",
-                }
-
-            try:
-                await client.delete(endpoint, headers={**headers, "mcp-session-id": session_id})
-            except _httpx.HTTPError:
-                pass
-
-            return {
-                "status": "online",
-                "latency_ms": latency_ms,
-                "endpoint_status": "online",
-                "endpoint": endpoint,
-            }
-    except _httpx.ConnectError:
-        latency_ms = int((_time.monotonic() - start) * 1000)
-        from urllib.parse import urlparse as _urlparse
-        netloc = _urlparse(endpoint).netloc or endpoint
-        return {
-            "status": "offline",
-            "latency_ms": latency_ms,
-            "endpoint_status": "offline",
-            "endpoint": endpoint,
-            "error": f"MCP Gateway 进程未运行（{netloc}）",
-        }
-    except _httpx.HTTPError as e:
-        latency_ms = int((_time.monotonic() - start) * 1000)
-        return {
-            "status": "offline",
-            "latency_ms": latency_ms,
-            "endpoint_status": "offline",
-            "endpoint": endpoint,
-            "error": type(e).__name__,
-        }
-
-
 @router.post("/test-draft")
 async def test_mcp_draft(request: Request):
-    """新增配置前的连通性 + PAT 认证探测（不需要先保存）"""
+    """新增配置前的连通性探测（不需要先保存）"""
     get_current_admin(request)
     body = await request.json()
-    server_type = body.get("type", "")
     url = body.get("server_url", "").strip()
-    credentials = body.get("credentials") or {}
+    if not url:
+        raise HTTPException(status_code=400, detail="server_url is required")
 
     import time as _time
     import httpx as _httpx
     start = _time.monotonic()
-
-    if server_type == "tableau":
-        pat_result = await _test_tableau_pat(credentials, start)
-        if pat_result["status"] != "online":
-            return pat_result
-        endpoint_result = await _test_mcp_endpoint(url, start)
-        if endpoint_result["status"] != "online":
-            return {
-                **endpoint_result,
-                "auth": "ok",
-                "site_id": pat_result.get("site_id"),
-                "error": endpoint_result.get("error", "MCP Endpoint 不可用"),
-            }
-        return {
-            **endpoint_result,
-            "auth": "ok",
-            "site_id": pat_result.get("site_id"),
-        }
-
-    if not url:
-        raise HTTPException(status_code=400, detail="server_url is required")
     try:
         async with _httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(url)
         latency_ms = int((_time.monotonic() - start) * 1000)
         return {"status": "online", "latency_ms": latency_ms, "http_status": resp.status_code}
-    except _httpx.HTTPError as e:
+    except (_httpx.ConnectError, _httpx.TimeoutException) as e:
         latency_ms = int((_time.monotonic() - start) * 1000)
         return {"status": "offline", "latency_ms": latency_ms, "error": type(e).__name__}
 
 
 @router.post("/{id}/test")
 async def test_mcp_server(id: int, request: Request):
-    """连通性 + PAT 认证探测"""
+    """HTTP 可达性探测"""
     get_current_admin(request)
     db = SessionLocal()
     try:
         record = db.query(McpServer).filter(McpServer.id == id).first()
         if not record:
             raise HTTPException(status_code=404, detail="MCP server not found")
-        server_type = record.type
-        credentials = _decrypt_credentials(record.credentials or {})
         url = record.server_url
     finally:
         db.close()
@@ -593,30 +309,11 @@ async def test_mcp_server(id: int, request: Request):
     import time as _time
     import httpx as _httpx
     start = _time.monotonic()
-
-    if server_type == "tableau":
-        pat_result = await _test_tableau_pat(credentials, start)
-        if pat_result["status"] != "online":
-            return pat_result
-        endpoint_result = await _test_mcp_endpoint(url, start)
-        if endpoint_result["status"] != "online":
-            return {
-                **endpoint_result,
-                "auth": "ok",
-                "site_id": pat_result.get("site_id"),
-                "error": endpoint_result.get("error", "MCP Endpoint 不可用"),
-            }
-        return {
-            **endpoint_result,
-            "auth": "ok",
-            "site_id": pat_result.get("site_id"),
-        }
-
     try:
         async with _httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(url)
         latency_ms = int((_time.monotonic() - start) * 1000)
         return {"status": "online", "latency_ms": latency_ms, "http_status": resp.status_code}
-    except _httpx.HTTPError as e:
+    except (_httpx.ConnectError, _httpx.TimeoutException) as e:
         latency_ms = int((_time.monotonic() - start) * 1000)
         return {"status": "offline", "latency_ms": latency_ms, "error": type(e).__name__}

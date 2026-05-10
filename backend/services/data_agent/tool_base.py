@@ -193,6 +193,21 @@ class ToolRegistry:
             if tool.metadata.category == category
         ]
 
+    def has(self, name: str) -> bool:
+        """检查工具是否已注册"""
+        return name in self._tools
+
+    def override_meta(self, name: str, description: str, parameters_schema: dict) -> None:
+        """用 DB 版本覆盖工具的 description 和 parameters_schema，保留 execute()"""
+        if name not in self._tools:
+            return
+        self._tools[name].description = description
+        self._tools[name].parameters_schema = parameters_schema
+
+    def list_tool_names(self) -> list:
+        """返回所有已注册工具的 name 列表（用于 skill_key 白名单校验）"""
+        return list(self._tools.keys())
+
     def __contains__(self, name: str) -> bool:
         return name in self._tools
 

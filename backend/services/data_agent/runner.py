@@ -108,12 +108,22 @@ async def run_agent(
                     tools_used.append(tool_name)
                 steps_count += 1
                 step_number += 1
+                # 从 engine 的 active_skill_versions 获取版本 ID（Track B LLM 集成）
+                _version_id_str = getattr(engine, "_active_skill_versions", {}).get(tool_name)
+                _skill_version_id = None
+                if _version_id_str:
+                    try:
+                        import uuid as _uuid_mod
+                        _skill_version_id = _uuid_mod.UUID(_version_id_str)
+                    except (ValueError, AttributeError):
+                        pass
                 step = BiAgentStep(
                     run_id=run_id,
                     step_number=step_number,
                     step_type="tool_call",
                     tool_name=tool_name,
                     tool_params=event.content.get("params", {}),
+                    skill_version_id=_skill_version_id,
                 )
                 db.add(step)
                 db.commit()

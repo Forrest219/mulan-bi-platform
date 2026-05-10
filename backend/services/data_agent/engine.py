@@ -116,6 +116,7 @@ class ReActEngine:
         max_tool_retries: int = DEFAULT_MAX_TOOL_RETRIES,
         max_history_tokens: int = DEFAULT_MAX_HISTORY_TOKENS,
         wrapper=None,
+        active_skill_versions: Optional[Dict[str, str]] = None,
     ):
         self.registry = registry
         self.llm = llm_service
@@ -125,6 +126,8 @@ class ReActEngine:
         self.max_tool_retries = max_tool_retries
         self.max_history_tokens = max_history_tokens
         self._wrapper = wrapper
+        # {skill_key: version_id_str} — populated by SkillLoader via factory
+        self._active_skill_versions: Dict[str, str] = active_skill_versions or {}
 
     async def run(
         self,

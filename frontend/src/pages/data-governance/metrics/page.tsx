@@ -313,9 +313,9 @@ export default function MetricsPage() {
           <div>
             <div className="flex items-center gap-2 mb-0.5">
               <span className="w-5 h-5 flex items-center justify-center">
-                <i className="ri-bar-chart-grouped-line text-slate-500 text-base" />
+                <i className="ri-hammer-line text-slate-500 text-base" />
               </span>
-              <h1 className="text-lg font-semibold text-slate-800">指标管理</h1>
+              <h1 className="text-lg font-semibold text-slate-800">指标治理</h1>
             </div>
             <p className="text-[13px] text-slate-400 ml-7">管理指标定义、口径与发布状态</p>
           </div>
