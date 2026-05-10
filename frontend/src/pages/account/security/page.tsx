@@ -24,7 +24,7 @@ interface SetupData {
   backup_codes: string[];
 }
 
-export default function AccountSecurityPage() {
+export default function AccountSecurityForm() {
   const { user } = useAuth();
   const [step, setStep] = useState<MfaStep>('loading');
   const [setupData, setSetupData] = useState<SetupData | null>(null);
@@ -167,11 +167,7 @@ export default function AccountSecurityPage() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto py-8 px-4">
-      <h1 className="text-lg font-semibold text-slate-900 mb-1">账户安全</h1>
-      <p className="text-sm text-slate-500 mb-6">管理两步验证等安全设置</p>
-
-      {/* 错误提示 */}
+    <>
       {error && (
         <div className="mb-4 px-3 py-2 rounded-md bg-red-50 border border-red-200 text-red-600 text-sm">
           {error}
@@ -456,6 +452,6 @@ export default function AccountSecurityPage() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

@@ -7,6 +7,7 @@ export interface DocumentItem {
   title: string;
   content: string;
   format: string;
+  doc_type: string;
   category: string;
   tags: string[];
   status: string;
@@ -43,8 +44,12 @@ export async function createDocument(data: {
   title: string;
   content: string;
   format?: string;
+  doc_type?: string;
   category?: string;
   tags?: string[];
+  linked_assets?: { uid: string; kind: string; label: string }[];
+  allow_rag?: boolean;
+  rag_weight?: string;
 }): Promise<{ id: number; message: string }> {
   const res = await fetch(`${BASE}/documents`, {
     method: 'POST',
@@ -54,8 +59,12 @@ export async function createDocument(data: {
       title: data.title,
       content: data.content,
       format: data.format ?? 'markdown',
+      doc_type: data.doc_type ?? 'general',
       category: data.category ?? 'general',
       tags: data.tags ?? [],
+      linked_assets: data.linked_assets ?? [],
+      allow_rag: data.allow_rag ?? true,
+      rag_weight: data.rag_weight ?? 'medium',
     }),
   });
   if (!res.ok) {
@@ -111,6 +120,7 @@ export interface GlossaryItem {
   formula: string | null;
   source: string;
   created_at: string;
+  related_metric_ids: string[];
 }
 
 export interface GlossaryListResponse {
@@ -141,6 +151,7 @@ export async function createGlossary(data: {
   category?: string;
   synonyms?: string[];
   formula?: string;
+  related_metric_ids?: string[];
 }): Promise<{ id: number; message: string }> {
   const q = new URLSearchParams({
     term: data.term,
@@ -148,6 +159,7 @@ export async function createGlossary(data: {
     definition: data.definition,
     category: data.category ?? 'concept',
     synonyms: JSON.stringify(data.synonyms ?? []),
+    related_metric_ids: JSON.stringify(data.related_metric_ids ?? []),
     ...(data.formula ? { formula: data.formula } : {}),
   });
   const res = await fetch(`${BASE}/glossary?${q}`, {
@@ -167,5 +179,39 @@ export async function deleteGlossary(id: number): Promise<void> {
     credentials: 'include',
   });
   if (!res.ok) throw new Error('删除术语失败');
+}
+
+export interface ImportGlossaryResult {
+  created: number;
+  skipped: number;
+  errors: { row: number; term?: string; reason: string }[];
+}
+
+export async function parseFile(formData: FormData): Promise<{ content: string; format: string }> {
+  const res = await fetch(`${BASE}/parse-file`, {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err?.detail as { message?: string })?.message ?? '文件解析失败');
+  }
+  return res.json();
+}
+
+export async function importGlossaryCSV(file: File): Promise<ImportGlossaryResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${BASE}/glossary/import`, {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err?.detail as { message?: string })?.message ?? '批量导入失败');
+  }
+  return res.json();
 }
 

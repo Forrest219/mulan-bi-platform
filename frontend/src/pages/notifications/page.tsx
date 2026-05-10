@@ -106,7 +106,7 @@ export default function NotificationsPage() {
     <div className="min-h-screen bg-slate-50">
       {/* 页头 */}
       <div className="bg-white border-b border-slate-200 px-8 py-5">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2 mb-0.5">
               <i className="ri-notification-3-line text-slate-500 text-base" />
@@ -128,27 +128,32 @@ export default function NotificationsPage() {
             }
           </button>
         </div>
+      </div>
 
-        {/* 过滤 Tab */}
-        <div className="max-w-4xl mx-auto mt-4 flex gap-1">
-          {FILTER_TABS.map(t => (
-            <button
-              key={t.key}
-              onClick={() => handleFilterChange(t.key)}
-              className={`px-3.5 py-1.5 text-[12px] font-medium rounded-lg transition-colors ${
-                filter === t.key
-                  ? 'bg-slate-800 text-white'
-                  : 'text-slate-500 hover:bg-slate-100'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+      {/* 过滤 Tab */}
+      <div className="bg-white border-b border-slate-100 px-8">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex gap-1 py-2">
+            {FILTER_TABS.map(t => (
+              <button
+                key={t.key}
+                onClick={() => handleFilterChange(t.key)}
+                className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
+                  filter === t.key
+                    ? 'bg-slate-800 text-white'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* 列表 */}
-      <div className="max-w-4xl mx-auto px-8 py-6">
+      <div className="px-8 py-6">
+        <div className="max-w-6xl mx-auto">
         {loading ? (
           <div className="flex items-center justify-center py-20 text-slate-400 text-[13px]">
             <i className="ri-loader-4-line animate-spin mr-2" />加载中…
@@ -224,6 +229,7 @@ export default function NotificationsPage() {
             </button>
           </div>
         )}
+      </div>
       </div>
     </div>
   );

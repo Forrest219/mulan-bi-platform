@@ -46,3 +46,11 @@ export async function markAllNotificationsRead(): Promise<void> {
     body: JSON.stringify({ all: true }),
   });
 }
+
+export async function deleteNotification(id: number): Promise<void> {
+  await fetch(`/api/notifications/${id}`, { method: 'DELETE', credentials: 'include' });
+}
+
+export async function markNotificationUnread(id: number): Promise<void> {
+  await fetch(`/api/notifications/${id}/unread`, { method: 'PUT', credentials: 'include' });
+}

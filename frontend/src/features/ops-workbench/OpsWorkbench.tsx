@@ -71,7 +71,7 @@ function OpsWorkbenchInner({
       {/* 固定底部：AskBar */}
       {bottomBar && (
         <div className="shrink-0 border-t border-slate-100 bg-white px-6 py-4">
-          <div className="max-w-4xl mx-auto">
+          <div className="w-full max-w-4xl mx-auto">
             {bottomBar}
           </div>
         </div>
@@ -94,7 +94,7 @@ export function OpsWorkbench(props: OpsWorkbenchInnerProps) {
         <div className="flex-1 overflow-y-auto">{props.idleContent}</div>
         {props.bottomBar && (
           <div className="shrink-0 border-t border-slate-100 bg-white px-6 py-4">
-            <div className="max-w-4xl mx-auto">{props.bottomBar}</div>
+            <div className="w-full max-w-4xl mx-auto">{props.bottomBar}</div>
           </div>
         )}
       </div>

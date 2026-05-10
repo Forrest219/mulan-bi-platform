@@ -419,36 +419,41 @@ export default function PlatformSettingsPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      {/* 页头 */}
       <div className="bg-white border-b border-slate-200 px-8 py-5">
-        <div className="max-w-4xl mx-auto">
-          <h1 className="text-base font-semibold text-slate-900">平台设置</h1>
-          <p className="text-xs text-slate-400 mt-0.5">配置平台 Logo、名称和邮件通知设置</p>
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center gap-2 mb-0.5">
+            <i className="ri-image-line text-slate-500 text-base" />
+            <h1 className="text-lg font-semibold text-slate-800">平台设置</h1>
+          </div>
+          <p className="text-[13px] text-slate-400 ml-7">配置平台 Logo、名称和邮件通知设置</p>
         </div>
       </div>
-      <div className="px-8 py-6">
-        <div className="max-w-4xl mx-auto">
 
-      {/* Tab 切换 */}
-      <div className="flex border-b border-slate-200 mb-5">
-        {([
-          ['general', '基础设置'],
-          ['email', '邮件通知'],
-        ] as [TabKey, string][]).map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setActiveTab(key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition ${
-              activeTab === key
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+      {/* Tab 导航 */}
+      <div className="bg-white border-b border-slate-100 px-8">
+        <div className="max-w-6xl mx-auto flex gap-1 py-2">
+          {([
+            ['general', '基础设置'],
+            ['email', '邮件通知'],
+          ] as [TabKey, string][]).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
+                activeTab === key
+                  ? 'bg-slate-800 text-white'
+                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* ========== 基础设置 Tab ========== */}
+      <div className="px-8 py-7">
+        <div className="max-w-6xl mx-auto">
       {activeTab === 'general' && (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden flex">
           {/* 左侧：Logo 预览面板 */}

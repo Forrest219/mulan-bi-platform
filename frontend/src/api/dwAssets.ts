@@ -8,9 +8,11 @@ export interface DwDatabaseItem {
   datasource_id: number;
   name: string;
   db_type: string;
-  database_name: string;
   host: string;
   table_count: number;
+  total_storage_bytes: number;
+  database_count: number;
+  databases: string[];
   last_synced_at: string | null;
   sync_status: string | null;
 }
@@ -141,9 +143,10 @@ export interface PaginatedResponse<T> {
 
 export interface DwTablesParams {
   datasource_id?: number;
+  database_name?: string;
   schema_name?: string;
   q?: string;
-  domain?: string;
+  domain?: string | string[];
   layer?: string;
   table_type?: string;
   sort?: string;
@@ -201,11 +204,20 @@ export const DW_SORT_OPTIONS = [
 // ============================================================
 
 function buildQueryString(params: object): string {
-  const entries = Object.entries(params).filter(
-    ([, v]) => v !== undefined && v !== null && v !== ''
-  );
-  if (entries.length === 0) return '';
-  return '?' + entries.map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&');
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === '') continue;
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (item !== undefined && item !== null && item !== '') {
+          parts.push(`${k}=${encodeURIComponent(String(item))}`);
+        }
+      }
+    } else {
+      parts.push(`${k}=${encodeURIComponent(String(v))}`);
+    }
+  }
+  return parts.length === 0 ? '' : '?' + parts.join('&');
 }
 
 /** 获取可浏览的数据源/库列表 */
@@ -398,6 +410,7 @@ export async function listDwSyncRuns(params?: {
 export interface DomainValueItem {
   l1: string;
   l2_list: string[];
+  description?: string | null;
 }
 
 /** 主题域层级配置项 */
@@ -405,6 +418,7 @@ export interface DwDomainTaxonomyItem {
   id: number;
   l1: string;
   l2: string | null;
+  description?: string | null;
   display_order: number;
 }
 

@@ -66,6 +66,64 @@ export interface PaginatedResponse<T> {
   pages: number;
 }
 
+// ─── 同步计划（BiSyncSchedule） ────────────────────────────────
+
+export interface SyncSchedule {
+  id: number;
+  name: string;
+  description: string | null;
+  frequency_type: string;  // hourly / daily / weekly / monthly
+  cron_expr: string;
+  priority: number;
+  execution_mode: string;  // parallel / sequential
+  is_enabled: boolean;
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
+  // 计算字段（API 返回）
+  cron_description?: string;
+  next_run_at?: string | null;
+  connection_count?: number;
+  connections?: TableauConnectionSimple[];
+}
+
+export interface TableauConnectionSimple {
+  id: number;
+  name: string;
+  server_url: string;
+  site: string;
+  auto_sync_enabled: boolean;
+  sync_interval_hours: number;
+  schedule_id: number | null;
+  last_sync_at: string | null;
+  sync_status: string;
+}
+
+export interface TaskQueueItem {
+  type: 'past' | 'future';
+  scheduled_time: string;
+  finished_at?: string | null;
+  schedule_name: string;
+  schedule_id?: number;
+  status: string;
+  duration_ms?: number | null;
+  run_id?: number;
+  task_name?: string;
+  connection_count?: number;
+  priority?: number;
+  execution_mode?: string;
+}
+
+export interface TaskQueueResponse {
+  items: TaskQueueItem[];
+  past_count: number;
+  future_count: number;
+  past_range: string;
+  future_range: string;
+}
+
+export interface SyncScheduleListResponse extends PaginatedResponse<SyncSchedule> {}
+
 // API functions — follow the exact pattern from health-scan.ts
 
 export async function fetchTaskSchedules(): Promise<{ items: TaskSchedule[]; total: number }> {
@@ -162,5 +220,108 @@ export async function previewCron(cronExpr: string, n = 3): Promise<{ cron_expr:
     const err = await res.json();
     throw new Error(err.detail?.message || err.detail || 'Cron 预览失败');
   }
+  return res.json();
+}
+
+// ─── 同步计划 API ───────────────────────────────────────────
+
+export async function fetchSyncSchedules(params?: {
+  page?: number; page_size?: number; enabled_only?: boolean;
+}): Promise<SyncScheduleListResponse> {
+  const sp = new URLSearchParams();
+  if (params?.page) sp.set('page', String(params.page));
+  if (params?.page_size) sp.set('page_size', String(params.page_size));
+  if (params?.enabled_only) sp.set('enabled_only', 'true');
+  const res = await fetch(`${API_BASE}/api/tasks/sync-schedules?${sp}`, { credentials: 'include' });
+  if (!res.ok) throw new Error('获取同步计划列表失败');
+  return res.json();
+}
+
+export async function fetchSyncSchedule(id: number): Promise<SyncSchedule> {
+  const res = await fetch(`${API_BASE}/api/tasks/sync-schedules/${id}`, { credentials: 'include' });
+  if (!res.ok) throw new Error('获取同步计划详情失败');
+  return res.json();
+}
+
+export async function createSyncSchedule(data: {
+  name: string; cron_expr: string; frequency_type: string;
+  priority?: number; execution_mode?: string; description?: string;
+}): Promise<SyncSchedule> {
+  const res = await fetch(`${API_BASE}/api/tasks/sync-schedules`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail?.message || err.detail || '创建同步计划失败');
+  }
+  return res.json();
+}
+
+export async function updateSyncSchedule(
+  id: number,
+  data: Partial<{
+    name: string; cron_expr: string; frequency_type: string;
+    priority: number; execution_mode: string; description: string; is_enabled: boolean;
+  }>,
+): Promise<SyncSchedule> {
+  const res = await fetch(`${API_BASE}/api/tasks/sync-schedules/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail?.message || err.detail || '更新同步计划失败');
+  }
+  return res.json();
+}
+
+export async function deleteSyncSchedule(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/tasks/sync-schedules/${id}`, {
+    method: 'DELETE', credentials: 'include',
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail?.message || err.detail || '删除同步计划失败');
+  }
+}
+
+export async function bindConnections(scheduleId: number, connectionIds: number[]): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/tasks/sync-schedules/${scheduleId}/bind`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ connection_ids: connectionIds }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail?.message || err.detail || '绑定连接失败');
+  }
+}
+
+export async function unbindConnections(scheduleId: number, connectionIds: number[]): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/tasks/sync-schedules/${scheduleId}/unbind`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ connection_ids: connectionIds }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail?.message || err.detail || '解除绑定失败');
+  }
+}
+
+export async function fetchTaskQueue(pastHours = 24, futureHours = 24): Promise<TaskQueueResponse> {
+  const sp = new URLSearchParams({
+    past_hours: String(pastHours),
+    future_hours: String(futureHours),
+  });
+  const res = await fetch(`${API_BASE}/api/tasks/tasks/queue?${sp}`, { credentials: 'include' });
+  if (!res.ok) throw new Error('获取任务队列失败');
   return res.json();
 }

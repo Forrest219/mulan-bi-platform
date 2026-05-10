@@ -38,7 +38,7 @@ function resizeToBase64(file: File, maxSize = 128): Promise<string> {
   });
 }
 
-export default function AccountProfilePage() {
+export default function AccountProfileForm() {
   const { user, updateUser } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
@@ -107,22 +107,14 @@ export default function AccountProfilePage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="bg-white border-b border-slate-200 px-8 py-5">
-        <div className="max-w-3xl mx-auto">
-          <h1 className="text-base font-semibold text-slate-900">个人中心</h1>
-          <p className="text-xs text-slate-400 mt-0.5">查看和管理你的个人信息</p>
-        </div>
-      </div>
-      <div className="px-8 py-7">
-        <div className="max-w-3xl mx-auto">
-
+    <>
       {toast && (
-        <div className={`mb-3 px-3 py-2 rounded-md text-sm border ${
+        <div className={`mb-4 p-3 rounded-md text-sm border flex items-center gap-2 ${
           toast.type === 'success'
-            ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+            ? 'bg-green-50 border-green-200 text-green-800'
             : 'bg-red-50 border-red-200 text-red-600'
         }`}>
+          {toast.type === 'success' && <i className="ri-checkbox-circle-fill text-green-500 text-base shrink-0" />}
           {toast.msg}
         </div>
       )}
@@ -248,9 +240,7 @@ export default function AccountProfilePage() {
           </div>
         </div>
       </div>
-        </div>
-      </div>
-    </div>
+    </>
   );
 }
 

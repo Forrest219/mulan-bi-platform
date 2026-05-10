@@ -59,9 +59,10 @@ const EmptyStatePage        = lazy(() => import('../pages/empty/EmptyStatePage')
 const AgentMonitorPage      = lazy(() => import('../pages/admin/agent-monitor/page'));
 const TokenStatsPage        = lazy(() => import('../pages/admin/token-stats/page'));
 const QueryPage             = lazy(() => import('../pages/query/page'));
-const AccountSecurityPage   = lazy(() => import('../pages/account/security/page'));
-const AccountPasswordPage   = lazy(() => import('../pages/account/password/page'));
-const AccountProfilePage    = lazy(() => import('../pages/account/profile/page'));
+const AccountCenterPage     = lazy(() => import('../pages/account/center/page'));
+import AccountProfileForm from '../pages/account/profile/page';
+import AccountPasswordForm from '../pages/account/password/page';
+import AccountSecurityForm from '../pages/account/security/page';
 const NotificationsPage     = lazy(() => import('../pages/notifications/page'));
 
 // DQC 模块
@@ -211,6 +212,14 @@ const routes: RouteObject[] = [
             ),
           },
           {
+            path: 'semantic-maintenance/datasources/:id',
+            element: (
+              <ProtectedRoute requiredPermission="tableau">
+                <SemanticDatasourceDetailPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
             path: 'semantic/fields',
             element: (
               <ProtectedRoute requiredPermission="tableau">
@@ -229,7 +238,7 @@ const routes: RouteObject[] = [
           {
             path: 'metrics',
             element: (
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="ddl_check">
                 <MetricsPage />
               </ProtectedRoute>
             ),
@@ -237,7 +246,7 @@ const routes: RouteObject[] = [
           {
             path: 'metrics/:id',
             element: (
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="ddl_check">
                 <MetricDetailPage />
               </ProtectedRoute>
             ),
@@ -245,7 +254,7 @@ const routes: RouteObject[] = [
           {
             path: 'metrics/maintenance-windows',
             element: (
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="ddl_check">
                 <MaintenanceWindowsPage />
               </ProtectedRoute>
             ),
@@ -254,7 +263,7 @@ const routes: RouteObject[] = [
           {
             path: 'dqc',
             element: (
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="rule_config">
                 <DqcOverviewPage />
               </ProtectedRoute>
             ),
@@ -262,7 +271,7 @@ const routes: RouteObject[] = [
           {
             path: 'dqc/monitor',
             element: (
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="rule_config">
                 <DqcMonitorPage />
               </ProtectedRoute>
             ),
@@ -274,7 +283,7 @@ const routes: RouteObject[] = [
           {
             path: 'dqc/analyses',
             element: (
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="rule_config">
                 <DqcAnalysesPage />
               </ProtectedRoute>
             ),
@@ -282,7 +291,7 @@ const routes: RouteObject[] = [
           {
             path: 'dqc/templates',
             element: (
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="rule_config">
                 <DqcTemplatesPage />
               </ProtectedRoute>
             ),
@@ -290,7 +299,7 @@ const routes: RouteObject[] = [
           {
             path: 'dqc/templates/ai-create',
             element: (
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="rule_config">
                 <DqcAiCreateRulePage />
               </ProtectedRoute>
             ),
@@ -298,7 +307,7 @@ const routes: RouteObject[] = [
           {
             path: 'dqc/templates/:id',
             element: (
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="rule_config">
                 <DqcTemplateDetailPage />
               </ProtectedRoute>
             ),
@@ -306,7 +315,7 @@ const routes: RouteObject[] = [
           {
             path: 'dqc/check-records',
             element: (
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="rule_config">
                 <DqcCheckRecordsPage />
               </ProtectedRoute>
             ),
@@ -314,7 +323,7 @@ const routes: RouteObject[] = [
           {
             path: 'dqc/derived-rules',
             element: (
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="rule_config">
                 <DqcDerivedRulesPage />
               </ProtectedRoute>
             ),
@@ -322,7 +331,7 @@ const routes: RouteObject[] = [
           {
             path: 'dqc/assets/:assetId',
             element: (
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="rule_config">
                 <DqcAssetDetailPage />
               </ProtectedRoute>
             ),
@@ -341,7 +350,7 @@ const routes: RouteObject[] = [
           {
             path: 'dw',
             element: (
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="database_monitor">
                 <DwAssetsPage />
               </ProtectedRoute>
             ),
@@ -349,7 +358,7 @@ const routes: RouteObject[] = [
           {
             path: 'dw/taxonomy',
             element: (
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="database_monitor">
                 <DwTaxonomyPage />
               </ProtectedRoute>
             ),
@@ -357,7 +366,7 @@ const routes: RouteObject[] = [
           {
             path: 'dw/:tableId',
             element: (
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="database_monitor">
                 <DwAssetDetailPage />
               </ProtectedRoute>
             ),
@@ -441,30 +450,27 @@ const routes: RouteObject[] = [
       // ── 账户设置 /account ──
       {
         path: '/account',
+        element: (
+          <ProtectedRoute>
+            <AccountCenterPage />
+          </ProtectedRoute>
+        ),
         children: [
           {
-            path: 'security',
-            element: (
-              <ProtectedRoute>
-                <AccountSecurityPage />
-              </ProtectedRoute>
-            ),
-          },
-          {
-            path: 'password',
-            element: (
-              <ProtectedRoute>
-                <AccountPasswordPage />
-              </ProtectedRoute>
-            ),
+            index: true,
+            element: <Navigate to="/account/profile" replace />,
           },
           {
             path: 'profile',
-            element: (
-              <ProtectedRoute>
-                <AccountProfilePage />
-              </ProtectedRoute>
-            ),
+            element: <AccountProfileForm />,
+          },
+          {
+            path: 'password',
+            element: <AccountPasswordForm />,
+          },
+          {
+            path: 'security',
+            element: <AccountSecurityForm />,
           },
         ],
       },
@@ -518,7 +524,7 @@ const routes: RouteObject[] = [
           {
             path: 'agent-monitor',
             element: (
-              <ProtectedRoute adminOnly>
+              <ProtectedRoute requiredPermission="user_management">
                 <AgentMonitorPage />
               </ProtectedRoute>
             ),
@@ -556,7 +562,7 @@ const routes: RouteObject[] = [
           {
             path: 'users',
             element: (
-              <ProtectedRoute adminOnly>
+              <ProtectedRoute requiredPermission="user_management">
                 <UsersAdminPage />
               </ProtectedRoute>
             ),
@@ -564,7 +570,7 @@ const routes: RouteObject[] = [
           {
             path: 'users/groups',
             element: (
-              <ProtectedRoute adminOnly>
+              <ProtectedRoute requiredPermission="user_management">
                 <GroupsAdminPage />
               </ProtectedRoute>
             ),
@@ -572,7 +578,7 @@ const routes: RouteObject[] = [
           {
             path: 'permissions',
             element: (
-              <ProtectedRoute adminOnly>
+              <ProtectedRoute requiredPermission="user_management">
                 <PermissionsAdminPage />
               </ProtectedRoute>
             ),
@@ -580,7 +586,7 @@ const routes: RouteObject[] = [
           {
             path: 'permissions/shared',
             element: (
-              <ProtectedRoute adminOnly>
+              <ProtectedRoute requiredPermission="user_management">
                 <SharedPermissionsAdminPage />
               </ProtectedRoute>
             ),
@@ -592,7 +598,7 @@ const routes: RouteObject[] = [
           {
             path: 'usage-stats/tokens',
             element: (
-              <ProtectedRoute adminOnly>
+              <ProtectedRoute requiredPermission="user_management">
                 <TokenStatsPage />
               </ProtectedRoute>
             ),
@@ -608,7 +614,7 @@ const routes: RouteObject[] = [
           {
             path: 'tasks',
             element: (
-              <ProtectedRoute adminOnly>
+              <ProtectedRoute requiredPermission="user_management">
                 <AdminTasksPage />
               </ProtectedRoute>
             ),
@@ -616,7 +622,7 @@ const routes: RouteObject[] = [
           {
             path: 'activity',
             element: (
-              <ProtectedRoute adminOnly>
+              <ProtectedRoute requiredPermission="user_management">
                 <ActivityAdminPage />
               </ProtectedRoute>
             ),
@@ -644,7 +650,7 @@ const routes: RouteObject[] = [
           {
             path: 'service-configs',
             element: (
-              <ProtectedRoute adminOnly>
+              <ProtectedRoute requiredPermission="user_management">
                 <ServiceConfigsPage />
               </ProtectedRoute>
             ),
@@ -652,7 +658,7 @@ const routes: RouteObject[] = [
           {
             path: 'mcp-debugger',
             element: (
-              <ProtectedRoute adminOnly>
+              <ProtectedRoute requiredPermission="user_management">
                 <McpDebuggerPage />
               </ProtectedRoute>
             ),
@@ -664,7 +670,7 @@ const routes: RouteObject[] = [
           {
             path: 'platform-settings',
             element: (
-              <ProtectedRoute adminOnly>
+              <ProtectedRoute requiredPermission="user_management">
                 <PlatformSettingsPage />
               </ProtectedRoute>
             ),
@@ -681,10 +687,10 @@ const routes: RouteObject[] = [
   // =====================
   { path: '/data-governance/health',           element: <Navigate to="/governance/dw-audit?tab=warehouse" replace /> },
   { path: '/semantic-maintenance/datasources', element: <Navigate to="/governance/semantic/datasources" replace /> },
-  { path: '/semantic-maintenance/datasources/:id', element: <Navigate to="/governance/semantic/datasources/:id" replace /> },
+  { path: '/semantic-maintenance/datasources/:id', element: <Navigate to="/governance/semantic-maintenance/datasources/:id" replace /> },
   { path: '/semantic-maintenance/fields',       element: <Navigate to="/governance/semantic/fields" replace /> },
   { path: '/tableau/assets',                   element: <Navigate to="/assets/tableau" replace /> },
-  { path: '/tableau/assets/:id',               element: <Navigate to="/assets/tableau/:id" replace /> },
+  { path: '/tableau/assets/:id',               element: <TableauAssetDetailPage /> },
   { path: '/tableau/health',                   element: <Navigate to="/governance/dw-audit?tab=tableau" replace /> },
   { path: '/admin/users',                      element: <Navigate to="/system/users" replace /> },
   { path: '/admin/groups',                     element: <Navigate to="/system/users/groups" replace /> },

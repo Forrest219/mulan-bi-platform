@@ -35,9 +35,11 @@ const USE_MOCK = false;
 function HomePageInner() {
   const navigate = useNavigate();
 
-  const [barCollapsed, setBarCollapsed] = useState<boolean>(() => {
+  const [homeState, setHomeState] = useState<HomeUiState>('HOME_IDLE');
+  const stateBeforeOfflineRef = useRef<HomeUiState>('HOME_IDLE');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('mulan-home-sidebar-collapsed') === 'true';
+      return localStorage.getItem('mulan-conversationbar-collapsed') === 'true';
     } catch {
       return false;
     }
@@ -45,32 +47,12 @@ function HomePageInner() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('mulan-home-sidebar-collapsed', String(barCollapsed));
+      localStorage.setItem('mulan-conversationbar-collapsed', String(sidebarCollapsed));
     } catch { /* ignore */ }
-  }, [barCollapsed]);
+  }, [sidebarCollapsed]);
 
-  const toggleBar = useCallback(() => setBarCollapsed(c => !c), []);
+  const toggleSidebar = useCallback(() => setSidebarCollapsed(c => !c), []);
 
-  // Keyboard shortcuts (migrated from HomeLayout)
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const isMod = e.metaKey || e.ctrlKey;
-      if (isMod && e.key === 'n') {
-        e.preventDefault();
-        navigate('/');
-      }
-      if (isMod && e.key === 'k') {
-        e.preventDefault();
-        const el = document.querySelector<HTMLTextAreaElement>('[data-askbar-input]');
-        el?.focus();
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [navigate]);
-
-  const [homeState, setHomeState] = useState<HomeUiState>('HOME_IDLE');
-  const stateBeforeOfflineRef = useRef<HomeUiState>('HOME_IDLE');
   const [result, setResult] = useState<SearchAnswer | null>(null);
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
   const [lastQuestion, setLastQuestion] = useState('');
@@ -313,8 +295,15 @@ function HomePageInner() {
   };
 
   const handleRegenerate = () => {
-    const question = lastQuestionRef.current;
+    let question = lastQuestionRef.current;
+    if (!question && historyMessages?.length > 0) {
+      const lastUserMsg = [...historyMessages].reverse().find(msg => msg.role === 'user');
+      if (lastUserMsg) {
+        question = lastUserMsg.content;
+      }
+    }
     if (!question || isStreaming) return;
+    lastQuestionRef.current = question;
     void sendMessage(question, scopeConnectionId ? Number(scopeConnectionId) : undefined, currentConversationId);
   };
 
@@ -355,6 +344,7 @@ function HomePageInner() {
           onRegenerate={handleRegenerate}
           historyMessages={historyMessages}
           historyConversationId={currentConversationId}
+          onSourceClick={(name) => console.log('Open DataSource Drawer:', name)}
         />
       )}
       {/* SuggestionGrid */}
@@ -374,6 +364,7 @@ function HomePageInner() {
           onRegenerate={handleRegenerate}
           historyMessages={historyMessages}
           historyConversationId={currentConversationId}
+          onSourceClick={(name) => console.log('Open DataSource Drawer:', name)}
         />
       )}
       {/* SearchResult */}
@@ -408,6 +399,7 @@ function HomePageInner() {
           onRegenerate={handleRegenerate}
           historyMessages={historyMessages}
           historyConversationId={currentConversationId}
+          onSourceClick={(name) => console.log('Open DataSource Drawer:', name)}
         />
       )}
     </>
@@ -415,25 +407,22 @@ function HomePageInner() {
 
   return (
     <div className="flex h-full overflow-hidden">
-      <ConversationBar collapsed={barCollapsed} onToggleCollapse={toggleBar} onNew={handleNewConversation} />
+      <div className={`transition-all duration-300 ${sidebarCollapsed ? 'w-[48px]' : 'w-[260px] shrink-0'}`}>
+        <ConversationBar
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={toggleSidebar}
+          onNew={handleNewConversation}
+        />
+      </div>
+
       <div className="flex-1 min-w-0 relative h-full">
-        {barCollapsed && (
-          <button
-            onClick={toggleBar}
-            className="absolute top-4 left-2 z-30 p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
-            title="展开侧边栏"
-            aria-label="展开侧边栏"
-          >
-            <i className="ri-sidebar-unfold-line text-lg" />
-          </button>
-        )}
         <OpsWorkbench
-            homeState={homeState}
-            idleContent={idleContent}
-            resultContent={resultContent}
-            submittingContent={submittingContent}
-            bottomBar={askBarNode}
-          />
+          homeState={homeState}
+          idleContent={idleContent}
+          resultContent={resultContent}
+          submittingContent={submittingContent}
+          bottomBar={askBarNode}
+        />
       </div>
     </div>
   );

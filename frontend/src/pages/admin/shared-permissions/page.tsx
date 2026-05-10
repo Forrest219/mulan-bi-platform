@@ -9,6 +9,7 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '../../../config';
+import PermissionsTabs from '../permissions/PermissionsTabs';
 
 interface SharedPermission {
   id: number;
@@ -160,6 +161,7 @@ export default function SharedPermissionsPage() {
           <p className="text-[13px] text-slate-400 ml-7">查看和管理资源共享权限（语义表 / 数据源）</p>
         </div>
       </div>
+      <PermissionsTabs />
 
       <div className="px-8 py-7">
         <div className="max-w-6xl mx-auto">

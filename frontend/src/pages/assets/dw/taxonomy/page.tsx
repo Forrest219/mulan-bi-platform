@@ -10,6 +10,7 @@
  *   DELETE /api/assets/dw/domain-taxonomy/:id  → { message }
  */
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../../../context/AuthContext';
 import { ConfirmModal } from '../../../../components/ConfirmModal';
 import {
@@ -23,6 +24,7 @@ import {
 
 interface TaxonomyGroup {
   l1: string;
+  description?: string | null;
   children: DwDomainTaxonomyItem[]; // l2 items under this L1
 }
 
@@ -36,6 +38,8 @@ function buildGroups(items: DwDomainTaxonomyItem[]): TaxonomyGroup[] {
     }
     if (item.l2) {
       map.get(item.l1)!.children.push(item);
+    } else if (item.description) {
+      map.get(item.l1)!.description = item.description;
     }
   }
   // Sort children by display_order
@@ -134,6 +138,10 @@ export default function DwTaxonomyPage() {
       {/* Page header */}
       <div className="bg-white border-b border-slate-200 px-8 py-5">
         <div className="max-w-4xl mx-auto">
+          <Link to="/assets/dw" className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 mb-1.5 transition-colors">
+            <i className="ri-arrow-left-s-line text-sm" />
+            返回数仓资产
+          </Link>
           <div className="flex items-center gap-2 mb-0.5">
             <i className="ri-mind-map text-slate-500 text-base" />
             <h1 className="text-lg font-semibold text-slate-800">主题域配置</h1>
@@ -191,12 +199,17 @@ export default function DwTaxonomyPage() {
           <div key={group.l1} className="bg-white border border-slate-200 rounded-lg mb-4 overflow-hidden">
             {/* L1 row */}
             <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded shrink-0">
                   L1
                 </span>
                 <span className="text-sm font-medium text-slate-800">{group.l1}</span>
-                <span className="text-xs text-slate-400">({group.children.length} 个 L2)</span>
+                <span className="text-xs text-slate-400 shrink-0">({group.children.length} 个 L2)</span>
+                {group.description && (
+                  <span className="text-xs text-slate-400 truncate" title={group.description}>
+                    — {group.description}
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 {/* Add L2 */}

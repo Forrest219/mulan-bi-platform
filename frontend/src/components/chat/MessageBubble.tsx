@@ -120,28 +120,26 @@ function AssetCardGrid({ items }: { items: AssetCardItem[] }) {
   }, [navigate]);
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 my-3 not-prose">
+    <ul className="my-3 space-y-1.5 not-prose">
       {items.map((item, i) => (
-        <div
+        <li
           key={i}
           onClick={() => handleClick(item, i)}
-          className="group flex items-center gap-2 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg
-                     hover:bg-blue-50 hover:border-blue-200 cursor-pointer transition-all duration-150"
+          className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-100 rounded-lg
+                     hover:bg-blue-50 hover:border-blue-100 cursor-pointer transition-all duration-150 text-xs text-slate-600"
         >
           {loadingIdx === i ? (
             <i className="ri-loader-4-line animate-spin text-blue-400 flex-shrink-0 text-[11px]" />
           ) : (
             <i className="ri-bookmark-line text-slate-400 group-hover:text-blue-500 flex-shrink-0 text-[11px]" />
           )}
-          <span className="text-xs text-slate-700 group-hover:text-blue-700 truncate flex-1 leading-tight">
-            {item.text}
+          <span className="flex-1 leading-tight break-all">{item.text}</span>
+          <span className="text-[10px] text-blue-400 whitespace-nowrap ml-2">
+            {loadingIdx === i ? '查询中' : '查看'}
           </span>
-          <span className="text-[10px] text-blue-400 opacity-0 group-hover:opacity-100 whitespace-nowrap transition-opacity">
-            {loadingIdx === i ? '查询中' : '点击查看'}
-          </span>
-        </div>
+        </li>
       ))}
-    </div>
+    </ul>
   );
 }
 
@@ -248,7 +246,17 @@ function parseThought(content: string): { thought: string | null; body: string }
 
 // ─── SourceFootnote ───────────────────────────────────────────────────────────
 
-function SourceFootnote({ sourcesCount, topSources }: { sourcesCount: number; topSources: string[] }) {
+interface SourceFootnoteProps {
+  sourcesCount: number;
+  topSources: string[];
+  onSourceClick?: (sourceName: string) => void;
+}
+
+function SourceFootnote({ sourcesCount, topSources, onSourceClick }: SourceFootnoteProps) {
+  const handleSourceClick = (name: string) => {
+    console.log('Open DataSource Drawer:', name);
+    onSourceClick?.(name);
+  };
   return (
     <div className="mt-4 pt-3 border-t border-slate-100">
       <div className="flex items-center gap-1.5 flex-wrap">
@@ -257,12 +265,13 @@ function SourceFootnote({ sourcesCount, topSources }: { sourcesCount: number; to
           基于 <strong className="text-slate-500 font-medium">{sourcesCount}</strong> 个数据源
         </span>
         {topSources.map(name => (
-          <span
+          <button
             key={name}
-            className="px-1.5 py-0.5 bg-slate-50 border border-slate-100 rounded text-[10px] text-slate-500"
+            onClick={() => handleSourceClick(name)}
+            className="px-1.5 py-0.5 bg-slate-50 border border-slate-100 rounded text-[10px] text-blue-500 cursor-pointer hover:bg-blue-50 hover:border-blue-200 hover:text-blue-600 transition-colors"
           >
             {name}
-          </span>
+          </button>
         ))}
       </div>
     </div>
@@ -291,6 +300,8 @@ export interface MessageBubbleProps {
   /** Source metadata — rendered as inline footnote inside assistant bubble */
   sourcesCount?: number;
   topSources?: string[];
+  /** Callback when user clicks a source tag to open datasource drawer */
+  onSourceClick?: (sourceName: string) => void;
 }
 
 export default function MessageBubble({
@@ -305,6 +316,7 @@ export default function MessageBubble({
   chartData,
   sourcesCount,
   topSources,
+  onSourceClick,
 }: MessageBubbleProps) {
   const isUser = role === 'user';
 
@@ -378,7 +390,7 @@ export default function MessageBubble({
                   {tableData && <QueryResultTable data={tableData} />}
                   {chartData && <QueryResultChart data={chartData} />}
                   {hasSourceFootnote && (
-                    <SourceFootnote sourcesCount={sourcesCount!} topSources={topSources!} />
+                    <SourceFootnote sourcesCount={sourcesCount!} topSources={topSources!} onSourceClick={onSourceClick} />
                   )}
                 </>
               );

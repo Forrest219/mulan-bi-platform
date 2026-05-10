@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import UsersTabs from '../user-management/UsersTabs';
 import { ALL_PERMISSIONS } from '../../../context/AuthContext';
 import { API_BASE, getAvatarGradient } from '../../../config';
 import { ConfirmModal } from '../../../components/ConfirmModal';
@@ -192,6 +193,7 @@ export default function GroupsPage() {
           </button>
         </div>
       </div>
+      <UsersTabs />
 
       <div className="px-8 py-7">
         <div className="max-w-6xl mx-auto">
@@ -290,9 +292,13 @@ export default function GroupsPage() {
                   {ALL_PERMISSIONS.map((perm) => {
                     const hasPerm = displayPerms.includes(perm.key);
                     const changeStatus = getPermChangeStatus(group, perm.key);
+                    const statusLabel = hasPerm ? '已启用' : '未启用';
+                    const changeLabel = changeStatus === 'added' ? '（新增）' : changeStatus === 'removed' ? '（移除）' : '';
                     return (
-                      <button key={perm.key}
+                      <button
+                        key={perm.key}
                         onClick={() => handlePermissionToggle(group.id, perm.key, displayPerms)}
+                        aria-label={`${perm.label} (${perm.key}) - ${statusLabel}${changeLabel}`}
                         className={`px-3 py-1.5 text-xs rounded-full transition-colors ${
                           hasPerm
                             ? changeStatus === 'added'
@@ -303,7 +309,8 @@ export default function GroupsPage() {
                             : changeStatus === 'removed'
                               ? 'bg-red-50 text-red-400 border-2 border-red-300 line-through'
                               : 'bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200'
-                        }`}>
+                        }`}
+                      >
                         {hasPerm ? '✓' : '+'} {perm.label}
                       </button>
                     );
@@ -352,9 +359,12 @@ export default function GroupsPage() {
                 <label className="block text-sm font-medium text-slate-600 mb-2">初始权限</label>
                 <div className="flex flex-wrap gap-2">
                   {ALL_PERMISSIONS.map((perm) => (
-                    <button key={perm.key}
+                    <button
+                      key={perm.key}
                       onClick={() => setNewGroup({ ...newGroup, permissions: togglePermission(perm.key, newGroup.permissions) })}
-                      className={`px-3 py-1.5 text-xs rounded-full transition-colors ${newGroup.permissions.includes(perm.key) ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200'}`}>
+                      aria-label={`${perm.label} (${perm.key}) - ${newGroup.permissions.includes(perm.key) ? '已启用' : '未启用'}`}
+                      className={`px-3 py-1.5 text-xs rounded-full transition-colors ${newGroup.permissions.includes(perm.key) ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200'}`}
+                    >
                       {newGroup.permissions.includes(perm.key) ? '✓' : '+'} {perm.label}
                     </button>
                   ))}

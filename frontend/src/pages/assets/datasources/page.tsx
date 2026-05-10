@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   listDataSources, createDataSource, updateDataSource, deleteDataSource,
   testDataSource, testDatasourceDraft, parseDatasourceConfig,
@@ -6,18 +7,25 @@ import {
 } from '../../../api/datasources';
 import { ConfirmModal } from '../../../components/ConfirmModal';
 
-export default function DatasourcesPage() {
+export interface DatasourcesPageRef { openNew: () => void }
+
+const DatasourcesPage = forwardRef<DatasourcesPageRef, { headerless?: boolean }>(
+function DatasourcesPage({ headerless = false }, ref) {
   const [datasources, setDatasources] = useState<DataSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Form view state
-  const [showForm, setShowForm] = useState(false);
-  const [editingDs, setEditingDs] = useState<DataSource | null>(null);
+  // URL-driven form state
+  const [searchParams, setSearchParams] = useSearchParams();
+  const modeParam = searchParams.get('mode');   // 'new' | 'edit' | null
+  const idParam   = searchParams.get('id');
+  const showForm  = modeParam === 'new' || modeParam === 'edit';
+  const editingDs = idParam ? datasources.find(d => String(d.id) === idParam) ?? null : null;
   const [formData, setFormData] = useState({
     name: '', db_type: 'mysql', host: '', port: 3306,
     database_name: '', username: '', password: '', description: '',
   });
+  const [passwordMode, setPasswordMode] = useState<'saved' | 'replace'>('replace');
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -61,40 +69,46 @@ export default function DatasourcesPage() {
 
   useEffect(() => { fetchDatasources(); }, []);
 
-  const resetForm = () => {
-    setFormData({ name: '', db_type: 'mysql', host: '', port: 3306, database_name: '', username: '', password: '', description: '' });
-    setFormError('');
-    setEditingDs(null);
-    setFormTestResult(null);
-    setFormTesting(false);
-    setPasteText('');
-    setParseError(null);
-    setParsed(false);
-  };
+  // Populate / reset form when URL mode changes
+  useEffect(() => {
+    if (modeParam === 'new') {
+      setFormData({ name: '', db_type: 'mysql', host: '', port: 3306, database_name: '', username: '', password: '', description: '' });
+      setFormError('');
+      setFormTestResult(null);
+      setFormTesting(false);
+      setPasswordMode('replace');
+      setPasteText('');
+      setParseError(null);
+      setParsed(false);
+    } else if (modeParam === 'edit' && editingDs) {
+      setFormData({
+        name: editingDs.name, db_type: editingDs.db_type, host: editingDs.host,
+        port: editingDs.port, database_name: editingDs.database_name,
+        username: editingDs.username, password: '',
+        description: editingDs.description ?? '',
+      });
+      setPasswordMode(editingDs.has_password ? 'saved' : 'replace');
+      setFormError('');
+      setFormTestResult(null);
+      setPasteText('');
+      setParseError(null);
+      setParsed(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modeParam, editingDs?.id]);
 
   const handleOpenNew = () => {
-    resetForm();
-    setShowForm(true);
+    setSearchParams(prev => { const n = new URLSearchParams(prev); n.set('mode', 'new'); n.delete('id'); return n; });
   };
 
+  useImperativeHandle(ref, () => ({ openNew: handleOpenNew }));
+
   const handleOpenEdit = (ds: DataSource) => {
-    setEditingDs(ds);
-    setFormData({
-      name: ds.name, db_type: ds.db_type, host: ds.host, port: ds.port,
-      database_name: ds.database_name, username: ds.username, password: '',
-      description: ds.description ?? '',
-    });
-    setFormError('');
-    setFormTestResult(null);
-    setPasteText('');
-    setParseError(null);
-    setParsed(false);
-    setShowForm(true);
+    setSearchParams(prev => { const n = new URLSearchParams(prev); n.set('mode', 'edit'); n.set('id', String(ds.id)); return n; });
   };
 
   const handleClose = () => {
-    setShowForm(false);
-    resetForm();
+    setSearchParams(prev => { const n = new URLSearchParams(prev); n.delete('mode'); n.delete('id'); return n; });
   };
 
   const handleSave = async () => {
@@ -134,23 +148,23 @@ export default function DatasourcesPage() {
       setFormTestResult({ success: false, message: '请填写主机和用户名' });
       return;
     }
+    if (!formData.password && (!editingDs || !editingDs.has_password)) {
+      setFormTestResult({ success: false, message: '请先输入密码' });
+      return;
+    }
     setFormTesting(true);
     setFormTestResult(null);
     try {
-      if (editingDs && !formData.password) {
-        const result = await testDataSource(editingDs.id);
-        setFormTestResult(result);
-      } else {
-        const result = await testDatasourceDraft({
-          db_type: formData.db_type,
-          host: formData.host,
-          port: formData.port,
-          database_name: formData.database_name || undefined,
-          username: formData.username,
-          password: formData.password,
-        });
-        setFormTestResult(result);
-      }
+      const result = await testDatasourceDraft({
+        datasource_id: editingDs?.id,
+        db_type: formData.db_type,
+        host: formData.host,
+        port: formData.port,
+        database_name: formData.database_name || undefined,
+        username: formData.username,
+        password: formData.password || undefined,
+      });
+      setFormTestResult(result);
     } catch {
       setFormTestResult({ success: false, message: '测试请求失败' });
     } finally {
@@ -213,31 +227,59 @@ export default function DatasourcesPage() {
 
   // ======================== FORM VIEW ========================
   if (showForm) {
+    const dbLabel = DB_TYPE_OPTIONS.find(o => o.value === formData.db_type)?.label || formData.db_type;
+    const hasSavedPassword = Boolean(editingDs?.has_password);
+    const testUsesSavedPassword = Boolean(editingDs && !formData.password && hasSavedPassword);
+    const lastTestLabel = editingDs?.last_tested_at
+      ? `${editingDs.last_test_success ? '上次测试成功' : '上次测试失败'} · ${formatDate(editingDs.last_tested_at)}`
+      : '尚未测试';
+
     return (
       <div className="min-h-screen bg-slate-50">
         {/* Header */}
         <div className="bg-white border-b border-slate-200 px-8 py-5">
-          <div className="max-w-4xl mx-auto flex items-center gap-3">
-            <button onClick={handleClose} className="text-slate-400 hover:text-slate-700 transition-colors">
-              <i className="ri-arrow-left-line text-xl" />
+          <div className="max-w-5xl mx-auto flex items-start gap-4">
+            <button
+              onClick={handleClose}
+              className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800 transition-colors"
+              aria-label="返回"
+            >
+              <i className="ri-arrow-left-line text-lg" />
             </button>
-            <div>
-              <h1 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-                <i className="ri-database-2-line text-blue-500" />
-                {editingDs ? '编辑数据源' : '新建数据源'}
-              </h1>
-              <p className="text-xs text-slate-400 mt-0.5">填写完成后点击右下角「保存」，或点击左侧箭头返回列表</p>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="min-w-0 truncate text-xl font-semibold text-slate-900">
+                  {editingDs ? formData.name || editingDs.name : '新建数据库连接'}
+                </h1>
+                <span className="rounded-md border border-blue-100 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+                  {dbLabel}
+                </span>
+                {editingDs && (
+                  <span className={`rounded-md border px-2 py-0.5 text-xs font-medium ${
+                    editingDs.last_test_success
+                      ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
+                      : 'border-slate-200 bg-slate-50 text-slate-500'
+                  }`}>
+                    {lastTestLabel}
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+                <span>{formData.host || '未填写主机'}:{formData.port || '-'}</span>
+                <span>{formData.username || '未填写用户'}</span>
+                <span>{formData.database_name || '服务器级连接'}</span>
+              </p>
             </div>
           </div>
         </div>
 
         {/* Content */}
-        <div className="max-w-4xl mx-auto px-8 py-7">
+        <div className="max-w-5xl mx-auto px-8 py-7">
           <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
 
             {/* AI Parse Section (only for new) */}
             {!editingDs && (
-              <div className="px-6 py-5 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-slate-100">
+              <div className="px-7 py-5 bg-blue-50/70 border-b border-blue-100">
                 <div className="flex items-center gap-2 mb-2">
                   <i className="ri-sparkling-line text-blue-500" />
                   <span className="text-sm font-medium text-slate-700">粘贴配置 / AI 解析</span>
@@ -266,8 +308,16 @@ export default function DatasourcesPage() {
             )}
 
             {/* Form Fields */}
-            <div className="px-6 py-6 space-y-5">
-              <div className="grid grid-cols-2 gap-4">
+            <div className="px-7 py-7 space-y-8">
+              <section className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-slate-800">连接信息</h2>
+                  {formData.db_type === 'starrocks' && (
+                    <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">MySQL 协议</span>
+                  )}
+                </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
                   <label className="block text-sm font-medium text-slate-600 mb-1.5">数据库类型 <span className="text-red-500">*</span></label>
                   <select
@@ -276,8 +326,9 @@ export default function DatasourcesPage() {
                       const t = e.target.value;
                       const port = DB_TYPE_PORT_DEFAULTS[t] || formData.port;
                       setFormData({ ...formData, db_type: t, port });
+                      setFormTestResult(null);
                     }}
-                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white"
+                    className="h-11 w-full rounded-lg border border-slate-200 bg-white px-4 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   >
                     {DB_TYPE_OPTIONS.map(opt => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -288,60 +339,103 @@ export default function DatasourcesPage() {
                   <label className="block text-sm font-medium text-slate-600 mb-1.5">名称 <span className="text-red-500">*</span></label>
                   <input type="text" value={formData.name}
                     onChange={e => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
+                    className="h-11 w-full rounded-lg border border-slate-200 px-4 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     placeholder="如: 生产-阿里云-MySQL" />
                 </div>
               </div>
 
-              <div className="grid grid-cols-4 gap-4">
-                <div className="col-span-3">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+                <div className="md:col-span-3">
                   <label className="block text-sm font-medium text-slate-600 mb-1.5">主机地址 <span className="text-red-500">*</span></label>
                   <input type="text" value={formData.host}
-                    onChange={e => setFormData({ ...formData, host: e.target.value })}
-                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
+                    onChange={e => { setFormData({ ...formData, host: e.target.value }); setFormTestResult(null); }}
+                    className="h-11 w-full rounded-lg border border-slate-200 px-4 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     placeholder="rm-xxx.mysql.rds.aliyuncs.com" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-600 mb-1.5">端口 <span className="text-red-500">*</span></label>
                   <input type="number" value={formData.port}
-                    onChange={e => setFormData({ ...formData, port: Number(e.target.value) })}
-                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
+                    onChange={e => { setFormData({ ...formData, port: Number(e.target.value) }); setFormTestResult(null); }}
+                    className="h-11 w-full rounded-lg border border-slate-200 px-4 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
                 </div>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-600 mb-1.5">数据库名</label>
                 <input type="text" value={formData.database_name}
-                  onChange={e => setFormData({ ...formData, database_name: e.target.value })}
-                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
+                  onChange={e => { setFormData({ ...formData, database_name: e.target.value }); setFormTestResult(null); }}
+                  className="h-11 w-full rounded-lg border border-slate-200 px-4 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   placeholder="选填，留空则连接服务器级别" />
               </div>
+              </section>
 
-              <div className="grid grid-cols-2 gap-4">
+              <section className="space-y-4 border-t border-slate-100 pt-6">
+                <h2 className="text-sm font-semibold text-slate-800">认证信息</h2>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
                   <label className="block text-sm font-medium text-slate-600 mb-1.5">用户名 <span className="text-red-500">*</span></label>
                   <input type="text" value={formData.username}
-                    onChange={e => setFormData({ ...formData, username: e.target.value })}
-                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
+                    onChange={e => { setFormData({ ...formData, username: e.target.value }); setFormTestResult(null); }}
+                    className="h-11 w-full rounded-lg border border-slate-200 px-4 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     placeholder="bi_zy" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-1.5">密码 {!editingDs && <span className="text-red-500">*</span>}</label>
-                  <input type="password" value={formData.password}
-                    onChange={e => setFormData({ ...formData, password: e.target.value })}
-                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
-                    placeholder={editingDs ? '留空则保持不变' : '输入密码'} />
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <label className="block text-sm font-medium text-slate-600">密码 {!editingDs && <span className="text-red-500">*</span>}</label>
+                    {editingDs && hasSavedPassword && passwordMode === 'saved' && (
+                      <button
+                        type="button"
+                        onClick={() => { setPasswordMode('replace'); setFormData({ ...formData, password: '' }); setFormTestResult(null); }}
+                        className="text-xs font-medium text-blue-600 hover:text-blue-700"
+                      >
+                        更换密码
+                      </button>
+                    )}
+                    {editingDs && hasSavedPassword && passwordMode === 'replace' && (
+                      <button
+                        type="button"
+                        onClick={() => { setPasswordMode('saved'); setFormData({ ...formData, password: '' }); setFormTestResult(null); }}
+                        className="text-xs font-medium text-slate-500 hover:text-slate-700"
+                      >
+                        使用已保存密码
+                      </button>
+                    )}
+                  </div>
+                  {editingDs && hasSavedPassword && passwordMode === 'saved' ? (
+                    <div className="flex h-11 items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3">
+                      <div className="flex items-center gap-2 text-sm font-medium text-emerald-800">
+                        <i className="ri-lock-password-line text-base" />
+                        <span>已保存密码</span>
+                      </div>
+                      <span className="text-xs text-emerald-700">保存将继续使用原密码</span>
+                    </div>
+                  ) : (
+                    <input type="password" value={formData.password}
+                      onChange={e => { setFormData({ ...formData, password: e.target.value }); setFormTestResult(null); }}
+                      className="h-11 w-full rounded-lg border border-slate-200 px-4 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      placeholder={editingDs ? '输入新密码后将覆盖已保存密码' : '输入密码'} />
+                  )}
                 </div>
               </div>
 
-              <div>
+              <p className="text-xs text-slate-500">
+                {editingDs && hasSavedPassword
+                  ? '留空保存不会修改密码；测试当前配置会在未输入新密码时复用已保存密码。'
+                  : editingDs
+                    ? '该连接尚未保存密码，请输入密码后测试或保存。'
+                    : '创建连接时必须提供密码。'}
+              </p>
+              </section>
+
+              <section className="space-y-3 border-t border-slate-100 pt-6">
                 <label className="block text-sm font-medium text-slate-600 mb-1.5">备注</label>
                 <textarea value={formData.description}
                   onChange={e => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 resize-none"
-                  rows={2}
+                  className="w-full resize-none rounded-lg border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  rows={3}
                   placeholder="选填，描述该连接的用途，如：生产环境 OpenClaw 主库" />
-              </div>
+              </section>
 
               {formError && (
                 <div className="text-sm text-red-600 bg-red-50 px-4 py-2.5 rounded-lg">{formError}</div>
@@ -349,32 +443,37 @@ export default function DatasourcesPage() {
             </div>
 
             {/* Footer */}
-            <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between bg-slate-50">
-              <div className="flex items-center gap-3">
+            <div className="px-7 py-5 border-t border-slate-100 flex flex-col gap-4 bg-slate-50 md:flex-row md:items-center md:justify-between">
+              <div className="flex flex-wrap items-center gap-3">
                 <button
                   onClick={handleTestDraft}
-                  disabled={formTesting}
-                  className="px-4 py-2 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-white disabled:opacity-50 flex items-center gap-1.5"
+                  disabled={formTesting || saving}
+                  className="flex h-10 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                 >
                   {formTesting ? <i className="ri-loader-4-line animate-spin" /> : <i className="ri-link" />}
-                  测试连接
+                  测试当前配置
                 </button>
                 {formTestResult && (
-                  <span className={`text-xs flex items-center gap-1 ${formTestResult.success ? 'text-green-600' : 'text-red-500'}`}>
+                  <span className={`text-xs flex items-center gap-1 ${formTestResult.success ? 'text-emerald-600' : 'text-red-500'}`}>
                     <i className={formTestResult.success ? 'ri-check-line' : 'ri-close-line'} />
                     {formTestResult.message}
+                  </span>
+                )}
+                {!formTestResult && (
+                  <span className="text-xs text-slate-500">
+                    {testUsesSavedPassword ? '将使用当前表单配置和已保存密码进行测试' : '将使用当前表单配置进行测试'}
                   </span>
                 )}
               </div>
               <div className="flex items-center gap-3">
                 <button onClick={handleClose}
-                  className="px-4 py-2 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-white">
+                  className="h-10 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50">
                   取消
                 </button>
                 <button onClick={handleSave} disabled={saving}
-                  className="px-5 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5">
+                  className="flex h-10 items-center gap-1.5 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
                   {saving && <i className="ri-loader-4-line animate-spin" />}
-                  保存
+                  {editingDs ? '保存更改' : '创建连接'}
                 </button>
               </div>
             </div>
@@ -387,7 +486,8 @@ export default function DatasourcesPage() {
   // ======================== LIST VIEW ========================
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Header */}
+      {/* Header — only when used as standalone page */}
+      {!headerless && (
       <div className="bg-white border-b border-slate-200 px-8 py-5">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div>
@@ -399,13 +499,14 @@ export default function DatasourcesPage() {
           </div>
           <button
             onClick={handleOpenNew}
-            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 flex items-center gap-1.5"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-900 text-white text-[12px] font-medium rounded-lg hover:bg-slate-700 transition-colors"
           >
             <i className="ri-add-line" />
             新建数据源
           </button>
         </div>
       </div>
+      )}
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-8 py-7">
@@ -532,4 +633,6 @@ export default function DatasourcesPage() {
       )}
     </div>
   );
-}
+});
+
+export default DatasourcesPage;

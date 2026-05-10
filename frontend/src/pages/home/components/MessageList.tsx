@@ -23,6 +23,7 @@ interface MessageListProps {
   historyMessages?: HistoryMessage[];
   /** conversation_id for history messages — enables feedback via conversation_id alone */
   historyConversationId?: string | null;
+  onSourceClick?: (sourceName: string) => void;
 }
 
 interface RenderItemOpts {
@@ -45,17 +46,19 @@ interface RenderItemOpts {
   question?: string;
   isLastAssistant?: boolean;
   onRegenerate?: () => void;
+  onSourceClick?: (sourceName: string) => void;
 }
 
 function renderMessageItem(opts: RenderItemOpts) {
   const {
     key, role, content, isStreaming, isError, errorCode, errorHint, thinking,
     traceId, tableData, chartData, sourcesCount, topSources,
-    timestamp, conversationId, messageIndex, question, isLastAssistant, onRegenerate,
+    timestamp, conversationId, messageIndex, question, isLastAssistant, onRegenerate, onSourceClick,
   } = opts;
   const timeStr = timestamp
     ? new Date(timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
     : null;
+  const showActions = role === 'assistant' && !isStreaming && (traceId || conversationId);
   return (
     <div key={key} className="group">
       <MessageBubble
@@ -71,21 +74,28 @@ function renderMessageItem(opts: RenderItemOpts) {
         chartData={chartData}
         sourcesCount={sourcesCount ?? undefined}
         topSources={topSources ?? undefined}
+        onSourceClick={onSourceClick}
       />
-      {timeStr && !isStreaming && (
-        <p className={`text-[10px] text-slate-400 mt-1 ${role === 'user' ? 'text-right' : 'ml-1'}`}>
-          {timeStr}
-        </p>
+      {/* Time + Actions in one flex row */}
+      {(timeStr || showActions) && (
+        <div className={`flex items-center mt-2 ${role === 'user' ? 'justify-end mr-2' : 'justify-between'}`}>
+          {role === 'assistant' && timeStr && !isStreaming && (
+            <p className="text-[10px] text-slate-400 ml-1">{timeStr}</p>
+          )}
+          {showActions && (
+            <MessageActions
+              content={content}
+              conversationId={conversationId ?? null}
+              messageIndex={messageIndex ?? 0}
+              question={question ?? ''}
+              traceId={traceId}
+              onRegenerate={isLastAssistant ? onRegenerate : undefined}
+            />
+          )}
+        </div>
       )}
-      {role === 'assistant' && !isStreaming && (traceId || conversationId) && (
-        <MessageActions
-          content={content}
-          conversationId={conversationId ?? null}
-          messageIndex={messageIndex ?? 0}
-          question={question ?? ''}
-          traceId={traceId}
-          onRegenerate={isLastAssistant ? onRegenerate : undefined}
-        />
+      {role === 'user' && timeStr && !isStreaming && (
+        <p className="text-[10px] text-slate-400 mt-1.5 text-right mr-2">{timeStr}</p>
       )}
     </div>
   );
@@ -103,7 +113,7 @@ function histTableData(msg: HistoryMessage): TableData | undefined {
   return { fields, rows: rows!, col_types };
 }
 
-function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onRegenerate, historyMessages, historyConversationId }: MessageListProps) {
+function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onRegenerate, historyMessages, historyConversationId, onSourceClick }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -152,6 +162,7 @@ function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onR
               question: q,
               isLastAssistant: idx === lastHistAssistantIdx,
               onRegenerate,
+              onSourceClick,
             });
           });
         })()}
@@ -186,6 +197,7 @@ function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onR
               question: questionForAction,
               isLastAssistant: msgIndex === lastAssistantIndex,
               onRegenerate,
+              onSourceClick,
             });
           });
         })()}

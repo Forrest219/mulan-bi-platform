@@ -59,7 +59,7 @@ function shouldShowConversation(conv: Conversation): boolean {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ConversationBar({ collapsed: _collapsed, onToggleCollapse: _onToggleCollapse, onNew }: ConversationBarProps) {
+export function ConversationBar({ collapsed, onToggleCollapse, onNew }: ConversationBarProps) {
   const { conversations, deleteConversation, updateConversationTitle } = useConversations();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -123,97 +123,124 @@ export function ConversationBar({ collapsed: _collapsed, onToggleCollapse: _onTo
     <aside
       id="sidebar"
       className={[
-        'h-full select-none shrink-0 overflow-x-hidden',
-        'text-slate-700',
-        _collapsed
-          ? 'w-0 overflow-hidden'
-          : 'w-[260px] bg-white border-r border-slate-200',
-        'transition-[width] duration-300',
+        'h-full select-none shrink-0 overflow-hidden bg-white text-slate-700',
+        'transition-all duration-300 ease-in-out',
+        collapsed ? 'w-[48px]' : 'w-[260px] border-r border-slate-200',
       ].join(' ')}
     >
-      <div className="flex flex-col justify-between h-full w-[260px] overflow-x-hidden scrollbar-hidden">
-        {/* Top section: sticky */}
-        <div className="sticky top-0 z-10">
-          {/* New conversation button */}
-          <div className="px-2 pt-4 pb-2">
+      <div className={[
+        'flex flex-col h-full overflow-x-hidden scrollbar-hidden',
+        collapsed ? 'items-center w-[48px]' : 'w-[260px]',
+      ].join(' ')}>
+        {/* ── Top controls: always visible ── */}
+        <div className={[
+          'flex flex-col shrink-0',
+          collapsed ? 'items-center gap-2 pt-4' : 'px-2 pt-3 gap-2',
+        ].join(' ')}>
+          {/* Collapse toggle — always */}
+          <button
+            onClick={onToggleCollapse}
+            title={collapsed ? '展开侧边栏' : '收起侧边栏'}
+            aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
+            className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            <i className={collapsed ? 'ri-arrow-right-s-line text-base' : 'ri-arrow-left-s-line text-base'} />
+          </button>
+
+          {/* New chat button — collapsed: icon only; expanded: full button */}
+          {collapsed ? (
             <button
               onClick={handleNew}
-              title="新建对话  ⌘N"
+              title={currentId ? '新建对话' : '请先选择或进入对话'}
               aria-label="新建对话"
-              className="w-full h-9 flex items-center justify-center gap-1.5 rounded-[10px]
-                         bg-blue-600 hover:bg-blue-700 text-white text-sm
-                         transition-colors duration-150"
+              disabled={!currentId}
+              className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors disabled:text-slate-300 disabled:cursor-not-allowed text-blue-600 hover:bg-blue-50"
+            >
+              <i className="ri-add-line text-base" />
+            </button>
+          ) : (
+            <button
+              onClick={handleNew}
+              title={currentId ? '新建对话  ⌘N' : '请先选择或进入对话'}
+              aria-label="新建对话"
+              disabled={!currentId}
+              className="w-full h-8 flex items-center justify-center gap-1.5 rounded-[10px] text-sm transition-colors duration-150 disabled:border disabled:border-slate-200 disabled:text-slate-300 disabled:cursor-not-allowed border border-blue-600 text-blue-600 hover:bg-blue-50"
             >
               <i className="ri-add-line text-base" />
               新建对话
             </button>
-          </div>
+          )}
 
-          {/* Search box */}
-          <div className="px-2 pb-2">
-            <div className="relative">
-              <i className="ri-search-line absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  setPage(1);
-                }}
-                placeholder="搜索对话..."
-                className="w-full pl-7 pr-3 py-1.5 text-sm bg-slate-100 dark:bg-slate-900 border border-transparent
-                           rounded-xl focus:outline-none focus:bg-white dark:focus:bg-slate-800 focus:border-slate-200 dark:focus:border-slate-700 placeholder-slate-400"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Conversation list: overflow-y-auto */}
-        <div className="flex-1 overflow-y-auto px-2">
-          {GROUP_ORDER.map((group) => {
-            const items = grouped[group];
-            if (!items || items.length === 0) return null;
-            return (
-              <div key={group} className="mb-3">
-                <div className="text-xs text-slate-400 dark:text-slate-500 font-medium px-2 py-1">{group}</div>
-                {items.map((conv) => (
-                  <ConversationItem
-                    key={conv.id}
-                    conv={conv}
-                    isActive={conv.id === currentId}
-                    onSelect={() => {
-                      if (location.pathname === '/') {
-                        navigate(`/?conv=${conv.id}`);
-                      } else {
-                        navigate(`/chat/${conv.id}`);
-                      }
-                    }}
-                    onDelete={() => setDeleteTarget(conv)}
-                    onRename={updateConversationTitle}
-                  />
-                ))}
+          {/* "历史记录" label + Search box — expanded only */}
+          {!collapsed && (
+            <>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium text-slate-400">历史记录</span>
               </div>
-            );
-          })}
-
-          {/* Load more (pagination, F-P1-6) */}
-          {hasMore && (
-            <button
-              onClick={() => setPage((p) => p + 1)}
-              className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-900
-                         rounded-xl transition-colors"
-            >
-              加载更多（剩余 {filtered.length - page * PAGE_SIZE} 条）
-            </button>
-          )}
-
-          {filtered.length === 0 && (
-            <div className="text-xs text-slate-400 dark:text-slate-500 text-center py-8">
-              {search ? '无匹配对话' : '暂无对话记录'}
-            </div>
+              <div className="relative">
+                <i className="ri-search-line absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPage(1);
+                  }}
+                  placeholder="搜索对话..."
+                  className="w-full pl-7 pr-3 py-1.5 text-sm bg-slate-100 border border-transparent
+                             rounded-xl focus:outline-none focus:bg-white focus:border-slate-200 placeholder-slate-400"
+                />
+              </div>
+            </>
           )}
         </div>
 
+        {/* Conversation list — expanded only, fills remaining space */}
+        {!collapsed && (
+          <div className="flex-1 overflow-y-auto px-2 mt-1">
+            {GROUP_ORDER.map((group) => {
+              const items = grouped[group];
+              if (!items || items.length === 0) return null;
+              return (
+                <div key={group} className="mb-3">
+                  <div className="text-xs text-slate-400 font-medium px-2 py-1">{group}</div>
+                  {items.map((conv) => (
+                    <ConversationItem
+                      key={conv.id}
+                      conv={conv}
+                      isActive={conv.id === currentId}
+                      onSelect={() => {
+                        if (location.pathname === '/') {
+                          navigate(`/?conv=${conv.id}`);
+                        } else {
+                          navigate(`/chat/${conv.id}`);
+                        }
+                      }}
+                      onDelete={() => setDeleteTarget(conv)}
+                      onRename={updateConversationTitle}
+                    />
+                  ))}
+                </div>
+              );
+            })}
+
+            {hasMore && (
+              <button
+                onClick={() => setPage((p) => p + 1)}
+                className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 hover:bg-slate-100
+                           rounded-xl transition-colors"
+              >
+                加载更多（剩余 {filtered.length - page * PAGE_SIZE} 条）
+              </button>
+            )}
+
+            {filtered.length === 0 && (
+              <div className="text-xs text-slate-400 text-center py-8">
+                {search ? '无匹配对话' : '暂无对话记录'}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 删除确认弹窗 */}

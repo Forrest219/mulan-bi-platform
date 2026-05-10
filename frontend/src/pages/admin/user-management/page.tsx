@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import UsersTabs from './UsersTabs';
 import { ALL_PERMISSIONS, ROLE_DEFAULT_PERMISSIONS } from '../../../context/AuthContext';
 import { API_BASE, getAvatarGradient } from '../../../config';
 import { ConfirmModal } from '../../../components/ConfirmModal';
@@ -74,6 +75,7 @@ export default function UserManagementPage() {
   const [editUserData, setEditUserData] = useState({ display_name: '', email: '' });
   const [resetPwdData, setResetPwdData] = useState({ new_password: '', confirm_password: '', totp_code: '' });
   const [resetPwdError, setResetPwdError] = useState('');
+  const [roleLoadingId, setRoleLoadingId] = useState<number | null>(null);
   const [formError, setFormError] = useState('');
   const [message, setMessage] = useState('');
   const [confirmModal, setConfirmModal] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void } | null>(null);
@@ -199,10 +201,22 @@ export default function UserManagementPage() {
     fetchUsers();
   };
 
-  const handleUpdateRole = async (userId: number, role: string) => {
-    const response = await fetch(`${API_BASE}/api/users/${userId}/role`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ role }) });
-    if (!response.ok) { setMessage('更新用户角色失败'); return; }
-    fetchUsers();
+  const handleUpdateRole = async (userId: number, oldRole: string, newRole: string) => {
+    if (newRole === oldRole) return;
+    setRoleLoadingId(userId);
+    try {
+      const response = await fetch(`${API_BASE}/api/users/${userId}/role`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ role: newRole }) });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        setMessage(err.detail?.message || '更新用户角色失败');
+        // 回滚下拉框的值由 select 的 value 属性直接从 users state 读取，无需额外操作
+        return;
+      }
+      setMessage('角色已更新');
+      fetchUsers();
+    } finally {
+      setRoleLoadingId(null);
+    }
   };
 
   const handleDeleteUser = async (userId: number) => {
@@ -314,6 +328,7 @@ export default function UserManagementPage() {
           </button>
         </div>
       </div>
+      <UsersTabs />
 
       <div className="px-8 py-7">
         <div className="max-w-6xl mx-auto">
@@ -423,15 +438,19 @@ export default function UserManagementPage() {
                   </button>
                 </td>
                 <td className="px-4 py-3">
-                  <select value={user.role} onChange={(e) => handleUpdateRole(user.id, e.target.value)}
-                    className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white">
+                  <select
+                    value={user.role}
+                    onChange={(e) => handleUpdateRole(user.id, user.role, e.target.value)}
+                    disabled={roleLoadingId === user.id}
+                    className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white disabled:opacity-50"
+                  >
                     {ROLES.map(r => (
                       <option key={r.key} value={r.key}>{r.label}</option>
                     ))}
                   </select>
                 </td>
                 <td className="px-4 py-3">
-                  <span className={`text-xs font-medium px-2 py-1 rounded-full ${user.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>
+                  <span className={`text-xs font-medium px-2 py-1 rounded-full ${user.is_active ? 'bg-status-enabled-bg text-status-enabled-text' : 'bg-red-50 text-red-600'}`}>
                     {user.is_active ? '启用' : '禁用'}
                   </span>
                 </td>
@@ -613,9 +632,10 @@ export default function UserManagementPage() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">
             <h2 className="text-lg font-semibold text-slate-800 mb-1">配置权限</h2>
-            <p className="text-sm text-slate-500 mb-4">{editingUser.display_name} (@{editingUser.username})</p>
+            <p className="text-sm text-slate-500 mb-1">{editingUser.display_name} (@{editingUser.username})</p>
+            <p className="text-xs text-slate-400 mb-4">部分系统管理权限已根据角色自动分配，此处仅配置功能级细粒度访问权限。</p>
             <div className="space-y-2 max-h-80 overflow-y-auto">
-              {ALL_PERMISSIONS.map((perm) => {
+              {ALL_PERMISSIONS.filter(p => ['ddl_generator', 'database_monitor', 'tableau', 'ddl_check', 'rule_config', 'scan_logs'].includes(p.key)).map((perm) => {
                 const isChecked = editingUser.permissions?.includes(perm.key);
                 return (
                   <label key={perm.key} className="flex items-center gap-3 px-3 py-2.5 bg-slate-50 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors">

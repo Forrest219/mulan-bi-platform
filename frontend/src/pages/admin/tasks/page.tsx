@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import {
   fetchTaskStats,
   fetchTaskSchedules,
@@ -13,6 +13,9 @@ import {
   type TaskRun,
   type TaskRunsParams,
 } from '../../../api/tasks';
+
+const SyncSchedulesTab = lazy(() => import('./SyncSchedulesTab'));
+const TaskQueueTab = lazy(() => import('./TaskQueueTab'));
 
 function formatDuration(ms: number | null): string {
   if (ms === null) return '—';
@@ -253,7 +256,7 @@ export default function AdminTasksPage() {
   const [runs, setRuns] = useState<TaskRun[]>([]);
   const [runsTotal, setRunsTotal] = useState(0);
   const [runsPages, setRunsPages] = useState(0);
-  const [activeTab, setActiveTab] = useState<'schedules' | 'history'>('schedules');
+  const [activeTab, setActiveTab] = useState<'schedules' | 'history' | 'sync' | 'queue'>('schedules');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [taskFilter, setTaskFilter] = useState<string>('');
   const [page, setPage] = useState(1);
@@ -359,7 +362,7 @@ export default function AdminTasksPage() {
             <i className="ri-task-line text-slate-500 text-base" />
             <h1 className="text-lg font-semibold text-slate-800">任务管理</h1>
           </div>
-          <p className="text-[13px] text-slate-400 ml-7">管理平台定时任务与执行历史</p>
+          <p className="text-[13px] text-slate-400 ml-7">管理平台定时任务、同步计划与执行队列</p>
         </div>
       </div>
 
@@ -385,6 +388,26 @@ export default function AdminTasksPage() {
             }`}
           >
             执行历史
+          </button>
+          <button
+            onClick={() => setActiveTab('sync')}
+            className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
+              activeTab === 'sync'
+                ? 'bg-slate-800 text-white'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+            }`}
+          >
+            同步计划
+          </button>
+          <button
+            onClick={() => setActiveTab('queue')}
+            className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
+              activeTab === 'queue'
+                ? 'bg-slate-800 text-white'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+            }`}
+          >
+            执行队列
           </button>
         </div>
       </div>
@@ -693,6 +716,20 @@ export default function AdminTasksPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* Tab 3: 同步计划 */}
+      {activeTab === 'sync' && (
+        <Suspense fallback={<div className="bg-white rounded-xl border border-slate-200 py-16 text-center text-[13px] text-slate-400">加载中…</div>}>
+          <SyncSchedulesTab />
+        </Suspense>
+      )}
+
+      {/* Tab 4: 执行队列 */}
+      {activeTab === 'queue' && (
+        <Suspense fallback={<div className="bg-white rounded-xl border border-slate-200 py-16 text-center text-[13px] text-slate-400">加载中…</div>}>
+          <TaskQueueTab />
+        </Suspense>
       )}
 
       {/* Cron edit modal */}

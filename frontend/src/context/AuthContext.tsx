@@ -78,24 +78,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Access Token 过期时间戳（毫秒），用于 proactive refresh
   // 用 ref 而非 state：不需要触发重渲染，避免 checkAuth 的 useCallback dep 循环
   const tokenExpiresAtRef = useRef<number | null>(null);
+  // 防止并发 refresh 的 in-flight 锁；refreshPromiseRef 用于让所有并发调用方等待同一个 refresh
+  const isRefreshingRef = useRef(false);
+  const refreshPromiseRef = useRef<Promise<boolean> | null>(null);
 
   const refreshToken = useCallback(async (): Promise<boolean> => {
-    try {
-      const response = await fetch(`${API_BASE}/api/auth/refresh`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (response.ok) {
-        // 从 Set-Cookie 中获取新的 expiry（无法直接读 HTTP-only cookie）
-        // 下次 /me 调用成功时会更新 tokenExpiresAt
-        return true;
-      }
-      // Refresh 失败，说明需要重新登录
-      setUser(null);
-      return false;
-    } catch {
-      return false;
+    // 已有 refresh 在飞行 → 返回同一个 promise，所有调用方等待同一次完成
+    if (refreshPromiseRef.current) {
+      return refreshPromiseRef.current;
     }
+    isRefreshingRef.current = true;
+    const p = (async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/auth/refresh`, {
+          method: 'POST',
+          credentials: 'include',
+        });
+        return response.ok;
+      } catch {
+        return false;
+      } finally {
+        isRefreshingRef.current = false;
+        refreshPromiseRef.current = null;
+      }
+    })();
+    refreshPromiseRef.current = p;
+    return p;
   }, []);
 
   // 检查是否需要 proactive token refresh
@@ -109,7 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [refreshToken]);
 
-  const checkAuth = useCallback(async () => {
+  const checkAuth = useCallback(async (retrying = false) => {
     try {
       const response = await fetch(`${API_BASE}/api/auth/me`, {
         credentials: 'include',
@@ -117,19 +125,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (response.ok) {
         const userData = await response.json();
         setUser(userData);
-        // 从 session cookie 中尝试读取 expiry（cookie 是 HTTP-only，
-        // 但 login 响应中我们已知 expiresAt，将其存内存）
-        // 如果没有存过，使用默认值不触发 refresh
         if (tokenExpiresAtRef.current) {
           scheduleProactiveRefresh(tokenExpiresAtRef.current);
         }
       } else if (response.status === 401) {
-        // 尝试用 refresh token 续期
-        const refreshed = await refreshToken();
-        if (refreshed) {
-          // 刷新成功，重新获取用户信息
-          await checkAuth();
+        // 401 且尚未重试过 → refresh 一次后复查 /me
+        if (!retrying) {
+          const ok = await refreshToken();
+          if (ok) {
+            await checkAuth(true);
+          } else {
+            setUser(null);
+          }
         } else {
+          // refresh 后 /me 仍失败，清空 user 不再递归
           setUser(null);
         }
       } else {

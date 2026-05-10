@@ -344,3 +344,128 @@ export async function getConnectionHealthOverview(connId: number): Promise<Healt
   if (!res.ok) throw new Error('获取健康概览失败');
   return res.json();
 }
+
+// Worker Health API
+
+export async function checkWorkerHealth(): Promise<{ available: boolean; workers: number }> {
+  const res = await fetch(`${API_BASE}/api/tableau/worker-health`, { credentials: 'include' });
+  if (!res.ok) return { available: false, workers: 0 };
+  return res.json();
+}
+
+// ── SPEC 39: 意图搜索 ────────────────────────────────────────────────────────
+
+export interface IntentSearchAsset {
+  id: number;
+  name: string;
+  asset_type: string;
+  project_name: string | null;
+  health_score: number | null;
+  ai_summary: string | null;
+  view_count: number | null;
+  relevance_reason: string;
+  relevance_score: number;
+}
+
+export interface IntentSearchIntent {
+  keywords: string[];
+  asset_type_hint: string | null;
+  time_range_hint: string | null;
+}
+
+export interface IntentSearchResult {
+  assets: IntentSearchAsset[];
+  total: number;
+  intent: IntentSearchIntent;
+}
+
+export async function intentSearchAssets(params: {
+  query: string;
+  connection_id: string;
+}): Promise<IntentSearchResult> {
+  const res = await fetch(`${API_BASE}/api/tableau/assets/intent-search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(extractErrorMessage(err, '意图搜索失败'));
+  }
+  return res.json();
+}
+
+// ── SPEC 40: 影响分析 ──────────────────────────────────────────────────────────
+
+export interface AssetImpactResult {
+  datasource: {
+    id: number;
+    name: string;
+    asset_type: string;
+    health_score: number | null;
+    project_name: string | null;
+  };
+  affected_workbooks: Array<{
+    id: number;
+    name: string;
+    asset_type: string;
+    affected_views: Array<{ id: number; name: string; asset_type: string }>;
+  }>;
+  summary: { workbook_count: number; view_dashboard_count: number };
+}
+
+export interface ImpactAlert {
+  datasource_id: number;
+  datasource_name: string;
+  health_score: number | null;
+  affected_workbook_count: number;
+  affected_view_dashboard_count: number;
+}
+
+export interface ImpactAlertsResult {
+  alerts: ImpactAlert[];
+  total_unhealthy_datasources: number;
+  total_affected_workbooks: number;
+}
+
+export async function getAssetImpact(assetId: string | number): Promise<AssetImpactResult> {
+  const res = await fetch(`${API_BASE}/api/tableau/assets/${assetId}/impact`, {
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(extractErrorMessage(err, '获取影响分析失败'));
+  }
+  return res.json();
+}
+
+export async function getImpactAlerts(connId: string): Promise<ImpactAlertsResult> {
+  const res = await fetch(`${API_BASE}/api/tableau/connections/${connId}/impact-alerts`, {
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(extractErrorMessage(err, '获取健康预警失败'));
+  }
+  return res.json();
+}
+
+export interface TableauAssetField {
+  field: string;
+  caption: string;
+  role: string;
+  data_type: string;
+  meaning: string;
+}
+
+export async function getAssetFields(assetId: number): Promise<{ fields: TableauAssetField[] }> {
+  const res = await fetch(`${API_BASE}/api/tableau/assets/${assetId}/fields`, {
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(extractErrorMessage(err, '获取字段数据失败'));
+  }
+  return res.json();
+}

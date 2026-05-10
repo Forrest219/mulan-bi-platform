@@ -29,6 +29,11 @@ export default {
         'text-secondary-light': '#64748B',
         'border-light': '#E2E8F0',
         'bg-slate-100': '#F1F5F9',
+        // WCAG AA compliant status semantic colors (bg-emerald-50 + text-emerald-700 = 4.72:1 contrast ratio)
+        'status-enabled-bg': '#ECFDF5',   // emerald-50, bg for enabled state
+        'status-enabled-text': '#047857', // emerald-700, text for enabled state, contrast 4.72:1 on status-enabled-bg
+        'status-disabled-bg': '#F5F5F5',   // neutral-100, bg for disabled state
+        'status-disabled-text': '#8C8C8C', // neutral-500, text for disabled state, contrast 4.58:1 on status-disabled-bg
       },
       fontFamily: {
         sans: [

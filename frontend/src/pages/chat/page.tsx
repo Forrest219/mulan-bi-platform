@@ -19,7 +19,7 @@ import type { Components } from 'react-markdown';
 import { conversationsApi, type ConversationDetail, type ConversationMessageAPI } from '../../api/conversations';
 import { askQuestion, type SearchAnswer } from '../../api/search';
 import { SearchResult } from '../home/components/SearchResult';
-import { DataUsedFooter } from '../home/components/DataUsedFooter';
+import { DataUsedFooter } from '../home/archive/DataUsedFooter';
 import { useConversations } from '../../store/conversationStore';
 import { listConnections, type TableauConnection } from '../../api/tableau';
 

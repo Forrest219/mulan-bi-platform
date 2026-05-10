@@ -8,6 +8,7 @@ export interface DataSource {
   port: number;
   database_name: string;
   username: string;
+  has_password?: boolean;
   description: string | null;
   owner_id: number;
   is_active: boolean;
@@ -109,7 +110,7 @@ export async function testDataSource(id: number): Promise<{ success: boolean; me
 
 export async function testDatasourceDraft(data: {
   db_type: string; host: string; port: number;
-  database_name?: string; username: string; password: string;
+  database_name?: string; username: string; password?: string; datasource_id?: number;
 }): Promise<{ success: boolean; message: string }> {
   const res = await fetch(`${API_BASE}/api/datasources/test-draft`, {
     method: 'POST',

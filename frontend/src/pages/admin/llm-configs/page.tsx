@@ -323,7 +323,7 @@ function TestEvidenceRow({ evidence }: { evidence: TestEvidence }) {
 
 // ─── LLMConfigsPage ──────────────────────────────────────────────────────────
 
-export default function LLMConfigsPage() {
+export default function LLMConfigsPage({ headerless = false }: { headerless?: boolean }) {
   const { isAdmin } = useAuth();
 
   const [configs, setConfigs] = useState<LLMConfigItem[]>([]);
@@ -668,32 +668,34 @@ export default function LLMConfigsPage() {
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
-      <div className="bg-white border-b border-slate-200 px-8 py-5">
+      <div className={`bg-white border-b border-slate-200 px-8 ${headerless && !showForm ? 'py-3' : 'py-5'}`}>
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2 mb-0.5">
-              {showForm ? (
-                <button
-                  onClick={handleClose}
-                  className="flex items-center gap-1 text-slate-400 hover:text-slate-600 transition-colors"
-                >
-                  <i className="ri-arrow-left-line text-base" />
-                </button>
-              ) : (
-                <i className="ri-robot-2-line text-slate-500 text-base" />
-              )}
-              <h1 className="text-lg font-semibold text-slate-800">
+          {(!headerless || showForm) && (
+            <div>
+              <div className="flex items-center gap-2 mb-0.5">
+                {showForm ? (
+                  <button
+                    onClick={handleClose}
+                    className="flex items-center gap-1 text-slate-400 hover:text-slate-600 transition-colors"
+                  >
+                    <i className="ri-arrow-left-line text-base" />
+                  </button>
+                ) : (
+                  <i className="ri-robot-2-line text-slate-500 text-base" />
+                )}
+                <h1 className="text-lg font-semibold text-slate-800">
+                  {showForm
+                    ? (editingId !== null ? '编辑 LLM 配置' : '新增 LLM 配置')
+                    : 'LLM 多配置管理'}
+                </h1>
+              </div>
+              <p className="text-[13px] text-slate-400 ml-6">
                 {showForm
-                  ? (editingId !== null ? '编辑 LLM 配置' : '新增 LLM 配置')
-                  : 'LLM 多配置管理'}
-              </h1>
+                  ? '填写完成后点击右下角「保存」，或点击左侧箭头返回列表'
+                  : '管理不同用途的 LLM Provider 配置（多配置支持按 purpose 选择）'}
+              </p>
             </div>
-            <p className="text-[13px] text-slate-400 ml-6">
-              {showForm
-                ? '填写完成后点击右下角「保存」，或点击左侧箭头返回列表'
-                : '管理不同用途的 LLM Provider 配置（多配置支持按 purpose 选择）'}
-            </p>
-          </div>
+          )}
           {!showForm && (
             <div className="flex items-center gap-2">
               <button

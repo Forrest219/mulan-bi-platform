@@ -11,8 +11,6 @@
  *
  * Open-WebUI 风格改造：
  * - Auto-grow textarea（最高 200px）
- * - 文件附件（paperclip 按钮 + chips 预览）
- * - DragDropOverlay（拖拽上传，dragCounter 避免闪烁）
  * - mockStreamAskData 流式接入
  */
 import { useState, useEffect, useRef, forwardRef, memo } from 'react';
@@ -68,8 +66,6 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
     const [noConnectionHint, setNoConnectionHint] = useState(false);
-    const [files, setFiles] = useState<File[]>([]);
-    const [isDragging, setIsDragging] = useState(false);
     const [searchParams] = useSearchParams();
 
     const scopeContext = useScope();
@@ -87,9 +83,7 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
 
     const internalRef = useRef<HTMLTextAreaElement>(null);
     const textareaRef = (ref as React.RefObject<HTMLTextAreaElement>) ?? internalRef;
-    const fileInputRef = useRef<HTMLInputElement>(null);
     const abortRef = useRef<(() => void) | null>(null);
-    const dragCounterRef = useRef(0);
 
     // Auto-grow textarea
     useEffect(() => {
@@ -125,7 +119,7 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
       : (scopeContext.connectionId ? Number(scopeContext.connectionId) : null);
 
     const submit = () => {
-      if ((!input.trim() && files.length === 0) || loading) return;
+      if (!input.trim() || loading) return;
       if (noConnection) {
         setNoConnectionHint(true);
         return;
@@ -136,7 +130,6 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
       onQuestionChange?.(question);
       onLoading(true);
       setInput('');
-      setFiles([]);
 
       // 非 mock 路径：委托给父层 useStreamingChat，不自己发起 SSE 流
       if (!useMock) {
@@ -175,109 +168,47 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
       onAbort?.();
     };
 
-    // DragDrop 处理，用 dragCounter 避免子元素穿越时闪烁
-    const handleDragEnter = (e: React.DragEvent) => {
-      e.preventDefault();
-      dragCounterRef.current += 1;
-      if (dragCounterRef.current === 1) setIsDragging(true);
-    };
-
-    const handleDragLeave = (e: React.DragEvent) => {
-      e.preventDefault();
-      dragCounterRef.current -= 1;
-      if (dragCounterRef.current === 0) setIsDragging(false);
-    };
-
-    const handleDragOver = (e: React.DragEvent) => {
-      e.preventDefault();
-    };
-
-    const handleDrop = (e: React.DragEvent) => {
-      e.preventDefault();
-      dragCounterRef.current = 0;
-      setIsDragging(false);
-      const dropped = Array.from(e.dataTransfer.files);
-      if (dropped.length > 0) {
-        setFiles((prev) => [...prev, ...dropped]);
-      }
-    };
-
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (!e.target.files) return;
-      const selected = Array.from(e.target.files);
-      setFiles((prev) => [...prev, ...selected]);
-      e.target.value = '';
-    };
-
-    const removeFile = (index: number) => {
-      setFiles((prev) => prev.filter((_, i) => i !== index));
-    };
-
-    const canSubmit = (input.trim().length > 0 || files.length > 0) && !loading;
+    const canSubmit = input.trim().length > 0 && !loading;
 
     return (
-      <>
-        <div
-          className="relative rounded-3xl border border-slate-200/70 bg-white/80 backdrop-blur-sm shadow-md px-3 py-3 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:shadow-lg transition-shadow"
-          onDragEnter={handleDragEnter}
-          onDragLeave={handleDragLeave}
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
-        >
-          {/* DragDrop 遮罩 */}
-          <div
-            aria-hidden="true"
-            className="absolute inset-0 rounded-3xl bg-blue-500/20 border-2 border-blue-400 pointer-events-none z-20 flex items-center justify-center"
-            style={{
-              opacity: isDragging ? 1 : 0,
-              transition: isDragging
-                ? 'opacity 150ms ease-out'
-                : 'opacity 100ms ease-in',
-            }}
-          >
-            <span className="text-blue-600 text-sm font-medium select-none">
-              释放以添加文件
-            </span>
-          </div>
-
-          {/* 连接状态 / 选择器 */}
+      <div
+        className={[
+          'w-full rounded-2xl border border-slate-200/70 bg-white shadow-sm',
+          'focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:shadow-md',
+          'transition-all duration-200',
+        ].join(' ')}
+      >
+        {/* 顶部连接状态栏 */}
+        <div className="flex items-center px-4 pt-2.5 pb-0 gap-2">
           {scopeContext.connectionsLoading && (
-            <div className="flex items-center gap-1.5 px-4 pt-2 pb-0 text-xs text-slate-400">
-              <i className="ri-database-2-line" />
-              <span>连接加载中…</span>
-            </div>
+            <span className="text-xs text-slate-400 flex items-center gap-1">
+              <i className="ri-loader-2-line animate-spin" />
+              连接加载中…
+            </span>
           )}
 
           {noConnection && (
-            <div className="flex items-center justify-between gap-3 px-4 pt-2 pb-0 text-xs">
-              <div className="flex min-w-0 items-center gap-1.5 text-amber-600">
-                <i className="ri-database-2-line shrink-0" />
-                <span className="truncate">暂无数据连接</span>
-              </div>
-              <Link
-                to="/system/mcp-configs"
-                className="shrink-0 font-medium text-blue-600 hover:text-blue-700 hover:underline"
-              >
-                前往添加连接
-              </Link>
-            </div>
+            <span className="text-xs text-amber-600 flex items-center gap-1">
+              <i className="ri-database-2-line" />
+              暂无数据连接
+            </span>
           )}
 
           {!scopeContext.connectionsLoading && scopeContext.connections.length === 1 && (
-            <div className="flex items-center gap-1.5 px-4 pt-2 pb-0 text-xs text-slate-500">
+            <span className="text-xs text-slate-500 flex items-center gap-1.5">
               <i className="ri-database-2-line text-slate-400" />
               <span className="truncate">{scopeContext.connections[0].name}</span>
-            </div>
+            </span>
           )}
 
           {!scopeContext.connectionsLoading && scopeContext.connections.length > 1 && (
-            <div className="flex items-center gap-1.5 px-4 pt-2 pb-0">
+            <div className="flex items-center gap-1.5">
               <i className="ri-database-2-line text-xs text-slate-400" />
               <select
                 value={scopeContext.connectionId ?? ''}
                 onChange={(e) => scopeContext.setConnectionId(e.target.value || null)}
-                className="text-xs text-slate-500 bg-transparent border-none outline-none cursor-pointer hover:text-slate-700 py-0.5 pr-4 appearance-none"
-                style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%2394a3b8\' stroke-width=\'2\'%3E%3Cpath d=\'M6 9l6 6 6-6\'/%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 0 center' }}
+                className="text-xs text-slate-600 bg-gray-100 rounded-full px-2.5 py-1
+                           border-none outline-none cursor-pointer hover:bg-gray-200 transition-colors"
                 disabled={scopeContext.connectionsLoading}
               >
                 {scopeContext.connections.map((c) => (
@@ -289,40 +220,19 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
             </div>
           )}
 
-          {/* 文件 chips 预览区 */}
-          {files.length > 0 && (
-            <div className="flex flex-wrap gap-2 px-4 pt-2 pb-1">
-              {files.map((file, i) => (
-                <div
-                  key={i}
-                  className="relative flex items-center gap-1.5 bg-slate-100 rounded-lg px-2 py-1 text-xs text-slate-700"
-                >
-                  {file.type.startsWith('image/') ? (
-                    <img
-                      src={URL.createObjectURL(file)}
-                      alt={file.name}
-                      className="w-16 h-16 object-cover rounded"
-                    />
-                  ) : (
-                    <span className="max-w-[120px] truncate">
-                      {file.name}
-                      <span className="ml-1 text-slate-400">
-                        ({(file.size / 1024).toFixed(1)}KB)
-                      </span>
-                    </span>
-                  )}
-                  <button
-                    onClick={() => removeFile(i)}
-                    className="ml-1 text-slate-400 hover:text-slate-600 transition-colors"
-                    aria-label={`移除 ${file.name}`}
-                  >
-                    <i className="ri-close-line text-xs" />
-                  </button>
-                </div>
-              ))}
-            </div>
+          {/* 无连接时的提示链接 */}
+          {noConnection && (
+            <Link
+              to="/system/mcp-configs"
+              className="text-xs text-blue-600 hover:text-blue-700 hover:underline ml-auto"
+            >
+              前往添加连接
+            </Link>
           )}
+        </div>
 
+        {/* 第二行：输入框 + 发送按钮并排 */}
+        <div className="flex items-end px-4 pb-2.5 gap-2">
           <textarea
             ref={textareaRef}
             data-askbar-input
@@ -340,46 +250,29 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
                 submit();
               }
             }}
-            placeholder={noConnection ? '请先添加连接，再开始提问' : '向木兰提问…'}
+            placeholder="向木兰提问…  ⌘K 聚焦"
             disabled={loading}
-            style={{ minHeight: '56px', maxHeight: '200px', overflowY: 'auto' }}
-            className="w-full pr-20 py-3 bg-white text-slate-800 placeholder-slate-400
-                       focus:outline-none text-sm resize-none overflow-y-auto leading-relaxed rounded-xl px-4"
+            rows={1}
+            style={{ minHeight: '28px', maxHeight: '120px' }}
+            className="flex-1 bg-transparent text-sm text-slate-800
+                       placeholder:text-slate-400/70 focus:outline-none resize-none
+                       overflow-y-auto leading-relaxed py-1"
           />
 
-          {/* 左下角：paperclip 按钮 */}
-          <div className="absolute left-4 bottom-4 z-10 flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="p-1.5 text-slate-400 hover:text-slate-600 transition-colors"
-              aria-label="添加附件"
-              title="支持 Schema / Excel / 图片文件"
-            >
-              <i className="ri-attachment-2 text-base" />
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={handleFileChange}
-            />
-          </div>
-
-          {/* 快捷键提示 */}
-          <span
-            className="absolute right-14 bottom-4 text-[10px] text-slate-300 select-none pointer-events-none"
-            style={{ color: '#cbd5e1' }}
-          >
-            ⌘K
-          </span>
+          {noConnectionHint && (
+            <span className="text-xs text-amber-600 self-center shrink-0">
+              请先
+              <Link to="/system/mcp-configs" className="underline hover:text-amber-700">
+                添加连接
+              </Link>
+            </span>
+          )}
 
           {isStreaming ? (
             <button
               onClick={handleAbort}
-              className="absolute right-4 top-1/2 -translate-y-1/2 p-2.5 bg-blue-700
-                         hover:bg-blue-800 text-white rounded-lg transition-colors"
+              className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center
+                         bg-blue-700 hover:bg-blue-800 text-white transition-colors"
               aria-label="停止"
             >
               <i className="ri-stop-circle-line text-base" />
@@ -388,8 +281,12 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
             <button
               onClick={submit}
               disabled={!canSubmit}
-              className="absolute right-4 top-1/2 -translate-y-1/2 p-2.5 bg-blue-700
-                         hover:bg-blue-800 disabled:bg-slate-100 disabled:text-slate-300 text-white rounded-lg transition-colors"
+              className={[
+                'shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-all duration-200 self-end mb-0.5',
+                canSubmit
+                  ? 'bg-blue-700 hover:bg-blue-800 text-white hover:shadow-md active:scale-95'
+                  : 'bg-slate-100 text-slate-300 cursor-not-allowed',
+              ].join(' ')}
               aria-label="发送"
             >
               {loading ? (
@@ -400,17 +297,7 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
             </button>
           )}
         </div>
-
-        {noConnectionHint && (
-          <p className="mt-1.5 text-xs text-amber-600">
-            尚未配置数据连接，请先
-            <Link to="/system/mcp-configs" className="underline hover:text-amber-700">
-              前往添加
-            </Link>
-            。
-          </p>
-        )}
-      </>
+      </div>
     );
   }
 );

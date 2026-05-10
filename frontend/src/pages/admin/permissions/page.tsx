@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import PermissionsTabs from './PermissionsTabs';
 import { ALL_PERMISSIONS } from '../../../context/AuthContext';
 import { API_BASE } from '../../../config';
 
@@ -82,6 +83,7 @@ export default function PermissionsPage() {
           <p className="text-[13px] text-slate-400 ml-7">查看各模块权限的用户和组分布</p>
         </div>
       </div>
+      <PermissionsTabs />
 
       <div className="px-8 py-7">
         <div className="max-w-6xl mx-auto">

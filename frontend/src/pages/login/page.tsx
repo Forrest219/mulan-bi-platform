@@ -86,10 +86,10 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#F8FAFC] to-[#EFF6FF] flex items-center justify-center px-4 sm:px-6">
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-[420px]">
 
         {/* Logo 区 */}
-        <div className="flex flex-col items-start mb-6">
+        <div className="flex flex-col items-center mb-5">
           <img
             src={settings.logo_url}
             alt={`${settings.platform_name} Logo`}
@@ -100,37 +100,35 @@ export default function LoginPage() {
         </div>
 
         {/* 卡片 */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_8px_32px_rgba(0,0,0,0.06)] p-8">
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_8px_32px_rgba(0,0,0,0.06)] p-8 pb-6">
 
-          {/* 错误提示区 — 固定高度防止布局跳动 */}
-          <div className="h-[68px] mb-2">
-            {error && (
-              <div className="h-full px-3 py-2 rounded-md bg-red-50 border border-red-200 text-sm flex flex-col justify-between">
-                <div className="flex items-start gap-2">
-                  <svg className="w-4 h-4 text-red-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                  <span className="text-red-600 leading-snug">{error.msg}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-400">
-                    如果问题持续，请{' '}
-                    <a href="mailto:support@mulan.local" className="text-blue-500 hover:underline">联系技术支持</a>
-                  </span>
-                  {error.requestId && (
-                    <span className="text-[11px] text-slate-400">ID: {error.requestId}</span>
-                  )}
-                </div>
+          {/* 错误提示区 */}
+          {error && (
+            <div className="mb-3 px-3 py-2 rounded-md bg-red-50 border border-red-200 text-sm flex flex-col justify-between">
+              <div className="flex items-start gap-2">
+                <svg className="w-4 h-4 text-red-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <span className="text-red-600 leading-snug">{error.msg}</span>
               </div>
-            )}
-          </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400">
+                  如果问题持续，请{' '}
+                  <a href="mailto:support@mulan.local" className="text-blue-500 hover:underline">联系技术支持</a>
+                </span>
+                {error.requestId && (
+                  <span className="text-[11px] text-slate-400">ID: {error.requestId}</span>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* 步骤 1：凭证 */}
           {step === 'credentials' && (
-            <form onSubmit={handleCredentials} className="space-y-4">
+            <form onSubmit={handleCredentials} className="max-w-[360px] mx-auto space-y-2.5">
               <div>
-                <label htmlFor="username" className="block text-sm font-medium text-slate-700 mb-1">
+                <label htmlFor="username" className="block text-sm font-medium text-slate-700 mb-1.5">
                   用户名
                 </label>
                 <input
@@ -148,7 +146,7 @@ export default function LoginPage() {
               </div>
 
               <div>
-                <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1">
+                <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1.5">
                   密码
                 </label>
                 <div className="relative">
@@ -220,42 +218,26 @@ export default function LoginPage() {
               </button>
 
               {/* 分割线 */}
-              <div className="relative">
+              <div className="relative py-1">
                 <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-slate-200" />
+                  <div className="w-full border-t border-slate-200/70" />
                 </div>
                 <div className="relative flex justify-center">
                   <span className="bg-white px-3 text-xs text-slate-400">或</span>
                 </div>
               </div>
 
-              {/* 企业 SSO 登录 */}
-              <button
-                type="button"
-                className="w-full border border-slate-200 text-slate-600 text-sm py-2.5 rounded-md
-                           hover:bg-slate-50 transition-colors duration-150 flex items-center justify-center gap-2"
-              >
-                <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                    d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                </svg>
-                企业 SSO 登录
-              </button>
+              {/* 暂无企业 SSO 实现，入口已移除 */}
 
-              <div className="text-center">
-                <Link
-                  to="/register"
-                  className="text-sm text-blue-600 hover:text-blue-700 transition-colors duration-150"
-                >
-                  注册新账号
-                </Link>
-              </div>
+              <p className="text-center text-sm text-slate-500 mt-2">
+                没有账号？<Link to="/register" className="text-blue-600 hover:text-blue-700 transition-colors duration-150">立即注册</Link>
+              </p>
             </form>
           )}
 
           {/* 步骤 2：MFA 验证 */}
           {step === 'mfa' && (
-            <form onSubmit={handleMfa} className="space-y-4">
+            <form onSubmit={handleMfa} className="max-w-[360px] mx-auto space-y-4">
               <div className="text-center mb-2">
                 <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-blue-50 mb-3">
                   <svg className="w-6 h-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
