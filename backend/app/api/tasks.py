@@ -11,7 +11,7 @@ from app.core.database import SessionLocal
 from app.core.dependencies import get_current_user
 from services.audit.audit_service import log_action
 from services.tasks import celery_app
-from services.tasks.seed import seed_task_schedules
+from services.tasks.seed import seed_task_schedules, seed_sync_schedules
 
 logger = logging.getLogger(__name__)
 
@@ -259,8 +259,222 @@ async def seed_tasks(request: Request):
 
     with SessionLocal() as db:
         seed_task_schedules(db)
+        seed_sync_schedules(db)
 
     return {"message": "种子数据已写入"}
+
+
+# ─── 同步计划（BiSyncSchedule） ────────────────────────────────
+
+@router.get("/sync-schedules")
+async def list_sync_schedules(
+    request: Request,
+    page: int = 1,
+    page_size: int = 20,
+    enabled_only: bool = False,
+):
+    """分页列出同步计划，含引用连接数、下次执行时间。"""
+    _get_user(request)
+
+    from services.tasks.schedule_service import SyncScheduleService
+    with SessionLocal() as db:
+        return SyncScheduleService().list_schedules(db, page=page, page_size=page_size, enabled_only=enabled_only)
+
+
+@router.post("/sync-schedules")
+async def create_sync_schedule(request: Request):
+    """创建同步计划（admin / data_admin 可操作）。"""
+    user = _require_admin(request)
+
+    body = await request.json()
+    name = body.get("name", "").strip()
+    cron_expr = body.get("cron_expr", "").strip()
+    frequency_type = body.get("frequency_type", "daily")
+    priority = body.get("priority", 50)
+    execution_mode = body.get("execution_mode", "parallel")
+    description = body.get("description")
+
+    if not name or not cron_expr:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "SYNC_001", "message": "name 和 cron_expr 不能为空"},
+        )
+
+    try:
+        from croniter import croniter
+        if not croniter.is_valid(cron_expr):
+            raise HTTPException(
+                status_code=400,
+                detail={"error_code": "SYNC_002", "message": f"无效的 cron 表达式: {cron_expr}"},
+            )
+    except ImportError:
+        pass
+
+    from services.tasks.schedule_service import SyncScheduleService
+    with SessionLocal() as db:
+        svc = SyncScheduleService()
+        schedule = svc.create_schedule(
+            db,
+            name=name,
+            cron_expr=cron_expr,
+            frequency_type=frequency_type,
+            priority=priority,
+            execution_mode=execution_mode,
+            description=description,
+            created_by=user.get("id"),
+        )
+        log_action(user["id"], user.get("username", ""), "create", "sync_schedule", schedule.name,
+                   after_state=schedule.to_dict())
+        return {"id": schedule.id, "name": schedule.name, "cron_expr": schedule.cron_expr}, 201
+
+
+@router.get("/sync-schedules/{schedule_id}")
+async def get_sync_schedule(schedule_id: int, request: Request):
+    """获取同步计划详情，含绑定连接列表。"""
+    _get_user(request)
+
+    from services.tasks.schedule_service import SyncScheduleService
+    with SessionLocal() as db:
+        result = SyncScheduleService().get_schedule(db, schedule_id)
+        if not result:
+            raise HTTPException(
+                status_code=404,
+                detail={"error_code": "SYNC_003", "message": "同步计划不存在"},
+            )
+        return result
+
+
+@router.patch("/sync-schedules/{schedule_id}")
+async def update_sync_schedule(schedule_id: int, request: Request):
+    """更新同步计划。"""
+    user = _require_admin(request)
+
+    body = await request.json()
+    cron_expr = body.get("cron_expr")
+    if cron_expr:
+        try:
+            from croniter import croniter
+            if not croniter.is_valid(cron_expr):
+                raise HTTPException(
+                    status_code=400,
+                    detail={"error_code": "SYNC_002", "message": f"无效的 cron 表达式: {cron_expr}"},
+                )
+        except ImportError:
+            pass
+
+    from services.tasks.schedule_service import SyncScheduleService
+    with SessionLocal() as db:
+        svc = SyncScheduleService()
+        schedule = svc.update_schedule(
+            db, schedule_id,
+            name=body.get("name"),
+            cron_expr=cron_expr,
+            frequency_type=body.get("frequency_type"),
+            priority=body.get("priority"),
+            execution_mode=body.get("execution_mode"),
+            description=body.get("description"),
+            is_enabled=body.get("is_enabled"),
+        )
+        if not schedule:
+            raise HTTPException(
+                status_code=404,
+                detail={"error_code": "SYNC_003", "message": "同步计划不存在"},
+            )
+        log_action(user["id"], user.get("username", ""), "update", "sync_schedule", schedule.name,
+                   after_state=schedule.to_dict())
+        return schedule.to_dict()
+
+
+@router.delete("/sync-schedules/{schedule_id}")
+async def delete_sync_schedule(schedule_id: int, request: Request):
+    """删除同步计划（有连接绑定时拒绝删除）。"""
+    user = _require_admin(request)
+
+    from services.tasks.schedule_service import SyncScheduleService
+    with SessionLocal() as db:
+        svc = SyncScheduleService()
+        ok, msg = svc.delete_schedule(db, schedule_id)
+        if not ok:
+            raise HTTPException(
+                status_code=409,
+                detail={"error_code": "SYNC_004", "message": msg},
+            )
+        log_action(user["id"], user.get("username", ""), "delete", "sync_schedule",
+                   f"id={schedule_id}", after_state={"deleted": True})
+        return {"message": "同步计划已删除"}
+
+
+@router.post("/sync-schedules/{schedule_id}/bind")
+async def bind_connections(schedule_id: int, request: Request):
+    """批量绑定连接到此同步计划。"""
+    user = _require_admin(request)
+
+    body = await request.json()
+    connection_ids = body.get("connection_ids", [])
+    if not connection_ids:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "SYNC_005", "message": "connection_ids 不能为空"},
+        )
+
+    from services.tasks.schedule_service import SyncScheduleService
+    with SessionLocal() as db:
+        svc = SyncScheduleService()
+        schedule = svc.get_schedule(db, schedule_id)
+        if not schedule:
+            raise HTTPException(
+                status_code=404,
+                detail={"error_code": "SYNC_003", "message": "同步计划不存在"},
+            )
+        count = svc.bind_connections(db, schedule_id, connection_ids)
+        log_action(user["id"], user.get("username", ""), "bind", "sync_schedule",
+                   f"schedule_id={schedule_id}",
+                   after_state={"bound": count, "connection_ids": connection_ids})
+        return {"message": f"已绑定 {count} 个连接"}
+
+
+@router.post("/sync-schedules/{schedule_id}/unbind")
+async def unbind_connections(schedule_id: int, request: Request):
+    """批量解绑连接。"""
+    user = _require_admin(request)
+
+    body = await request.json()
+    connection_ids = body.get("connection_ids", [])
+    if not connection_ids:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "SYNC_005", "message": "connection_ids 不能为空"},
+        )
+
+    from services.tasks.schedule_service import SyncScheduleService
+    with SessionLocal() as db:
+        svc = SyncScheduleService()
+        count = svc.unbind_connections(db, schedule_id, connection_ids)
+        log_action(user["id"], user.get("username", ""), "unbind", "sync_schedule",
+                   f"schedule_id={schedule_id}",
+                   after_state={"unbound": count, "connection_ids": connection_ids})
+        return {"message": f"已解绑 {count} 个连接"}
+
+
+# ─── 任务队列 ────────────────────────────────────────────────
+
+@router.get("/tasks/queue")
+async def get_task_queue(
+    request: Request,
+    past_hours: int = 24,
+    future_hours: int = 24,
+):
+    """执行队列：历史执行记录 + 未来预计执行时间线。"""
+    _get_user(request)
+
+    if past_hours < 1 or past_hours > 168:
+        past_hours = 24
+    if future_hours < 1 or future_hours > 168:
+        future_hours = 24
+
+    from services.tasks.schedule_service import TaskQueueService
+    with SessionLocal() as db:
+        return TaskQueueService().get_queue(db, past_hours=past_hours, future_hours=future_hours)
 
 
 # ─── 废弃端点（保留原路径避免 404） ─────────────────────────

@@ -241,3 +241,105 @@ def scheduled_sync_all():
             redis_client.delete(lock_key)
         except Exception:
             pass
+
+
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=60)
+def sync_by_schedule(self, schedule_id: int):
+    """
+    按同步计划（BiSyncSchedule）触发所有绑定连接。
+    由 RedBeat 按 cron 表达式触发，每次只处理一个 schedule。
+
+    - execution_mode=parallel: 用 Celery group 并行触发
+    - execution_mode=sequential: 逐个触发（保留兼容性）
+    - 按 priority 排序（高优先级先执行，在 RedBeat 入口已保证）
+    - 每个连接复用 Redis 锁（sync_connection_task 内部已处理）
+    """
+    import redis
+    from celery import group
+    from services.common.settings import get_redis_url
+
+    lock_key = f"tableau:beat:sync_schedule:{schedule_id}:lock"
+    lock_timeout = 3600  # 1 小时，防止 schedule 密集触发
+
+    redis_client = None
+    try:
+        redis_client = redis.from_url(get_redis_url(), decode_responses=True)
+        acquired = redis_client.set(lock_key, "1", nx=True, ex=lock_timeout)
+        if not acquired:
+            logger.info("sync_by_schedule[%d]: already running, skipping", schedule_id)
+            return {"status": "skipped", "schedule_id": schedule_id}
+    except Exception as e:
+        logger.warning("sync_by_schedule[%d]: Redis lock failed (%s), proceeding", schedule_id, e)
+        redis_client = None
+
+    try:
+        from services.tableau.models import TableauDatabase
+        from app.core.database import get_db_context
+
+        with get_db_context() as db:
+            _db = TableauDatabase(session=db)
+
+            # 获取 schedule 元信息
+            from services.tasks.models import BiSyncSchedule
+            schedule = db.query(BiSyncSchedule).filter(BiSyncSchedule.id == schedule_id).first()
+            if not schedule:
+                logger.warning("sync_by_schedule: schedule %d not found", schedule_id)
+                return {"status": "error", "message": "计划不存在"}
+            if not schedule.is_enabled:
+                logger.info("sync_by_schedule: schedule %d is disabled, skipping", schedule_id)
+                return {"status": "skipped", "message": "计划已禁用"}
+
+            # 查询该计划下所有已启用自动同步的连接
+            connections = db.query(TableauConnection).filter(
+                TableauConnection.schedule_id == schedule_id,
+                TableauConnection.auto_sync_enabled == True,
+                TableauConnection.is_active == True,
+            ).order_by(TableauConnection.id).all()
+
+            if not connections:
+                logger.info("sync_by_schedule[%d]: no active connections bound, skipping", schedule_id)
+                return {"status": "skipped", "schedule_id": schedule_id, "message": "无绑定连接"}
+
+            logger.info(
+                "sync_by_schedule[%d '%s']: triggering %d connections (mode=%s)",
+                schedule_id, schedule.name, len(connections), schedule.execution_mode,
+            )
+
+            # 桥接 MCP
+            _bridge_mcp_to_connections(_db, db)
+
+            if schedule.execution_mode == "sequential":
+                results = []
+                for conn in connections:
+                    result = sync_connection_task.delay(conn.id, trigger_type="scheduled")
+                    results.append(result.id)
+                return {
+                    "status": "dispatched",
+                    "schedule_id": schedule_id,
+                    "schedule_name": schedule.name,
+                    "connection_count": len(connections),
+                    "execution_mode": "sequential",
+                    "tasks": results,
+                }
+            else:
+                # parallel: 用 group 并行触发
+                job = group(
+                    sync_connection_task.s(conn.id, None, "scheduled")
+                    for conn in connections
+                )
+                result = job.apply_async()
+                return {
+                    "status": "dispatched",
+                    "schedule_id": schedule_id,
+                    "schedule_name": schedule.name,
+                    "connection_count": len(connections),
+                    "execution_mode": "parallel",
+                    "group_id": result.id,
+                }
+
+    finally:
+        if redis_client:
+            try:
+                redis_client.delete(lock_key)
+            except Exception:
+                pass

@@ -26,10 +26,6 @@ celery_app.conf.update(
     task_track_started=True,
     result_expires=3600,
     beat_schedule={
-        "tableau-auto-sync": {
-            "task": "services.tasks.tableau_tasks.scheduled_sync_all",
-            "schedule": 60.0,
-        },
         "quality-cleanup-old-results": {
             "task": "services.tasks.quality_tasks.cleanup_old_quality_results",
             "schedule": 86400.0,  # 每天执行一次（清理 90 天前数据）
@@ -73,6 +69,27 @@ celery_app.conf.update(
         },
     },
 )
+
+
+# ---- RedBeat 动态加载：启动时将所有 BiSyncSchedule 注册到 Redis ----
+def _load_sync_schedules_to_redbeat(*args, **kwargs):
+    """Celery Beat 启动后，将所有启用的 BiSyncSchedule 加载到 RedBeat。"""
+    try:
+        from app.core.database import get_db_context
+        from services.tasks.schedule_service import SyncScheduleService
+
+        with get_db_context() as db:
+            svc = SyncScheduleService()
+            count = svc.load_all_to_redbeat(db)
+            if count > 0:
+                import logging
+                log = logging.getLogger(__name__)
+                log.info("RedBeat: loaded %d enabled sync schedules", count)
+    except Exception:
+        pass  # Beat 启动失败不影响 worker
+
+
+celery_app.on_after_configure.connect(_load_sync_schedules_to_redbeat)
 
 celery_app.conf.include = [
     "services.tasks.tableau_tasks",

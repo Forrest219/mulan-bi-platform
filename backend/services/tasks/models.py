@@ -86,3 +86,54 @@ class BiTaskSchedule(Base):
             "created_at": self.created_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.created_at else None,
             "updated_at": self.updated_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.updated_at else None,
         }
+
+
+class BiSyncSchedule(Base):
+    """同步调度计划表 bi_sync_schedules — 可复用的同步计划模板"""
+    __tablename__ = "bi_sync_schedules"
+    __table_args__ = (
+        Index("ix_sync_sched_name", "name"),
+        Index("ix_sync_sched_enabled", "is_enabled"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(128), unique=True, nullable=False)
+    description = Column(Text, nullable=True)
+    frequency_type = Column(String(20), nullable=False)  # hourly / daily / weekly / monthly
+    cron_expr = Column(String(64), nullable=False)
+    priority = Column(Integer, nullable=False, server_default=sa_text("50"))
+    execution_mode = Column(String(16), nullable=False, server_default=sa_text("'parallel'"))  # parallel / sequential
+    is_enabled = Column(Boolean, nullable=False, server_default=sa_text("true"))
+    created_by = Column(Integer, ForeignKey("auth_users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=sa_func.now())
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "frequency_type": self.frequency_type,
+            "cron_expr": self.cron_expr,
+            "priority": self.priority,
+            "execution_mode": self.execution_mode,
+            "is_enabled": self.is_enabled,
+            "created_by": self.created_by,
+            "created_at": self.created_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.updated_at else None,
+        }
+
+
+# 避免循环 import，在文件底部动态添加 relationship
+def _add_sync_schedule_relationships():
+    from sqlalchemy.orm import relationship
+    from app.core.database import Base
+    for cls in [BiSyncSchedule]:
+        if not hasattr(cls, "connections"):
+            cls.connections = relationship(
+                "TableauConnection",
+                back_populates="schedule",
+                foreign_keys="TableauConnection.schedule_id",
+            )
+
+_add_sync_schedule_relationships()

@@ -37,6 +37,7 @@ class DataSource(Base):
             "port": self.port,
             "database_name": self.database_name,
             "username": self.username,
+            "has_password": bool(self.password_encrypted),
             "description": self.description,
             "owner_id": self.owner_id,
             "is_active": self.is_active,

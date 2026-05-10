@@ -1,7 +1,7 @@
 """任务调度种子数据"""
 from sqlalchemy.orm import Session
 
-from services.tasks.models import BiTaskSchedule
+from services.tasks.models import BiTaskSchedule, BiSyncSchedule
 
 
 SEED_DATA = [
@@ -23,6 +23,13 @@ SEED_DATA = [
      "清理 90 天前的任务运行记录", "每日 02:00", "0 2 * * *"),
 ]
 
+# 同步计划（BiSyncSchedule）种子数据
+SYNC_SCHEDULE_SEED = [
+    ("每日两次同步", "每日 00:00 / 12:00 执行", "daily", "0 0,12 * * *", 50, "parallel"),
+    ("工作日每4小时同步", "工作日 4 小时执行一次", "hourly", "0 */4 * * 1-5", 40, "parallel"),
+    ("每日凌晨一次", "每日凌晨 02:00 执行（低峰）", "daily", "0 2 * * *", 30, "sequential"),
+]
+
 
 def seed_task_schedules(db_session: Session) -> None:
     """幂等插入 Beat 调度种子数据"""
@@ -38,5 +45,25 @@ def seed_task_schedules(db_session: Session) -> None:
                 description=description,
                 schedule_expr=schedule_expr,
                 cron_expr=cron_expr,
+            ))
+    db_session.commit()
+
+
+def seed_sync_schedules(db_session: Session) -> None:
+    """幂等插入同步计划（BiSyncSchedule）种子数据"""
+    existing_names = {
+        row[0] for row in
+        db_session.query(BiSyncSchedule.name).all()
+    }
+    for name, description, frequency_type, cron_expr, priority, execution_mode in SYNC_SCHEDULE_SEED:
+        if name not in existing_names:
+            db_session.add(BiSyncSchedule(
+                name=name,
+                description=description,
+                frequency_type=frequency_type,
+                cron_expr=cron_expr,
+                priority=priority,
+                execution_mode=execution_mode,
+                is_enabled=True,
             ))
     db_session.commit()

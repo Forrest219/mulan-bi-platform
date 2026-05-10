@@ -133,10 +133,33 @@ async def parse_datasource_config(body: dict, request: Request, db: Session = De
 async def test_draft_connection(
     body: dict,
     current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+    db: Session = Depends(get_db),
 ):
-    """测试未保存的数据源配置（10秒超时）"""
+    """测试未保存/未提交的数据源配置（10秒超时）。
+
+    编辑态允许传 datasource_id。若 password 为空，则复用该数据源已保存密码，
+    但 host/port/db_type/database_name/username 使用当前表单值进行测试。
+    """
     import asyncio
     from services.ddl_checker.connector import DatabaseConnector
+
+    saved_password = ""
+    datasource_id = body.get("datasource_id")
+    if not body.get("password") and not datasource_id:
+        return {"success": False, "message": "请先输入密码"}
+
+    if datasource_id and not body.get("password"):
+        _db = DataSourceDatabase()
+        try:
+            ds_id = int(datasource_id)
+        except (TypeError, ValueError):
+            raise DSError.not_found()
+        ds = _db.get(db, ds_id)
+        if not ds:
+            raise DSError.not_found()
+        if current_user["role"] != "admin" and ds.owner_id != current_user["id"]:
+            raise DSError.not_owner()
+        saved_password = _decrypt(ds.password_encrypted)
 
     db_config = {
         "db_type": body.get("db_type", "mysql"),
@@ -144,7 +167,7 @@ async def test_draft_connection(
         "port": body.get("port", 3306),
         "database": body.get("database_name", ""),
         "user": body.get("username", ""),
-        "password": body.get("password", ""),
+        "password": body.get("password") or saved_password,
     }
 
     def _do_connect():

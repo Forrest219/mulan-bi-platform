@@ -2,7 +2,6 @@
 import logging
 import yaml
 from typing import Optional, Dict, Any
-from urllib.parse import quote_plus
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 
@@ -64,22 +63,19 @@ class DatabaseConnector:
         db_type = self.config.get("db_type", "mysql")
         host = self.config.get("host", "localhost")
         port = self.config.get("port", 3306)
-        user = quote_plus(self.config.get("user", "root"))
-        password = quote_plus(self.config.get("password", ""))
+        user = self.config.get("user", "root")
+        password = self.config.get("password", "")
         database = self.config.get("database", "")
 
         if db_type == "mysql":
-            db_path = f"/{database}" if database else ""
-            return f"mysql+pymysql://{user}:{password}@{host}:{port}{db_path}"
+            return f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
         elif db_type == "postgresql":
-            db_path = f"/{database}" if database else ""
-            return f"postgresql://{user}:{password}@{host}:{port}{db_path}"
+            return f"postgresql://{user}:{password}@{host}:{port}/{database}"
         elif db_type == "sqlite":
             return f"sqlite:///{database}"
         elif db_type == "starrocks":
             port = self.config.get("port", 9030)
-            db_path = f"/{database}" if database else ""
-            return f"mysql+pymysql://{user}:{password}@{host}:{port}{db_path}"
+            return f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
         else:
             raise ValueError(f"不支持的数据库类型: {db_type}")
 
@@ -151,52 +147,6 @@ class DatabaseConnector:
                 return ""
         return ""
 
-    def show_partitions(self, db: str, tbl: str) -> list:
-        """
-        查询 StarRocks 分区信息
-
-        Args:
-            db: 数据库名
-            tbl: 表名
-
-        Returns:
-            分区信息列表，每条记录为一个 dict
-        """
-        if self.config.get("db_type") != "starrocks":
-            return []
-        try:
-            sql = f"SHOW PARTITIONS FROM `{db}`.`{tbl}`"
-            with self.engine.connect() as conn:
-                result = conn.execute(text(sql))
-                columns = result.keys()
-                return [dict(zip(columns, row)) for row in result.fetchall()]
-        except Exception as e:
-            logger.warning(f"查询分区信息失败 (db={db}, tbl={tbl}): {e}")
-            return []
-
-    def show_tablets(self, db: str, tbl: str) -> list:
-        """
-        查询 StarRocks Tablet 信息
-
-        Args:
-            db: 数据库名
-            tbl: 表名
-
-        Returns:
-            Tablet 信息列表，每条记录为一个 dict
-        """
-        if self.config.get("db_type") != "starrocks":
-            return []
-        try:
-            sql = f"SHOW TABLETS FROM `{db}`.`{tbl}`"
-            with self.engine.connect() as conn:
-                result = conn.execute(text(sql))
-                columns = result.keys()
-                return [dict(zip(columns, row)) for row in result.fetchall()]
-        except Exception as e:
-            logger.warning(f"查询 Tablet 信息失败 (db={db}, tbl={tbl}): {e}")
-            return []
-
     @staticmethod
     def from_yaml(config_path: str) -> "DatabaseConnector":
         """从 YAML 配置文件加载配置并创建连接器"""
@@ -204,36 +154,3 @@ class DatabaseConnector:
             config = yaml.safe_load(f)
         connector = DatabaseConnector(config.get("database", {}))
         return connector
-
-    def create_target_engine(self, conn_url: str = None) -> Engine:
-        """
-        直连目标库，使用独立短连接池 + statement_timeout
-
-        用于 DDL 扫描时直连目标库，配合 statement_timeout 防止慢查询阻塞。
-
-        Args:
-            conn_url: 连接 URL，若为 None 则使用当前配置的连接字符串
-
-        Returns:
-            配置好的 SQLAlchemy Engine
-        """
-        if conn_url is None:
-            conn_url = self._build_connection_string()
-
-        engine = create_engine(
-            conn_url,
-            pool_pre_ping=True,
-            pool_size=2,          # 独立小池
-            max_overflow=0,       # 不溢出
-            pool_timeout=10,
-        )
-
-        # 设置 statement_timeout = 30s
-        try:
-            with engine.connect() as conn:
-                conn.execute(text("SET statement_timeout = '30s'"))
-                conn.commit()
-        except Exception as e:
-            logger.warning("设置 statement_timeout 失败: %s", e)
-
-        return engine
