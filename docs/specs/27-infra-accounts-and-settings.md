@@ -23,23 +23,27 @@
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `id` | UUID | PK |
-| `user_id` | UUID | FK → auth_users.id |
+| `id` | INTEGER | PK，autoincrement |
+| `user_id` | INTEGER | FK → auth_users.id |
 | `token_hash` | VARCHAR(64) | SHA-256(token)，不存明文 |
 | `expires_at` | TIMESTAMP | 默认为 now() + 15min |
-| `is_used` | BOOLEAN | 默认 false |
+| `is_used` | BOOLEAN | 默认 false，server_default=false |
 | `created_at` | TIMESTAMP | 默认 now() |
+
+> 迁移文件：`20260426_0002_add_auth_password_reset_tokens_and_ip_ua.py`
 
 ### 2.2 扩展表：`auth_refresh_tokens`
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
+| `device_fingerprint` | VARCHAR(256) | 浏览器 UA/IP 指纹（可选，与 ip_address/user_agent 并存） |
 | `ip_address` | VARCHAR(45) | 支持 IPv6 |
 | `user_agent` | VARCHAR(512) | 浏览器 UA |
 | `expires_at` | TIMESTAMP | 原有 |
-| `is_revoked` | BOOLEAN | 原有 |
+| `revoked_at` | TIMESTAMP | 撤销时间，非空表示已撤销（原有） |
 
-> 需 Alembic 迁移：`add_ip_address_user_agent_to_auth_refresh_tokens`
+> 迁移文件：`20260426_0002_add_auth_password_reset_tokens_and_ip_ua.py`
+> `create_refresh_token()` 调用时同时写入 `device_fingerprint`、`ip_address`、`user_agent` 三个字段。
 
 ---
 

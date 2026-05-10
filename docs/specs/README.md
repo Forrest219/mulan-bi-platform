@@ -1,6 +1,6 @@
 # Mulan BI Platform — 技术规格书索引
 
-> 最后更新：2026-04-24
+> 最后更新：2026-05-09
 
 ## 状态说明
 
@@ -69,9 +69,10 @@
 
 ## 附录 — 独立 Spec
 
-| 文档 | 说明 | 状态 |
-|------|------|------|
-| [MCP 统一配置](spec-mcp-configs.md) | MCP Server CRUD + AI 解析（v1.1 补 credentials） | :white_check_mark: |
+| # | 文档 | 说明 | 状态 |
+|---|------|------|------|
+| — | [Command Palette 搜索](42-command-palette-spec.md) | 全局命令面板搜索（Spotlight 风格） | :white_check_mark: |
+| — | [MCP 统一配置](spec-mcp-configs.md) | MCP Server CRUD + AI 解析（v1.1 补 credentials） | :white_check_mark: |
 | [LLM-Tableau-MCP 配置](spec-llm-tableau-mcp-config.md) | 早期 MCP 状态卡（部分被 spec-mcp-configs 取代） | :white_check_mark: |
 | [首页 UI 修复](spec-homepage-ui-bug-fix.md) | 首页 Bug 修复 | :white_check_mark: |
 | [反馈 API](feedback-api-spec.md) | Ask Data 反馈接口 | :white_check_mark: |

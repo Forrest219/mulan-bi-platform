@@ -125,6 +125,7 @@ erDiagram
 | PUT | `/api/datasources/{id}` | Cookie | admin, data_admin (owner 或 admin) | 更新数据源 |
 | DELETE | `/api/datasources/{id}` | Cookie | admin, data_admin (owner 或 admin) | 删除数据源 |
 | POST | `/api/datasources/{id}/test` | Cookie | admin, data_admin (owner 或 admin) | 测试连接 |
+| POST | `/api/datasources/test-draft` | Cookie | admin, data_admin | 测试当前表单配置，编辑态可复用已保存密码 |
 
 ### 3.2 请求/响应 Schema
 
@@ -157,6 +158,7 @@ erDiagram
   "port": 3306,
   "database_name": "prod_bi",
   "username": "bi_reader",
+  "has_password": true,
   "extra_config": {
     "ssl": true,
     "charset": "utf8mb4"
@@ -168,7 +170,7 @@ erDiagram
 }
 ```
 
-> **注意**：响应中 **不包含** `password_encrypted` 字段，`to_dict()` 方法默认排除密码。
+> **注意**：响应中 **不包含** `password_encrypted` 字段，`to_dict()` 方法默认排除密码。响应可返回 `has_password: boolean` 供前端展示“已保存密码”状态。
 
 **错误响应：**
 ```json
@@ -192,6 +194,7 @@ erDiagram
     "port": 3306,
     "database_name": "prod_bi",
     "username": "bi_reader",
+    "has_password": true,
     "extra_config": {},
     "owner_id": 2,
     "is_active": true,
@@ -223,7 +226,7 @@ erDiagram
 }
 ```
 
-> 所有字段均为可选，仅传入需要更新的字段。若传入 `password`，将重新加密存储。
+> 所有字段均为可选，仅传入需要更新的字段。若传入非空 `password`，将重新加密存储；未传入 `password` 时保留原密文不变。
 
 #### `DELETE /api/datasources/{id}` - 删除
 
@@ -236,6 +239,31 @@ erDiagram
 ```
 
 #### `POST /api/datasources/{id}/test` - 连接测试
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "连接成功"
+}
+```
+
+#### `POST /api/datasources/test-draft` - 当前表单配置测试
+
+用于新建/编辑表单中的“测试当前配置”，不要求先保存表单。编辑态传入 `datasource_id` 且 `password` 为空时，后端先执行 owner/admin 权限校验，再复用该数据源已保存密码，仅使用请求体中的 host、port、database、username 等当前表单值进行测试。
+
+**Request:**
+```json
+{
+  "datasource_id": 2,
+  "db_type": "starrocks",
+  "host": "10.69.65.62",
+  "port": 8090,
+  "database_name": "",
+  "username": "admin",
+  "password": ""
+}
+```
 
 **Response (200):**
 ```json
@@ -278,8 +306,11 @@ erDiagram
 
 **密码不可逆原则：**
 - API 响应 **永不** 返回 `password_encrypted` 字段
+- API 响应仅返回 `has_password` 布尔值，用于表达“服务端存在已保存密码”
 - `to_dict()` 方法默认排除该字段
 - 更新时若未传入 `password` 字段，保留原密文不变
+- 编辑页不得显示空密码框造成“密码丢失”误解；应展示“已保存密码”状态，用户点击“更换密码”后才输入新密码
+- 编辑页保存时若密码为空，不更新 `password_encrypted`；测试当前配置时若密码为空且存在 `datasource_id`，后端复用已保存密码
 
 ### 4.2 IDOR 防护
 
@@ -309,6 +340,11 @@ erDiagram
 4. 构造连接参数（host, port, db, user, password, extra_config）
 5. 在线程池中创建 `DatabaseConnector` 并尝试连接
 6. 10 秒超时后中断返回失败
+
+**草稿测试补充：**
+- 新建态：`POST /api/datasources/test-draft` 必须传入明文 `password` 才能测试。
+- 编辑态：`POST /api/datasources/test-draft` 可传 `datasource_id`。若 `password` 为空，服务端复用该数据源已保存密码；若传入新 `password`，仅用于本次测试，不会自动保存。
+- 草稿测试必须与单数据源测试使用相同 owner/admin 权限校验，避免通过 `datasource_id` 复用他人密钥。
 
 ### 4.4 校验规则
 

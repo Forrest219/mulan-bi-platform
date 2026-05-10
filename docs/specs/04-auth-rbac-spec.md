@@ -39,8 +39,9 @@
 | position | VARCHAR(128) | NULLABLE | 职位 |
 | department | VARCHAR(128) | NULLABLE | 部门 |
 | phone | VARCHAR(32) | NULLABLE | 手机号 |
+| avatar_url | TEXT | NULLABLE | 头像 URL（base64 data URI 或外部 URL） |
 
-> 迁移文件：`20260507_220000_add_user_profile_fields.py`
+> 迁移文件：`20260507_220000_add_user_profile_fields.py`（position/department/phone），`20260508_add_avatar_url_to_auth_users.py`（avatar_url）
 
 #### auth_user_groups
 | 列名 | 类型 | 约束 | 说明 |
@@ -138,16 +139,18 @@ erDiagram
     "display_name": "管理员",
     "email": "admin@mulan.local",
     "role": "admin",
+    "position": "BI 总监",
+    "department": "BI 中心",
+    "phone": "138xxxx0000",
+    "avatar_url": "data:image/png;base64,...",
     "permissions": ["ddl_check", "tableau", "llm"],
+    "all_permissions": ["ddl_check", "tableau", "llm", "database_monitor", "rule_config", "scan_logs", "user_management", "ddl_generator"],
     "group_ids": [1],
     "group_names": ["核心团队"],
     "is_active": true,
     "mfa_enabled": false,
     "created_at": "2026-04-01 00:00:00",
-    "last_login": "2026-04-03 10:30:00",
-    "position": "BI 总监",
-    "department": "BI 中心",
-    "phone": "138xxxx0000"
+    "last_login": "2026-04-03 10:30:00"
   }
 }
 ```
@@ -440,7 +443,10 @@ admin 角色自动拥有全部权限，无需额外检查。
 
 - JWT 每次请求从 DB 重新验证用户状态和角色（防止 Token 中角色过期）
 - 密码哈希使用 PBKDF2-SHA256（100k 迭代），不存储明文
-- 注册限流：IP 级别，60s/5 次
+- **限流**：
+  - 注册：IP 级别，60 秒内最多 5 次，超限返回 429
+  - 登录：IP + username 级别，60 秒内最多 5 次，超限返回 429
+  - MFA 验证：session 级别，60 秒内最多 5 次，超限返回 429
 - 管理员不可自降角色、不可删除自己
 - `password_hash` 不出现在 API 响应中（`to_dict()` 不包含）
 
@@ -453,6 +459,19 @@ admin 角色自动拥有全部权限，无需额外检查。
 - 启用时生成随机 Base32 Secret，QR Code URI 通过 `pyotp` 生成
 - Secret 和备用码（8个）使用 Fernet（`LLM_ENCRYPTION_KEY`）加密存储
 - 登录流程支持 MFA Challenge：`/api/auth/login` 验证密码后，若 `mfa_enabled=true` 返回 `{ mfa_required: true }` 并预置 session cookie，前端显示 MFA 验证码输入框
+
+**MFA Secret 生命周期（关键约束）**：
+
+MFA 启用分为两个独立步骤，secret 必须共用，不得重新生成：
+
+1. **`POST /mfa/setup`**：生成 TOTP Secret → 加密暂存 → 返回 `secret`（明文供用户绑定验证器）、`qr_uri`、`backup_codes`
+2. **`POST /mfa/verify-setup`**：读取 setup 阶段暂存的 secret → 验证用户输入的 TOTP code → 成功后启用 MFA（设置 `mfa_enabled=true`）并存储 backup codes
+
+**约束**：
+- `setup` 和 `verify-setup` 必须使用同一个 secret
+- `verify-setup` **不得**重新生成 secret，否则用户验证器绑定的是旧 secret，TOTP 码永不匹配
+- MFA 启用后，`mfa_enabled=true` 的用户在 `login` 时触发 MFA Challenge（pending session）
+- pending session 只能调用 `/mfa/verify`（完成验证）或 `/logout`，禁止调用业务 API 或 `/me`
 
 **API 端点**：
 

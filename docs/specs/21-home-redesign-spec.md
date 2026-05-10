@@ -56,11 +56,11 @@
 
 - **首页 `/`**: 使用**专用的 HomeLayout**，包含 ConversationBar + MainContent
 - **其他页面 `/dev/*`, `/governance/*` 等**: 继续使用 AppShellLayout + AppSidebar
-- **对话详情页 `/chat/:id`**: 新增路由，同样使用 HomeLayout，MainContent 替换为对话流
+- **对话详情页**: 通过 URL Search Params `?conv=<id>` 在 HomePage 内恢复，不存在独立路由
 
 ```
-路由 /           -> HomeLayout > HomePage (欢迎 + 建议问题)
-路由 /chat/:id   -> HomeLayout > ChatPage (对话详情)
+路由 /           -> HomeLayout > HomePage (欢迎 + 建议问题 + SSE 消息流)
+路由 /?conv=xxx  -> HomeLayout > HomePage (恢复指定对话的消息流)
 路由 /dev/*      -> AppShellLayout > 各功能页
 ```
 
@@ -108,7 +108,7 @@
 | 属性 | 值 | Tailwind |
 |------|-----|----------|
 | 宽度 (展开) | 260px | `w-[260px]` |
-| 宽度 (折叠) | 0px (完全隐藏) | `w-0 overflow-hidden` |
+| 宽度 (折叠) | 48px 图标条（仅展开/折叠切换按钮） | 可折叠：展开 260px / 折叠 48px（图标条） |
 | 背景色 | white | `bg-white` |
 | 右边框 | 1px slate-200 | `border-r border-slate-200` |
 | 内边距 (水平) | 12px | `px-3` |
@@ -231,11 +231,75 @@
 4. "Tableau 仪表盘中哪些字段缺少语义定义？"
 ```
 
-**AskBar (底部输入区, 改造后):**
+### 4.3 建议问题动态 API（双轨制）
+
+**架构策略**：采用"动态 API 优先 + 静态数据兜底"的双轨制。组件挂载时立即请求 `/api/chat/suggestions`，请求失败时回退到本地静态数组。
+
+**接口协议**：
+
+`GET /api/chat/suggestions` — 返回建议问题列表
+
+Response（标准结构）:
+```json
+{
+  "suggestions": [
+    { "title": "你有哪些看板？", "category": "asset" },
+    { "title": "哪些子类别近6个月利润率持续下滑？", "category": "trend" },
+    { "title": "对比各区域本季度销售额与利润率排名", "category": "rank" }
+  ]
+}
+```
+
+Response（简化结构，直接数组）:
+```json
+[
+  { "title": "你有哪些看板？", "category": "asset" },
+  { "title": "哪些子类别近6个月利润率持续下滑？", "category": "trend" }
+]
+```
+
+**字段定义**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `title` | string | 建议问题文本，必填 |
+| `category` | string | 问题类型，用于视觉映射；可选，缺失时使用默认样式 |
+| `hint` | string | 额外提示信息，可选 |
+
+**视觉映射规则**：
+
+| category | 图标 | iconColor | 左边框色 | 适用场景 |
+|----------|------|-----------|---------|---------|
+| `asset` | `ri-database-2-line` | `text-violet-400` | `border-l-violet-300` | 资产发现类问题 |
+| `trend` | `ri-line-chart-line` | `text-amber-400` | `border-l-amber-300` | 趋势分析类问题 |
+| `rank` | `ri-bar-chart-grouped-line` | `text-blue-400` | `border-l-blue-300` | 对比排名类问题 |
+| 无 / 其他 | `ri-questionnaire-line` | `text-slate-300` | `border-l-slate-200` | 默认兜底样式 |
+
+**兜底数据**（API 请求失败时使用）：
+
+```typescript
+const SUGGESTIONS: Suggestion[] = [
+  { title: '你有哪些看板？',                               category: 'asset' },
+  { title: '你有哪些数据源？',                             category: 'asset' },
+  { title: '哪些子类别近6个月利润率持续下滑？',           category: 'trend' },
+  { title: '对比各区域本季度销售额与利润率排名',           category: 'rank'  },
+  { title: '分析各类别近12个月销售额的月度变化趋势',       category: 'trend' },
+  { title: '利润贡献前10的客户是谁？集中度如何？',         category: 'rank'  },
+];
+```
+
+**加载时序**：
+1. 组件挂载 → 显示 6 个骨架屏卡片（Skeleton Loading）
+2. 并发请求 `/api/chat/suggestions`
+3. 请求返回且有数据 → 渲染动态建议
+4. 请求失败或返回空 → 渲染兜底静态建议
+5. 两者均不再显示 loading 态
+
+**AskBar (底部输入区, Open-WebUI 风格):**
 
 | 属性 | 值 | Tailwind |
 |------|-----|----------|
-| 位置 | 主内容区底部固定 | `fixed bottom-0` 或 `mt-auto` 视实现 |
+| 位置 | 主内容区底部固定 | `mt-auto` |
 | 最大宽度 | 640px, 居中 | `max-w-[640px] mx-auto` |
 | 下间距 | 24px | `pb-6` |
 | 输入框圆角 | 16px | `rounded-2xl` |
@@ -245,6 +309,40 @@
 | focus 阴影 | ring-2 blue-100 | `focus:ring-2 focus:ring-blue-100` |
 | 发送按钮 | 圆形, bg-blue-600, 右侧内嵌 | -- |
 | 底部提示 | "点击建议问题或直接输入，开始对话" | `text-xs text-slate-400 text-center mt-2` |
+
+#### AskBar 高阶交互规范
+
+##### A. 自适应高度（Auto-grow）
+
+- 输入框初始高度为单行（约 42px）
+- 随内容自动长高，最高限制为 **200px**（`max-h-[200px]`）
+- 超出 200px 后内部滚动（`overflow-y-auto`），不撑开容器
+- 实现：监听 `onChange` + `scrollHeight`，动态设置 `style.height`
+
+##### B. 连接选择器（ScopeContext 集成）
+
+- 仅当数据连接数量 > 1 个时显示，渲染为 AskBar 左侧下拉框
+- 连接下拉框显示当前选中的 `connection_name`，点击展开列表
+- 无连接时（connection_count === 0）显示告警图标 + 文字"请先配置数据源"，点击引导跳转 `/tableau/connections`
+- `ScopeContext` 驱动选择状态，选择后后续所有消息均使用该 connection_id
+
+##### C. 文件附件支持
+
+- 左下角增加 paperclip 按钮（`ri-attachment-2`），点击触发隐藏的 `<input type="file">`
+- 文件上传后，在输入框上方展示 **Chips 预览区**：
+  - 图片文件：显示缩略图（64×64 object-cover）+ 文件名 + 删除按钮
+  - 文档文件：显示文件图标 + 文件名 + 文件大小 + 删除按钮
+- Chips 区支持多文件同时存在
+
+##### D. 拖拽上传机制
+
+- AskBar 容器监听 `dragenter` / `dragover` / `dragleave` / `drop` 事件
+- 使用内部 `dragCounter`（整数）避免多次触发：
+  - `dragenter` → `dragCounter++`
+  - `dragleave` → `dragCounter--`
+  - `dragCounter === 0` 时移除遮罩
+- 拖入时覆盖蓝色半透明遮罩层，`bg-blue-500/20`，中心显示"释放以添加文件"文字
+- 拖放文件后触发同上传逻辑，添加到 Chips 预览区
 
 ---
 
@@ -261,7 +359,7 @@
 
 | 触发 | 行为 |
 |------|------|
-| 在 AskBar 输入文字并按 Enter (非 Shift) | 创建新对话，URL 跳转 `/chat/:newId`；主内容区切换为对话流视图；左侧栏顶部插入新对话记录 |
+| 在 AskBar 输入文字并按 Enter (非 Shift) | 创建新对话，更新 URL 参数 `?conv=<newId>`；主内容区切换为 SSE 消息流；左侧栏顶部插入新对话记录 |
 | 点击建议问题卡片 | 同上，问题文本作为首条消息 |
 | Shift + Enter | 输入框内换行，不提交 |
 
@@ -269,7 +367,7 @@
 
 | 触发 | 行为 |
 |------|------|
-| 点击对话记录 | URL 导航到 `/chat/:id`，主内容区加载该对话的消息流 |
+| 点击对话记录 | URL 参数更新为 `?conv=<id>`，主内容区加载该对话的 SSE 消息流；历史消息通过 `/api/chat/conversations/<id>/messages` 恢复 |
 | hover 对话记录 | 背景变为 slate-50，右侧出现 `...` 更多操作按钮 |
 | 点击 `...` 更多按钮 | 弹出下拉菜单: "重命名" / "删除" |
 | 删除对话 | 弹出确认弹窗 "确定删除这条对话吗？删除后无法恢复"，确认后从列表移除并跳回 `/` |
@@ -283,14 +381,17 @@
 | 搜索无结果 | 列表区显示 "没有找到相关对话" |
 | 清空搜索框 | 恢复完整列表 |
 
-### 5.5 左侧栏折叠
+### 5.5 左侧栏折叠/展开
+
+桌面端 ConversationBar 支持折叠为 48px 图标条，展开为 260px 完整面板。折叠状态通过 localStorage 持久化。
 
 | 触发 | 行为 |
 |------|------|
-| 点击 ConversationBar 顶部折叠按钮 | 左侧栏宽度 260px -> 0px，带 200ms ease 过渡动画；主内容区自动占满全宽 |
-| 折叠后展开 | 主内容区左上角出现 hamburger 按钮 `ri-menu-line`，点击展开 |
-| < 768px (移动端) | 默认隐藏左侧栏；hamburger 按钮固定显示；点击后左侧栏以 overlay 方式滑出（带半透明遮罩） |
-| 折叠状态持久化 | 使用 localStorage key `mulan-home-sidebar-collapsed` |
+| 点击折叠/展开按钮 | 左侧栏在 260px ↔ 48px 之间切换，带 300ms 动画 |
+| 折叠状态 | 仅显示 48px 图标条（包含切换按钮 + 新建对话图标），对话列表和搜索框隐藏 |
+| 展开状态 | 完整 260px 面板，显示新建按钮、搜索框、对话列表 |
+| localStorage | 折叠状态持久化到 key `mulan-conversationbar-collapsed` |
+| < 768px (移动端) | 默认隐藏左侧栏；hamburger 按钮固定显示；点击后以 overlay 方式滑出（带半透明遮罩） |
 
 ### 5.6 建议问题卡片
 
@@ -317,19 +418,27 @@
 ### 6.3 已登录 -- 有对话历史 (常规)
 
 - ConversationBar: 按时间倒序展示对话列表，分组标签: "今天" / "昨天" / "过去 7 天" / "更早"
-- MainContent: 同 6.2（欢迎页），或如果 URL 为 `/chat/:id` 则显示对话流
+- MainContent: 同 6.2（欢迎页），或如果 URL 含 `?conv=<id>` 则通过 SSE 消息流恢复该对话
 
-### 6.4 对话进行中
+### 6.4 对话进行中（SSE 流式主路径）
 
-- MainContent: 消息流视图（用户消息靠右，AI 回复靠左）
-- AI 回复加载中: 显示 typing indicator（三点跳动动画）+ 文字 "正在分析..."
-- AskBar: 固定在底部，可继续输入追问
-- WelcomeHero 和 SuggestionGrid: 隐藏
-- 左侧栏当前对话高亮 (blue-50 背景)
+**核心渲染路径**：SSE 流式消息队列（MessageQueue），不依赖 SearchResult。
+
+- **MainContent**: 消息流视图（用户消息靠右，AI 回复靠左）
+- **AI 回复过程（SSE 流式）**:
+  - 逐字渲染，支持 Markdown 实时解析（标题/列表/代码块等）
+  - 打字机动画（Typing Indicator）：三点跳动 + "正在分析..." 文字
+  - `thinking` 思考过程：折叠展示，点击展开详细内容
+  - Trace 追溯信息：可展开浮层，展示数据源/推理链
+  - Auto-scroll：消息队列底部自动滚动至最新消息
+- **AskBar**: 固定在底部，可继续输入追问
+- **WelcomeHero 和 SuggestionGrid**: 隐藏（仅在空闲态显示）
+- **左侧栏**: 当前对话高亮 (blue-50 背景)
+- **SearchResult**: 仅在非流式或错误兜底场景使用（见 C1）
 
 ### 6.5 对话加载失败
 
-- 消息流中 AI 回复位置显示 ErrorCard（复用现有 SearchResult 的 ErrorCard 组件）
+- 消息流中 AI 回复位置显示 ErrorCard（来自 SearchResult 的 ErrorCard 组件，仅作兜底）
 - 显示重试按钮
 - AskBar 保持可用
 
@@ -428,8 +537,8 @@
 
 | 断点 | ConversationBar | MainContent | AskBar |
 |------|----------------|-------------|--------|
-| >= 1280px | 展开 260px，可手动折叠 | max-w-[640px] 居中 | 640px 居中 |
-| 768px ~ 1279px | 默认折叠，可手动展开 | max-w-[640px] 居中 | 640px 居中 |
+| >= 1280px | 展开 260px / 折叠 48px | max-w-[640px] 居中 | 640px 居中 |
+| 768px ~ 1279px | 展开 260px / 折叠 48px | max-w-[640px] 居中 | 640px 居中 |
 | < 768px | 隐藏，overlay 模式 | 全宽 px-4 | 全宽 px-4, 固定底部 |
 
 移动端 ConversationBar overlay 规则:
@@ -444,12 +553,12 @@
 
 ### 方案: 独立布局，互不干扰
 
-| 维度 | 首页 (/ 和 /chat/:id) | 功能页 (/dev/*, /governance/* 等) |
+| 维度 | 首页 (/ 和 /?conv=xxx) | 功能页 (/dev/*, /governance/* 等) |
 |------|----------------------|----------------------------------|
 | 布局组件 | HomeLayout (新增) | AppShellLayout (不变) |
 | 侧栏 | ConversationBar (对话历史) | AppSidebar (5 域导航) |
 | 顶栏 | 无独立顶栏 (ConversationBar 顶部含 Logo) | AppHeader |
-| 侧栏宽度 | 260px | 240px (展开) / 56px (折叠) |
+| 侧栏宽度 | 260px（固定） | 240px (展开) / 56px (折叠) |
 
 路由配置变更 (`router/config.tsx`):
 
@@ -461,11 +570,12 @@
   {
     element: <HomeLayout />,
     children: [
-      { path: '/',          element: <HomePage /> },
-      { path: '/chat/:id',  element: <ChatPage /> },
+      { path: '/', element: <HomePage /> },
     ],
   }
 ```
+
+> 不存在 `/chat/:id` 路由。对话历史通过 URL Search Params `?conv=<id>` 在 HomePage 内恢复。
 
 QuickNavLinks 底部导航提供从首页跳转到功能页的通道，点击后进入 AppShellLayout 体系，侧栏自动切换为 AppSidebar。这是两套独立的布局，用户心智模型清晰:
 
@@ -505,13 +615,12 @@ QuickNavLinks 底部导航提供从首页跳转到功能页的通道，点击后
 
 ### 12.2 状态管理
 
-- ConversationBar 的折叠状态: localStorage `mulan-home-sidebar-collapsed`
+- ConversationBar 折叠状态: localStorage `mulan-conversationbar-collapsed`
 - 对话列表数据: 建议使用 React Context 或轻量 store (如 zustand)，避免 prop drilling
 - AskBar 的输入状态: 组件内部 useState，不上提
 
 ### 12.3 动画与过渡
 
-- ConversationBar 折叠/展开: `transition-all duration-200 ease-in-out`
 - SuggestionCard hover: `transition-all duration-150`
 - 移动端 overlay 滑入: `transition-transform duration-200`
 - 消息出现: 简单 fade-in `animate-fadeIn` (可选，非 P0)
@@ -522,7 +631,6 @@ QuickNavLinks 底部导航提供从首页跳转到功能页的通道，点击后
 - 搜索框: `role="search"`, `aria-label="搜索历史对话"`
 - SuggestionCard: `role="button"`, `tabIndex={0}`, 支持 Enter 触发
 - ConversationItem: `aria-current="true"` 标记当前选中对话
-- 折叠按钮: `aria-expanded` 动态更新
 
 ### 12.5 性能
 
@@ -551,12 +659,10 @@ frontend/src/
       QuickNavLinks.tsx     # 新增
       WelcomeHero.tsx       # 新增
       SuggestionGrid.tsx    # 新增
-      SearchResult.tsx      # 保留
+      SearchResult.tsx      # 保留（降级为 Fallback）
       ExamplePrompts.tsx    # 废弃 (保留文件，标注 @deprecated)
-  pages/chat/
-    page.tsx                # 新增 (P1，首版可只做占位)
   router/
-    config.tsx              # 修改 (增加 HomeLayout wrapper 和 /chat/:id 路由)
+    config.tsx              # 修改 (增加 HomeLayout wrapper；无 /chat/:id 路由)
 ```
 
 ---
@@ -567,15 +673,15 @@ frontend/src/
 
 - HomeLayout + ConversationBar 基本结构
 - WelcomeHero + SuggestionGrid + AskBar 改造
-- 点击建议问题 -> 调用现有 askQuestion API -> 在主内容区显示结果 (复用 SearchResult)
-- 对话历史存 localStorage (无后端)
-- 左侧栏折叠/展开 + 移动端 overlay
+- 点击建议问题 -> SSE 流式输出 -> MessageQueue 渲染
+- 对话历史通过 URL Search Params `?conv=<id>` 恢复
+- 左侧栏支持折叠/展开（260px ↔ 48px）+ localStorage 持久化
 - QuickNavLinks 底部导航
 
 ### P1 (二期)
 
-- `/chat/:id` 对话详情页 (消息流视图)
-- 后端对话历史 API 对接
+- 流式消息队列完整功能（Markdown 渲染 / thinking 折叠 / Trace 追溯 / Auto-scroll）
+- 后端对话历史 API 对接（`?conv=` 驱动）
 - 对话重命名/删除
 - 搜索历史对话
 - 对话列表虚拟滚动
@@ -593,9 +699,20 @@ frontend/src/
 
 以下 7 点经 Human 确认，作为后续开发的准则，优先级高于原 Spec 描述。
 
-### C1：P0 结果原地展示，不跳转
+### C1：SSE 流式消息队列为主路径，SearchResult 降级为 Fallback
 
-P0 阶段用户提交问题后，结果在 HomePage 原地展示（复用现有 `SearchResult.tsx`），URL 保持 `/`，**不跳转** `/chat/:id`。`/chat/:id` 路由及 ChatPage 推迟到 P1 实现。
+首页交互以 SSE 流式消息队列（MessageQueue）为核心渲染路径：
+- AI 回复过程实时渲染 Markdown，支持逐字打字机动画
+- 支持 `thinking` 思考过程折叠展示
+- 支持 Trace 追溯信息展示
+- 消息队列底部自动滚动（Auto-scroll）
+
+原 `SearchResult.tsx` 组件降级为以下场景的 Fallback：
+- 非流式调用（direct answer，不走 SSE）
+- 系统级错误展示（ERR/NULL 响应）
+- 旧版兼容（历史数据格式）
+
+URL 始终保持 `/`，对话切换由 URL Search Params `?conv=<id>` 驱动，不存在 `/chat/:id` 路由。
 
 ### C2：localStorage Schema 与后端 API 结构对齐
 
