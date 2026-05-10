@@ -47,4 +47,5 @@ cd backend && alembic downgrade -1 && alembic upgrade head
 | `ai_` | LLM/AI | ai_llm_configs |
 | `agent_` | Data Agent | agent_conversations, agent_conversation_messages |
 | `tableau_` | Tableau | tableau_connections, tableau_assets, tableau_field_semantics |
+| `dw_asset_` | 数仓资产 | dw_asset_tables, dw_asset_columns, dw_asset_lineage_edges |
 | `mcp_` | MCP 配置 | mcp_servers, mcp_debug_logs |

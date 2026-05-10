@@ -19,6 +19,8 @@ from app.api.governance import api_contract_routes, dqc
 from app.api.semantic_maintenance import datasources as sm_datasources, fields as sm_fields, review as sm_review, sync as sm_sync, publish as sm_publish
 from app.api import audit, governance_runtime, connection_hub, agent_admin, sql_agent
 from app.api import token_stats
+from app.api import dw_assets
+from app.api import skills as skills_api
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +115,8 @@ app.include_router(connection_hub.router, prefix="/api/connection-hub", tags=["�
 app.include_router(platform_settings.router, prefix="/api/platform-settings", tags=["平台设置"])
 app.include_router(agent_admin.router, prefix="/api/admin/agent", tags=["Agent 监控"])
 app.include_router(sql_agent.router)  # prefix="/api/sql-agent" 已在 router 内部定义
+app.include_router(dw_assets.router, prefix="/api/assets/dw", tags=["数仓资产"])
+app.include_router(skills_api.router, tags=["技能中心"])
 
 
 @app.get("/")

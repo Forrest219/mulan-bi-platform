@@ -62,6 +62,13 @@ cd backend && pytest tests/ --cov=services --cov=app           # 后端测试
 cd frontend && npm test -- --run                               # 前端测试
 ```
 
+### 迁移后初始化（首次部署 / 新环境）
+
+```bash
+cd backend && alembic upgrade head
+cd backend && python scripts/seed_skills.py   # 技能中心初始数据（必须在 upgrade head 后执行）
+```
+
 ---
 
 ## 认证与 API

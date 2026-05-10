@@ -24,43 +24,59 @@ depends_on = None
 
 
 def upgrade() -> None:
+    existing_columns = {
+        col["name"]
+        for col in sa.inspect(op.get_bind()).get_columns("bi_metric_anomalies")
+    }
     # Add direction column (VARCHAR(8))
-    op.add_column(
-        "bi_metric_anomalies",
-        sa.Column("direction", sa.String(length=8), nullable=True, comment="up | down"),
-    )
+    if "direction" not in existing_columns:
+        op.add_column(
+            "bi_metric_anomalies",
+            sa.Column("direction", sa.String(length=8), nullable=True, comment="up | down"),
+        )
     # Add dimension_context_hash column (VARCHAR(64))
-    op.add_column(
-        "bi_metric_anomalies",
-        sa.Column(
-            "dimension_context_hash",
-            sa.String(length=64),
-            nullable=True,
-            comment="SHA256 hash of dimension_context",
-        ),
-    )
+    if "dimension_context_hash" not in existing_columns:
+        op.add_column(
+            "bi_metric_anomalies",
+            sa.Column(
+                "dimension_context_hash",
+                sa.String(length=64),
+                nullable=True,
+                comment="SHA256 hash of dimension_context",
+            ),
+        )
     # Add magnitude_bucket column (VARCHAR(16))
-    op.add_column(
-        "bi_metric_anomalies",
-        sa.Column(
-            "magnitude_bucket",
-            sa.String(length=16),
-            nullable=True,
-            comment="tiny | small | medium | large | extreme",
-        ),
-    )
+    if "magnitude_bucket" not in existing_columns:
+        op.add_column(
+            "bi_metric_anomalies",
+            sa.Column(
+                "magnitude_bucket",
+                sa.String(length=16),
+                nullable=True,
+                comment="tiny | small | medium | large | extreme",
+            ),
+        )
     # Add last_seen_at column (TIMESTAMP)
-    op.add_column(
-        "bi_metric_anomalies",
-        sa.Column("last_seen_at", sa.DateTime(), nullable=True),
-    )
+    if "last_seen_at" not in existing_columns:
+        op.add_column(
+            "bi_metric_anomalies",
+            sa.Column("last_seen_at", sa.DateTime(), nullable=True),
+        )
     # Composite index for efficient dedup window queries
-    op.create_index(
-        "ix_bma_dedup",
-        "bi_metric_anomalies",
-        ["metric_id", "algorithm", "direction", "dimension_context_hash", "detected_at"],
-        unique=False,
-    )
+    index_columns = ["metric_id", "direction", "dimension_context_hash", "detected_at"]
+    if "algorithm" in existing_columns:
+        index_columns.insert(1, "algorithm")
+    existing_indexes = {
+        idx["name"]
+        for idx in sa.inspect(op.get_bind()).get_indexes("bi_metric_anomalies")
+    }
+    if "ix_bma_dedup" not in existing_indexes:
+        op.create_index(
+            "ix_bma_dedup",
+            "bi_metric_anomalies",
+            index_columns,
+            unique=False,
+        )
 
 
 def downgrade() -> None:

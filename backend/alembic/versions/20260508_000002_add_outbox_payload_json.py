@@ -21,11 +21,27 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        'bi_notification_outbox',
-        sa.Column('payload_json', postgresql.JSONB(), nullable=True),
-    )
+    inspector = sa.inspect(op.get_bind())
+    if "bi_notification_outbox" not in inspector.get_table_names():
+        return
+    existing_columns = {
+        col["name"]
+        for col in inspector.get_columns("bi_notification_outbox")
+    }
+    if "payload_json" not in existing_columns:
+        op.add_column(
+            'bi_notification_outbox',
+            sa.Column('payload_json', postgresql.JSONB(), nullable=True),
+        )
 
 
 def downgrade() -> None:
-    op.drop_column('bi_notification_outbox', 'payload_json')
+    inspector = sa.inspect(op.get_bind())
+    if "bi_notification_outbox" not in inspector.get_table_names():
+        return
+    existing_columns = {
+        col["name"]
+        for col in inspector.get_columns("bi_notification_outbox")
+    }
+    if "payload_json" in existing_columns:
+        op.drop_column('bi_notification_outbox', 'payload_json')

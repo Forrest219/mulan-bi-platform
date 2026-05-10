@@ -39,7 +39,7 @@ def upgrade() -> None:
         "bi_agent_dual_write_audit",
         sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
         # 追踪 ID（API 入口生成，双写路径共用）
-        sa.Column("trace_id", sa.String(64), nullable=False, index=True),
+        sa.Column("trace_id", sa.String(64), nullable=False),
         # HOMEPAGE_AGENT_MODE 四态
         sa.Column("mode", sa.String(32), nullable=False),
         # 原始问题

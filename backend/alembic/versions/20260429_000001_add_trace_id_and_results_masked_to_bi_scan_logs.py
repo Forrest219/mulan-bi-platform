@@ -20,18 +20,28 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Add trace_id column (VARCHAR(64))
-    op.add_column(
-        'bi_scan_logs',
-        sa.Column('trace_id', sa.String(length=64), nullable=True)
-    )
-    # Add results_masked column (TEXT)
-    op.add_column(
-        'bi_scan_logs',
-        sa.Column('results_masked', sa.Text(), nullable=True)
-    )
+    existing_columns = {
+        col["name"]
+        for col in sa.inspect(op.get_bind()).get_columns("bi_scan_logs")
+    }
+    if "trace_id" not in existing_columns:
+        op.add_column(
+            'bi_scan_logs',
+            sa.Column('trace_id', sa.String(length=64), nullable=True)
+        )
+    if "results_masked" not in existing_columns:
+        op.add_column(
+            'bi_scan_logs',
+            sa.Column('results_masked', sa.Text(), nullable=True)
+        )
 
 
 def downgrade() -> None:
-    op.drop_column('bi_scan_logs', 'results_masked')
-    op.drop_column('bi_scan_logs', 'trace_id')
+    existing_columns = {
+        col["name"]
+        for col in sa.inspect(op.get_bind()).get_columns("bi_scan_logs")
+    }
+    if "results_masked" in existing_columns:
+        op.drop_column('bi_scan_logs', 'results_masked')
+    if "trace_id" in existing_columns:
+        op.drop_column('bi_scan_logs', 'trace_id')

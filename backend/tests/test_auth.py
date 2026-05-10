@@ -209,6 +209,13 @@ class TestMFATOTP:
         assert verify_resp.json()["success"] is True
         assert "backup_codes" in verify_resp.json()
 
+        # 4. 清理：禁用 MFA（用同一 code，应该仍在 valid_window 内）
+        resp_disable = admin_client.post(
+            "/api/auth/mfa/disable",
+            json={"password": "admin123", "code": code},
+        )
+        assert resp_disable.status_code == 200, f"MFA cleanup failed: {resp_disable.status_code} {resp_disable.text}"
+
     def test_mfa_verify_setup_with_invalid_code(self, admin_client):
         """错误的 TOTP code 验证失败"""
         resp = admin_client.post("/api/auth/mfa/verify-setup", json={"code": "000000"})
@@ -222,9 +229,17 @@ class TestMFATOTP:
         setup_resp = admin_client.post("/api/auth/mfa/setup")
         secret = setup_resp.json()["secret"]
         totp = pyotp.TOTP(secret)
-        admin_client.post("/api/auth/mfa/verify-setup", json={"code": totp.now()})
+        code = totp.now()
+        admin_client.post("/api/auth/mfa/verify-setup", json={"code": code})
 
         # 检查状态
         status_resp = admin_client.get("/api/auth/mfa/status")
         assert status_resp.status_code == 200
         assert status_resp.json()["mfa_enabled"] is True
+
+        # 清理：禁用 MFA（用同一 code）
+        resp_disable = admin_client.post(
+            "/api/auth/mfa/disable",
+            json={"password": "admin123", "code": code},
+        )
+        assert resp_disable.status_code == 200, f"MFA cleanup failed: {resp_disable.status_code} {resp_disable.text}"

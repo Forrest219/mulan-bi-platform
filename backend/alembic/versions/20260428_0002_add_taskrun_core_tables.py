@@ -13,6 +13,7 @@ from typing import Sequence, Union
 
 from alembic import op, context
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
 
 
 revision: str = "20260428_0002"
@@ -31,8 +32,8 @@ def upgrade() -> None:
         sa.Column("user_id", sa.Integer(), nullable=False),
         sa.Column("intent", sa.String(length=64), nullable=False),
         sa.Column("status", sa.String(length=16), nullable=False, server_default="queued"),
-        sa.Column("input_payload", sa.JSONB(), nullable=False),
-        sa.Column("output_payload", sa.JSONB(), nullable=True),
+        sa.Column("input_payload", JSONB(), nullable=False),
+        sa.Column("output_payload", JSONB(), nullable=True),
         sa.Column("error_code", sa.String(length=16), nullable=True),
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("started_at", sa.DateTime(), nullable=False, server_default=sa.text("NOW()")),
@@ -98,7 +99,7 @@ def upgrade() -> None:
         sa.Column("task_run_id", sa.Integer(), nullable=False),
         sa.Column("step_id", sa.Integer(), nullable=True),
         sa.Column("event_type", sa.String(length=32), nullable=False),
-        sa.Column("payload", sa.JSONB(), nullable=False),
+        sa.Column("payload", JSONB(), nullable=False),
         sa.Column("emitted_at", sa.DateTime(), nullable=False, server_default=sa.text("NOW()")),
         sa.PrimaryKeyConstraint("id"),
     )

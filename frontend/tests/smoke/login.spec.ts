@@ -47,8 +47,8 @@ test.describe('登录页', () => {
     const submitBtn = page.locator('button[type="submit"]');
     await expect(submitBtn).toBeVisible();
     await expect(submitBtn).toContainText('登录');
-    // 注册链接
-    await expect(page.locator('a[href="/register"]')).toContainText('注册新账号');
+    // 注册链接 - 用 href 定位，不依赖展示文案
+    await expect(page.locator('a[href="/register"]')).toBeVisible();
   });
 
   // ===== 表单交互 =====

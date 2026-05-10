@@ -12,6 +12,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
 
 
 # revision identifiers, used by Alembic.
@@ -28,7 +29,7 @@ def upgrade() -> None:
     )
     op.add_column(
         'tableau_publish_logs',
-        sa.Column('previous_version_snapshot', sa.JSONB(), nullable=True, server_default=sa.text("'{}'::jsonb"))
+        sa.Column('previous_version_snapshot', JSONB(), nullable=True, server_default=sa.text("'{}'::jsonb"))
     )
     # 创建索引加速按 action 查询
     op.create_index('ix_publish_log_action', 'tableau_publish_logs', ['action'])

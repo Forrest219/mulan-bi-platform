@@ -416,13 +416,28 @@ STARROCKS_RULES_SEED = [
 
 def upgrade() -> None:
     """Seed 25 条 StarRocks 规则到 bi_rule_configs 表（幂等性 UPSERT）"""
+    rule_configs = sa.table(
+        "bi_rule_configs",
+        sa.column("rule_id"),
+        sa.column("name"),
+        sa.column("description"),
+        sa.column("level"),
+        sa.column("category"),
+        sa.column("db_type"),
+        sa.column("suggestion"),
+        sa.column("enabled"),
+        sa.column("is_custom"),
+        sa.column("is_modified_by_user"),
+        sa.column("scene_type"),
+        sa.column("config_json", postgresql.JSONB()),
+    )
     for rule in STARROCKS_RULES_SEED:
         rule_id = rule["rule_id"]
-        config_json = rule.pop("config_json")
+        config_json = rule["config_json"]
 
         # PostgreSQL UPSERT: ON CONFLICT (rule_id) DO UPDATE SET ...
         # 仅当 is_modified_by_user=FALSE 时覆盖（保留用户修改）
-        stmt = postgresql.insert(sa.text("bi_rule_configs")).values(
+        stmt = postgresql.insert(rule_configs).values(
             rule_id=rule_id,
             name=rule["name"],
             description=rule["description"],

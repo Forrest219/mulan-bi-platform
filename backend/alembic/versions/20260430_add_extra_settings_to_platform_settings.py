@@ -20,10 +20,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # Add extra_settings JSONB column for key-value feature flags (Spec 36 §15 homepage_agent_mode)
-    op.add_column(
-        'platform_settings',
-        sa.Column('extra_settings', postgresql.JSONB(astext_type=sa.Text()), nullable=True, server_default=sa.text("'{}'::jsonb"))
-    )
+    op.execute("""
+        ALTER TABLE platform_settings
+        ADD COLUMN IF NOT EXISTS extra_settings JSONB DEFAULT '{}'::jsonb
+    """)
 
 
 def downgrade() -> None:

@@ -524,3 +524,30 @@ class TestGroupManagement:
         assert "tableau" in result["all"]
         assert result["personal"] == ["ddl_check"]
         assert "tableau" in result["from_groups"]
+
+
+# =====================================================================
+# refresh token
+# =====================================================================
+
+
+class TestRefreshToken:
+    """Refresh Token 创建测试"""
+
+    def test_create_refresh_token_persists_audit_fields(self):
+        svc = _make_service()
+
+        raw_token = svc.create_refresh_token(
+            user_id=1,
+            device_fingerprint="Chrome/125",
+            ip_address="2001:db8::1",
+            user_agent="Chrome/125 full user agent",
+        )
+
+        assert raw_token
+        call_kwargs = svc._db.create_refresh_token.call_args.kwargs
+        assert call_kwargs["user_id"] == 1
+        assert call_kwargs["device_fingerprint"] == "Chrome/125"
+        assert call_kwargs["ip_address"] == "2001:db8::1"
+        assert call_kwargs["user_agent"] == "Chrome/125 full user agent"
+        assert len(call_kwargs["token_hash"]) == 64

@@ -56,6 +56,7 @@ def init_db():
         from services.semantic_maintenance.models import TableauDatasourceSemantics, TableauDatasourceSemanticVersion, TableauFieldSemantics, TableauFieldSemanticVersion, TableauPublishLog
         from services.events.models import BiEvent, BiNotification, BiEventSubscription
         from services.knowledge_base.models import KbGlossary, KbSchema, KbDocument, KbEmbedding
+        from services.dw_assets.models import DwAssetTable, DwAssetColumn, DwAssetPartition, DwAssetLineageEdge, DwAssetSyncRun
 
         Base.metadata.create_all(bind=engine)
         logger.info("Database schema initialized successfully.")
