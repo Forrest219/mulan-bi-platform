@@ -435,13 +435,13 @@ class AuthService:
         """使用 LLM CryptoHelper 加密 MFA 敏感字段"""
         from app.core.crypto import get_llm_crypto
         crypto = get_llm_crypto()
-        return crypto.encrypt(plaintext.encode()).decode()
+        return crypto.encrypt(plaintext)  # encrypt() 已返回 base64 str
 
     def _decrypt_mfa_field(self, ciphertext: str) -> str:
         """解密 MFA 敏感字段"""
         from app.core.crypto import get_llm_crypto
         crypto = get_llm_crypto()
-        return crypto.decrypt(ciphertext.encode()).decode()
+        return crypto.decrypt(ciphertext)  # decrypt() 接收 base64 str
 
     def verify_mfa_code(self, user_id: int, code: str) -> bool:
         """
@@ -489,29 +489,37 @@ class AuthService:
 
         返回 (success, secret_or_error_message)
         success=True 时返回 secret（明文，仅此时展示给用户）
+
+        注意：secret 已在 /mfa/setup 时生成并临时存储，
+        此处只读取已存储的 secret 进行验证，不得重新生成。
         """
-        # 生成 secret（如果还没有）
-        result = self.generate_mfa_secret(user_id)
-        if not result:
-            return False, "用户不存在"
-        secret, qr_uri, backup_codes_plaintext = result
+        # 读取 /mfa/setup 时暂存的 secret（未启用状态）
+        encrypted_secret = self._db.get_mfa_secret_encrypted(user_id)
+        if not encrypted_secret:
+            return False, "MFA 设置已过期，请重新获取验证码"
 
-        # 验证输入的 code 是否正确
-        encrypted_secret = self._encrypt_mfa_field(secret)
-        # 临时存储 secret 以便验证
-        self._db.set_mfa_secret(user_id, encrypted_secret)
+        try:
+            secret = self._decrypt_mfa_field(encrypted_secret)
+        except Exception:
+            return False, "MFA 密钥解密失败，请重新获取验证码"
 
-        if not self.verify_mfa_code(user_id, code):
-            # 验证失败，清除临时 secret
-            self._db.set_mfa_secret(user_id, "")
+        # 验证输入的 code 是否正确（使用 setup 时暂存的 secret）
+        import pyotp
+        totp = pyotp.TOTP(secret)
+        if not totp.verify(code, valid_window=1):
             return False, "验证码不正确，请确认 authenticator 应用已同步"
 
-        # 验证通过，启用 MFA
+        # 验证通过，生成 backup codes 并启用 MFA
         import json
+        import secrets
+        backup_codes_plaintext = [secrets.token_hex(4).upper() for _ in range(8)]
         backup_codes_encrypted = self._encrypt_mfa_field(json.dumps(backup_codes_plaintext))
         self._db.enable_mfa(user_id, encrypted_secret, backup_codes_encrypted)
 
-        return True, {"secret": secret, "qr_uri": qr_uri, "backup_codes": backup_codes_plaintext}
+        # 获取 qr_uri（需要重新构造，因为 generate_mfa_secret 每次生成新 secret）
+        # 但 verify-setup 场景下 secret 已在 setup 阶段确定，qr_uri 也已返回前端
+        # 此处只需返回成功状态和 backup codes
+        return True, {"secret": secret, "backup_codes": backup_codes_plaintext}
 
     def disable_mfa(self, user_id: int, password: str, code: str) -> tuple:
         """

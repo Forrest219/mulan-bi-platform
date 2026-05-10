@@ -34,11 +34,11 @@ class User(Base):
     mfa_enabled = Column(Boolean, default=False, server_default=sa_text('false'))
     mfa_secret_encrypted = Column(String(256), nullable=True)  # Fernet 加密存储
     mfa_backup_codes_encrypted = Column(String(1024), nullable=True)  # 加密 JSON 数组
-    # 个人信息扩展字段
-    position = Column(String(128), nullable=True)    # 职位
-    department = Column(String(128), nullable=True)  # 部门
-    phone = Column(String(32), nullable=True)        # 手机号
-    avatar_url = Column(Text, nullable=True)         # 头像（base64 data URI）
+    # 个人资料扩展字段
+    position = Column(String(128), nullable=True)
+    department = Column(String(128), nullable=True)
+    phone = Column(String(32), nullable=True)
+    avatar_url = Column(Text, nullable=True)  # 与迁移 20260508_add_avatar_url_to_auth_users.py 一致（Text 无长度限制）
 
     __table_args__ = (
         CheckConstraint(
@@ -74,6 +74,10 @@ class User(Base):
             "display_name": self.display_name,
             "email": self.email,
             "role": self.role,
+            "position": self.position,
+            "department": self.department,
+            "phone": self.phone,
+            "avatar_url": self.avatar_url,
             "permissions": personal_perms,
             "all_permissions": all_perms,  # 合并后生效权限（角色默认 + 个人 + 组继承）
             "group_ids": [g.id for g in self.groups] if self.groups else [],
@@ -83,10 +87,6 @@ class User(Base):
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
             "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
             "last_login": self.last_login.strftime("%Y-%m-%d %H:%M:%S") if self.last_login else None,
-            "position": self.position,
-            "department": self.department,
-            "phone": self.phone,
-            "avatar_url": self.avatar_url,
         }
         return result
 
@@ -165,8 +165,9 @@ class RefreshToken(Base):
     user_id = Column(Integer, ForeignKey('auth_users.id', ondelete='CASCADE'), nullable=False, index=True)
     token_hash = Column(String(64), nullable=False, unique=True)  # SHA-256 hash of the raw token
     device_fingerprint = Column(String(256), nullable=True)  # 浏览器 UA/IP 指纹（可选）
-    ip_address = Column(String(45), nullable=True)  # 支持 IPv6
-    user_agent = Column(String(512), nullable=True)  # 浏览器 UA
+    # 以下字段与迁移 20260426_0002_add_auth_password_reset_tokens_and_ip_ua.py 一致
+    ip_address = Column(String(45), nullable=True)  # IPv6 兼容（45 字符）
+    user_agent = Column(String(512), nullable=True)  # 浏览器 User-Agent
     expires_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime, nullable=False, server_default=sa_func.now())
     revoked_at = Column(DateTime, nullable=True)  # 撤销时间，非空表示已撤销
@@ -269,14 +270,15 @@ class UserDatabase:
 
     def __init__(self, db_path: str = None):
         """db_path 参数不再使用，保留签名以兼容旧代码"""
-        pass
+        import threading
+        self._thread_local = threading.local()
 
     @property
     def session(self) -> Session:
-        """每次访问获取当前线程的 session，并刷新缓存避免脏读"""
-        s = SessionLocal()
-        s.expire_all() # 刷新缓存，确保获取最新数据
-        return s
+        """获取当前线程的 session（线程安全，无副作用）"""
+        if not hasattr(self._thread_local, 'session') or self._thread_local.session is None:
+            self._thread_local.session = SessionLocal()
+        return self._thread_local.session
 
     def create_user(self, username: str, password_hash: str, role: str = "user", display_name: str = None, email: str = None, permissions: list = None) -> User:
         """创建用户"""
