@@ -7,11 +7,12 @@ import math
 import uuid
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, and_
+from sqlalchemy import func, or_, and_, distinct, text
 from sqlalchemy.orm import Session
 
+from app.core.crypto import get_datasource_crypto
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_roles
 from services.audit.audit_service import log_action
@@ -25,7 +26,7 @@ from services.dw_assets.models import (
     DwDomainTaxonomy,
     DwDomainTaxonomyDatabase,
 )
-from services.dw_assets.sync_service import MetadataSyncService
+from services.dw_assets.sync_service import MetadataSyncService, _SYSTEM_DATABASES
 from services.dw_assets.preview_service import PreviewService
 from services.dw_assets.lineage_service import LineageService
 
@@ -167,56 +168,98 @@ async def list_databases(
     current_user: dict = Depends(require_roles(_ANALYST_PLUS)),
     db: Session = Depends(get_db),
 ):
-    """获取可浏览的数据源/库列表（含表计数和同步状态）"""
-    # 基础查询：活跃的 starrocks/mysql 数据源
-    query = db.query(DataSource).filter(
-        DataSource.is_active == True,
-        DataSource.db_type.in_(["starrocks", "mysql"]),
+    """获取可浏览的数据源/库列表（按数据源聚合，含表计数、存储和同步状态）"""
+    # 聚合查询：按 datasource_id 分组统计（LEFT JOIN 保留未同步的数据源）
+    table_filter = and_(
+        DwAssetTable.datasource_id == DataSource.id,
+        DwAssetTable.is_deleted == False,
+        DwAssetTable.database_name.notin_(_SYSTEM_DATABASES),
+    )
+    agg_query = (
+        db.query(
+            DataSource.id.label("datasource_id"),
+            DataSource.name,
+            DataSource.db_type,
+            DataSource.host,
+            func.count(DwAssetTable.id).label("table_count"),
+            func.coalesce(func.sum(DwAssetTable.storage_bytes), 0).label("total_storage_bytes"),
+            func.count(distinct(DwAssetTable.database_name)).label("database_count"),
+            func.array_agg(distinct(DwAssetTable.database_name)).label("databases"),
+        )
+        .outerjoin(DwAssetTable, table_filter)
+        .filter(
+            DataSource.is_active == True,
+            DataSource.db_type.in_(["starrocks", "mysql"]),
+        )
+        .group_by(DataSource.id)
     )
 
     # 权限过滤
     if current_user["role"] != "admin":
-        query = query.filter(DataSource.owner_id == current_user["id"])
+        agg_query = agg_query.filter(DataSource.owner_id == current_user["id"])
 
     # db_type 过滤
     if db_type:
-        query = query.filter(DataSource.db_type == db_type)
+        agg_query = agg_query.filter(DataSource.db_type == db_type)
 
-    # 搜索
+    # 搜索（按数据源名称或库名模糊匹配）
     if q:
-        query = query.filter(
+        search_pattern = f"%{q}%"
+        agg_query = agg_query.filter(
             or_(
-                DataSource.name.ilike(f"%{q}%"),
-                DataSource.database_name.ilike(f"%{q}%"),
+                DataSource.name.ilike(search_pattern),
+                DataSource.host.ilike(search_pattern),
             )
         )
 
-    datasources = query.all()
+    agg_rows = agg_query.all()
+
+    # 收集所有命中的 datasource_id，批量查最新同步状态
+    ds_ids = [row.datasource_id for row in agg_rows]
+
+    sync_map: dict = {}
+    if ds_ids:
+        # 子查询：每个 datasource_id 最新的 started_at
+        latest_subq = (
+            db.query(
+                DwAssetSyncRun.datasource_id,
+                func.max(DwAssetSyncRun.started_at).label("max_started"),
+            )
+            .filter(DwAssetSyncRun.datasource_id.in_(ds_ids))
+            .group_by(DwAssetSyncRun.datasource_id)
+            .subquery()
+        )
+        sync_rows = (
+            db.query(DwAssetSyncRun)
+            .join(
+                latest_subq,
+                and_(
+                    DwAssetSyncRun.datasource_id == latest_subq.c.datasource_id,
+                    DwAssetSyncRun.started_at == latest_subq.c.max_started,
+                ),
+            )
+            .all()
+        )
+        sync_map = {sr.datasource_id: sr for sr in sync_rows}
 
     items = []
-    for ds in datasources:
-        # 统计表计数
-        table_count = db.query(func.count(DwAssetTable.id)).filter(
-            DwAssetTable.datasource_id == ds.id,
-            DwAssetTable.is_deleted == False,
-        ).scalar() or 0
-
-        # 最新同步状态
-        latest_sync = (
-            db.query(DwAssetSyncRun)
-            .filter(DwAssetSyncRun.datasource_id == ds.id)
-            .order_by(DwAssetSyncRun.started_at.desc())
-            .first()
-        )
-
+    for row in agg_rows:
+        latest_sync = sync_map.get(row.datasource_id)
+        databases_list = sorted(d for d in (row.databases or []) if d is not None)
         items.append({
-            "datasource_id": ds.id,
-            "name": ds.name,
-            "db_type": ds.db_type,
-            "database_name": ds.database_name,
-            "host": ds.host,
-            "table_count": table_count,
-            "last_synced_at": latest_sync.started_at.strftime("%Y-%m-%d %H:%M:%S") if latest_sync and latest_sync.started_at else None,
+            "datasource_id": row.datasource_id,
+            "name": row.name,
+            "db_type": row.db_type,
+            "host": row.host,
+            "table_count": row.table_count,
+            "total_storage_bytes": row.total_storage_bytes,
+            "database_count": row.database_count,
+            "databases": databases_list,
+            "last_synced_at": (
+                latest_sync.started_at.strftime("%Y-%m-%d %H:%M:%S")
+                if latest_sync and latest_sync.started_at
+                else None
+            ),
             "sync_status": latest_sync.status if latest_sync else None,
         })
 
@@ -459,9 +502,10 @@ async def search_assets(
 async def list_tables(
     request: Request,
     datasource_id: Optional[int] = None,
+    database_name: Optional[str] = None,
     schema_name: Optional[str] = None,
     q: Optional[str] = None,
-    domain: Optional[str] = None,
+    domain: Optional[List[str]] = Query(None),
     layer: Optional[str] = None,
     table_type: Optional[str] = None,
     has_partition: Optional[bool] = None,
@@ -486,6 +530,8 @@ async def list_tables(
     # 条件过滤
     if datasource_id:
         query = query.filter(DwAssetTable.datasource_id == datasource_id)
+    if database_name:
+        query = query.filter(DwAssetTable.database_name == database_name)
     if schema_name:
         query = query.filter(DwAssetTable.schema_name == schema_name)
     if q:
@@ -498,13 +544,11 @@ async def list_tables(
             )
         )
     if domain:
-        # 前缀匹配："销售" 同时命中 "销售" 和 "销售/订单"
-        query = query.filter(
-            or_(
-                DwAssetTable.domain == domain,
-                DwAssetTable.domain.like(f"{domain}/%"),
-            )
-        )
+        conditions = []
+        for d in domain:
+            conditions.append(DwAssetTable.domain == d)
+            conditions.append(DwAssetTable.domain.like(f"{d}/%"))
+        query = query.filter(or_(*conditions))
     if layer:
         query = query.filter(DwAssetTable.layer == layer)
     if table_type:
