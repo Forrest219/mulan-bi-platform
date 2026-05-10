@@ -36,7 +36,8 @@ class DocumentService:
 
     def create_document(
         self, db: Session, title: str, content: str,
-        format: str = "markdown", category: str = "general",
+        format: str = "markdown", doc_type: str = "general",
+        category: str = "general",
         tags: List[str] = None, created_by: int = None
     ) -> KbDocument:
         """
@@ -44,7 +45,7 @@ class DocumentService:
         创建后立即返回，Embedding 由 Celery Worker 异步生成。
         """
         doc = self._db.create(
-            db, title=title, content=content, format=format,
+            db, title=title, content=content, format=format, doc_type=doc_type,
             category=category, tags=tags, created_by=created_by,
         )
         # 触发 Celery 异步任务（不等候完成）

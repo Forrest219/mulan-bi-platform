@@ -26,6 +26,7 @@ class KbGlossary(Base):
     formula = Column(Text, nullable=True)
     category = Column(String(64), nullable=False, server_default=sa_text("'concept'"))
     related_fields_json = Column(JSONB, nullable=True, server_default=sa_text("'[]'::jsonb"))
+    related_metric_ids_json = Column(JSONB, nullable=True, server_default=sa_text("'[]'::jsonb"))
     source = Column(String(16), nullable=False, server_default=sa_text("'manual'"))
     status = Column(String(16), nullable=False, server_default=sa_text("'active'"))
     created_by = Column(Integer, nullable=True)
@@ -49,6 +50,7 @@ class KbGlossary(Base):
             "formula": self.formula,
             "category": self.category,
             "related_fields": self.related_fields_json or [],
+            "related_metric_ids": self.related_metric_ids_json or [],
             "source": self.source,
             "status": self.status,
             "created_by": self.created_by,
@@ -129,6 +131,7 @@ class KbDocument(Base):
     title = Column(String(256), nullable=False)
     content = Column(Text, nullable=False)
     format = Column(String(16), nullable=False, server_default=sa_text("'markdown'"))
+    doc_type = Column(String(32), nullable=False, server_default=sa_text("'general'"))
     category = Column(String(64), nullable=False, server_default=sa_text("'general'"))
     tags_json = Column(JSONB, nullable=True, server_default=sa_text("'[]'::jsonb"))
     status = Column(String(16), nullable=False, server_default=sa_text("'active'"))
@@ -150,6 +153,7 @@ class KbDocument(Base):
             "title": self.title,
             "content": self.content,
             "format": self.format,
+            "doc_type": self.doc_type,
             "category": self.category,
             "tags": self.tags_json or [],
             "status": self.status,
@@ -210,12 +214,13 @@ class KbGlossaryDatabase:
 
     def create(self, db: Session, term: str, canonical_term: str, definition: str,
                category: str = "concept", synonyms: list = None, formula: str = None,
-               related_fields: list = None, source: str = "manual",
-               created_by: int = None) -> KbGlossary:
+               related_fields: list = None, related_metric_ids: list = None,
+               source: str = "manual", created_by: int = None) -> KbGlossary:
         g = KbGlossary(
             term=term, canonical_term=canonical_term, definition=definition,
             category=category, synonyms_json=synonyms or [],
             formula=formula, related_fields_json=related_fields or [],
+            related_metric_ids_json=related_metric_ids or [],
             source=source, created_by=created_by,
         )
         db.add(g); db.commit(); db.refresh(g)
@@ -289,10 +294,12 @@ class KbDocumentDatabase:
     """kb_documents CRUD"""
 
     def create(self, db: Session, title: str, content: str,
-               format: str = "markdown", category: str = "general",
+               format: str = "markdown", doc_type: str = "general",
+               category: str = "general",
                tags: list = None, created_by: int = None) -> KbDocument:
         d = KbDocument(
-            title=title, content=content, format=format, category=category,
+            title=title, content=content, format=format, doc_type=doc_type,
+            category=category,
             tags_json=tags or [], created_by=created_by,
         )
         db.add(d); db.commit(); db.refresh(d)

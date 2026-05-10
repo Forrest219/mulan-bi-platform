@@ -1,7 +1,9 @@
 """知识库 API（PRD §7 + §8 + §9）"""
+import csv
+import io
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -28,6 +30,7 @@ class CreateDocumentBody(BaseModel):
     title: str
     content: str
     format: str = "markdown"
+    doc_type: str = "general"
     category: str = "general"
     tags: Optional[List[str]] = []
 
@@ -139,6 +142,7 @@ async def create_glossary(
     synonyms: str = "",
     formula: Optional[str] = None,
     related_fields: str = "",
+    related_metric_ids: str = "",
     source: str = "manual",
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
@@ -152,6 +156,7 @@ async def create_glossary(
     import json
     synonyms_list = json.loads(synonyms) if synonyms else []
     related_fields_list = json.loads(related_fields) if related_fields else []
+    related_metric_ids_list = json.loads(related_metric_ids) if related_metric_ids else []
 
     try:
         glossary = glossary_service.create_term(
@@ -163,6 +168,7 @@ async def create_glossary(
             synonyms=synonyms_list,
             formula=formula,
             related_fields=related_fields_list,
+            related_metric_ids=related_metric_ids_list,
             source=source,
             created_by=user.get("id"),
         )
@@ -195,6 +201,7 @@ async def update_glossary(
     synonyms: Optional[str] = None,
     formula: Optional[str] = None,
     related_fields: Optional[str] = None,
+    related_metric_ids: Optional[str] = None,
     status: Optional[str] = None,
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
@@ -220,6 +227,8 @@ async def update_glossary(
         kwargs["formula"] = formula
     if related_fields is not None:
         kwargs["related_fields_json"] = json.loads(related_fields) if related_fields else []
+    if related_metric_ids is not None:
+        kwargs["related_metric_ids_json"] = json.loads(related_metric_ids) if related_metric_ids else []
     if status is not None:
         kwargs["status"] = status
 
@@ -253,6 +262,67 @@ async def delete_glossary(
     return {"message": "术语已删除" if hard else "术语已标记为 deprecated"}
 
 
+@router.post("/glossary/import")
+async def import_glossary_csv(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """批量导入术语（CSV）— data_admin+
+    CSV 必填列: term, canonical_term, definition
+    可选列: category, synonyms（逗号分隔）, formula, related_metric_ids（逗号分隔）
+    列名支持中文别名：术语/标准名称/定义/分类/同义词/公式/关联指标
+    """
+    _require_role(user, "data_admin")
+
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = content.decode("gbk", errors="replace")
+
+    reader = csv.DictReader(io.StringIO(text))
+    created, skipped, errors = 0, 0, []
+
+    for row_num, row in enumerate(reader, start=2):
+        term = (row.get("term") or row.get("术语") or "").strip()
+        canonical_term = (row.get("canonical_term") or row.get("标准名称") or "").strip()
+        definition = (row.get("definition") or row.get("定义") or "").strip()
+
+        if not term or not canonical_term or not definition:
+            errors.append({"row": row_num, "reason": "缺少必填列 term/canonical_term/definition"})
+            continue
+
+        category = (row.get("category") or row.get("分类") or "concept").strip()
+        synonyms_raw = (row.get("synonyms") or row.get("同义词") or "").strip()
+        synonyms = [s.strip() for s in synonyms_raw.split(",")] if synonyms_raw else []
+        formula = (row.get("formula") or row.get("公式") or "").strip() or None
+        metric_raw = (row.get("related_metric_ids") or row.get("关联指标") or "").strip()
+        related_metric_ids = [m.strip() for m in metric_raw.split(",")] if metric_raw else []
+
+        try:
+            glossary_service.create_term(
+                db,
+                term=term,
+                canonical_term=canonical_term,
+                definition=definition,
+                category=category,
+                synonyms=synonyms,
+                formula=formula,
+                related_metric_ids=related_metric_ids,
+                source="import",
+                created_by=user.get("id"),
+            )
+            created += 1
+        except Exception as e:
+            if "unique" in str(e).lower() or "duplicate" in str(e).lower():
+                skipped += 1
+            else:
+                errors.append({"row": row_num, "term": term, "reason": str(e)})
+
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
 # === 文档端点 ===
 
 @router.get("/documents")
@@ -283,7 +353,7 @@ async def create_document(
     if not body.content or not body.content.strip():
         raise _error_response(KBErrorCode.DOC_EMPTY_CONTENT, 400)
 
-    supported_formats = {"markdown", "text"}
+    supported_formats = {"markdown", "text", "json", "sql", "richtext"}
     if body.format not in supported_formats:
         raise _error_response(KBErrorCode.DOC_UNSUPPORTED_FORMAT, 400, format=body.format)
 
@@ -292,6 +362,7 @@ async def create_document(
         title=body.title,
         content=body.content,
         format=body.format,
+        doc_type=body.doc_type,
         category=body.category,
         tags=body.tags or [],
         created_by=user.get("id"),
@@ -447,3 +518,50 @@ async def rag_enrich(
 
     result = await rag_service.enrich_context(db, body.question, body.scenario)
     return result
+
+
+@router.post("/parse-file")
+async def parse_file(
+    file: UploadFile = File(...),
+    user=Depends(get_current_user),
+):
+    """解析上传文件，提取文本内容用于填充文档编辑器 — analyst+
+    支持 .md, .txt, .docx
+    返回 { content: str, format: "markdown" | "text" }
+    """
+    _require_role(user, "analyst")
+
+    filename = file.filename or ""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    content_bytes = await file.read()
+
+    if ext in ("md", "txt"):
+        try:
+            text = content_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            text = content_bytes.decode("gbk", errors="replace")
+        return {"content": text, "format": "markdown" if ext == "md" else "text"}
+
+    elif ext == "docx":
+        try:
+            import io as _io
+            from docx import Document  # python-docx
+            doc = Document(_io.BytesIO(content_bytes))
+            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+            return {"content": "\n\n".join(paragraphs), "format": "text"}
+        except ImportError:
+            raise HTTPException(
+                status_code=500,
+                detail={"code": "PARSE_ERROR", "message": "DOCX 解析模块未安装，请联系管理员"},
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "PARSE_ERROR", "message": f"DOCX 解析失败: {exc}"},
+            )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "UNSUPPORTED_FORMAT", "message": "仅支持 .md、.txt、.docx 格式"},
+        )
+

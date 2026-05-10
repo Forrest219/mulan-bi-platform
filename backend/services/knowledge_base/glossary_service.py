@@ -43,13 +43,15 @@ class GlossaryService:
         self, db: Session, term: str, canonical_term: str, definition: str,
         category: str = "concept", synonyms: List[str] = None,
         formula: str = None, related_fields: List[str] = None,
+        related_metric_ids: List[str] = None,
         source: str = "manual", created_by: int = None
     ) -> KbGlossary:
         """创建术语（触发异步 Embedding 生成）"""
         g = self._db.create(
             db, term=term, canonical_term=canonical_term, definition=definition,
             category=category, synonyms=synonyms, formula=formula,
-            related_fields=related_fields, source=source, created_by=created_by,
+            related_fields=related_fields, related_metric_ids=related_metric_ids,
+            source=source, created_by=created_by,
         )
         # 异步生成 Embedding（Celery Worker）
         from services.tasks.knowledge_base_tasks import regenerate_glossary_embedding
