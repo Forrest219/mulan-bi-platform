@@ -102,6 +102,9 @@ class Logger:
         details: Any = None,
         operator: str = "anonymous",
         operator_id: int = None,
+        ip_address: str = None,
+        user_agent: str = None,
+        trace_id: str = None,
     ):
         log = OperationLog(
             op_time=datetime.now(),
@@ -110,7 +113,10 @@ class Logger:
             operation_type=operation_type,
             target=target,
             status=status,
-            details=json.dumps(details, ensure_ascii=False) if details else None
+            details=json.dumps(details, ensure_ascii=False) if details else None,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            trace_id=trace_id,
         )
         self._db.add_operation_log(log)
 

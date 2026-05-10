@@ -42,6 +42,16 @@ _register_attempts: dict[str, list[float]] = defaultdict(list)
 _REGISTER_RATE_LIMIT = 5
 _REGISTER_RATE_WINDOW = 60  # seconds
 
+# 登录速率限制：每个 IP+用户名 每 60 秒最多 5 次
+_login_attempts: dict[str, list[float]] = defaultdict(list)
+_LOGIN_RATE_LIMIT = 5
+_LOGIN_RATE_WINDOW = 60  # seconds
+
+# MFA 验证速率限制：每个 session 每 60 秒最多 5 次
+_mfa_verify_attempts: dict[str, list[float]] = defaultdict(list)
+_MFA_VERIFY_RATE_LIMIT = 5
+_MFA_VERIFY_RATE_WINDOW = 60  # seconds
+
 
 def _create_session_token(user_id: int, username: str, role: str, mfa_pending: bool = False) -> str:
     """创建带签名和过期时间的 JWT session token"""
@@ -134,9 +144,31 @@ def get_session_user(request: Request) -> Optional[dict]:
     return _decode_session_token(token)
 
 
+def _get_client_ip(request: Request) -> str:
+    """使用 ASGI client 地址做审计来源，避免信任可伪造的转发头。"""
+    return (request.client.host if request.client else "unknown")[:45]
+
+
+def _get_user_agent(request: Request) -> str:
+    return request.headers.get("User-Agent", "")[:512]
+
+
+def _get_device_fingerprint(request: Request) -> str:
+    return _get_user_agent(request)[:128]
+
+
 @router.post("/login", response_model=LoginResponse)
 async def login(request: LoginRequest, response: Response, http_request: Request):
     """用户登录"""
+    # IP + username 维度限流
+    client_ip = _get_client_ip(http_request)
+    login_key = f"{client_ip}:{request.username}"
+    now = time.time()
+    _login_attempts[login_key] = [t for t in _login_attempts[login_key] if now - t < _LOGIN_RATE_WINDOW]
+    if len(_login_attempts[login_key]) >= _LOGIN_RATE_LIMIT:
+        raise HTTPException(status_code=429, detail="登录请求过于频繁，请稍后再试")
+    _login_attempts[login_key].append(now)
+
     user = auth_service.authenticate(request.username, request.password)
 
     if not user:
@@ -175,10 +207,12 @@ async def login(request: LoginRequest, response: Response, http_request: Request
     )
 
     # Refresh Token（30 天 Sliding Window）
-    _device = http_request.headers.get("User-Agent", "")[:128]
+    _device = _get_device_fingerprint(http_request)
     refresh_token = auth_service.create_refresh_token(
         user_id=user["id"],
         device_fingerprint=_device,
+        ip_address=client_ip,
+        user_agent=_get_user_agent(http_request),
     )
     response.set_cookie(
         key=_REFRESH_TOKEN_COOKIE_NAME,
@@ -188,6 +222,21 @@ async def login(request: LoginRequest, response: Response, http_request: Request
         secure=_is_secure,
         max_age=_REFRESH_TOKEN_EXPIRE_SECONDS,
     )
+
+    # 记录操作日志
+    try:
+        from services.logs import logger
+        logger.log_operation(
+            operation_type="login",
+            target=user.get("username") or request.username,
+            status="success",
+            operator=user.get("username") or request.username,
+            operator_id=user.get("id"),
+            ip_address=client_ip,
+            user_agent=_get_user_agent(http_request),
+        )
+    except Exception:
+        pass  # 日志记录失败不影响登录流程
 
     return LoginResponse(
         success=True,
@@ -200,7 +249,7 @@ async def login(request: LoginRequest, response: Response, http_request: Request
 async def register(request: RegisterRequest, req: Request, response: Response):
     """用户注册"""
     # 速率限制
-    client_ip = req.client.host if req.client else "unknown"
+    client_ip = _get_client_ip(req)
     now = time.time()
     _register_attempts[client_ip] = [t for t in _register_attempts[client_ip] if now - t < _REGISTER_RATE_WINDOW]
     if len(_register_attempts[client_ip]) >= _REGISTER_RATE_LIMIT:
@@ -230,7 +279,9 @@ async def register(request: RegisterRequest, req: Request, response: Response):
     # Refresh Token（30 天 Sliding Window）
     refresh_token = auth_service.create_refresh_token(
         user_id=user["id"],
-        device_fingerprint=request.client.host if request.client else "unknown",
+        device_fingerprint=_get_device_fingerprint(req),
+        ip_address=client_ip,
+        user_agent=_get_user_agent(req),
     )
     response.set_cookie(
         key=_REFRESH_TOKEN_COOKIE_NAME,
@@ -261,7 +312,10 @@ async def logout(request: Request, response: Response):
                     operation_type="logout",
                     target=user_info["username"],
                     status="success",
-                    operator=user_info["username"]
+                    operator=user_info["username"],
+                    operator_id=user_info.get("id"),
+                    ip_address=_get_client_ip(request),
+                    user_agent=_get_user_agent(request),
                 )
             except Exception as e:
                 # 日志记录失败不影响登出流程
@@ -314,16 +368,16 @@ async def mfa_setup(request: Request, response: Response):
 
 
 @router.post("/mfa/verify-setup")
-async def mfa_verify_setup(request: MFAVerifyRequest, response: Response):
+async def mfa_verify_setup(mfa_request: MFAVerifyRequest, response: Response, http_request: Request):
     """验证 MFA Setup Code 并启用 MFA。
 
     需要先调用 /mfa/setup 获取 secret 和 backup codes。
     """
-    user_info = _get_current_user(request)
+    user_info = _get_current_user(http_request)
     if not user_info:
         raise HTTPException(status_code=401, detail="未登录")
 
-    success, data = auth_service.setup_mfa(user_info["id"], request.code)
+    success, data = auth_service.setup_mfa(user_info["id"], mfa_request.code)
     if not success:
         raise HTTPException(status_code=400, detail=data)
 
@@ -335,17 +389,17 @@ async def mfa_verify_setup(request: MFAVerifyRequest, response: Response):
 
 
 @router.post("/mfa/disable")
-async def mfa_disable(request: MFADisableRequest, response: Response):
+async def mfa_disable(mfa_request: MFADisableRequest, response: Response, http_request: Request):
     """禁用 MFA（需要密码 + MFA 验证码双重验证）。
     """
-    user_info = _get_current_user(request)
+    user_info = _get_current_user(http_request)
     if not user_info:
         raise HTTPException(status_code=401, detail="未登录")
 
     success, message = auth_service.disable_mfa(
         user_id=user_info["id"],
-        password=request.password,
-        code=request.code,
+        password=mfa_request.password,
+        code=mfa_request.code,
     )
     if not success:
         raise HTTPException(status_code=400, detail=message)
@@ -378,6 +432,14 @@ async def mfa_verify(request: MFAVerifyRequest, response: Response, http_request
     if not user_info.get("mfa_pending"):
         raise HTTPException(status_code=400, detail="当前会话不需要 MFA 验证")
 
+    # Session 维度限流（session token 本身即唯一标识）
+    session_key = http_request.cookies.get("session") or "unknown"
+    now = time.time()
+    _mfa_verify_attempts[session_key] = [t for t in _mfa_verify_attempts[session_key] if now - t < _MFA_VERIFY_RATE_WINDOW]
+    if len(_mfa_verify_attempts[session_key]) >= _MFA_VERIFY_RATE_LIMIT:
+        raise HTTPException(status_code=429, detail="验证尝试过于频繁，请稍后再试")
+    _mfa_verify_attempts[session_key].append(now)
+
     if not auth_service.verify_mfa_code(user_info["id"], request.code):
         raise HTTPException(status_code=400, detail="MFA 验证码不正确")
 
@@ -393,10 +455,12 @@ async def mfa_verify(request: MFAVerifyRequest, response: Response, http_request
         max_age=_JWT_EXPIRE_SECONDS,
     )
 
-    _device = http_request.headers.get("User-Agent", "")[:128]
+    _device = _get_device_fingerprint(http_request)
     refresh_token = auth_service.create_refresh_token(
         user_id=user_info["id"],
         device_fingerprint=_device,
+        ip_address=_get_client_ip(http_request),
+        user_agent=_get_user_agent(http_request),
     )
     response.set_cookie(
         key=_REFRESH_TOKEN_COOKIE_NAME,
@@ -408,6 +472,22 @@ async def mfa_verify(request: MFAVerifyRequest, response: Response, http_request
     )
 
     user = auth_service.get_user(user_info["id"])
+
+    # 记录 MFA 登录完成日志
+    try:
+        from services.logs import logger
+        logger.log_operation(
+            operation_type="login",
+            target=user_info.get("username"),
+            status="success",
+            operator=user_info.get("username"),
+            operator_id=user_info.get("id"),
+            ip_address=_get_client_ip(http_request),
+            user_agent=_get_user_agent(http_request),
+        )
+    except Exception:
+        pass  # 日志记录失败不影响登录流程
+
     return LoginResponse(
         success=True,
         message="MFA 验证成功",
@@ -448,10 +528,12 @@ async def refresh_token(request: Request, response: Response):
 
     # Sliding Window：撤销旧 Refresh Token，颁发新的
     auth_service.revoke_refresh_token(refresh_token)
-    _device = request.headers.get("User-Agent", "")[:128]
+    _device = _get_device_fingerprint(request)
     new_refresh_token = auth_service.create_refresh_token(
         user_id=user["id"],
         device_fingerprint=_device,
+        ip_address=_get_client_ip(request),
+        user_agent=_get_user_agent(request),
     )
     response.set_cookie(
         key=_REFRESH_TOKEN_COOKIE_NAME,

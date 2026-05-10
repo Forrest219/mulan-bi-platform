@@ -84,6 +84,9 @@ class OperationLog(Base):
     target = Column(String(256), nullable=True)
     status = Column(String(32), default="success", server_default=sa_text("'success'"))
     details = Column(JSONB, nullable=True)
+    ip_address = Column(String(64), nullable=True)
+    user_agent = Column(String(512), nullable=True)
+    trace_id = Column(String(64), nullable=True)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -95,6 +98,9 @@ class OperationLog(Base):
             "target": self.target,
             "status": self.status,
             "details": self.details,
+            "ip_address": self.ip_address,
+            "user_agent": self.user_agent,
+            "trace_id": self.trace_id,
         }
 
 
@@ -126,6 +132,34 @@ class LogDatabase:
         self.session.add(log)
         self.session.commit()
 
+    def add_operation_log_raw(
+        self,
+        operation_type: str,
+        operator: str = "anonymous",
+        operator_id: int = None,
+        target: str = None,
+        status: str = "success",
+        details: Dict[str, Any] = None,
+        ip_address: str = None,
+        user_agent: str = None,
+        trace_id: str = None,
+    ):
+        """直接构造 OperationLog 并写入（绕过 ORM 对象构造）"""
+        log = OperationLog(
+            op_time=datetime.now(),
+            operator=operator,
+            operator_id=operator_id,
+            operation_type=operation_type,
+            target=target,
+            status=status,
+            details=json.dumps(details, ensure_ascii=False) if details else None,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            trace_id=trace_id,
+        )
+        self.session.add(log)
+        self.session.commit()
+
     def get_scan_logs(self, limit: int = 100, database_name: str = None) -> List[ScanLog]:
         query = self.session.query(ScanLog)
         if database_name:
@@ -137,19 +171,58 @@ class LogDatabase:
             RuleChangeLog.change_time.desc()
         ).limit(limit).all()
 
+    def get_operation_logs_paginated(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        operation_type: str = None,
+        start_time=None,
+        end_time=None,
+        user_id: int = None,
+    ) -> tuple:
+        """分页查询操作日志，返回 (logs, total_count)"""
+        from sqlalchemy import func
+        query = self.session.query(OperationLog)
+        count_query = self.session.query(func.count(OperationLog.id))
+
+        if operation_type:
+            query = query.filter(OperationLog.operation_type == operation_type)
+            count_query = count_query.filter(OperationLog.operation_type == operation_type)
+        if start_time:
+            query = query.filter(OperationLog.op_time >= start_time)
+            count_query = count_query.filter(OperationLog.op_time >= start_time)
+        if end_time:
+            query = query.filter(OperationLog.op_time <= end_time)
+            count_query = count_query.filter(OperationLog.op_time <= end_time)
+        if user_id is not None:
+            query = query.filter(OperationLog.operator_id == user_id)
+            count_query = count_query.filter(OperationLog.operator_id == user_id)
+
+        total = count_query.scalar() or 0
+        logs = query.order_by(OperationLog.op_time.desc()).offset(offset).limit(limit).all()
+        return logs, total
+
     def get_operation_logs(self, limit: int = 100, operation_type: str = None) -> List[OperationLog]:
         query = self.session.query(OperationLog)
         if operation_type:
             query = query.filter(OperationLog.operation_type == operation_type)
         return query.order_by(OperationLog.op_time.desc()).limit(limit).all()
 
+    def get_distinct_operation_types(self) -> List[str]:
+        """获取所有不重复的 operation_type 值"""
+        from sqlalchemy import func, distinct
+        results = self.session.query(func.distinct(OperationLog.operation_type)).all()
+        return [r[0] for r in results if r[0]]
+
     def get_statistics(self) -> Dict[str, Any]:
         from sqlalchemy import func
         total_scans = self.session.query(ScanLog).count()
         total_tables = self.session.query(func.sum(ScanLog.table_count)).scalar() or 0
         total_violations = self.session.query(func.sum(ScanLog.total_violations)).scalar() or 0
+        total_operations = self.session.query(func.count(OperationLog.id)).scalar() or 0
         return {
             "total_scans": total_scans,
             "total_tables": total_tables,
             "total_violations": total_violations,
+            "total_operations": total_operations,
         }
