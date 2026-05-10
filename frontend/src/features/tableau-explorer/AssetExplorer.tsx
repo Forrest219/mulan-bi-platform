@@ -1,14 +1,23 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useMemo, KeyboardEvent, lazy, Suspense } from 'react';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+
+// React.lazy 懒加载 AssetChatPanel（gotcha #2: named export 转换）
+const AssetChatPanel = lazy(() =>
+  import('./AssetChatPanel').then(m => ({ default: m.AssetChatPanel }))
+);
 import {
   listAssets,
   searchAssets,
+  intentSearchAssets,
   getProjects,
   listConnections,
   syncConnection,
+  getImpactAlerts,
   TableauAsset,
   TableauConnection,
   ProjectNode,
+  ImpactAlertsResult,
+  IntentSearchResult,
 } from '../../api/tableau';
 import { ASSET_TYPE_LABELS } from '../../config';
 
@@ -60,12 +69,27 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
   const [loadError, setLoadError] = useState('');
+  const [alerts, setAlerts] = useState<ImpactAlertsResult | null>(null);
+  const [showAlertDetail, setShowAlertDetail] = useState(false);
+  // SPEC 39: 意图搜索模式
+  const [isIntentMode, setIsIntentMode] = useState(false);
+  const [intentResults, setIntentResults] = useState<IntentSearchResult | null>(null);
+  const [intentLoading, setIntentLoading] = useState(false);
+  // SPEC 41: 对话式资产助手
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [highlightedAssetIds, setHighlightedAssetIds] = useState<Set<string>>(new Set());
 
   const filteredProjects = useMemo(() => {
     if (!projectSearch.trim()) return projects;
     const q = projectSearch.toLowerCase();
     return projects.filter(p => p.name.toLowerCase().includes(q));
   }, [projects, projectSearch]);
+
+  const fetchAlerts = (connId: number) => {
+    getImpactAlerts(String(connId))
+      .then(data => setAlerts(data))
+      .catch(() => setAlerts(null));
+  };
 
   const handleSync = async () => {
     if (!connectionId || syncing) return;
@@ -87,6 +111,7 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
           setAssets(assetsData.assets);
           setTotal(assetsData.total);
           setProjects(projectsData.projects || []);
+          fetchAlerts(connectionId);
         }).catch(() => {}).finally(() => setLoading(false));
       }, 3000);
     } catch (e: unknown) {
@@ -116,7 +141,18 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
   useEffect(() => {
     const found = connections.find(c => c.id === connectionId);
     setSelectedConn(found || null);
+    if (connectionId) {
+      fetchAlerts(connectionId);
+    }
   }, [connectionId, connections]);
+
+  // SPEC 41: connectionId 切换时关闭对话面板并清空 sessionStorage
+  useEffect(() => {
+    if (!connectionId) return;
+    setIsChatOpen(false);
+    setHighlightedAssetIds(new Set());
+    sessionStorage.removeItem(`tableau-asset-chat-${connectionId}`);
+  }, [connectionId]);
 
   useEffect(() => {
     if (!connectionId) return;
@@ -144,11 +180,48 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
     }
   };
 
+  // SPEC 39: 意图模式判断 — 长度 ≥ 8 且含空格
+  const detectIntentMode = (value: string) => value.length >= 8 && value.includes(' ');
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    setPage(1);
+    const willBeIntent = detectIntentMode(value);
+    setIsIntentMode(willBeIntent);
+    if (!willBeIntent) {
+      // 退出意图模式，清空意图结果
+      setIntentResults(null);
+    }
+  };
+
+  const handleIntentSearch = async () => {
+    if (!connectionId || !search.trim()) return;
+    setIntentLoading(true);
+    setLoadError('');
+    try {
+      const result = await intentSearchAssets({
+        query: search,
+        connection_id: String(connectionId),
+      });
+      setIntentResults(result);
+    } catch (e: unknown) {
+      setLoadError(e instanceof Error ? e.message : '意图搜索失败，请重试');
+    } finally {
+      setIntentLoading(false);
+    }
+  };
+
+  const handleSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && isIntentMode) {
+      handleIntentSearch();
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
       <div className="bg-white border-b border-slate-200 px-8 py-5">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2 mb-0.5">
               <i className="ri-bar-chart-box-line text-slate-500 text-base" />
@@ -208,13 +281,26 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
                 <i className="ri-list-check" />
               </button>
             </div>
+            {/* SPEC 41: 资产助手按钮 */}
+            <button
+              onClick={() => setIsChatOpen(v => !v)}
+              disabled={!connectionId}
+              className={`flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                isChatOpen
+                  ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              <i className="ri-robot-2-line" />
+              资产助手
+            </button>
           </div>
         </div>
       </div>
 
       {/* Filter strip */}
       <div className="bg-white border-b border-slate-100 px-8">
-        <div className="max-w-7xl mx-auto">
+        <div className="max-w-6xl mx-auto">
           <div className="flex items-center gap-2 py-2">
             <button onClick={() => { setAssetTypeFilter(''); setPage(1); }}
               className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${!assetTypeFilter ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'}`}>
@@ -228,18 +314,82 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
               </button>
             ))}
             <div className="flex-1" />
-            <div className="relative">
-              <i className="ri-search-line absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm" />
-              <input type="text" placeholder="搜索资产名称、项目或所有者..."
-                value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
-                className="pl-9 pr-4 py-1.5 border border-slate-200 rounded-lg text-[12px] w-56 focus:outline-none focus:border-blue-400" />
+            <div className="relative flex items-center gap-1.5">
+              <div className="relative">
+                <i className="ri-search-line absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm" />
+                <input type="text" placeholder="搜索资产名称、项目或所有者..."
+                  value={search}
+                  onChange={e => handleSearchChange(e.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                  className="pl-9 pr-4 py-1.5 border border-slate-200 rounded-lg text-[12px] w-64 focus:outline-none focus:border-blue-400" />
+                {isIntentMode && (
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-blue-500 font-medium bg-blue-50 px-1.5 py-0.5 rounded pointer-events-none">
+                    意图搜索
+                  </span>
+                )}
+              </div>
+              {isIntentMode && (
+                <button
+                  onClick={handleIntentSearch}
+                  disabled={intentLoading || !connectionId}
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-600 text-white text-[12px] rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {intentLoading ? (
+                    <><i className="ri-loader-4-line animate-spin" />正在理解...</>
+                  ) : (
+                    <><i className="ri-search-eye-line" />搜索</>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>
       </div>
 
       <div className="px-8 py-6">
-        <div className="max-w-7xl mx-auto">
+        <div className="max-w-6xl mx-auto">
+
+        {/* SPEC 40: 健康预警 Banner */}
+        {alerts && alerts.total_unhealthy_datasources > 0 && (
+          <div className="mb-4 bg-orange-50 border border-orange-200 rounded-lg px-4 py-2.5">
+            <div className="flex items-center gap-2">
+              <span className="text-orange-500 flex-shrink-0">⚠</span>
+              <span className="text-sm text-orange-700 flex-1">
+                {alerts.total_unhealthy_datasources} 个数据源健康异常，影响 {alerts.total_affected_workbooks} 个工作簿
+              </span>
+              <button
+                onClick={() => setShowAlertDetail(v => !v)}
+                className="text-xs text-orange-600 hover:text-orange-800 border border-orange-300 rounded px-2 py-0.5 flex-shrink-0"
+              >
+                {showAlertDetail ? '收起' : '展开'}
+              </button>
+            </div>
+            {showAlertDetail && (
+              <div className="mt-2 space-y-1.5 pl-6">
+                {alerts.alerts.map(alert => (
+                  <div key={alert.datasource_id} className="flex items-center gap-3 text-xs text-orange-700">
+                    <span className="font-medium truncate max-w-[200px]" title={alert.datasource_name}>
+                      {alert.datasource_name}
+                    </span>
+                    <span className={`px-1.5 py-0.5 rounded-full text-[11px] flex-shrink-0 ${
+                      (alert.health_score ?? 100) < 40 ? 'bg-red-100 text-red-600' : 'bg-orange-100 text-orange-600'
+                    }`}>
+                      健康度 {alert.health_score ?? '-'}
+                    </span>
+                    <span className="text-orange-500 flex-shrink-0">影响 {alert.affected_workbook_count} 个工作簿</span>
+                    <Link
+                      to={`/assets/tableau/${alert.datasource_id}?tab=impact`}
+                      className="text-blue-500 hover:underline flex-shrink-0"
+                    >
+                      查看影响 →
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex gap-6">
 
           {/* Sidebar - Project Tree */}
@@ -296,7 +446,85 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
                 </button>
               </div>
             )}
-            {loading ? (
+            {/* SPEC 39: 意图搜索结果区 */}
+            {isIntentMode && (intentLoading || intentResults) && (
+              <div className="mb-6">
+                {intentLoading ? (
+                  <div className="flex flex-col items-center justify-center py-16">
+                    <i className="ri-loader-4-line text-2xl text-blue-600 animate-spin" />
+                    <p className="mt-3 text-xs text-slate-500">正在理解...</p>
+                  </div>
+                ) : intentResults && (
+                  <>
+                    {/* 意图摘要 */}
+                    <div className="flex items-center gap-2 mb-3 text-[11px] text-slate-400">
+                      <i className="ri-search-eye-line text-blue-500" />
+                      <span>
+                        意图关键词：{intentResults.intent.keywords.join('、')}
+                        {intentResults.intent.asset_type_hint && `　类型偏好：${intentResults.intent.asset_type_hint}`}
+                      </span>
+                      <span className="ml-auto">共 {intentResults.total} 条结果</span>
+                    </div>
+                    {intentResults.assets.length === 0 ? (
+                      <div className="text-center py-12 text-slate-400">
+                        <i className="ri-search-line text-3xl text-slate-300 block mb-2" />
+                        <p>未找到匹配资产，请尝试换个描述方式</p>
+                      </div>
+                    ) : (
+                      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-slate-200">
+                              <th className="text-left font-medium text-slate-600 px-3 py-3 whitespace-nowrap">类型</th>
+                              <th className="text-left font-medium text-slate-600 px-3 py-3">名称 / 相关原因</th>
+                              <th className="text-left font-medium text-slate-600 px-3 py-3">项目</th>
+                              <th className="text-right font-medium text-slate-600 px-3 py-3 whitespace-nowrap">相关度</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {intentResults.assets.map(asset => (
+                              <tr key={asset.id}
+                                onClick={() => navigate(`/assets/tableau/${asset.id}`)}
+                                className="hover:bg-slate-50 cursor-pointer">
+                                <td className="px-3 py-3 whitespace-nowrap">
+                                  <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] ${
+                                    asset.asset_type === 'workbook' ? 'bg-blue-50 text-blue-600' :
+                                    asset.asset_type === 'dashboard' ? 'bg-purple-50 text-purple-600' :
+                                    asset.asset_type === 'view' ? 'bg-emerald-50 text-emerald-600' :
+                                    'bg-orange-50 text-orange-600'
+                                  }`}>
+                                    <i className={ASSET_TYPE_ICONS[asset.asset_type] ?? 'ri-file-line'} />
+                                    {ASSET_TYPE_LABELS[asset.asset_type] ?? asset.asset_type}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-3">
+                                  <div className="text-slate-700 font-medium truncate max-w-xs">{asset.name}</div>
+                                  {asset.relevance_reason && (
+                                    <div className="text-gray-400 text-xs truncate max-w-xs mt-0.5">{asset.relevance_reason}</div>
+                                  )}
+                                </td>
+                                <td className="px-3 py-3 text-slate-500">{asset.project_name || '-'}</td>
+                                <td className="px-3 py-3 text-right whitespace-nowrap">
+                                  <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${
+                                    asset.relevance_score >= 0.7 ? 'bg-emerald-50 text-emerald-600' :
+                                    asset.relevance_score >= 0.4 ? 'bg-yellow-50 text-yellow-600' :
+                                    'bg-slate-50 text-slate-500'
+                                  }`}>
+                                    {Math.round(asset.relevance_score * 100)}%
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+            {/* 非意图模式下显示普通资产列表 */}
+            {!isIntentMode && (loading ? (
               <div className="flex flex-col items-center justify-center py-20">
                 <i className="ri-loader-4-line text-2xl text-blue-600 animate-spin" />
                 <p className="mt-3 text-xs text-slate-500">加载中...</p>
@@ -325,7 +553,11 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
                 {assets.map(asset => (
                   <div key={asset.id}
                     onClick={() => handleAssetClick(asset)}
-                    className="bg-white border border-slate-200 rounded-xl p-4 cursor-pointer hover:border-blue-300 hover:shadow-sm transition-all">
+                    className={`bg-white border rounded-xl p-4 cursor-pointer hover:border-blue-300 hover:shadow-sm transition-all ${
+                      highlightedAssetIds.has(String(asset.id))
+                        ? 'border-yellow-400 bg-yellow-50'
+                        : 'border-slate-200'
+                    }`}>
                     <div className="flex items-start justify-between mb-3">
                       {asset.thumbnail_url ? (
                         <img
@@ -393,7 +625,11 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
                   <tbody className="divide-y divide-slate-100">
                     {assets.map(asset => (
                       <tr key={asset.id} onClick={() => handleAssetClick(asset)}
-                        className="hover:bg-slate-50 cursor-pointer">
+                        className={`cursor-pointer ${
+                          highlightedAssetIds.has(String(asset.id))
+                            ? 'bg-yellow-50 hover:bg-yellow-100'
+                            : 'hover:bg-slate-50'
+                        }`}>
                         <td className="px-3 py-3 whitespace-nowrap">
                           <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] ${
                             asset.asset_type === 'workbook' ? 'bg-blue-50 text-blue-600' :
@@ -422,7 +658,7 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
                   </tbody>
                 </table>
               </div>
-            )}
+            ))}
 
             {/* Pagination */}
             {total > 24 && (
@@ -459,6 +695,25 @@ export function AssetExplorer({ connectionId: connectionIdProp, onSelect }: Asse
         </div>
         </div>
       </div>
+
+      {/* SPEC 41: 对话式资产助手浮层 */}
+      {isChatOpen && connectionId > 0 && (
+        <Suspense fallback={null}>
+          <AssetChatPanel
+            connectionId={connectionId}
+            currentFilter={assetTypeFilter || undefined}
+            visibleAssetCount={total}
+            onApplyFilter={(assetType) => {
+              setAssetTypeFilter(assetType);
+              setPage(1);
+            }}
+            onHighlightAssets={(assetIds) => {
+              setHighlightedAssetIds(new Set(assetIds));
+            }}
+            onClose={() => setIsChatOpen(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

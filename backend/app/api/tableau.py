@@ -1,9 +1,11 @@
 """Tableau 管理 API
 """
+import json
 import logging
-from typing import Optional
+from typing import AsyncGenerator, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -898,6 +900,73 @@ async def explain_asset(asset_id: int, req: ExplainRequest, request: Request, db
         return {"explain": None, "error": f"生成失败: {str(e)}", "cached": False, "field_semantics": field_semantics}
 
 
+# --- Asset Chat (SPEC 41) ---
+
+class AssetChatRequest(BaseModel):
+    message: str
+    connection_id: int
+    history: List[dict] = []
+    context: dict = {}
+
+
+def _sse_frame(event: dict) -> str:
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+async def _generate_chat_events(
+    body: AssetChatRequest,
+    current_user: dict,
+    db: Session,
+) -> AsyncGenerator[str, None]:
+    """生成资产对话 SSE 事件流"""
+    from services.tableau.asset_chat_service import AssetChatService
+
+    service = AssetChatService(db)
+    try:
+        async for frame in service.stream_chat(
+            message=body.message,
+            connection_id=body.connection_id,
+            history=body.history,
+            context=body.context,
+        ):
+            yield _sse_frame(frame)
+    except Exception as exc:
+        logger.error("资产对话流式生成失败: %s", exc, exc_info=True)
+        yield _sse_frame({"type": "error", "code": "TAB_AC_002", "message": "对话服务暂时不可用"})
+
+
+@router.post("/assets/chat")
+async def chat_about_assets(
+    body: AssetChatRequest,
+    request: Request,
+    current_user: dict = Depends(require_roles(["admin", "data_admin", "analyst"])),
+    db: Session = Depends(get_db),
+):
+    """POST /api/tableau/assets/chat — 资产对话（SSE 流式，SPEC 41）
+
+    鉴权要求：analyst+ 角色
+    connection_id 无效或无权限时返回 403（非 SSE）
+    """
+    # 权限校验：验证 connection_id 是否有效且当前用户有访问权
+    try:
+        verify_connection_access(body.connection_id, current_user, db)
+    except HTTPException:
+        raise HTTPException(
+            status_code=403,
+            detail={"error_code": "TAB_AC_001", "message": "connection_id 无效或无权限"},
+        )
+
+    return StreamingResponse(
+        _generate_chat_events(body, current_user, db),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
 # --- Asset Health Score (Phase 2b) ---
 
 @router.get("/assets/{asset_id}/health")
@@ -1159,6 +1228,110 @@ async def tableau_v2_query(
     except TableauMCPError as e:
         status, body = _mcp_error_response(e)
         raise HTTPException(status_code=status, detail=body)
+
+
+# ── SPEC 39: 资产意图搜索 ─────────────────────────────────────────────────────
+
+class IntentSearchRequest(BaseModel):
+    query: str
+    connection_id: str
+
+
+@router.post("/assets/intent-search")
+async def intent_search_assets(
+    body: IntentSearchRequest,
+    current_user: dict = Depends(require_roles(["admin", "data_admin", "analyst"])),
+    db: Session = Depends(get_db),
+):
+    """自然语言意图搜索（SPEC 39）
+
+    权限：admin / data_admin / analyst
+    """
+    query = body.query[:200]
+    connection_id = body.connection_id
+
+    # 验证 connection_id：必须是整数 ID（tableau_connections.id 为 Integer），校验权限
+    try:
+        conn_id_int = int(connection_id)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=403,
+            detail={"error_code": "TAB_IS_002", "message": "connection_id 无效或无权访问"},
+        )
+    verify_connection_access(conn_id_int, current_user, db)
+
+    from services.tableau.intent_search_service import IntentSearchService
+
+    service = IntentSearchService(db=db)
+    try:
+        result = await service.intent_search(query=query, connection_id=conn_id_int)
+        return result
+    except Exception as e:
+        logger.error("intent_search 失败: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error_code": "TAB_IS_001", "message": "意图解析失败，请重试"},
+        )
+
+
+# ── SPEC 40: 资产影响分析 ─────────────────────────────────────────────────────
+
+@router.get("/assets/{asset_id}/impact")
+async def get_asset_impact(
+    asset_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """SPEC 40: 查询 datasource 资产的两级影响树（仅 datasource 类型）"""
+    user = get_current_user(request, db)
+    _db = TableauDatabase(session=db)
+
+    asset = _db.get_asset(asset_id)
+    if not asset or asset.is_deleted:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "TAB_IA_001", "message": "资产不存在或类型不是 datasource", "detail": {}},
+        )
+
+    verify_connection_access(asset.connection_id, user, db)
+
+    if asset.asset_type != "datasource":
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "TAB_IA_001", "message": "资产不存在或类型不是 datasource", "detail": {}},
+        )
+
+    from services.tableau.impact_service import ImpactService
+    svc = ImpactService(db=db)
+    try:
+        result = svc.get_asset_impact(asset_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "TAB_IA_001", "message": "资产不存在或类型不是 datasource", "detail": {}},
+        )
+    return result
+
+
+@router.get("/connections/{conn_id}/impact-alerts")
+async def get_impact_alerts(
+    conn_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """SPEC 40: 查询连接级健康预警（health_score < 60 的 datasource）"""
+    user = get_current_user(request, db)
+    _db = TableauDatabase(session=db)
+
+    conn = _db.get_connection(conn_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="连接不存在")
+
+    verify_connection_access(conn_id, user, db)
+
+    from services.tableau.impact_service import ImpactService
+    svc = ImpactService(db=db)
+    return svc.get_impact_alerts(conn_id)
 
 
 @router.get("/datasources/{asset_id}/metadata")

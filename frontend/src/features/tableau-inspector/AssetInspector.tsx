@@ -1,4 +1,5 @@
 import { useNavigate, Link } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
 import { useAssetDetail } from './hooks/useAssetDetail';
 import { InfoTab } from './tabs/InfoTab';
 import { DatasourcesTab } from './tabs/DatasourcesTab';
@@ -8,6 +9,11 @@ import { HealthTab } from './tabs/HealthTab';
 import { AiExplainTab } from './tabs/AiExplainTab';
 import { ConfirmModal } from '../../components/ConfirmModal';
 import { ASSET_TYPE_LABELS } from '../../config';
+
+// SPEC 40: ImpactTab 懒加载（仅 datasource 类型显示）
+const ImpactTab = lazy(() =>
+  import('./tabs/ImpactTab').then(m => ({ default: m.ImpactTab }))
+);
 
 const ASSET_TYPE_ICONS: Record<string, string> = {
   workbook: 'ri-file-chart-line',
@@ -54,6 +60,7 @@ export function AssetInspector({ assetId, layout = 'page', defaultTab, onClose }
   if (!asset) return <div className="p-8 text-center text-slate-400">资产不存在</div>;
 
   const isWorkbook = asset.asset_type === 'workbook';
+  const isDatasource = asset.asset_type === 'datasource';
   const hasParent = asset.asset_type === 'view' || asset.asset_type === 'dashboard';
 
   // Build available tabs
@@ -64,6 +71,7 @@ export function AssetInspector({ assetId, layout = 'page', defaultTab, onClose }
     { key: 'fields', label: '字段元数据' },
     { key: 'health', label: '健康度' },
     { key: 'ai', label: 'AI 深度解读', warn: !llmConfigured },
+    ...(isDatasource ? [{ key: 'impact', label: '影响分析' }] : []),
   ];
 
   return (
@@ -227,6 +235,13 @@ export function AssetInspector({ assetId, layout = 'page', defaultTab, onClose }
                 onLoadExplain={() => loadAIExplain()}
                 llmConfigured={llmConfigured}
               />
+            )}
+
+            {/* Tab: Impact Analysis (datasource only) */}
+            {activeTab === 'impact' && isDatasource && (
+              <Suspense fallback={<div className="flex items-center justify-center py-12 text-slate-400 text-xs">加载中...</div>}>
+                <ImpactTab assetId={String(asset.id)} />
+              </Suspense>
             )}
           </div>
 

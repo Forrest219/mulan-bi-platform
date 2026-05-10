@@ -12,7 +12,7 @@ import {
 import { getAssetSummary, getLLMConfig } from '../../../api/llm';
 import type { FieldSemantic } from '../types';
 
-type ActiveTab = 'info' | 'datasources' | 'ai' | 'children' | 'fields' | 'health';
+type ActiveTab = 'info' | 'datasources' | 'ai' | 'children' | 'fields' | 'health' | 'impact';
 
 interface ConfirmModalState {
   open: boolean;
