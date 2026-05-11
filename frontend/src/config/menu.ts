@@ -64,7 +64,8 @@ export interface MenuDomain {
 
 // ============================================================
 // 完整菜单配置（Spec 18 v0.3 §2.0，7域）
-// 顺序：home（首页）、query（问数）、assets（资产）、governance（治理）、agents（智能体）、config（配置）、admin（管理）
+// 顺序：assets（资产）、governance（治理）、agents（智能体）、config（配置）、admin（管理）
+// 注：首页入口由 AppSidebar 硬编码直达链接提供，不在此处重复
 // ============================================================
 export const menuConfig: MenuDomain[] = [
 

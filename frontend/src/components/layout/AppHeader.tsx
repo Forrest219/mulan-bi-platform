@@ -164,11 +164,12 @@ export default function AppHeader() {
         <div className="relative">
           <button
             onClick={() => setSearchFocused(true)}
-            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 transition-colors text-slate-500"
+            className="flex items-center gap-2 pl-3 pr-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200 hover:border-slate-300 hover:bg-white transition-colors text-slate-400 hover:text-slate-500"
             aria-label="搜索功能页面"
-            title="搜索功能页面"
           >
-            <i className="ri-search-line text-lg" />
+            <i className="ri-search-line text-sm shrink-0" />
+            <span className="text-[13px] whitespace-nowrap">搜索功能页面…</span>
+            <kbd className="ml-1 px-1.5 py-0.5 text-[10px] bg-slate-100 border border-slate-200 rounded text-slate-400 font-mono">⌘K</kbd>
           </button>
 
           {searchFocused && (
@@ -428,12 +429,12 @@ export default function AppHeader() {
               <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
               <div className="absolute right-0 top-full mt-1 w-52 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-1.5">
                 <Link
-                  to="/account/profile"
+                  to="/account"
                   onClick={() => setMenuOpen(false)}
                   className="flex items-center gap-2.5 px-3.5 py-2 text-[13px] text-slate-700 hover:bg-slate-50 transition-colors"
                 >
                   <i className="ri-user-3-line text-[15px] text-slate-500" />
-                  个人中心
+                  账号设置
                 </Link>
                 <div className="my-1 border-t border-slate-100" />
                 <button
