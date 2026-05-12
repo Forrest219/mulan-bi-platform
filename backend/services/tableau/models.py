@@ -778,6 +778,49 @@ class TableauDatabase:
             TableauDatasourceField.asset_id == asset_id
         ).order_by(TableauDatasourceField.role, TableauDatasourceField.field_name).all()
 
+    def resolve_tableau_ids_to_asset_ids(self, connection_id: int, tableau_ids: List[str]) -> List[int]:
+        """将 Tableau LUID 列表解析成本地 datasource asset id 列表。"""
+        if not tableau_ids:
+            return []
+        rows = self.session.query(TableauAsset.id).filter(
+            TableauAsset.connection_id == connection_id,
+            TableauAsset.asset_type == "datasource",
+            TableauAsset.tableau_id.in_(tableau_ids),
+            TableauAsset.is_deleted == False,
+        ).all()
+        return [row[0] for row in rows]
+
+    def get_datasource_field_counts(self, asset_ids: List[int]) -> Dict[int, int]:
+        """批量获取 datasource asset 的字段数量。"""
+        if not asset_ids:
+            return {}
+        counts = {asset_id: 0 for asset_id in asset_ids}
+        rows = (
+            self.session.query(
+                TableauDatasourceField.asset_id,
+                sa_func.count(TableauDatasourceField.id),
+            )
+            .filter(TableauDatasourceField.asset_id.in_(asset_ids))
+            .group_by(TableauDatasourceField.asset_id)
+            .all()
+        )
+        for asset_id, count in rows:
+            counts[asset_id] = int(count or 0)
+        return counts
+
+    def get_last_finished_sync_log(self, connection_id: int) -> Optional[TableauSyncLog]:
+        """获取该连接最近一次已完成同步日志，用于计算字段 diff。"""
+        return (
+            self.session.query(TableauSyncLog)
+            .filter(
+                TableauSyncLog.connection_id == connection_id,
+                TableauSyncLog.finished_at != None,
+                TableauSyncLog.status.in_(["success", "partial"]),
+            )
+            .order_by(TableauSyncLog.finished_at.desc(), TableauSyncLog.id.desc())
+            .first()
+        )
+
     def get_datasource_fields_bulk(self, asset_ids: List[int]) -> Dict[int, List[TableauDatasourceField]]:
         """批量获取多个资产的字段列表，避免健康总览 N+1 查询。"""
         if not asset_ids:
@@ -821,5 +864,23 @@ class TableauDatabase:
         conn.sync_status = status
         if duration_sec is not None:
             conn.last_sync_duration_sec = duration_sec
+        self.session.commit()
+        return True
+
+    def reset_sync_failures(self, conn_id: int) -> bool:
+        """清零连续同步失败次数。"""
+        conn = self.get_connection(conn_id)
+        if not conn:
+            return False
+        conn.consecutive_sync_failures = 0
+        self.session.commit()
+        return True
+
+    def increment_sync_failures(self, conn_id: int) -> bool:
+        """递增连续同步失败次数。"""
+        conn = self.get_connection(conn_id)
+        if not conn:
+            return False
+        conn.consecutive_sync_failures = (conn.consecutive_sync_failures or 0) + 1
         self.session.commit()
         return True

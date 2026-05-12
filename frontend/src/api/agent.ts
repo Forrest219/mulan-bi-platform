@@ -292,6 +292,7 @@ export interface AgentStep {
   tool_result_summary: string | null;
   content: string | null;
   execution_time_ms: number | null;
+  duration_source: 'recorded' | 'derived' | 'none';
   created_at: string | null;
 }
 

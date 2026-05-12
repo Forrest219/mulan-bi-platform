@@ -145,8 +145,8 @@ export default function SyncTasksTab() {
             <tr className="bg-slate-50 border-b border-slate-200">
               <th className="text-left text-[11px] font-semibold text-slate-400 uppercase px-4 py-3 w-16">ID</th>
               <th className="text-left text-[11px] font-semibold text-slate-400 uppercase px-4 py-3">连接</th>
-              <th className="text-left text-[11px] font-semibold text-slate-400 uppercase px-4 py-3">关联计划</th>
-              <th className="text-left text-[11px] font-semibold text-slate-400 uppercase px-4 py-3">计划执行时间</th>
+              <th className="text-left text-[11px] font-semibold text-slate-400 uppercase px-4 py-3">同步规则</th>
+              <th className="text-left text-[11px] font-semibold text-slate-400 uppercase px-4 py-3">预计执行时间</th>
               <th className="text-left text-[11px] font-semibold text-slate-400 uppercase px-4 py-3">状态</th>
               <th className="text-left text-[11px] font-semibold text-slate-400 uppercase px-4 py-3">触发方式</th>
               <th className="text-left text-[11px] font-semibold text-slate-400 uppercase px-4 py-3">更新时间</th>
@@ -165,7 +165,7 @@ export default function SyncTasksTab() {
                 <td colSpan={8} className="px-4 py-16 text-center">
                   <i className="ri-calendar-check-line text-3xl text-slate-300 block mb-2" />
                   <span className="text-[13px] text-slate-400">
-                    {date === todayStr() ? '今日暂无任务，请先运行"任务规划"或等待 00:05 自动生成' : '该日期暂无任务'}
+                    {date === todayStr() ? '今日暂无同步安排，稍后可刷新查看' : '该日期暂无同步安排'}
                   </span>
                 </td>
               </tr>

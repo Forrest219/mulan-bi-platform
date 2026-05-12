@@ -19,6 +19,7 @@ import AppSidebar from './AppSidebar';
 import PageSkeleton from './PageSkeleton';
 import { Suspense } from 'react';
 import { STORAGE_KEY_SIDEBAR_COLLAPSED } from '../../config/menu';
+import HelpAgentDrawer from '../../pages/agents/help-agent/HelpAgentDrawer';
 
 export default function AppShellLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
@@ -31,6 +32,7 @@ export default function AppShellLayout() {
   });
 
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   // 持久化折叠状态
   useEffect(() => {
@@ -114,6 +116,17 @@ export default function AppShellLayout() {
           </Suspense>
         </main>
       </div>
+
+      <button
+        type="button"
+        onClick={() => setHelpOpen(true)}
+        className={`fixed ${isMobile ? 'bottom-20 right-4' : 'bottom-5 right-5'} z-30 w-11 h-11 rounded-full bg-slate-900 text-white shadow-lg flex items-center justify-center hover:bg-slate-800`}
+        title="打开 Help Agent"
+        aria-label="打开 Help Agent"
+      >
+        <i className="ri-question-answer-line text-lg" />
+      </button>
+      <HelpAgentDrawer open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   );
 }

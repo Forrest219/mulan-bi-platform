@@ -258,14 +258,19 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
     >
       {/* Logo + 平台名称 + 折叠按钮 */}
       <div className={`flex items-center px-2 pt-4 pb-2 ${collapsed ? 'flex-col gap-2' : 'justify-between'}`}>
-        <div className="flex items-center gap-2 shrink-0">
+        <Link
+          to="/"
+          aria-label="返回首页"
+          title="返回首页"
+          className="flex items-center gap-2 shrink-0 min-w-0 rounded-lg px-1.5 py-1 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500"
+        >
           <img src={platformSettings.logo_url} alt={platformSettings.platform_name} className="h-7 w-auto object-contain" />
           {!collapsed && (
             <span className={`text-sm font-medium text-slate-700 tracking-wide`}>
               {platformSettings.platform_name}
             </span>
           )}
-        </div>
+        </Link>
 
         <button
           onClick={onToggleCollapse}

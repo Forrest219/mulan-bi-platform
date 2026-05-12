@@ -26,6 +26,20 @@ const CATEGORY_OPTIONS = [
   { value: 'general', label: '通用' },
 ];
 
+const CONFIG_SYNC_MESSAGE = '配置已保存，最多约 10 秒后在所有服务实例生效';
+
+function parseJsonObject(text: string): Record<string, unknown> {
+  const parsed = JSON.parse(text) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('JSON 顶层必须是对象');
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function formatJsonText(text: string): string {
+  return JSON.stringify(parseJsonObject(text), null, 2);
+}
+
 // ── Schema Drawer ─────────────────────────────────────────────────────────────
 
 interface SchemaDrawerProps {
@@ -215,9 +229,9 @@ function PublishVersionModal({ skillId, activeVersion, nextVersionNumber, onClos
     if (!desc.trim()) { setError('请填写 LLM 工具描述'); return; }
     let parsedSchema: Record<string, unknown>;
     try {
-      parsedSchema = JSON.parse(schemaText);
-    } catch {
-      setError('Input Schema 格式不正确，请输入合法 JSON');
+      parsedSchema = parseJsonObject(schemaText);
+    } catch (e) {
+      setError(`Input Schema 格式不正确：${e instanceof Error ? e.message : '未知错误'}`);
       return;
     }
     const payload: PublishVersionPayload = {
@@ -236,6 +250,15 @@ function PublishVersionModal({ skillId, activeVersion, nextVersionNumber, onClos
       setError(e instanceof Error ? e.message : '发布失败');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleFormatJson = () => {
+    try {
+      setSchemaText(formatJsonText(schemaText));
+      setError('');
+    } catch (e) {
+      setError(`Input Schema 格式不正确：${e instanceof Error ? e.message : '未知错误'}`);
     }
   };
 
@@ -267,9 +290,18 @@ function PublishVersionModal({ skillId, activeVersion, nextVersionNumber, onClos
             />
           </div>
           <div>
-            <label className="block text-[12px] font-medium text-slate-600 mb-1">
-              Input Schema（JSON Schema）
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-[12px] font-medium text-slate-600">
+                Input Schema（JSON Schema）
+              </label>
+              <button
+                type="button"
+                onClick={handleFormatJson}
+                className="text-[12px] text-blue-600 hover:text-blue-500 px-2 py-1 rounded hover:bg-blue-50"
+              >
+                格式化 JSON
+              </button>
+            </div>
             <textarea
               value={schemaText}
               onChange={e => setSchemaText(e.target.value)}
@@ -381,6 +413,7 @@ export default function SkillDetailPage() {
   const [skill, setSkill] = useState<SkillDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
 
   // 左侧面板编辑状态
   const [editName, setEditName] = useState('');
@@ -413,12 +446,18 @@ export default function SkillDetailPage() {
 
   useEffect(() => { loadSkill(); }, [loadSkill]);
 
+  const showSuccess = (msg: string) => {
+    setSuccessMsg(msg);
+    setTimeout(() => setSuccessMsg(''), 3000);
+  };
+
   const handlePatch = async (field: string, value: string | boolean) => {
     if (!skillId) return;
     setSavingField(field);
     try {
       const updated = await patchSkill(skillId, { [field]: value } as Parameters<typeof patchSkill>[1]);
       setSkill(prev => prev ? { ...prev, ...updated } : prev);
+      if (field === 'is_enabled') showSuccess(CONFIG_SYNC_MESSAGE);
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存失败');
     } finally {
@@ -498,6 +537,14 @@ export default function SkillDetailPage() {
             <div className="mb-4 px-4 py-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-[13px] flex items-center justify-between">
               <span>{error}</span>
               <button onClick={() => setError('')} className="text-red-400 hover:text-red-600">
+                <i className="ri-close-line" />
+              </button>
+            </div>
+          )}
+          {successMsg && (
+            <div className="mb-4 px-4 py-3 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-[13px] flex items-center justify-between">
+              <span>{successMsg}</span>
+              <button onClick={() => setSuccessMsg('')} className="text-emerald-400 hover:text-emerald-600">
                 <i className="ri-close-line" />
               </button>
             </div>

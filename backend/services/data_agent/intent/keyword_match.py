@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 # 直接查询模式：可被单次 QueryTool 调用回答的问题特征
 DIRECT_QUERY_PATTERNS = [
+    r'(过去|近)\s*几\s*年',                    # 过去几年 / 近几年
     r'过去\s*\d+\s*(年|季度|个月|周)',          # 过去四年 / 过去3个月
     r'\d{4}\s*年',                              # 2021年 / 2024年
     r'(今年|去年|上季度|上月|最近\d)',
@@ -25,6 +26,17 @@ DIRECT_QUERY_PATTERNS = [
     # 简单聚合问法
     r'有多少|多少笔|总计|汇总|统计',
     r'是.*多少|多少.*是',
+]
+
+SUPPORTED_TOPN_DIRECT_PATTERNS = [
+    # 已由 QueryTool deterministic planner 覆盖：年度 TopN 大客户 + 销售额/利润/收入/金额。
+    r'\d{4}\s*年.{0,20}(top\s*\d+|前\s*\d+).{0,20}(大?客户).{0,30}(销售|销售额|收入|利润|金额)',
+    r'(销售|销售额|收入|利润|金额).{0,20}\d{4}\s*年.{0,20}(top\s*\d+|前\s*\d+).{0,20}(大?客户)',
+]
+
+SUPPORTED_CHURN_DIRECT_PATTERNS = [
+    r'\d{4}\s*年.{0,30}(老客户|客户).{0,20}流失.{0,40}(最近一年|近一年|过去一年)',
+    r'(老客户|客户).{0,20}流失.{0,40}\d{4}\s*年.{0,40}(最近一年|近一年|过去一年)',
 ]
 
 # 复杂分析模式：即使匹配到上面的模式，也应走完整 ReAct
@@ -40,7 +52,7 @@ COMPLEX_ANALYSIS_PATTERNS = [
     # 预测/建议 — 生成性分析
     r'预测|建议|改善|提升|优化',
     # 异常/发现问题
-    r'异常|问题|故障|发现',
+    r'异常|问题|故障|发现|流失|留存|定义',
     # 报表生成 — 复杂输出
     r'生成报表|生成报告|做个报表|输出一张报表',
     # 特定分析短语
@@ -49,6 +61,16 @@ COMPLEX_ANALYSIS_PATTERNS = [
     # 占比/同比/环比/top/排名 — 需二次计算或排序
     r'占比|同比|环比|增长率|增幅',
     r'\btop\s*\d+|排名|排序|第.\d?名',
+]
+
+# Schema / metadata questions must not use the direct query fast path.
+# Asset names may contain metric-looking words such as "summary" / "汇总",
+# but questions about fields or table structure should route through schema.
+SCHEMA_METADATA_PATTERNS = [
+    r'字段|栏位|列名|列\b|表结构|结构信息|schema|元数据|数据资产',
+    r'有哪些.{0,12}(字段|列)',
+    r'(字段|列).{0,12}有哪些',
+    r'(查看|查询|展示|列出).{0,20}(字段|列|表结构|schema|元数据)',
 ]
 
 
@@ -86,6 +108,15 @@ def is_direct_query(question: str) -> bool:
     复杂分析关键词（为什么/原因/归因）优先级更高，命中则返回 False。
     """
     normalized = _normalize(question)
+    for pattern in SCHEMA_METADATA_PATTERNS:
+        if re.search(pattern, normalized):
+            return False
+    for pattern in SUPPORTED_TOPN_DIRECT_PATTERNS:
+        if re.search(pattern, normalized):
+            return True
+    for pattern in SUPPORTED_CHURN_DIRECT_PATTERNS:
+        if re.search(pattern, normalized):
+            return True
     for pattern in COMPLEX_ANALYSIS_PATTERNS:
         if re.search(pattern, normalized):
             return False

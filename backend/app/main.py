@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.errors import MulanError
 
-from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm, health_scan, tasks, notifications, events, knowledge_base, search, conversations, chat, ask_data, query, platform_settings
+from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm, health_scan, tasks, notifications, events, knowledge_base, search, conversations, chat, ask_data, query, platform_settings, help_agent
 from app.api.agent import router as data_agent_router
 from services.data_agent.routes.causation import router as causation_router
 from services.data_agent.routes.dau_churn import router as dau_churn_router
@@ -86,6 +86,7 @@ app.include_router(chat.router)  # Gap-05: /api/chat/stream (SSE), prefix 已在
 app.include_router(ask_data.router)  # prefix/tags 已在 router 内定义
 app.include_router(query.router, prefix="/api/query", tags=["问数 Query"])
 app.include_router(data_agent_router)  # prefix="/api/agent" 已在 router 内部定义
+app.include_router(help_agent.router)  # prefix="/api/help-agent" 已在 router 内部定义
 app.include_router(causation_router)   # prefix="/api/data-agent/causation" 已在 router 内部定义
 app.include_router(dau_churn_router)  # prefix="/api/data-agent/dau-churn" 已在 router 内部定义
 from app.api import query_admin

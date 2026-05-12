@@ -141,6 +141,15 @@ class TableauSyncService:
 
         synced_ids = {"workbook": [], "dashboard": [], "view": [], "datasource": []}
         errors = []
+        field_sync = {
+            "attempted": 0,
+            "succeeded": 0,
+            "empty": 0,
+            "failed": 0,
+            "fields_upserted": 0,
+            "empty_datasources": [],
+            "failed_datasources": [],
+        }
 
         # --- Workbooks ---
         try:
@@ -679,6 +688,15 @@ class TableauRestSyncService:
 
         synced_ids = {"workbook": [], "dashboard": [], "view": [], "datasource": []}
         errors = []
+        field_sync = {
+            "attempted": 0,
+            "succeeded": 0,
+            "empty": 0,
+            "failed": 0,
+            "fields_upserted": 0,
+            "empty_datasources": [],
+            "failed_datasources": [],
+        }
 
         # --- Workbooks ---
         try:
@@ -783,15 +801,29 @@ class TableauRestSyncService:
                 synced_ids["datasource"].append(ds_id)
 
                 # Step 5: 拉取字段级元数据（Spec 07 §4.1.2 P0 修复）
+                field_sync["attempted"] += 1
                 try:
                     raw_fields = self._get_datasource_fields(ds_id)
-                    if raw_fields:
-                        parsed_fields = [self._parse_field_metadata(f) for f in raw_fields]
-                        if parsed_fields:
-                            db.upsert_datasource_fields(asset.id, ds_id, parsed_fields)
-                            logger.info("REST sync: upserted %d fields for datasource %s", len(parsed_fields), ds_id)
+                    parsed_fields = [self._parse_field_metadata(f) for f in raw_fields] if raw_fields else []
+                    if parsed_fields:
+                        db.upsert_datasource_fields(asset.id, ds_id, parsed_fields)
+                        asset.field_count = len(parsed_fields)
+                        db.session.commit()
+                        field_sync["succeeded"] += 1
+                        field_sync["fields_upserted"] += len(parsed_fields)
+                        logger.info("REST sync: upserted %d fields for datasource %s", len(parsed_fields), ds_id)
+                    else:
+                        asset.field_count = 0
+                        db.session.commit()
+                        field_sync["empty"] += 1
+                        if len(field_sync["empty_datasources"]) < 20:
+                            field_sync["empty_datasources"].append({"id": ds_id, "name": asset.name})
+                        logger.warning("REST sync: datasource %s (%s) returned no fields", ds_id, asset.name)
                 except Exception as field_err:
                     logger.warning("REST datasource fields sync error for %s: %s", ds_id, field_err)
+                    field_sync["failed"] += 1
+                    if len(field_sync["failed_datasources"]) < 20:
+                        field_sync["failed_datasources"].append({"id": ds_id, "name": asset.name, "error": str(field_err)})
                     errors.append(f"Datasource {ds_id} fields: {field_err}")
 
         except Exception as e:
@@ -813,6 +845,8 @@ class TableauRestSyncService:
 
         duration_sec = int(time.time() - start_time)
         total = len(all_ids)
+        if field_sync["attempted"] > 0 and field_sync["succeeded"] == 0 and field_sync["empty"] > 0:
+            errors.append(f"Datasource field sync returned no fields for all {field_sync['empty']} datasources")
         status = "success" if not errors else ("partial" if total > 0 else "failed")
         error_msg = "\n".join(errors) if errors else None
 
@@ -831,7 +865,10 @@ class TableauRestSyncService:
                 "fields_added": fields_added,
                 "fields_deleted": fields_deleted,
                 "fields_total": current_total,
+                "field_sync": field_sync,
             }
+        elif field_sync["attempted"]:
+            sync_details = {"field_sync": field_sync}
 
         db.finish_sync_log(
             sync_log.id,

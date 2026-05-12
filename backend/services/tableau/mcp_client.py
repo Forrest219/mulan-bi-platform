@@ -32,7 +32,7 @@ from services.common.settings import (
     get_tableau_mcp_server_url,
     get_tableau_mcp_protocol_version,
 )
-from services.tableau.models import TableauConnection, TableauAsset
+from services.tableau.models import TableauConnection, TableauAsset, TableauDatabase
 
 
 class _CachedTableauConnection:
@@ -72,6 +72,8 @@ class _CachedTableauConnection:
 
 
 logger = logging.getLogger(__name__)
+
+_MULAN_MCP_TIMEOUT_HEADER = "X-Mulan-MCP-Timeout"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # connection_id 上下文变量（约束 D：跨协程传递租户上下文）
@@ -328,6 +330,10 @@ def _post_mcp(
     """
     url = base_url if base_url else get_tableau_mcp_server_url()
     headers = _build_headers(with_session=True, session_state=session_state, jwt_token=jwt_token)
+    # Keep the gateway-side tool timeout slightly below the HTTP read timeout.
+    # Otherwise a client-side timeout can leave the gateway proxy locked until
+    # its own longer default timeout expires, making the next ask look hung.
+    headers[_MULAN_MCP_TIMEOUT_HEADER] = str(max(1, int(timeout) - 1))
     last_error: Optional[Exception] = None
 
     for attempt in range(2):
@@ -895,13 +901,13 @@ class TableauMCPClient:
             session_state = _get_or_create_session_state(site_key)
             effective_base_url = _get_effective_mcp_base_url(conn_record)
 
-            # 尝试调用 list_datasources 工具
+            # 官方 Tableau MCP 工具名使用连字符。
             payload = {
                 "jsonrpc": "2.0",
                 "id": _next_id(),
                 "method": "tools/call",
                 "params": {
-                    "name": "list_datasources",
+                    "name": "list-datasources",
                     "arguments": {"limit": limit},
                 },
             }
@@ -915,19 +921,12 @@ class TableauMCPClient:
                 jwt_token=jwt_token,
             )
 
-            parsed = self._parse_jsonrpc_response(response)
-            # 标准化返回格式
-            content = parsed.get("content", [])
-            text = _extract_text(content)
-            if text:
-                try:
-                    data = json.loads(text)
-                    if isinstance(data, dict) and "datasources" in data:
-                        return data
-                except json.JSONDecodeError:
-                    pass
-            # 如果解析失败，返回原始内容
-            return {"datasources": [], "raw": parsed}
+            data = _parse_tool_json_text(response, tool_name="list-datasources")
+            if isinstance(data, dict) and isinstance(data.get("datasources"), list):
+                return data
+            if isinstance(data, list):
+                return {"datasources": data}
+            return {"datasources": [], "raw": data}
         finally:
             _connection_id_var.reset(token)
 
@@ -1113,9 +1112,10 @@ class TableauMCPClient:
         """
         if "error" in body:
             err = body["error"]
+            message = err.get("message", "MCP 返回错误")
             raise TableauMCPError(
-                code=_map_mcp_error(err.get("code")),
-                message=err.get("message", "MCP 返回错误"),
+                code=_map_mcp_error(err.get("code"), message=message),
+                message=message,
                 details=err.get("data", {}),
             )
 
@@ -1142,14 +1142,13 @@ class TableauMCPClient:
                 details={"raw": text_payload[:500], "json_error": str(e)},
             )
 
-        # data 期望结构 {"fields": [...], "rows": [[...]]}
         if not isinstance(data, dict):
             raise TableauMCPError(
                 code="NLQ_006",
                 message="query-datasource 返回值不是对象",
                 details={"type": type(data).__name__},
             )
-        return data
+        return _normalize_query_datasource_result(data)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1162,15 +1161,76 @@ def _extract_text(content: list) -> str:
     return "".join(parts)
 
 
-def _map_mcp_error(code: Any) -> str:
+def _parse_tool_json_text(body: dict, tool_name: str) -> Any:
+    """Parse a generic MCP tools/call JSON text payload."""
+    if "error" in body:
+        err = body["error"]
+        message = err.get("message", "MCP 返回错误")
+        raise TableauMCPError(
+            code=_map_mcp_error(err.get("code"), message=message),
+            message=message,
+            details=err.get("data", {}),
+        )
+
+    result = body.get("result", {})
+    if result.get("isError"):
+        error_text = _extract_text(result.get("content", []))
+        raise TableauMCPError(
+            code="NLQ_006",
+            message=f"MCP 工具执行失败: {error_text[:200]}",
+            details={"tool": tool_name, "raw": error_text[:500]},
+        )
+
+    text_payload = _extract_text(result.get("content", []))
+    try:
+        return json.loads(text_payload)
+    except json.JSONDecodeError as e:
+        raise TableauMCPError(
+            code="NLQ_006",
+            message=f"{tool_name} 返回非 JSON 文本",
+            details={"raw": text_payload[:500], "json_error": str(e)},
+        )
+
+
+def _normalize_query_datasource_result(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize official Tableau MCP query-datasource results.
+
+    Current @tableau/mcp-server returns {"data": [{"field": value, ...}]} while
+    older Mulan code expects {"fields": [...], "rows": [[...]]}. Preserve the
+    original data array and add the tabular shape for downstream renderers.
+    """
+    if "rows" in data or "fields" in data:
+        return data
+
+    records = data.get("data")
+    if not isinstance(records, list):
+        return data
+
+    if not records:
+        return {**data, "fields": [], "rows": []}
+
+    if not all(isinstance(record, dict) for record in records):
+        return data
+
+    fields = list(records[0].keys())
+    rows = [[record.get(field) for field in fields] for record in records]
+    return {**data, "fields": fields, "rows": rows}
+
+
+def _map_mcp_error(code: Any, message: str = "") -> str:
     """
     将 MCP 错误码映射为 NLQ 系列错误码。
 
     规则：
         - Tableau/LLM 相关错误 → NLQ_006
+        - 超时 → NLQ_007
         - 权限/不存在 → NLQ_009
         - 其他 → NLQ_006
     """
+    message_lower = message.lower()
+    if "timeout" in message_lower or "timed out" in message_lower or "超时" in message:
+        return "NLQ_007"
     if code is None:
         return "NLQ_006"
     code_str = str(code)

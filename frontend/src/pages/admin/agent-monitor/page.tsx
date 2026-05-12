@@ -19,6 +19,7 @@ import {
   type AgentSessionItem,
 } from '../../../api/agent';
 import { API_BASE } from '../../../config';
+import InlineDiagnosticPanel from '../../agents/help-agent/InlineDiagnosticPanel';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -130,6 +131,61 @@ function formatMs(ms: number | null): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+function formatStepMs(step: AgentStep): string {
+  const value = formatMs(step.execution_time_ms);
+  return step.duration_source === 'derived' && value !== '-' ? `≈${value}` : value;
+}
+
+function stepDurationTitle(step: AgentStep): string {
+  if (step.duration_source === 'recorded') return '真实记录耗时';
+  if (step.duration_source === 'derived') return '历史记录按步骤时间戳推导';
+  return '无耗时记录';
+}
+
+function stepDurationClass(ms: number | null): string {
+  if (ms === null || ms === undefined) return 'text-slate-300';
+  if (ms >= 15000) return 'text-red-600 bg-red-50';
+  if (ms >= 5000) return 'text-amber-700 bg-amber-50';
+  return 'text-slate-500 bg-slate-50';
+}
+
+function StepDurationSummary({ steps, totalMs }: { steps: AgentStep[]; totalMs: number | null }) {
+  const timedSteps = steps.filter((step) => step.execution_time_ms !== null && step.execution_time_ms !== undefined);
+  const slowest = timedSteps.reduce<AgentStep | null>((current, step) => {
+    if (!current) return step;
+    return (step.execution_time_ms ?? 0) > (current.execution_time_ms ?? 0) ? step : current;
+  }, null);
+  const thinkingMs = timedSteps
+    .filter((step) => step.step_type === 'thinking')
+    .reduce((sum, step) => sum + (step.execution_time_ms ?? 0), 0);
+  const toolMs = timedSteps
+    .filter((step) => step.step_type === 'tool_result')
+    .reduce((sum, step) => sum + (step.execution_time_ms ?? 0), 0);
+
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+      <div className="bg-white border border-slate-200 rounded-lg px-3 py-2">
+        <div className="text-[11px] text-slate-400">总耗时</div>
+        <div className="text-sm font-semibold text-slate-700">{formatMs(totalMs)}</div>
+      </div>
+      <div className="bg-white border border-slate-200 rounded-lg px-3 py-2">
+        <div className="text-[11px] text-slate-400">最慢步骤</div>
+        <div className="text-sm font-semibold text-slate-700">
+          {slowest ? `#${slowest.step_number} ${formatStepMs(slowest)}` : '-'}
+        </div>
+      </div>
+      <div className="bg-white border border-slate-200 rounded-lg px-3 py-2">
+        <div className="text-[11px] text-slate-400">Thinking</div>
+        <div className="text-sm font-semibold text-slate-700">{formatMs(thinkingMs)}</div>
+      </div>
+      <div className="bg-white border border-slate-200 rounded-lg px-3 py-2">
+        <div className="text-[11px] text-slate-400">工具执行</div>
+        <div className="text-sm font-semibold text-slate-700">{formatMs(toolMs)}</div>
+      </div>
+    </div>
+  );
+}
+
 function statusBadge(status: string) {
   const map: Record<string, { bg: string; text: string; label: string }> = {
     running: { bg: 'bg-blue-50', text: 'text-blue-700', label: '运行中' },
@@ -172,6 +228,7 @@ export default function AgentMonitorPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [offset, setOffset] = useState(0);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [diagnosticRunId, setDiagnosticRunId] = useState<string | null>(null);
   const [steps, setSteps] = useState<AgentStep[]>([]);
   const [stepsLoading, setStepsLoading] = useState(false);
 
@@ -328,6 +385,7 @@ export default function AgentMonitorPage() {
   const toggleExpand = (runId: string) => {
     if (expandedRunId === runId) {
       setExpandedRunId(null);
+      setDiagnosticRunId(null);
       setSteps([]);
     } else {
       setExpandedRunId(runId);
@@ -340,6 +398,7 @@ export default function AgentMonitorPage() {
     setStatusFilter(s);
     setOffset(0);
     setExpandedRunId(null);
+    setDiagnosticRunId(null);
     setSteps([]);
   };
 
@@ -756,13 +815,24 @@ export default function AgentMonitorPage() {
                           <tr>
                             <td colSpan={8} className="px-0 py-0">
                               <div className="bg-slate-50/80 border-t border-slate-200 px-6 py-4">
-                                <h4 className="text-xs font-semibold text-slate-500 mb-3">执行步骤</h4>
+                                <div className="flex items-center justify-between gap-3 mb-3">
+                                  <h4 className="text-xs font-semibold text-slate-500">执行步骤</h4>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDiagnosticRunId((current) => (current === run.id ? null : run.id))}
+                                    className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                                  >
+                                    <i className="ri-stethoscope-line" />
+                                    诊断
+                                  </button>
+                                </div>
                                 {stepsLoading ? (
                                   <div className="text-sm text-slate-400 py-2">加载中...</div>
                                 ) : steps.length === 0 ? (
                                   <div className="text-sm text-slate-400 py-2">暂无步骤记录</div>
                                 ) : (
                                   <div className="space-y-2">
+                                    <StepDurationSummary steps={steps} totalMs={run.execution_time_ms} />
                                     {steps.map((step) => (
                                       <div key={step.id} className="bg-white rounded-lg border border-slate-200 p-3">
                                         <div className="flex items-center gap-3 mb-1.5">
@@ -773,7 +843,12 @@ export default function AgentMonitorPage() {
                                               {step.tool_name}
                                             </span>
                                           )}
-                                          <span className="text-xs text-slate-400 ml-auto">{formatMs(step.execution_time_ms)}</span>
+                                          <span
+                                            className={`text-xs px-1.5 py-0.5 rounded ml-auto ${stepDurationClass(step.execution_time_ms)}`}
+                                            title={stepDurationTitle(step)}
+                                          >
+                                            {formatStepMs(step)}
+                                          </span>
                                         </div>
                                         {step.content && (
                                           <div className="text-xs text-slate-600 ml-9 whitespace-pre-wrap break-words max-h-32 overflow-y-auto">
@@ -788,6 +863,13 @@ export default function AgentMonitorPage() {
                                       </div>
                                     ))}
                                   </div>
+                                )}
+                                {diagnosticRunId === run.id && (
+                                  <InlineDiagnosticPanel
+                                    runId={run.id}
+                                    defaultQuestion="请诊断这个 run 的失败原因和耗时瓶颈。"
+                                    visibleState={{ status: run.status, expanded: true }}
+                                  />
                                 )}
                               </div>
                             </td>

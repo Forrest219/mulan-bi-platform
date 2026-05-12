@@ -1178,10 +1178,10 @@ function GlossaryTab({ canWrite }: { canWrite: boolean }) {
 
 type TabId = 'docs' | 'rag' | 'glossary';
 
-const TABS: { id: TabId; label: string; icon: string }[] = [
-  { id: 'docs',     label: '文档库',   icon: 'ri-file-list-3-line' },
-  { id: 'rag',      label: '语义检索', icon: 'ri-search-eye-line' },
-  { id: 'glossary', label: '术语表',   icon: 'ri-book-2-line' },
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'docs',     label: '文档库' },
+  { id: 'rag',      label: '语义检索' },
+  { id: 'glossary', label: '术语表' },
 ];
 
 export default function KnowledgePage() {
@@ -1206,18 +1206,18 @@ export default function KnowledgePage() {
       {/* Filter strip */}
       <div className="bg-white border-b border-slate-100 px-8">
         <div className="max-w-6xl mx-auto">
-          <div className="flex items-center gap-2 py-2">
+          <div className="flex gap-1 py-2">
             {TABS.map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1 px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
+                className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
                   activeTab === tab.id
                     ? 'bg-slate-800 text-white'
                     : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
                 }`}
               >
-                <i className={tab.icon} />{tab.label}
+                {tab.label}
               </button>
             ))}
           </div>

@@ -23,8 +23,8 @@ def _criterion_value(criteria, column_key):
 
 def _mock_tableau_schema_db(connection=None, assets=None, fields=None):
     """Mock enough of Session.query for Tableau schema lookups."""
-    assets = assets or []
-    fields = fields or []
+    assets = [] if assets is None else assets
+    fields = [] if fields is None else fields
 
     class MockQuery:
         def __init__(self, model):
@@ -138,10 +138,15 @@ class TestSchemaTool:
         assert result.data["tables"][0]["name"] == "orders-订单明细表"
         assert result.data["asset_summary"] == {"datasource": 1}
 
-    def test_tableau_table_name_matches_asset_suffix_with_empty_fields_warning(self, tool):
+    def test_tableau_table_name_matches_asset_suffix_with_empty_fields_warning(self, tool, monkeypatch):
         """table_name='订单明细表' 应匹配 TableauAsset.name='orders-订单明细表'。"""
         asset = _tableau_asset()
         mock_db = _mock_tableau_schema_db(assets=[asset], fields=[])
+        monkeypatch.setattr(
+            tool,
+            "_sync_missing_tableau_fields",
+            lambda db, tc, asset: {"synced": 0, "error": "Tableau 未返回字段列表"},
+        )
 
         data = tool._query_tableau_schema(
             mock_db,
@@ -153,7 +158,38 @@ class TestSchemaTool:
         assert data["fields"] == {"orders-订单明细表": []}
         assert data["matched_asset"]["name"] == "orders-订单明细表"
         assert data["field_count"] == 0
-        assert data["warning"] == "已匹配到 Tableau 资产，但未同步到字段元数据"
+        assert data["warning"] == "已匹配到 Tableau 资产，但自动同步字段元数据未返回字段：Tableau 未返回字段列表"
+
+    def test_tableau_empty_fields_auto_syncs_before_return(self, tool, monkeypatch):
+        asset = _tableau_asset()
+        synced_field = TableauDatasourceField(
+            asset_id=asset.id,
+            datasource_luid=asset.tableau_id,
+            field_name="[销售额]",
+            field_caption="销售额",
+            data_type="real",
+            role="measure",
+            is_calculated=False,
+        )
+        fields = []
+        mock_db = _mock_tableau_schema_db(assets=[asset], fields=fields)
+
+        def fake_sync(db, tc, matched_asset):
+            fields.append(synced_field)
+            return {"synced": 1}
+
+        monkeypatch.setattr(tool, "_sync_missing_tableau_fields", fake_sync)
+
+        data = tool._query_tableau_schema(
+            mock_db,
+            _tableau_connection(),
+            table_name="订单明细表",
+            limit=100,
+        )
+
+        assert data["fields"]["orders-订单明细表"][0]["caption"] == "销售额"
+        assert data["field_count"] == 1
+        assert "warning" not in data
 
     def test_tableau_exact_match_returns_fields(self, tool):
         asset = _tableau_asset()

@@ -8,7 +8,7 @@ QueryTool 集成测试
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from services.data_agent.tools.query_tool import QueryTool
+from services.data_agent.tools.query_tool import QueryTool, _build_customer_churn_vizqls, _build_direct_vizql
 from services.data_agent.tool_base import ToolContext, ToolResult
 from services.llm.nlq_service import NLQError
 
@@ -75,6 +75,219 @@ class TestQueryTool:
         # 应返回错误，因为没有可用数据源
         assert result.success is False
         assert "数据源" in result.error or "datasource" in result.error.lower()
+
+    def test_direct_vizql_trend_adds_date_dimension_and_maps_synonyms(self):
+        vizql = _build_direct_vizql(
+            "过去四年的销售额、利润趋势如何？",
+            ["订单日期", "净额", "利润金额", "毛额"],
+        )
+
+        assert vizql == {
+            "fields": [
+                {"fieldCaption": "订单日期", "function": "YEAR"},
+                {"fieldCaption": "净额", "function": "SUM", "fieldAlias": "销售额"},
+                {"fieldCaption": "利润金额", "function": "SUM", "fieldAlias": "利润"},
+            ],
+            "filters": [
+                {
+                    "field": {"fieldCaption": "订单日期"},
+                    "filterType": "DATE",
+                    "dateRangeType": "LASTN",
+                    "periodType": "YEARS",
+                    "rangeN": 4,
+                }
+            ],
+        }
+
+    def test_direct_vizql_counts_distinct_channels(self):
+        vizql = _build_direct_vizql(
+            "我们有多少个渠道？",
+            ["订单日期", "渠道名称", "净额", "利润金额"],
+        )
+
+        assert vizql == {
+            "fields": [{"fieldCaption": "渠道名称", "function": "COUNTD"}],
+            "filters": [],
+        }
+
+    def test_direct_vizql_channel_profit_by_year_for_past_few_years(self):
+        vizql = _build_direct_vizql(
+            "这些渠道过去几年的利润情况如何？",
+            ["订单日期", "渠道名称", "净额", "利润金额"],
+        )
+
+        assert vizql == {
+            "fields": [
+                {"fieldCaption": "订单日期", "function": "YEAR"},
+                {"fieldCaption": "渠道名称"},
+                {"fieldCaption": "利润金额", "function": "SUM", "fieldAlias": "利润"},
+            ],
+            "filters": [
+                {
+                    "field": {"fieldCaption": "订单日期"},
+                    "filterType": "DATE",
+                    "dateRangeType": "LASTN",
+                    "periodType": "YEARS",
+                    "rangeN": 4,
+                }
+            ],
+        }
+
+    def test_direct_vizql_channel_profit_increasing_uses_year_channel_profit(self):
+        vizql = _build_direct_vizql(
+            "哪些渠道过去几年的利润一直在涨？",
+            ["订单日期", "渠道名称", "净额", "利润金额"],
+        )
+
+        assert vizql["fields"] == [
+            {"fieldCaption": "订单日期", "function": "YEAR"},
+            {"fieldCaption": "渠道名称"},
+            {"fieldCaption": "利润金额", "function": "SUM", "fieldAlias": "利润"},
+        ]
+        assert vizql["filters"][0]["filterType"] == "DATE"
+        assert vizql["filters"][0]["dateRangeType"] == "LASTN"
+
+    def test_direct_vizql_2024_top10_customers_uses_date_range_and_sortable_sales(self):
+        vizql = _build_direct_vizql(
+            "2024 年 Top10 大客户及占比",
+            ["订单日期", "客户名称", "渠道名称", "净额", "利润金额"],
+        )
+
+        assert vizql == {
+            "fields": [
+                {"fieldCaption": "客户名称"},
+                {
+                    "fieldCaption": "净额",
+                    "function": "SUM",
+                    "sortDirection": "DESC",
+                    "sortPriority": 1,
+                },
+            ],
+            "filters": [
+                {
+                    "field": {"fieldCaption": "订单日期"},
+                    "filterType": "QUANTITATIVE_DATE",
+                    "quantitativeFilterType": "RANGE",
+                    "minDate": "2024-01-01",
+                    "maxDate": "2024-12-31",
+                }
+            ],
+        }
+
+    def test_customer_churn_builds_base_and_recent_queries(self):
+        plan = _build_customer_churn_vizqls(
+            "哪些 2021 年的老客户流失了（定义 2021 年有订单，但最近一年没有订单）？",
+            ["订单日期", "客户ID", "净额"],
+        )
+
+        assert plan == {
+            "year": 2021,
+            "customer_field": "客户ID",
+            "base_vizql": {
+                "fields": [{"fieldCaption": "客户ID"}],
+                "filters": [
+                    {
+                        "field": {"fieldCaption": "订单日期"},
+                        "filterType": "QUANTITATIVE_DATE",
+                        "quantitativeFilterType": "RANGE",
+                        "minDate": "2021-01-01",
+                        "maxDate": "2021-12-31",
+                    }
+                ],
+            },
+            "recent_vizql": {
+                "fields": [{"fieldCaption": "客户ID"}],
+                "filters": [
+                    {
+                        "field": {"fieldCaption": "订单日期"},
+                        "filterType": "DATE",
+                        "dateRangeType": "LASTN",
+                        "periodType": "YEARS",
+                        "rangeN": 1,
+                    }
+                ],
+            },
+        }
+
+    @pytest.mark.asyncio
+    async def test_direct_path_channel_count_does_not_call_llm(self, tool, tool_context):
+        mock_ds_info = {
+            "luid": "test-luid",
+            "name": "test-datasource",
+            "asset_id": 123,
+        }
+
+        with patch("services.data_agent.tools.query_tool.route_datasource", return_value=mock_ds_info):
+            with patch("services.data_agent.tools.query_tool.get_datasource_fields_cached", return_value=["订单日期", "渠道名称", "净额"]):
+                with patch("services.data_agent.tools.query_tool.one_pass_llm", new_callable=AsyncMock) as mock_nlq:
+                    with patch("services.data_agent.tools.query_tool.execute_query", new_callable=AsyncMock) as mock_exec:
+                        mock_exec.return_value = {"fields": ["COUNTD(渠道名称)"], "rows": [[4]]}
+
+                        result = await tool.execute({"question": "我们有多少个渠道？"}, tool_context)
+
+        assert result.success is True
+        mock_nlq.assert_not_called()
+        called_vizql = mock_exec.call_args.kwargs["vizql_json"]
+        assert called_vizql == {
+            "fields": [{"fieldCaption": "渠道名称", "function": "COUNTD"}],
+            "filters": [],
+        }
+
+    @pytest.mark.asyncio
+    async def test_direct_path_top10_customers_sorts_and_calculates_share_locally(self, tool, tool_context):
+        mock_ds_info = {
+            "luid": "test-luid",
+            "name": "test-datasource",
+            "asset_id": 123,
+        }
+
+        rows = [
+            ["客户B", 30],
+            ["客户A", 70],
+            ["客户C", 10],
+        ]
+
+        with patch("services.data_agent.tools.query_tool.route_datasource", return_value=mock_ds_info):
+            with patch("services.data_agent.tools.query_tool.get_datasource_fields_cached", return_value=["订单日期", "客户名称", "净额"]):
+                with patch("services.data_agent.tools.query_tool.one_pass_llm", new_callable=AsyncMock) as mock_nlq:
+                    with patch("services.data_agent.tools.query_tool.execute_query", new_callable=AsyncMock) as mock_exec:
+                        mock_exec.return_value = {"fields": ["客户名称", "净额"], "rows": rows}
+
+                        result = await tool.execute({"question": "2024 年 Top2 大客户及占比"}, tool_context)
+
+        assert result.success is True
+        mock_nlq.assert_not_called()
+        assert result.data["fields"] == ["客户名称", "净额", "占比"]
+        assert result.data["rows"] == [["客户A", 70, 70 / 110], ["客户B", 30, 30 / 110]]
+        assert result.data["top_n"] == 2
+        assert result.data["share_calculated"] is True
+
+    @pytest.mark.asyncio
+    async def test_direct_path_customer_churn_calculates_set_difference(self, tool, tool_context):
+        mock_ds_info = {
+            "luid": "test-luid",
+            "name": "test-datasource",
+            "asset_id": 123,
+        }
+
+        with patch("services.data_agent.tools.query_tool.route_datasource", return_value=mock_ds_info):
+            with patch("services.data_agent.tools.query_tool.get_datasource_fields_cached", return_value=["订单日期", "客户ID", "净额"]):
+                with patch("services.data_agent.tools.query_tool.execute_query") as mock_exec:
+                    mock_exec.side_effect = [
+                        {"fields": ["客户ID"], "rows": [["C1"], ["C2"], ["C3"]]},
+                        {"fields": ["客户ID"], "rows": [["C2"]]},
+                    ]
+
+                    result = await tool.execute(
+                        {"question": "哪些 2021 年的老客户流失了（定义 2021 年有订单，但最近一年没有订单）？"},
+                        tool_context,
+                    )
+
+        assert result.success is True
+        assert result.data["fields"] == ["客户ID"]
+        assert result.data["rows"] == [["C1"], ["C3"]]
+        assert result.data["customer_churn"]["base_year"] == 2021
+        assert result.data["customer_churn"]["churned_customer_count"] == 2
 
     # =============================================================================
     # TC-QUERY-004: route_datasource 失败

@@ -84,7 +84,28 @@ class AgentStepItem(BaseModel):
     tool_result_summary: Optional[str] = None
     content: Optional[str] = None
     execution_time_ms: Optional[int] = None
+    duration_source: str = "none"  # recorded | derived | none
     created_at: Optional[str] = None
+
+
+def _resolve_step_duration_ms(
+    run: BiAgentRun,
+    step: BiAgentStep,
+    previous_step: Optional[BiAgentStep],
+) -> tuple[Optional[int], str]:
+    """Return recorded step duration, or derive a best-effort value for old rows."""
+    if step.execution_time_ms is not None:
+        return step.execution_time_ms, "recorded"
+
+    started_at = previous_step.created_at if previous_step else run.created_at
+    ended_at = step.created_at
+    if not started_at or not ended_at:
+        return None, "none"
+
+    duration_ms = int((ended_at - started_at).total_seconds() * 1000)
+    if duration_ms < 0:
+        return None, "none"
+    return duration_ms, "derived"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -315,8 +336,11 @@ def get_run_steps(
         .all()
     )
 
-    return [
-        AgentStepItem(
+    items: List[AgentStepItem] = []
+    previous_step: Optional[BiAgentStep] = None
+    for step in steps:
+        execution_time_ms, duration_source = _resolve_step_duration_ms(run, step, previous_step)
+        items.append(AgentStepItem(
             id=step.id,
             run_id=str(step.run_id),
             step_number=step.step_number,
@@ -325,11 +349,13 @@ def get_run_steps(
             tool_params=step.tool_params,
             tool_result_summary=step.tool_result_summary,
             content=step.content,
-            execution_time_ms=step.execution_time_ms,
+            execution_time_ms=execution_time_ms,
+            duration_source=duration_source,
             created_at=step.created_at.isoformat() if step.created_at else None,
-        )
-        for step in steps
-    ]
+        ))
+        previous_step = step
+
+    return items
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -177,6 +177,12 @@ export const menuConfig: MenuDomain[] = [
         path: '/agents/metrics',
       },
       {
+        key: 'help-agent',
+        label: 'Help Agent',
+        icon: 'ri-question-answer-line',
+        path: '/agents/help',
+      },
+      {
         key: 'agent-monitor',
         label: 'Agent 监控',
         icon: 'ri-eye-line',

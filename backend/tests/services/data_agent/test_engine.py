@@ -396,3 +396,121 @@ async def test_schema_inventory_question_does_not_preload_single_datasource(
     assert route_mock.call_count == 0
     assert fields_mock.call_count == 0
     assert any(e.type == "tool_call" and e.content.get("tool") == "schema" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_schema_tool_result_is_rendered_without_second_llm_or_invented_meanings(
+    mock_llm,
+    tool_context,
+):
+    """SchemaTool 字段结果应确定性渲染，不能让 LLM 给字段补业务说明。"""
+
+    class MockSchemaTool(BaseTool):
+        name = "schema"
+        description = "查询字段"
+        parameters_schema = {"type": "object"}
+
+        async def execute(self, params, context):
+            return ToolResult(
+                success=True,
+                data={
+                    "requested_table_name": "bidm_ai_metric_summary_mth",
+                    "matched_asset": {
+                        "name": "bidm_ai_metric_summary_mth-月度指标汇总表",
+                        "type": "datasource",
+                        "web_url": "https://example.test/datasource",
+                    },
+                    "field_count": 2,
+                    "fields": {
+                        "bidm_ai_metric_summary_mth-月度指标汇总表": [
+                            {
+                                "name": "净额",
+                                "caption": "",
+                                "data_type": "",
+                                "role": "",
+                                "is_calculated": False,
+                            },
+                            {
+                                "name": "统计月份",
+                                "caption": "",
+                                "data_type": "",
+                                "role": "",
+                                "is_calculated": False,
+                            },
+                        ]
+                    },
+                    "tables": [
+                        {
+                            "name": "bidm_ai_metric_summary_mth-月度指标汇总表",
+                            "type": "datasource",
+                            "web_url": "https://example.test/datasource",
+                        }
+                    ],
+                },
+            )
+
+    reg = ToolRegistry()
+    reg.register(MockSchemaTool())
+    engine = ReActEngine(registry=reg, llm_service=mock_llm, max_steps=10)
+    mock_llm.complete = AsyncMock(return_value={
+        "action": "tool_call",
+        "tool_name": "schema",
+        "tool_params": {"table_name": "bidm_ai_metric_summary_mth"},
+        "reasoning": "用户询问字段，应查询 schema",
+    })
+
+    events = [
+        e
+        async for e in engine.run(
+            "请查看 Tableau 数据资产 bidm_ai_metric_summary_mth-月度指标汇总表 有哪些字段？",
+            tool_context,
+        )
+    ]
+
+    event_types = [e.type for e in events]
+    answer = next(e.content for e in events if e.type == "answer")
+
+    assert event_types == ["thinking", "tool_call", "tool_result", "answer"]
+    assert mock_llm.complete.call_count == 1
+    assert "净额" in answer
+    assert "统计月份" in answer
+    assert "销售总额" not in answer
+    assert "时间维度" not in answer
+    assert "资产链接：https://example.test/datasource" in answer
+
+
+@pytest.mark.asyncio
+async def test_force_first_query_failure_returns_terminal_error(mock_registry, mock_llm, tool_context):
+    """强制首步 query 超时时必须返回 error，不能让前端一直等待。"""
+
+    class TimeoutQueryTool(BaseTool):
+        name = "query"
+        description = "查询数据"
+        parameters_schema = {"type": "object"}
+
+        async def execute(self, params, context):
+            return ToolResult(success=False, error="[NLQ_007] MCP 查询超时（30s）")
+
+    reg = ToolRegistry()
+    reg.register(TimeoutQueryTool())
+    engine = ReActEngine(registry=reg, llm_service=mock_llm, max_steps=10)
+    mock_llm.complete = AsyncMock(return_value={
+        "action": "final_answer",
+        "answer": "不应调用 LLM 恢复",
+        "reasoning": "不应调用",
+    })
+
+    events = [
+        e
+        async for e in engine.run(
+            "过去四年的销售额、利润趋势如何？",
+            tool_context,
+            force_first_tool="query",
+            force_first_params={"question": "过去四年的销售额、利润趋势如何？"},
+        )
+    ]
+
+    assert [event.type for event in events] == ["tool_call", "tool_result", "error"]
+    assert events[-1].content["error_code"] == "AGENT_001"
+    assert "MCP 查询超时" in events[-1].content["message"]
+    assert mock_llm.complete.call_count == 0

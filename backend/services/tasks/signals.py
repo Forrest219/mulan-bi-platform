@@ -5,6 +5,7 @@ from datetime import datetime
 from celery.signals import task_prerun, task_postrun, task_failure, worker_process_init
 
 from app.core.database import get_db_context
+from services.agent_observability.structured_error import StructuredBIError, persist_structured_error
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,14 @@ def on_task_failure(sender=None, task_id=None, exception=None, traceback=None, *
                 run.duration_ms = int((run.finished_at - run.started_at).total_seconds() * 1000)
 
             db.commit()
+            persist_structured_error(
+                db,
+                "bi_task_runs",
+                run.id,
+                StructuredBIError.from_exception(exception, error_code=getattr(exception, "error_code", None))
+                if isinstance(exception, BaseException)
+                else StructuredBIError.from_message(run.error_message, error_type="TaskError"),
+            )
             _update_schedule_last_run(db, run.task_name, run.finished_at, run.status)
             _emit_failure_alert(db, run)
     except Exception as e:

@@ -1,5 +1,5 @@
 """任务管理 API — Spec 33"""
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import re
 
@@ -262,6 +262,348 @@ async def seed_tasks(request: Request):
         seed_sync_schedules(db)
 
     return {"message": "种子数据已写入"}
+
+
+# ─── Tableau 同步概览 ─────────────────────────────────────────
+
+def _iso(dt):
+    """Return frontend-friendly ISO string for naive local datetimes."""
+    return dt.strftime("%Y-%m-%dT%H:%M:%S") if dt else None
+
+
+def _check_sync_health():
+    """Best-effort Celery health check; never fail the overview endpoint."""
+    health = {
+        "worker_online": None,
+        "beat_online": None,
+        "worker_status": "unknown",
+        "beat_status": "unknown",
+        "warnings": [],
+    }
+    messages = []
+
+    try:
+        pong = celery_app.control.inspect(timeout=1.0).ping()
+        health["worker_online"] = bool(pong)
+        health["worker_status"] = "healthy" if pong else "warning"
+        if not pong:
+            messages.append("Celery worker 未响应")
+    except Exception as exc:
+        health["worker_online"] = False
+        health["worker_status"] = "error"
+        messages.append(f"Celery worker 检查失败: {exc}")
+
+    # Celery Beat/RedBeat has no reliable inspect ping equivalent here.
+    # Keep it nullable so UI can show "unknown" without treating it as outage.
+    health["beat_online"] = None
+
+    if messages:
+        health["message"] = "；".join(messages)
+        health["warnings"] = messages
+    return health
+
+
+def _details_field_sync(details):
+    if not isinstance(details, dict):
+        return {}
+    field_sync = details.get("field_sync")
+    return field_sync if isinstance(field_sync, dict) else {}
+
+
+def _overview_status(status):
+    if status == "success":
+        return "succeeded"
+    return status or "unknown"
+
+
+def _sync_log_to_overview(log):
+    if not log:
+        return None
+
+    duration = None
+    if log.started_at and log.finished_at:
+        duration = int((log.finished_at - log.started_at).total_seconds())
+
+    return {
+        "id": log.id,
+        "connection_id": log.connection_id,
+        "trigger_type": log.trigger_type,
+        "started_at": _iso(log.started_at),
+        "finished_at": _iso(log.finished_at),
+        "status": _overview_status(log.status),
+        "duration_sec": duration,
+        "duration_ms": duration * 1000 if duration is not None else None,
+        "workbooks_synced": log.workbooks_synced or 0,
+        "views_synced": log.views_synced or 0,
+        "dashboards_synced": log.dashboards_synced or 0,
+        "datasources_synced": log.datasources_synced or 0,
+        "assets_deleted": log.assets_deleted or 0,
+        "error_message": log.error_message,
+        "details": {
+            "field_sync": _details_field_sync(log.details),
+        },
+    }
+
+
+def _next_runs_between(cron_expr, start_at, end_at, limit=200):
+    try:
+        from croniter import croniter
+        if not croniter.is_valid(cron_expr):
+            return []
+        cron = croniter(cron_expr, start_at)
+        runs = []
+        while len(runs) < limit:
+            next_dt = cron.get_next(datetime)
+            if next_dt > end_at:
+                break
+            runs.append(next_dt)
+        return runs
+    except Exception:
+        return []
+
+
+@router.get("/sync-overview")
+async def get_sync_overview(request: Request):
+    """Tableau 同步日历聚合视图，供 /admin/tasks 默认页使用。"""
+    _get_user(request)
+
+    from sqlalchemy import distinct, func
+    from services.tableau.models import TableauAsset, TableauConnection, TableauDatasourceField, TableauSyncLog
+    from services.tasks.models import BiSyncSchedule, BiSyncTask
+
+    now = datetime.now()
+    tomorrow = (now + timedelta(days=1)).date()
+    future_end = now + timedelta(hours=48)
+    today = now.date()
+
+    with SessionLocal() as db:
+        connections = db.query(TableauConnection).order_by(TableauConnection.id).all()
+        schedules = {
+            s.id: s
+            for s in db.query(BiSyncSchedule).all()
+        }
+
+        datasource_rows = (
+            db.query(TableauAsset.connection_id, func.count(TableauAsset.id))
+            .filter(
+                TableauAsset.asset_type == "datasource",
+                TableauAsset.is_deleted == False,
+            )
+            .group_by(TableauAsset.connection_id)
+            .all()
+        )
+        datasource_total_by_conn = {conn_id: int(total or 0) for conn_id, total in datasource_rows}
+
+        field_rows = (
+            db.query(
+                TableauAsset.connection_id,
+                func.count(TableauDatasourceField.id),
+                func.count(distinct(TableauDatasourceField.asset_id)),
+            )
+            .join(TableauDatasourceField, TableauDatasourceField.asset_id == TableauAsset.id)
+            .filter(
+                TableauAsset.asset_type == "datasource",
+                TableauAsset.is_deleted == False,
+            )
+            .group_by(TableauAsset.connection_id)
+            .all()
+        )
+        fields_total_by_conn = {conn_id: int(total or 0) for conn_id, total, _ in field_rows}
+        datasource_with_fields_by_conn = {conn_id: int(total or 0) for conn_id, _, total in field_rows}
+
+        latest_logs = {}
+        for conn in connections:
+            latest_logs[conn.id] = (
+                db.query(TableauSyncLog)
+                .filter(TableauSyncLog.connection_id == conn.id)
+                .order_by(TableauSyncLog.started_at.desc(), TableauSyncLog.id.desc())
+                .first()
+            )
+
+        future_tasks = {}
+        for task in (
+            db.query(BiSyncTask)
+            .filter(
+                BiSyncTask.scheduled_at >= now,
+                BiSyncTask.scheduled_at <= future_end,
+            )
+            .all()
+        ):
+            key = (
+                task.schedule_id,
+                task.connection_id,
+                task.scheduled_at.replace(second=0, microsecond=0),
+            )
+            future_tasks[key] = task
+
+        timeline = []
+        connection_items = []
+        next_sync_candidates = []
+        tomorrow_sync_count = 0
+
+        for conn in connections:
+            schedule = schedules.get(conn.schedule_id) if conn.schedule_id else None
+            datasource_total = datasource_total_by_conn.get(conn.id, 0)
+            datasource_with_fields = datasource_with_fields_by_conn.get(conn.id, 0)
+            fields_total = fields_total_by_conn.get(conn.id, 0)
+            latest_log = latest_logs.get(conn.id)
+            latest_log_dict = _sync_log_to_overview(latest_log)
+            field_sync_from_log = _details_field_sync(latest_log.details if latest_log else None)
+
+            warnings = []
+            if conn.auto_sync_enabled and not conn.schedule_id:
+                warnings.append("已启用自动同步，但未绑定同步规则")
+            if datasource_total > 0 and fields_total == 0:
+                warnings.append("数据源字段数为 0")
+            elif datasource_with_fields < datasource_total:
+                warnings.append("部分数据源缺少字段信息")
+
+            next_sync_at = None
+            tomorrow_times = []
+            if (
+                conn.is_active
+                and conn.auto_sync_enabled
+                and schedule
+                and schedule.is_enabled
+            ):
+                runs = _next_runs_between(schedule.cron_expr, now, future_end)
+                if runs:
+                    next_sync_at = runs[0]
+                    next_sync_candidates.append(next_sync_at)
+
+                for scheduled_at in runs:
+                    task_key = (
+                        schedule.id,
+                        conn.id,
+                        scheduled_at.replace(second=0, microsecond=0),
+                    )
+                    task = future_tasks.get(task_key)
+                    if scheduled_at.date() == tomorrow:
+                        tomorrow_times.append(_iso(scheduled_at))
+                        tomorrow_sync_count += 1
+
+                    if scheduled_at.date() == today:
+                        item_type = "today"
+                    elif scheduled_at.date() == tomorrow:
+                        item_type = "tomorrow"
+                    else:
+                        item_type = "future"
+
+                    timeline.append({
+                        "id": task.id if task else None,
+                        "scheduled_time": _iso(scheduled_at),
+                        "scheduled_at": _iso(scheduled_at),
+                        "schedule_id": schedule.id,
+                        "schedule_name": schedule.name,
+                        "connection_id": conn.id,
+                        "connection_name": conn.name,
+                        "status": task.status if task else "pending",
+                        "trigger_type": "scheduled",
+                        "type": item_type,
+                    })
+
+            field_summary = {
+                "datasource_total": datasource_total,
+                "datasource_with_fields": datasource_with_fields,
+                "fields_total": fields_total,
+                "empty": int(field_sync_from_log.get("empty") or 0),
+                "failed": int(field_sync_from_log.get("failed") or 0),
+            }
+            if not conn.is_active:
+                health_status = "disabled"
+            elif warnings:
+                health_status = "warning"
+            else:
+                health_status = "healthy"
+
+            connection_items.append({
+                "id": conn.id,
+                "name": conn.name,
+                "server_url": conn.server_url,
+                "site": conn.site,
+                "is_active": bool(conn.is_active),
+                "auto_sync_enabled": bool(conn.auto_sync_enabled),
+                "schedule_id": conn.schedule_id,
+                "schedule_name": schedule.name if schedule else None,
+                "sync_rule": {
+                    "id": schedule.id,
+                    "name": schedule.name,
+                    "cron_expr": schedule.cron_expr,
+                    "cron_description": schedule.description,
+                    "execution_mode": schedule.execution_mode,
+                } if schedule else None,
+                "sync_status": conn.sync_status or "idle",
+                "last_sync_at": _iso(conn.last_sync_at),
+                "last_sync_duration_sec": conn.last_sync_duration_sec,
+                "next_sync_at": _iso(next_sync_at),
+                "tomorrow_sync_times": tomorrow_times,
+                "last_sync_log": latest_log_dict,
+                "last_sync": latest_log_dict,
+                "field_summary": field_summary,
+                "field_completeness": field_summary,
+                "health_status": health_status,
+                "warnings": warnings,
+            })
+
+        latest_overall_log = None
+        latest_available_logs = [log for log in latest_logs.values() if log]
+        if latest_available_logs:
+            latest_overall_log = max(
+                latest_available_logs,
+                key=lambda log: (log.started_at or datetime.min, log.id or 0),
+            )
+
+        timeline.sort(key=lambda item: item["scheduled_time"])
+        active_connection_ids = {conn.id for conn in connections if conn.is_active}
+        datasource_total = sum(
+            datasource_total_by_conn.get(conn_id, 0) for conn_id in active_connection_ids
+        )
+        datasource_with_fields = sum(
+            datasource_with_fields_by_conn.get(conn_id, 0) for conn_id in active_connection_ids
+        )
+        fields_total = sum(
+            fields_total_by_conn.get(conn_id, 0) for conn_id in active_connection_ids
+        )
+        field_completeness = {
+            "datasource_total": datasource_total,
+            "datasource_with_fields": datasource_with_fields,
+            "fields_total": fields_total,
+            "empty": 0,
+            "failed": 0,
+        }
+        if latest_overall_log:
+            latest_field_sync = _details_field_sync(latest_overall_log.details)
+            field_completeness["empty"] = int(latest_field_sync.get("empty") or 0)
+            field_completeness["failed"] = int(latest_field_sync.get("failed") or 0)
+
+        timeline_groups = {
+            "today": [item for item in timeline if item["type"] == "today"],
+            "tomorrow": [item for item in timeline if item["type"] == "tomorrow"],
+            "future_48h": timeline,
+        }
+
+        return {
+            "generated_at": _iso(now),
+            "health": _check_sync_health(),
+            "summary": {
+                "active_connections": sum(1 for conn in connections if conn.is_active),
+                "enabled_connections": sum(
+                    1 for conn in connections if conn.is_active and conn.auto_sync_enabled
+                ),
+                "next_sync_at": _iso(min(next_sync_candidates)) if next_sync_candidates else None,
+                "tomorrow_sync_count": tomorrow_sync_count,
+                "last_sync_status": _overview_status(latest_overall_log.status) if latest_overall_log else None,
+                "latest_sync_status": _overview_status(latest_overall_log.status) if latest_overall_log else "unknown",
+                "latest_sync_at": _iso(latest_overall_log.finished_at or latest_overall_log.started_at) if latest_overall_log else None,
+                "datasource_total": datasource_total,
+                "datasource_with_fields": datasource_with_fields,
+                "fields_total": fields_total,
+                "field_completeness": field_completeness,
+            },
+            "connections": connection_items,
+            "timeline": timeline_groups,
+            "timeline_flat": timeline,
+        }
 
 
 # ─── 同步计划（BiSyncSchedule） ────────────────────────────────

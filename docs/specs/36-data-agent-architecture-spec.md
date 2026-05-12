@@ -3,6 +3,7 @@
 > 版本：v0.3 | 状态：Engineering Spec — minimax 可开发（首页 Agent 灰度迁移已设计于 §15） | 日期：2026-05-12 | 关联 PRD：批次 0 T0.3 待 PM 决策（不阻塞 T2.3 启动）
 >
 > **变更记录**
+> - v0.4（2026-05-12）— 新增首页问答生产上线刚性条件：首页 Agent 答案准确性不得低于 Tableau MCP / 底层工具参照链路；任何“有回复但口径偏离、字段缺失、维度缺失、混入非目标资产、错误成功”的样本均视为验收失败，禁止进入正式上线。
 > - v0.3（2026-05-12）— 首页问答临时收敛为 Tableau-only：`/api/agent/stream`、QueryTool、SchemaTool 禁止 fallback 到普通 `bi_data_sources`；历史会话中的停用 Tableau 连接必须解析到 active Tableau 或明确报错；Agent Monitor 必须保留工具失败摘要。
 > - v0.2（2026-04-28）— 0.5d.1 补丁：§15 首页 Agent 灰度迁移与回滚（4 态 feature flag / 双写规约 / 自动回滚阈值 / 3 意图策略决策树 / `bi_agent_dual_write_audit` + `bi_agent_intent_log` 两张新表 / 5 P0 + 2 P1 测试 / 红线 + 强制清单 + grep + 正错示范）
 > - v0.1（2026-04-24）— 初版草稿
@@ -662,6 +663,7 @@ sequenceDiagram
 - [ ] SSE 流式事件格式符合 §5.2 定义
 - [ ] 多轮对话上下文正确传递
 - [ ] 现有首页功能无回归（`/api/chat/stream` 透传正常）
+- [ ] **生产上线刚性条件：首页答案准确性不得低于底层 Tableau MCP / 工具参照链路。** 对同一问题集必须先记录 Tableau MCP / QueryTool / SchemaTool 的参照结果，再记录首页 `/api/agent/stream` 的结果；首页结果必须在目标资产范围、字段集合、聚合维度、过滤条件、数值结果上与参照链路一致或更严格。若首页仅“有回复”但出现口径扩大、混入 `view` 等非目标资产、字段缺失/多出、维度缺失、过滤误译、数值不一致、或“错误成功”，均视为验收失败，不得进入正式上线。
 
 ### 12.3 Mock 与测试约束
 
@@ -893,6 +895,7 @@ context_aware → keyword_match → llm_classify → fallback("chat")
 4. 自动回滚操作必须写 audit log（actor=`system`，原因=阈值告警 + 指标快照 JSON）
 5. 意图识别 `fallback_chain` 必须落 `bi_agent_intent_log`；禁止只在内存中转或仅打 logger.info
 6. 首页 Agent 链路禁止引用普通 `bi_data_sources` 作为问答目标；`DataSource` 同 ID 记录不得接管 Tableau connection_id
+7. 首页 Agent 的生产验收禁止以“有回复”为成功标准；必须以 Tableau MCP / 底层工具参照链路为准确性基线。任何让首页答案弱于参照链路的改动（口径漂移、字段/维度丢失、错误成功、自由发挥补全）均视为 P0 回归，PR 必须拒绝或回滚。
 
 #### 强制检查清单
 
@@ -901,6 +904,7 @@ context_aware → keyword_match → llm_classify → fallback("chat")
 - [ ] `bi_agent_dual_write_audit` 分区脚本与 `bi_events` 同步加入 Beat 任务（不引入第二份调度）
 - [ ] 新增意图策略必须在 `IntentStrategyRegistry` 注册，并补本 spec §15.D 表
 - [ ] `platform_settings.homepage_agent_mode` 写操作有 admin 角色校验
+- [ ] 首页问答上线前必须提交“Tableau MCP 参照链路 vs 首页链路”对照报告；报告至少覆盖数据源清单、字段清单、简单聚合、趋势、多轮追问、TopN/占比等场景，并明确逐题判定首页是否不劣于参照链路。
 
 #### 验证命令
 

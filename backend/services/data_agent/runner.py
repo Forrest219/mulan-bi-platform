@@ -7,12 +7,15 @@ No web framework dependency: only SQLAlchemy + pure Python.
 """
 
 import logging
+import re
 import time
 import uuid as uuid_lib
 from datetime import datetime
 from typing import AsyncGenerator, Dict, List, Optional
 
 from sqlalchemy.orm import Session
+
+from services.agent_observability.structured_error import StructuredBIError, persist_structured_error
 
 from .engine import ReActEngine
 from .models import BiAgentRun, BiAgentStep
@@ -23,6 +26,8 @@ from .tool_base import ToolContext
 from .engine import _infer_col_types, _build_chart_data
 
 logger = logging.getLogger(__name__)
+
+_SCHEMA_ASSET_PATTERN = re.compile(r"数据资产\s+\*\*([^*]+)\*\*")
 
 
 async def run_agent(
@@ -44,7 +49,9 @@ async def run_agent(
         to SSE or any other transport format.
     """
     conversation_id_str = str(session.conversation_id)
-    total_start = time.time()
+    total_start = time.monotonic()
+    last_step_at = total_start
+    pending_tool_start: Optional[float] = None
     tools_used: List[str] = []
     steps_count = 0
     last_tool_result: Dict = {}
@@ -75,12 +82,18 @@ async def run_agent(
 
         step_number = 0
 
+        def _elapsed_ms(start: float, end: Optional[float] = None) -> int:
+            return max(0, int(((end or time.monotonic()) - start) * 1000))
+
         # 直接查询快速路径：跳过 LLM Think 首步，直接执行 QueryTool
         force_first_tool = None
         force_first_params = None
         if is_direct_query(question):
             force_first_tool = "query"
             force_first_params = {"question": question}
+            followup_datasource_name = resolve_recent_schema_asset_name(session_mgr, session, current_user["id"])
+            if followup_datasource_name:
+                force_first_params["datasource_name"] = followup_datasource_name
             logger.info("fast_path: is_direct_query=True, force_first_tool=query, question=%s", question[:80])
 
         async for event in engine.run(
@@ -90,6 +103,7 @@ async def run_agent(
             force_first_tool=force_first_tool,
             force_first_params=force_first_params,
         ):
+            event_at = time.monotonic()
             if event.type == "thinking":
                 step_number += 1
                 step = BiAgentStep(
@@ -97,9 +111,11 @@ async def run_agent(
                     step_number=step_number,
                     step_type="thinking",
                     content=event.content[:500] if event.content else None,
+                    execution_time_ms=_elapsed_ms(last_step_at, event_at),
                 )
                 db.add(step)
                 db.commit()
+                last_step_at = event_at
                 yield event
 
             elif event.type == "tool_call":
@@ -124,14 +140,18 @@ async def run_agent(
                     tool_name=tool_name,
                     tool_params=event.content.get("params", {}),
                     skill_version_id=_skill_version_id,
+                    execution_time_ms=0,
                 )
                 db.add(step)
                 db.commit()
+                pending_tool_start = event_at
+                last_step_at = event_at
                 yield event
 
             elif event.type == "tool_result":
                 tool_name = event.content.get("tool", "")
                 result_data = event.content.get("result", {})
+                structured_error = None
                 if isinstance(result_data, dict) and (
                     result_data.get("success") is False or result_data.get("error")
                 ):
@@ -140,6 +160,11 @@ async def run_agent(
                         or result_data.get("message")
                         or result_data.get("error_message")
                         or result_data
+                    )
+                    structured_error = StructuredBIError.from_message(
+                        summary,
+                        error_type=str(result_data.get("error_type") or "ToolError"),
+                        error_code=result_data.get("error_code"),
                     )
                 else:
                     summary = result_data.get("data") if isinstance(result_data, dict) else result_data
@@ -151,9 +176,14 @@ async def run_agent(
                     step_type="tool_result",
                     tool_name=tool_name,
                     tool_result_summary=summary_str,
+                    execution_time_ms=_elapsed_ms(pending_tool_start or last_step_at, event_at),
                 )
                 db.add(step)
                 db.commit()
+                if structured_error is not None:
+                    persist_structured_error(db, "bi_agent_steps", getattr(step, "id", None), structured_error)
+                pending_tool_start = None
+                last_step_at = event_at
                 last_tool_result = result_data
                 yield event
 
@@ -167,7 +197,8 @@ async def run_agent(
 
             elif event.type == "answer":
                 answer_text = event.content
-                execution_time_ms = int((time.time() - total_start) * 1000)
+                answer_step_ms = _elapsed_ms(last_step_at, event_at)
+                execution_time_ms = _elapsed_ms(total_start, event_at)
 
                 response_type = "text"
                 response_data = None
@@ -191,7 +222,7 @@ async def run_agent(
                     step_number=step_number,
                     step_type="answer",
                     content=answer_text[:500] if answer_text else None,
-                    execution_time_ms=execution_time_ms,
+                    execution_time_ms=answer_step_ms,
                 )
                 db.add(step)
 
@@ -267,9 +298,15 @@ async def run_agent(
                     step_number=step_number,
                     step_type="error",
                     content=error_content.get("message", "")[:500],
+                    execution_time_ms=_elapsed_ms(last_step_at, event_at),
                 )
                 db.add(step)
-                execution_time_ms = int((time.time() - total_start) * 1000)
+                structured_error = StructuredBIError.from_message(
+                    error_content.get("message", ""),
+                    error_type=str(error_content.get("error_type") or "AgentError"),
+                    error_code=err_code,
+                )
+                execution_time_ms = _elapsed_ms(total_start, event_at)
                 completed_at = datetime.utcnow()
                 db.query(BiAgentRun).filter(BiAgentRun.id == run_id).update(
                     {
@@ -281,6 +318,7 @@ async def run_agent(
                     synchronize_session=False,
                 )
                 db.commit()
+                persist_structured_error(db, "bi_agent_steps", getattr(step, "id", None), structured_error)
 
                 yield AgentEvent(type="error", content=error_content)
 
@@ -288,8 +326,17 @@ async def run_agent(
         logger.exception("Agent runner exception")
         if run_id:
             try:
-                execution_time_ms = int((time.time() - total_start) * 1000)
+                execution_time_ms = max(0, int((time.monotonic() - total_start) * 1000))
                 completed_at = datetime.utcnow()
+                structured_error = StructuredBIError.from_exception(e, error_code="AGENT_003")
+                step = BiAgentStep(
+                    run_id=run_id,
+                    step_number=step_number + 1,
+                    step_type="error",
+                    content=structured_error.message[:500],
+                    execution_time_ms=execution_time_ms,
+                )
+                db.add(step)
                 db.query(BiAgentRun).filter(BiAgentRun.id == run_id).update(
                     {
                         BiAgentRun.status: "failed",
@@ -300,9 +347,34 @@ async def run_agent(
                     synchronize_session=False,
                 )
                 db.commit()
+                persist_structured_error(db, "bi_agent_steps", getattr(step, "id", None), structured_error)
             except Exception:
                 logger.warning("Failed to update run status on exception")
         yield AgentEvent(
             type="error",
             content={"error_code": "AGENT_003", "message": "Agent 执行异常"},
         )
+
+
+def resolve_recent_schema_asset_name(session_mgr: SessionManager, session: AgentSession, user_id: int) -> Optional[str]:
+    """Return the most recent schema asset mentioned in the conversation."""
+    try:
+        messages = session_mgr.get_conversation_messages(
+            conversation_id=session.conversation_id,
+            user_id=user_id,
+            limit=20,
+        )
+    except Exception:
+        return None
+
+    for message in reversed(messages):
+        if getattr(message, "role", None) != "assistant":
+            continue
+        tools_used = getattr(message, "tools_used", None) or []
+        if "schema" not in tools_used:
+            continue
+        content = getattr(message, "content", "") or ""
+        match = _SCHEMA_ASSET_PATTERN.search(content)
+        if match:
+            return match.group(1).strip()
+    return None

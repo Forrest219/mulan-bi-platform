@@ -14,6 +14,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from services.llm.nlq_service import (
     classify_intent,
     validate_one_pass_output,
+    normalize_one_pass_output,
+    validate_field_captions_consistency,
     parse_json_from_response,
     format_response,
     ONE_PASS_OUTPUT_SCHEMA,
@@ -150,6 +152,83 @@ class TestValidateOnePassOutput:
         }
         is_valid, err = validate_one_pass_output(output)
         assert not is_valid
+
+    @pytest.mark.parametrize(
+        ("raw_function", "expected_function"),
+        [
+            ("count", "COUNT"),
+            ("sum", "SUM"),
+            ("countd", "COUNTD"),
+        ],
+    )
+    def test_normalizes_lowercase_aggregate_function(self, raw_function, expected_function):
+        """LLM 返回小写聚合函数时规范化为合法枚举"""
+        output = {
+            "intent": "aggregate",
+            "confidence": 0.85,
+            "vizql_json": {
+                "fields": [
+                    {"fieldCaption": "Sales", "function": raw_function}
+                ],
+            },
+        }
+        is_valid, err = validate_one_pass_output(output)
+        assert is_valid
+        assert err is None
+        assert output["vizql_json"]["fields"][0]["function"] == expected_function
+
+    def test_normalizes_year_set_filter_on_date_field(self):
+        """日期字段上的 SET 年份值转为合法日期范围过滤"""
+        output = {
+            "intent": "filter",
+            "confidence": 0.85,
+            "vizql_json": {
+                "fields": [{"fieldCaption": "Sales", "function": "sum"}],
+                "filters": [
+                    {
+                        "field": {"fieldCaption": "订单日期"},
+                        "filterType": "SET",
+                        "values": ["2024"],
+                    }
+                ],
+            },
+        }
+
+        with patch("services.llm.nlq_service._get_datasource_date_field_keys", return_value={"订单日期"}):
+            normalize_one_pass_output(output, datasource_luid="ds-1")
+
+        date_filter = output["vizql_json"]["filters"][0]
+        assert date_filter["filterType"] == "QUANTITATIVE_DATE"
+        assert date_filter["quantitativeFilterType"] == "RANGE"
+        assert date_filter["minDate"] == "2024-01-01"
+        assert date_filter["maxDate"] == "2024-12-31"
+        assert "values" not in date_filter
+
+    def test_field_caption_consistency_accepts_field_name_fallback(self):
+        """一致性校验使用 field_caption/field_name 稳定集合"""
+        output = {
+            "intent": "aggregate",
+            "confidence": 0.85,
+            "vizql_json": {
+                "fields": [{"fieldCaption": "Order Date"}],
+                "filters": [],
+            },
+        }
+
+        mock_asset = MagicMock()
+        mock_asset.id = 10
+        mock_session = MagicMock()
+        mock_session.query.return_value.filter.return_value.first.return_value = mock_asset
+        mock_db = MagicMock()
+        mock_db.session = mock_session
+
+        with patch("services.llm.nlq_service.TableauDatabase", return_value=mock_db), \
+             patch("services.llm.nlq_service._get_datasource_field_keys", return_value=["订单日期", "Order Date"]):
+            is_valid, missing, available = validate_field_captions_consistency(output, "ds-1")
+
+        assert is_valid
+        assert missing == []
+        assert available == []
 
 
 class TestParseJsonFromResponse:

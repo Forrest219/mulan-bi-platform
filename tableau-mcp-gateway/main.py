@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 
 MCP_PROTOCOL_VERSION = "2025-06-18"
 SESSION_TTL = 300  # 5 min idle timeout
+DEFAULT_TOOL_TIMEOUT = int(os.environ.get("GATEWAY_TOOL_TIMEOUT", "55"))
+MAX_TOOL_TIMEOUT = int(os.environ.get("GATEWAY_MAX_TOOL_TIMEOUT", "300"))
+MULAN_MCP_TIMEOUT_HEADER = "x-mulan-mcp-timeout"
 
 # GATEWAY_CONFIG_ID: 指定加载哪条 mcp_servers 记录（多站点部署时通过环境变量区分）
 _CONFIG_ID: Optional[int] = int(os.environ["GATEWAY_CONFIG_ID"]) if os.environ.get("GATEWAY_CONFIG_ID") else None
@@ -100,6 +103,18 @@ def _gc() -> None:
     now = time.monotonic()
     for k in [k for k, v in list(_sessions.items()) if now - v > SESSION_TTL]:
         _sessions.pop(k, None)
+
+
+def _tool_timeout_from_request(request: Request) -> int:
+    """Use the backend's remaining HTTP timeout budget when provided."""
+    raw = request.headers.get(MULAN_MCP_TIMEOUT_HEADER)
+    if not raw:
+        return DEFAULT_TOOL_TIMEOUT
+    try:
+        parsed = int(float(raw))
+    except (TypeError, ValueError):
+        return DEFAULT_TOOL_TIMEOUT
+    return max(1, min(parsed, MAX_TOOL_TIMEOUT))
 
 
 # ── SSE response helpers ───────────────────────────────────────────────────────
@@ -181,10 +196,11 @@ async def mcp_post(request: Request) -> Response:
     # ── tools/list, tools/call: proxy to subprocess ────────────────────────────
     if method in ("tools/list", "tools/call"):
         params = body.get("params")
+        tool_timeout = _tool_timeout_from_request(request)
         try:
-            resp = await _proxy.call(method, params)
+            resp = await _proxy.call(method, params, timeout=tool_timeout)
         except asyncio.TimeoutError:
-            return _err(req_id, -32000, f"Request timed out ({method})")
+            return _err(req_id, -32000, f"Request timed out after {tool_timeout}s ({method})")
         except Exception as exc:
             return _err(req_id, -32000, str(exc))
 

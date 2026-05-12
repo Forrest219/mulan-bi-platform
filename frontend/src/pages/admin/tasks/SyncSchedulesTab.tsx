@@ -106,8 +106,8 @@ function EditModal({ schedule, onSave, onClose }: EditModalProps) {
   };
 
   const handleSubmit = async () => {
-    if (!form.name.trim()) { setError('计划名称不能为空'); return; }
-    if (!cronInput.trim()) { setError('Cron 表达式不能为空'); return; }
+    if (!form.name.trim()) { setError('规则名称不能为空'); return; }
+    if (!cronInput.trim()) { setError('执行时间不能为空'); return; }
     setLoading(true);
     setError('');
     try {
@@ -123,13 +123,13 @@ function EditModal({ schedule, onSave, onClose }: EditModalProps) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl shadow-xl w-[560px] max-h-[85vh] overflow-y-auto">
         <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-800">{schedule ? '编辑同步计划' : '新建同步计划'}</h3>
+          <h3 className="text-sm font-semibold text-slate-800">{schedule ? '编辑同步规则' : '新建同步规则'}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg">×</button>
         </div>
         <div className="px-6 py-4 space-y-4">
           {/* 名称 */}
           <div>
-            <label className="block text-[12px] font-medium text-slate-600 mb-1">计划名称 <span className="text-red-500">*</span></label>
+            <label className="block text-[12px] font-medium text-slate-600 mb-1">规则名称 <span className="text-red-500">*</span></label>
             <input
               value={form.name}
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
@@ -160,7 +160,7 @@ function EditModal({ schedule, onSave, onClose }: EditModalProps) {
               </select>
             </div>
             <div className="flex-1">
-              <label className="block text-[12px] font-medium text-slate-600 mb-1">执行模式</label>
+              <label className="block text-[12px] font-medium text-slate-600 mb-1">执行方式</label>
               <select
                 value={form.execution_mode}
                 onChange={e => setForm(f => ({ ...f, execution_mode: e.target.value }))}
@@ -181,7 +181,7 @@ function EditModal({ schedule, onSave, onClose }: EditModalProps) {
           </div>
           {/* AI 自然语言解析 */}
           <div>
-            <label className="block text-[12px] font-medium text-slate-600 mb-1">AI 解析 Cron（可选）</label>
+            <label className="block text-[12px] font-medium text-slate-600 mb-1">AI 解析执行时间（可选）</label>
             <div className="flex gap-2">
               <input
                 value={aiDesc}
@@ -200,7 +200,7 @@ function EditModal({ schedule, onSave, onClose }: EditModalProps) {
           </div>
           {/* Cron 表达式 */}
           <div>
-            <label className="block text-[12px] font-medium text-slate-600 mb-1">Cron 表达式 <span className="text-red-500">*</span></label>
+            <label className="block text-[12px] font-medium text-slate-600 mb-1">执行时间 <span className="text-red-500">*</span></label>
             <input
               value={cronInput}
               onChange={e => { setCronInput(e.target.value); setForm(f => ({ ...f, cron_expr: e.target.value })); }}
@@ -298,7 +298,7 @@ function BindDrawer({ schedule, onClose }: BindDrawerProps) {
       <div className="flex-1" onClick={onClose} />
       <div className="w-[420px] bg-white flex flex-col">
         <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-800">管理引用连接：{schedule.name}</h3>
+          <h3 className="text-sm font-semibold text-slate-800">绑定连接：{schedule.name}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl">×</button>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4">
@@ -397,12 +397,12 @@ export default function SyncSchedulesTab() {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-[13px] font-semibold text-slate-700">同步计划</h2>
+        <h2 className="text-[13px] font-semibold text-slate-700">同步规则</h2>
         <button
           onClick={() => { setEditSchedule(undefined); setShowEdit(true); }}
           className="flex items-center gap-1 px-3 py-1.5 bg-slate-800 text-white text-[12px] rounded-lg hover:bg-slate-700"
         >
-          <span>+</span> 新建计划
+          <span>+</span> 新建规则
         </button>
       </div>
 
@@ -411,7 +411,7 @@ export default function SyncSchedulesTab() {
         <table className="w-full">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200">
-              {['计划名称', '调度周期', '频率', '优先级', '模式', '引用连接', '状态', '下次执行', '操作'].map(h => (
+              {['规则名称', '执行时间', '频率', '优先级', '执行方式', '绑定连接', '状态', '下次执行', '操作'].map(h => (
                 <th key={h} className="px-3 py-2 text-left text-[11px] font-medium text-slate-500">{h}</th>
               ))}
             </tr>
@@ -420,7 +420,7 @@ export default function SyncSchedulesTab() {
             {loading ? (
               <tr><td colSpan={9} className="px-4 py-12 text-center text-slate-400 text-[13px]">加载中…</td></tr>
             ) : schedules.length === 0 ? (
-              <tr><td colSpan={9} className="px-4 py-12 text-center text-slate-400 text-[13px]">暂无同步计划</td></tr>
+              <tr><td colSpan={9} className="px-4 py-12 text-center text-slate-400 text-[13px]">暂无同步规则</td></tr>
             ) : schedules.map(s => (
               <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50/50">
                 <td className="px-3 py-2.5">
@@ -446,7 +446,7 @@ export default function SyncSchedulesTab() {
                     {s.connection_count ?? 0} 个连接
                   </button>
                   {s.is_enabled && (s.connection_count ?? 0) === 0 && (
-                    <p className="text-[10px] text-amber-500 mt-0.5" title="计划已启用但无绑定连接，不会产生任务">⚠ 无绑定连接</p>
+                    <p className="text-[10px] text-amber-500 mt-0.5" title="规则已启用但无绑定连接，不会产生同步任务">无绑定连接</p>
                   )}
                 </td>
                 <td className="px-3 py-2.5"><StatusBadge enabled={s.is_enabled} /></td>
@@ -508,7 +508,7 @@ export default function SyncSchedulesTab() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl w-[360px] p-6">
             <h3 className="text-sm font-semibold text-slate-800 mb-2">确认删除</h3>
-            <p className="text-[13px] text-slate-500 mb-4">删除后将无法恢复，确认删除此同步计划？</p>
+            <p className="text-[13px] text-slate-500 mb-4">删除后将无法恢复，确认删除此同步规则？</p>
             <div className="flex justify-end gap-2">
               <button onClick={() => setDeleteConfirm(null)} className="px-4 py-2 text-[12px] text-slate-500 hover:text-slate-700">取消</button>
               <button onClick={() => handleDelete(deleteConfirm)} className="px-4 py-2 bg-red-500 text-white text-[12px] rounded-lg hover:bg-red-600">删除</button>

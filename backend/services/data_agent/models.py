@@ -14,6 +14,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from app.core.database import Base, sa_func
+from services.agent_observability import AgentRunTelemetryMixin, AgentStepTelemetryMixin
 
 
 class AgentConversation(Base):
@@ -91,7 +92,7 @@ class AgentConversationMessage(Base):
 # ---------------------------------------------------------------------------
 
 
-class BiAgentRun(Base):
+class BiAgentRun(AgentRunTelemetryMixin, Base):
     """Agent 运行记录 — 每次 POST /api/agent/stream 调用产生一行"""
 
     __tablename__ = "bi_agent_runs"
@@ -115,15 +116,6 @@ class BiAgentRun(Base):
     user_id = Column(Integer, nullable=False)
     question = Column(Text, nullable=False)
     connection_id = Column(Integer, nullable=True)
-    status = Column(String(16), nullable=False, server_default=sa_text("'running'"))
-    error_code = Column(String(16), nullable=True)
-    steps_count = Column(Integer, server_default=sa_text("0"))
-    tools_used = Column(ARRAY(Text), nullable=True)
-    response_type = Column(String(16), nullable=True)
-    execution_time_ms = Column(Integer, nullable=True)
-    created_at = Column(DateTime, server_default=sa_func.now(), nullable=False)
-    completed_at = Column(DateTime, nullable=True)
-
     def to_dict(self) -> dict:
         return {
             "id": str(self.id),
@@ -142,7 +134,7 @@ class BiAgentRun(Base):
         }
 
 
-class BiAgentStep(Base):
+class BiAgentStep(AgentStepTelemetryMixin, Base):
     """Agent 步骤记录 — 每个 ReAct step 产生一行"""
 
     __tablename__ = "bi_agent_steps"
@@ -157,16 +149,8 @@ class BiAgentStep(Base):
         ForeignKey("bi_agent_runs.id", ondelete="CASCADE"),
         nullable=False,
     )
-    step_number = Column(Integer, nullable=False)
-    step_type = Column(String(16), nullable=False)  # thinking | tool_call | tool_result | answer | error
-    tool_name = Column(String(64), nullable=True)
-    tool_params = Column(JSONB, nullable=True)
-    tool_result_summary = Column(Text, nullable=True)  # first 500 chars
-    content = Column(Text, nullable=True)
-    execution_time_ms = Column(Integer, nullable=True)
     # 记录调用时使用的 agent_skill_versions.id（Track B LLM 集成，DB 表由 Track A 迁移创建）
     skill_version_id = Column(UUID(as_uuid=True), nullable=True)
-    created_at = Column(DateTime, server_default=sa_func.now(), nullable=False)
 
     def to_dict(self) -> dict:
         return {
@@ -178,6 +162,7 @@ class BiAgentStep(Base):
             "tool_params": self.tool_params,
             "tool_result_summary": self.tool_result_summary,
             "content": self.content,
+            "structured_error": self.structured_error,
             "execution_time_ms": self.execution_time_ms,
             "skill_version_id": str(self.skill_version_id) if self.skill_version_id else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,

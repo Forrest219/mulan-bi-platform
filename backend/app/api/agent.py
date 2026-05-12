@@ -28,6 +28,11 @@ from app.core.database import get_db, get_db_context
 from app.core.dependencies import get_current_user
 
 from services.data_agent.factory import create_engine, create_engine_with_skills
+from services.data_agent.deterministic import (
+    DeterministicRouteResult,
+    detect_deterministic_route,
+    run_schema_inventory_route,
+)
 from services.data_agent.models import (
     AgentConversation,
     AgentConversationMessage,
@@ -35,7 +40,7 @@ from services.data_agent.models import (
     BiAgentStep,
     BiAgentFeedback,
 )
-from services.data_agent.runner import run_agent
+from services.data_agent.runner import resolve_recent_schema_asset_name, run_agent
 from services.data_agent.session import SessionManager, AgentSession
 from services.data_agent.tool_base import ToolContext, ToolRegistry
 from services.data_agent.context import build_session_context
@@ -51,6 +56,7 @@ from services.agent.dual_write import (
 )
 from services.data_agent.intent import IntentRecognizer
 from services.data_agent.intent.keyword_match import is_direct_query
+from services.skills.service import get_active_skill_version
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["Data Agent"])
@@ -185,6 +191,143 @@ _FAST_RECOVERABLE_ERRORS = frozenset([
 ])
 
 
+def _sse_data(payload: dict) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _uuid_or_none(value: Any) -> Optional[uuid_lib.UUID]:
+    if not value:
+        return None
+    if isinstance(value, uuid_lib.UUID):
+        return value
+    try:
+        return uuid_lib.UUID(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _write_schema_inventory_success(
+    *,
+    db: Session,
+    run_id: uuid_lib.UUID,
+    session: AgentSession,
+    session_mgr: SessionManager,
+    current_user: dict,
+    context: ToolContext,
+    question: str,
+    connection_id: Optional[int],
+    result: DeterministicRouteResult,
+    execution_time_ms: int,
+    step_durations_ms: Optional[Dict[int, int]] = None,
+) -> None:
+    now = datetime.now(timezone.utc)
+    skill_version_uuid = _uuid_or_none(result.skill_version_id)
+    step_durations_ms = step_durations_ms or {}
+
+    run = BiAgentRun(
+        id=run_id,
+        conversation_id=session.conversation_id,
+        user_id=current_user["id"],
+        connection_id=connection_id,
+        question=question,
+        status="completed",
+        steps_count=result.steps_count,
+        tools_used=result.tools_used,
+        response_type=result.response_type,
+        execution_time_ms=execution_time_ms,
+        completed_at=now,
+    )
+    db.add(run)
+    db.flush()
+    db.add_all([
+        BiAgentStep(
+            run_id=run_id,
+            step_number=1,
+            step_type="thinking",
+            content="识别为数据源清单问题，准备读取当前连接的 schema 信息。",
+            execution_time_ms=step_durations_ms.get(1),
+        ),
+        BiAgentStep(
+            run_id=run_id,
+            step_number=2,
+            step_type="tool_call",
+            tool_name=result.tool_name,
+            tool_params=result.tool_params,
+            skill_version_id=skill_version_uuid,
+            execution_time_ms=step_durations_ms.get(2),
+        ),
+        BiAgentStep(
+            run_id=run_id,
+            step_number=3,
+            step_type="tool_result",
+            tool_name=result.tool_name,
+            tool_result_summary=result.tool_result_summary[:500],
+            execution_time_ms=step_durations_ms.get(3),
+        ),
+        BiAgentStep(
+            run_id=run_id,
+            step_number=4,
+            step_type="answer",
+            content=result.answer[:500],
+            execution_time_ms=step_durations_ms.get(4),
+        ),
+    ])
+    db.commit()
+
+    session_mgr.persist_message(
+        session=session,
+        role="assistant",
+        content=result.answer,
+        trace_id=context.trace_id,
+        response_type=result.response_type,
+        response_data=result.response_data,
+        tools_used=result.tools_used,
+        steps_count=result.steps_count,
+        execution_time_ms=execution_time_ms,
+    )
+
+
+def _write_schema_inventory_error_run(
+    *,
+    db: Session,
+    run_id: uuid_lib.UUID,
+    session: AgentSession,
+    current_user: dict,
+    question: str,
+    connection_id: Optional[int],
+    error_code: str,
+    message: str,
+    execution_time_ms: int,
+) -> None:
+    run = BiAgentRun(
+        id=run_id,
+        conversation_id=session.conversation_id,
+        user_id=current_user["id"],
+        connection_id=connection_id,
+        question=question,
+        status="failed",
+        error_code=error_code,
+        steps_count=0,
+        tools_used=["schema"],
+        response_type="error",
+        execution_time_ms=execution_time_ms,
+        completed_at=datetime.now(timezone.utc),
+    )
+    db.add(run)
+    db.flush()
+    db.add(
+        BiAgentStep(
+            run_id=run_id,
+            step_number=1,
+            step_type="error",
+            tool_name="schema",
+            content=message[:500],
+            execution_time_ms=execution_time_ms,
+        )
+    )
+    db.commit()
+
+
 async def try_fast_mcp_stream(
     question: str,
     context: ToolContext,
@@ -193,6 +336,7 @@ async def try_fast_mcp_stream(
     db: Session,
     session,  # AgentSession from session_mgr
     session_mgr,  # SessionManager instance
+    datasource_name_hint: Optional[str] = None,
 ) -> Optional[tuple[Optional[uuid_lib.UUID], AsyncGenerator[str, None]]]:
     """
     快通 MCP 路径：绕过 ReAct 引擎，直接 route → VizQL → MCP 查询 → SSE。
@@ -206,12 +350,18 @@ async def try_fast_mcp_stream(
     from services.llm.nlq_service import route_datasource, get_datasource_fields_cached
     from services.llm.query_executor import execute_query, QueryExecutorError
     from services.tableau.mcp_client import TableauMCPError
+    from services.data_agent.tools.query_tool import _lookup_datasource_by_name
 
+    fast_start = time.monotonic()
     logger.info("[FAST_ATTEMPTED] question=%s, trace=%s", question[:80], context.trace_id)
 
     # 1. 数据源路由（已有 Redis 缓存，<10ms）
     try:
-        ds_info = route_datasource(question, connection_id=req_connection_id)
+        ds_info = (
+            _lookup_datasource_by_name(datasource_name_hint, connection_id=req_connection_id)
+            if datasource_name_hint
+            else None
+        ) or route_datasource(question, connection_id=req_connection_id)
     except Exception as e:
         logger.warning("[FAST_FAILED] route_datasource error=%s, trace=%s", e, context.trace_id)
         # 路由异常走 ReAct，不算快通失败
@@ -220,6 +370,7 @@ async def try_fast_mcp_stream(
     if not ds_info:
         logger.info("[SLOW_FALLBACK] route_datasource returned None, trace=%s", context.trace_id)
         return None
+    route_ms = max(0, int((time.monotonic() - fast_start) * 1000))
 
     datasource_luid = ds_info.get("luid")
     datasource_name = ds_info.get("name")
@@ -237,21 +388,69 @@ async def try_fast_mcp_stream(
         pass
 
     # 3. 构建直接 VizQL（无 LLM，<1ms）
-    from services.data_agent.tools.query_tool import _build_direct_vizql
+    from services.data_agent.tools.query_tool import (
+        _build_customer_churn_vizqls,
+        _build_direct_vizql,
+        _calculate_customer_churn,
+        _normalize_result_table,
+        _postprocess_rows,
+    )
 
-    vizql_json = _build_direct_vizql(question, field_captions)
-    if not vizql_json:
-        logger.info("[SLOW_FALLBACK] _build_direct_vizql returned None, trace=%s", context.trace_id)
+    churn_plan = _build_customer_churn_vizqls(question, field_captions)
+    vizql_json = None if churn_plan else _build_direct_vizql(question, field_captions)
+    if not churn_plan and not vizql_json:
+        logger.info("[SLOW_FALLBACK] deterministic query builder returned None, trace=%s", context.trace_id)
         return None
 
     # 4. 通过 execute_query 走 MCP 执行（阻塞，~300-800ms）
+    query_start = time.monotonic()
     try:
-        result = execute_query(
-            datasource_luid=datasource_luid,
-            vizql_json=vizql_json,
-            limit=1000,
-            connection_id=req_connection_id,
-        )
+        if churn_plan:
+            base_result = execute_query(
+                datasource_luid=datasource_luid,
+                vizql_json=churn_plan["base_vizql"],
+                limit=1000,
+                connection_id=req_connection_id,
+            )
+            base_fields, base_rows = _normalize_result_table(base_result)
+            if base_rows:
+                recent_result = execute_query(
+                    datasource_luid=datasource_luid,
+                    vizql_json=churn_plan["recent_vizql"],
+                    limit=1000,
+                    connection_id=req_connection_id,
+                )
+                recent_fields, recent_rows = _normalize_result_table(recent_result)
+            else:
+                recent_fields, recent_rows = [churn_plan["customer_field"]], []
+            response_data = _calculate_customer_churn(
+                customer_field=churn_plan["customer_field"],
+                year=churn_plan["year"],
+                base_fields=base_fields,
+                base_rows=base_rows,
+                recent_fields=recent_fields,
+                recent_rows=recent_rows,
+            )
+            response_data.update({
+                "intent": "customer_churn",
+                "confidence": 0.95,
+                "datasource_name": datasource_name,
+            })
+            fields = response_data["fields"]
+            rows = response_data["rows"]
+        else:
+            result = execute_query(
+                datasource_luid=datasource_luid,
+                vizql_json=vizql_json,
+                limit=1000,
+                connection_id=req_connection_id,
+            )
+            fields, rows = _normalize_result_table(result)
+            processed = _postprocess_rows(question, fields, rows)
+            fields = processed.get("fields", fields)
+            rows = processed.get("rows", rows)
+            response_data = {"fields": fields, "rows": rows}
+            response_data.update({k: v for k, v in processed.items() if k not in {"fields", "rows"}})
     except (TableauMCPError, QueryExecutorError) as e:
         code = getattr(e, "code", None) or (getattr(e, "error_code", None) if hasattr(e, "error_code") else None)
         if code in _FAST_RECOVERABLE_ERRORS:
@@ -265,10 +464,7 @@ async def try_fast_mcp_stream(
     except Exception as e:
         logger.warning("[FAST_FAILED] execute_query unexpected error=%s trace=%s", e, context.trace_id)
         return None
-
-    # 5. 格式化结果为 SSE stream
-    fields = result.get("fields", [])
-    rows = result.get("rows", [])
+    query_ms = max(0, int((time.monotonic() - query_start) * 1000))
 
     logger.info("[FAST_SUCCESS] datasource=%s rows=%d trace=%s", datasource_luid, len(rows), context.trace_id)
 
@@ -278,7 +474,8 @@ async def try_fast_mcp_stream(
         # fast_event_generator accesses run_id from enclosing function scope
         t0 = time.monotonic()
         # 构造回答文本（L2 修复：使用 fields 和 datasource_name）
-        answer_text = _build_fast_answer(question, fields, rows, datasource_name or datasource_luid)
+        answer_text = _build_fast_answer(question, fields, rows, datasource_name or datasource_luid, response_data)
+        answer_ms = max(0, int((time.monotonic() - t0) * 1000))
 
         # H4 修复：持久化 assistant 回复到会话历史
         try:
@@ -288,7 +485,7 @@ async def try_fast_mcp_stream(
                 content=answer_text,
                 trace_id=context.trace_id,
                 response_type="table",
-                response_data={"fields": fields, "rows": rows},
+                response_data=response_data,
                 tools_used=["query"],
                 steps_count=1,
             )
@@ -300,6 +497,7 @@ async def try_fast_mcp_stream(
         try:
             run_id = uuid_lib.uuid4()
             with get_db_context() as _db:
+                total_ms = max(0, int((time.monotonic() - fast_start) * 1000))
                 run = BiAgentRun(
                     id=run_id,
                     conversation_id=uuid_lib.UUID(context.session_id),
@@ -310,10 +508,36 @@ async def try_fast_mcp_stream(
                     steps_count=1,
                     tools_used=["query"],
                     response_type="table",
-                    execution_time_ms=int((time.monotonic() - t0) * 1000),
+                    execution_time_ms=total_ms,
                     completed_at=datetime.now(timezone.utc),
                 )
                 _db.add(run)
+                _db.flush()
+                _db.add_all([
+                    BiAgentStep(
+                        run_id=run_id,
+                        step_number=1,
+                        step_type="tool_call",
+                        tool_name="query",
+                        tool_params={"question": question},
+                        execution_time_ms=route_ms,
+                    ),
+                    BiAgentStep(
+                        run_id=run_id,
+                        step_number=2,
+                        step_type="tool_result",
+                        tool_name="query",
+                        tool_result_summary=str({"fields": fields, "rows": rows[:3]})[:500],
+                        execution_time_ms=query_ms,
+                    ),
+                    BiAgentStep(
+                        run_id=run_id,
+                        step_number=3,
+                        step_type="answer",
+                        content=answer_text[:500],
+                        execution_time_ms=answer_ms,
+                    ),
+                ])
                 _db.commit()
         except Exception as e:
             logger.warning("[FAST] BiAgentRun write failed: %s", e)
@@ -334,7 +558,7 @@ async def try_fast_mcp_stream(
             'run_id': str(run_id) if run_id else '',
             'tools_used': ['query'],
             'response_type': 'table',
-            'response_data': {'fields': fields, 'rows': rows},
+            'response_data': response_data,
             'steps_count': 1,
             'execution_time_ms': int((time.monotonic() - t0) * 1000),
             'sources_count': 0,
@@ -353,8 +577,36 @@ async def try_fast_mcp_stream(
     return (run_id, fast_event_generator())
 
 
-def _build_fast_answer(question: str, fields: List, rows: List, datasource_name: str) -> str:
+def _build_fast_answer(
+    question: str,
+    fields: List,
+    rows: List,
+    datasource_name: str,
+    response_data: Optional[dict] = None,
+) -> str:
     """根据查询结果生成自然语言回答。"""
+    response_data = response_data or {}
+    churn = response_data.get("customer_churn")
+    if isinstance(churn, dict):
+        count = int(churn.get("churned_customer_count") or 0)
+        definition = churn.get("definition") or "指定基准期有订单，但最近一年没有订单"
+        if count == 0:
+            return f"没有找到符合「{definition}」定义的流失客户。"
+        preview = ", ".join(str(row[0]) for row in rows[:10] if row)
+        suffix = f"（共 {count} 个）" if count > 10 else ""
+        return f"符合「{definition}」定义的流失客户为：{preview}{suffix}。"
+
+    increasing = response_data.get("monotonic_increasing")
+    if isinstance(increasing, list) and ("一直在涨" in question or "持续增长" in question):
+        matched = [
+            str(item.get("dimension"))
+            for item in increasing
+            if isinstance(item, dict) and item.get("is_increasing") is True and item.get("dimension") is not None
+        ]
+        if matched:
+            return f"「{question}」中符合利润持续上涨条件的渠道是：{', '.join(matched)}。"
+        return f"「{question}」中没有找到利润持续上涨的渠道。"
+
     if not rows:
         return f"没有找到符合「{question}」的数据。"
     row_count = len(rows)
@@ -601,7 +853,156 @@ async def agent_stream(
     async def event_generator() -> AsyncGenerator[str, None]:
         _t0 = time.monotonic()
 
+        # ── Deterministic route：稳定回答连接 schema / 数据源清单问题 ────────────
+        deterministic_route = detect_deterministic_route(req.question, context.connection_type)
+        if deterministic_route == "schema_inventory":
+            run_id = uuid_lib.uuid4()
+            active_skill_version = get_active_skill_version(db, "schema")
+            yield _sse_data({
+                "type": "metadata",
+                "conversation_id": conversation_id_str,
+                "run_id": str(run_id),
+            })
+
+            if (
+                active_skill_version.get("is_configured")
+                and active_skill_version.get("is_enabled") is False
+            ):
+                error_code = "AGENT_003"
+                message = "schema 工具已禁用，无法生成数据源清单。请联系管理员在 Skills Center 启用 schema 工具。"
+                execution_time_ms = int((time.monotonic() - _t0) * 1000)
+                try:
+                    _write_schema_inventory_error_run(
+                        db=db,
+                        run_id=run_id,
+                        session=session,
+                        current_user=current_user,
+                        question=req.question,
+                        connection_id=effective_connection_id,
+                        error_code=error_code,
+                        message=message,
+                        execution_time_ms=execution_time_ms,
+                    )
+                except Exception as e:
+                    logger.warning("[DETERMINISTIC] failed to write disabled schema run: %s", e)
+                yield _sse_data({
+                    "type": "error",
+                    "error_code": error_code,
+                    "message": message,
+                })
+                log_nlq_query(
+                    user_id=current_user.get("id"),
+                    question=req.question,
+                    execution_time_ms=execution_time_ms,
+                    error_code=error_code,
+                )
+                return
+
+            version_for_route = active_skill_version if active_skill_version.get("version_id") else None
+            thinking_text = "识别为数据源清单问题，准备读取当前连接的 schema 信息。"
+            yield _sse_data({"type": "thinking", "content": thinking_text})
+            yield _sse_data({"type": "tool_call", "tool": "schema", "params": {}})
+
+            try:
+                route_start = time.monotonic()
+                result = await run_schema_inventory_route(
+                    _registry,
+                    context,
+                    active_skill_version=version_for_route,
+                    question=req.question,
+                )
+                route_ms = max(0, int((time.monotonic() - route_start) * 1000))
+                execution_time_ms = int((time.monotonic() - _t0) * 1000)
+                _write_schema_inventory_success(
+                    db=db,
+                    run_id=run_id,
+                    session=session,
+                    session_mgr=session_mgr,
+                    current_user=current_user,
+                    context=context,
+                    question=req.question,
+                    connection_id=effective_connection_id,
+                    result=result,
+                    execution_time_ms=execution_time_ms,
+                    step_durations_ms={
+                        1: 0,
+                        2: 0,
+                        3: route_ms,
+                        4: max(0, execution_time_ms - route_ms),
+                    },
+                )
+            except Exception as e:
+                logger.exception("[DETERMINISTIC] schema inventory route failed: %s", e)
+                error_code = "AGENT_003"
+                message = "生成数据源清单失败，请稍后重试。"
+                execution_time_ms = int((time.monotonic() - _t0) * 1000)
+                try:
+                    _write_schema_inventory_error_run(
+                        db=db,
+                        run_id=run_id,
+                        session=session,
+                        current_user=current_user,
+                        question=req.question,
+                        connection_id=effective_connection_id,
+                        error_code=error_code,
+                        message=message,
+                        execution_time_ms=execution_time_ms,
+                    )
+                except Exception as write_error:
+                    logger.warning("[DETERMINISTIC] failed to write schema error run: %s", write_error)
+                yield _sse_data({
+                    "type": "error",
+                    "error_code": error_code,
+                    "message": message,
+                })
+                log_nlq_query(
+                    user_id=current_user.get("id"),
+                    question=req.question,
+                    execution_time_ms=execution_time_ms,
+                    error_code=error_code,
+                )
+                return
+
+            yield _sse_data({
+                "type": "tool_result",
+                "tool": result.tool_name,
+                "summary": result.tool_result_summary[:200],
+            })
+            token_text = result.answer
+            yield _sse_data({"type": "token", "content": token_text})
+            done_payload = {
+                "type": "done",
+                "answer": token_text,
+                "trace_id": trace_id,
+                "run_id": str(run_id),
+                "tools_used": result.tools_used,
+                "response_type": result.response_type,
+                "response_data": result.response_data,
+                "steps_count": result.steps_count,
+                "execution_time_ms": execution_time_ms,
+                "sources_count": 0,
+                "top_sources": [],
+            }
+            yield _sse_data(done_payload)
+            log_nlq_query(
+                user_id=current_user.get("id"),
+                question=req.question,
+                response_type=result.response_type,
+                execution_time_ms=execution_time_ms,
+                error_code=None,
+            )
+            if is_new_session:
+                asyncio.create_task(
+                    _generate_short_title(req.question, conversation_id_str, current_user["id"])
+                )
+            return
+
         # ── 快通 MCP 路径：意图命中的简单问数直连 VizQL ──────────────────────
+        followup_datasource_name = resolve_recent_schema_asset_name(
+            session_mgr,
+            session,
+            current_user["id"],
+        )
         if is_direct_query(req.question):
             logger.info("[FAST_ATTEMPTED] question=%s, trace=%s", req.question[:80], trace_id)
             run_id: Optional[uuid_lib.UUID] = None
@@ -614,6 +1015,7 @@ async def agent_stream(
                     db=db,
                     session=session,
                     session_mgr=session_mgr,
+                    datasource_name_hint=followup_datasource_name,
                 )
                 if fast_result is not None:
                     run_id, fast_gen = fast_result

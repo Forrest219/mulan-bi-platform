@@ -6,9 +6,9 @@ const CompliancePage = lazy(() => import('../compliance/page'));
 
 type Tab = 'warehouse' | 'compliance';
 
-const TABS: { key: Tab; label: string; icon: string }[] = [
-  { key: 'warehouse', label: '数仓体检', icon: 'ri-heart-pulse-line' },
-  { key: 'compliance', label: 'DDL 合规规则', icon: 'ri-checkbox-circle-line' },
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'warehouse', label: '数仓体检' },
+  { key: 'compliance', label: 'DDL 合规规则' },
 ];
 
 export default function HealthCenterPage() {
@@ -48,19 +48,18 @@ export default function HealthCenterPage() {
         </div>
       </div>
       <div className="bg-white border-b border-slate-100 px-8">
-        <div className="max-w-6xl mx-auto py-2">
-          <div className="flex gap-1">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex gap-1 py-2">
             {TABS.map((t) => (
               <button
                 key={t.key}
                 onClick={() => handleTabChange(t.key)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
+                className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
                   activeTab === t.key
                     ? 'bg-slate-800 text-white'
                     : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
                 }`}
               >
-                <i className={t.icon} />
                 {t.label}
               </button>
             ))}

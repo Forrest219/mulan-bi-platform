@@ -205,6 +205,10 @@ class ReActEngine:
                     else:
                         result_data = forced_result if isinstance(forced_result, dict) else {"data": forced_result}
                     yield AgentEvent(type="tool_result", content={"tool": force_first_tool, "result": result_data})
+                    forced_error = _tool_failure_error_content(force_first_tool, result_data)
+                    if forced_error:
+                        yield AgentEvent(type="error", content=forced_error)
+                        return
                     history_messages.append({
                         "role": "assistant",
                         "content": json.dumps({
@@ -362,6 +366,11 @@ class ReActEngine:
             # 记录工具使用
             if tool_name not in tools_used:
                 tools_used.append(tool_name)
+
+            schema_answer = _format_schema_tool_answer(result_data) if tool_name == "schema" else None
+            if schema_answer:
+                yield AgentEvent(type="answer", content=schema_answer)
+                return
 
         # 6. 达到 max_steps 上限
         yield AgentEvent(
@@ -676,6 +685,138 @@ def _format_direct_answer(query: str, result_data: dict) -> str:
 
     hint = f"「{ds_name}」" if ds_name else ""
     return f"已从{hint}查询到 **{row_count}** 条记录，详见下方表格。"
+
+
+def _format_schema_tool_answer(result_data: dict) -> Optional[str]:
+    """Render SchemaTool output deterministically to avoid LLM-invented metadata."""
+    if not isinstance(result_data, dict) or result_data.get("success") is not True:
+        return None
+
+    data = result_data.get("data")
+    if not isinstance(data, dict):
+        return None
+
+    fields_by_asset = data.get("fields")
+    if isinstance(fields_by_asset, dict) and fields_by_asset:
+        return _format_schema_fields_answer(data, fields_by_asset)
+
+    tables = data.get("tables")
+    if isinstance(tables, list):
+        return _format_schema_assets_answer(data, tables)
+
+    return None
+
+
+def _tool_failure_error_content(tool_name: str, result_data: dict) -> Optional[Dict[str, Any]]:
+    """Convert a forced first-tool failure into a terminal user-visible error."""
+    if not isinstance(result_data, dict):
+        return None
+
+    error_message = ""
+    error_code = result_data.get("error_code")
+    if result_data.get("success") is False:
+        error_message = str(result_data.get("error") or result_data.get("message") or "")
+    elif error_code:
+        error_message = str(result_data.get("message") or result_data.get("error") or "")
+
+    if not error_message and not error_code:
+        return None
+
+    timeout_markers = ("NLQ_007", "超时", "timeout", "timed out")
+    if not error_code:
+        error_code = "AGENT_001" if any(marker in error_message for marker in timeout_markers) else "AGENT_003"
+
+    content: Dict[str, Any] = {
+        "error_code": error_code,
+        "message": error_message or f"工具执行失败: {tool_name}",
+        "detail": {"tool": tool_name},
+    }
+    if error_code == "AGENT_001":
+        content["user_hint"] = "数据源响应超时，请稍后重试，或缩小查询范围。"
+    return content
+
+
+def _format_schema_fields_answer(data: dict, fields_by_asset: dict) -> str:
+    asset_name = None
+    field_rows = []
+    for candidate_name, candidate_fields in fields_by_asset.items():
+        if isinstance(candidate_fields, list):
+            asset_name = str(candidate_name)
+            field_rows = candidate_fields
+            break
+
+    requested = data.get("requested_table_name")
+    matched_asset = data.get("matched_asset") if isinstance(data.get("matched_asset"), dict) else {}
+    display_name = matched_asset.get("name") or asset_name or requested or "该数据资产"
+    field_count = data.get("field_count")
+    if not isinstance(field_count, int):
+        field_count = len(field_rows)
+
+    if not field_rows:
+        return f"未找到 **{display_name}** 的字段信息。"
+
+    lines = [
+        f"数据资产 **{display_name}** 返回了 **{field_count} 个字段**：",
+        "",
+        "| 序号 | 字段名称 | 类型 | 角色 | 计算字段 |",
+        "|---:|---|---|---|---|",
+    ]
+
+    for index, field in enumerate(field_rows, start=1):
+        if not isinstance(field, dict):
+            name = str(field)
+            data_type = ""
+            role = ""
+            is_calculated = ""
+        else:
+            name = str(field.get("name") or field.get("caption") or "")
+            data_type = str(field.get("data_type") or "")
+            role = str(field.get("role") or "")
+            is_calculated = "是" if field.get("is_calculated") is True else ("否" if field.get("is_calculated") is False else "")
+
+        lines.append(
+            f"| {index} | {_escape_markdown_table_cell(name)} | "
+            f"{_escape_markdown_table_cell(data_type) or '-'} | "
+            f"{_escape_markdown_table_cell(role) or '-'} | "
+            f"{is_calculated or '-'} |"
+        )
+
+    web_url = matched_asset.get("web_url")
+    if web_url:
+        lines.extend(["", f"资产链接：{web_url}"])
+
+    warning = data.get("warning")
+    if warning:
+        lines.extend(["", f"注意：{warning}"])
+
+    return "\n".join(lines)
+
+
+def _format_schema_assets_answer(data: dict, tables: list) -> str:
+    datasource_name = data.get("datasource_name") or "当前连接"
+    if not tables:
+        return f"在 **{datasource_name}** 中未找到可用数据资产。"
+
+    lines = [
+        f"**{datasource_name}** 返回了 **{len(tables)} 个数据资产**：",
+        "",
+        "| 序号 | 名称 | 类型 | 项目 |",
+        "|---:|---|---|---|",
+    ]
+    for index, asset in enumerate(tables, start=1):
+        if not isinstance(asset, dict):
+            lines.append(f"| {index} | {_escape_markdown_table_cell(str(asset))} | - | - |")
+            continue
+        lines.append(
+            f"| {index} | {_escape_markdown_table_cell(str(asset.get('name') or ''))} | "
+            f"{_escape_markdown_table_cell(str(asset.get('type') or '')) or '-'} | "
+            f"{_escape_markdown_table_cell(str(asset.get('project') or '')) or '-'} |"
+        )
+    return "\n".join(lines)
+
+
+def _escape_markdown_table_cell(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", " ").strip()
 
 
 _TIME_KEYWORDS = {'年', '月', '季', '日', '周', '年份', '月份', '日期', '时间', '季度',

@@ -137,6 +137,100 @@ export interface TaskQueueResponse {
   future_range: string;
 }
 
+// ─── 同步日历总览 ─────────────────────────────────────────────
+
+export type SyncOverviewStatus =
+  | 'pending'
+  | 'running'
+  | 'succeeded'
+  | 'completed'
+  | 'failed'
+  | 'skipped'
+  | 'cancelled'
+  | 'idle'
+  | 'unknown';
+
+export type SyncOverviewHealthStatus = 'healthy' | 'warning' | 'error' | 'disabled' | 'unknown';
+
+export interface SyncFieldCompleteness {
+  datasource_total: number;
+  datasource_with_fields: number;
+  fields_total: number;
+  empty: number;
+  failed: number;
+}
+
+export interface SyncOverviewRule {
+  id: number;
+  name: string;
+  cron_expr?: string | null;
+  cron_description?: string | null;
+  execution_mode?: string | null;
+}
+
+export interface SyncOverviewLatestSync {
+  status: SyncOverviewStatus;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms?: number | null;
+  error_message?: string | null;
+}
+
+export interface SyncOverviewSummary {
+  next_sync_at: string | null;
+  tomorrow_sync_count: number;
+  latest_sync_status: SyncOverviewStatus;
+  latest_sync_at: string | null;
+  field_completeness: SyncFieldCompleteness;
+}
+
+export interface SyncOverviewConnection {
+  id: number;
+  name: string;
+  server_url?: string | null;
+  site?: string | null;
+  auto_sync_enabled: boolean;
+  sync_rule: SyncOverviewRule | null;
+  next_sync_at: string | null;
+  last_sync: SyncOverviewLatestSync | null;
+  field_completeness: SyncFieldCompleteness;
+  health_status: SyncOverviewHealthStatus;
+  warnings?: string[];
+}
+
+export interface SyncOverviewTimelineItem {
+  id?: number;
+  connection_id: number;
+  connection_name: string;
+  schedule_id?: number | null;
+  schedule_name: string;
+  scheduled_at: string;
+  status: SyncOverviewStatus;
+  trigger_type?: 'scheduled' | 'manual' | string;
+  health_status?: SyncOverviewHealthStatus;
+  warning?: string | null;
+}
+
+export interface SyncOverviewTimeline {
+  today: SyncOverviewTimelineItem[];
+  tomorrow: SyncOverviewTimelineItem[];
+  future_48h: SyncOverviewTimelineItem[];
+}
+
+export interface SyncOverviewHealth {
+  worker_status?: SyncOverviewHealthStatus;
+  beat_status?: SyncOverviewHealthStatus;
+  warnings?: string[];
+}
+
+export interface SyncOverviewResponse {
+  generated_at: string;
+  summary: SyncOverviewSummary;
+  connections: SyncOverviewConnection[];
+  timeline: SyncOverviewTimeline;
+  health?: SyncOverviewHealth;
+}
+
 export type SyncScheduleListResponse = PaginatedResponse<SyncSchedule>;
 
 // API functions — follow the exact pattern from health-scan.ts
@@ -338,6 +432,12 @@ export async function fetchTaskQueue(pastHours = 24, futureHours = 24): Promise<
   });
   const res = await fetch(`${API_BASE}/api/tasks/tasks/queue?${sp}`, { credentials: 'include' });
   if (!res.ok) throw new Error('获取任务队列失败');
+  return res.json();
+}
+
+export async function fetchSyncOverview(): Promise<SyncOverviewResponse> {
+  const res = await fetch(`${API_BASE}/api/tasks/sync-overview`, { credentials: 'include' });
+  if (!res.ok) throw await apiError(res, '获取同步日历失败');
   return res.json();
 }
 

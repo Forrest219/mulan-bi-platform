@@ -76,6 +76,30 @@ export interface PublishVersionPayload {
   change_notes?: string;
 }
 
+export interface PublishVersionResponse {
+  id: string;
+  skill_id: string;
+  version_number: string;
+  is_active: boolean;
+  previous_active_version: string | null;
+  created_at: string | null;
+}
+
+async function skillApiError(res: Response, fallback: string): Promise<Error> {
+  const body = await res.json().catch(() => ({}));
+  const detail = body?.detail;
+  if (detail && typeof detail === 'object') {
+    const code = typeof detail.code === 'string' ? detail.code : undefined;
+    const message = typeof detail.message === 'string' ? detail.message : undefined;
+    if (code && message) return new Error(`[${code}] ${message}`);
+    if (message) return new Error(message);
+    if (code) return new Error(`[${code}] ${fallback}`);
+  }
+  if (typeof detail === 'string') return new Error(detail);
+  if (typeof body?.message === 'string') return new Error(body.message);
+  return new Error(fallback);
+}
+
 // ── API 函数 ───────────────────────────────────────────────────────────────────
 
 export async function listSkills(params: SkillListParams): Promise<SkillListResponse> {
@@ -86,13 +110,13 @@ export async function listSkills(params: SkillListParams): Promise<SkillListResp
   if (params.page) q.set('page', String(params.page));
   if (params.page_size) q.set('page_size', String(params.page_size));
   const res = await fetch(`${BASE}?${q}`, { credentials: 'include' });
-  if (!res.ok) throw new Error('获取技能列表失败');
+  if (!res.ok) throw await skillApiError(res, '获取技能列表失败');
   return res.json();
 }
 
 export async function getSkill(id: string): Promise<SkillDetail> {
   const res = await fetch(`${BASE}/${id}`, { credentials: 'include' });
-  if (!res.ok) throw new Error('获取技能详情失败');
+  if (!res.ok) throw await skillApiError(res, '获取技能详情失败');
   return res.json();
 }
 
@@ -103,10 +127,7 @@ export async function createSkill(payload: CreateSkillPayload): Promise<AgentSki
     credentials: 'include',
     body: JSON.stringify(payload),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error((err?.detail as { message?: string })?.message ?? '创建技能失败');
-  }
+  if (!res.ok) throw await skillApiError(res, '创建技能失败');
   return res.json();
 }
 
@@ -120,24 +141,21 @@ export async function patchSkill(
     credentials: 'include',
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error('更新技能失败');
+  if (!res.ok) throw await skillApiError(res, '更新技能失败');
   return res.json();
 }
 
 export async function publishVersion(
   skillId: string,
   payload: PublishVersionPayload,
-): Promise<SkillVersion> {
+): Promise<PublishVersionResponse> {
   const res = await fetch(`${BASE}/${skillId}/versions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
     body: JSON.stringify(payload),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error((err?.detail as { message?: string })?.message ?? '发布版本失败');
-  }
+  if (!res.ok) throw await skillApiError(res, '发布版本失败');
   return res.json();
 }
 
@@ -149,7 +167,7 @@ export async function rollbackVersion(
     method: 'POST',
     credentials: 'include',
   });
-  if (!res.ok) throw new Error('回滚版本失败');
+  if (!res.ok) throw await skillApiError(res, '回滚版本失败');
   return res.json();
 }
 
@@ -161,6 +179,6 @@ export async function getVersionDiff(
   const res = await fetch(`${BASE}/${skillId}/versions/${vId1}/diff/${vId2}`, {
     credentials: 'include',
   });
-  if (!res.ok) throw new Error('获取版本差异失败');
+  if (!res.ok) throw await skillApiError(res, '获取版本差异失败');
   return res.json();
 }

@@ -19,6 +19,8 @@ BACKEND="$ROOT/backend"
 FRONTEND="$ROOT/frontend"
 LOG_DIR="$ROOT/.dev-logs"
 PID_DIR="$ROOT/.dev-pids"
+BACKEND_PY="$BACKEND/.venv/bin/python"
+BACKEND_CELERY="$BACKEND/.venv/bin/celery"
 
 # 默认 .env 文件
 ENV_FILE="$ROOT/.env"
@@ -64,7 +66,7 @@ load_env() {
 # ============ 环境检查 ============
 check_deps() {
   local missing=0
-  for cmd in docker node python3 npm; do
+  for cmd in docker node npm; do
     if ! command -v $cmd &> /dev/null; then
       echo "${RED}Error: $cmd not found${RESET}"
       missing=1
@@ -72,6 +74,19 @@ check_deps() {
   done
   if [ $missing -eq 1 ]; then
     echo "${RED}Please install missing dependencies${RESET}"
+    exit 1
+  fi
+  if [ ! -x "$BACKEND_PY" ]; then
+    echo "${RED}Error: missing backend virtualenv: $BACKEND_PY${RESET}"
+    echo "${RED}Create it with Python 3.10+ and run: cd backend && .venv/bin/python -m pip install -r requirements.txt${RESET}"
+    exit 1
+  fi
+  if ! "$BACKEND_PY" -c "import sys; raise SystemExit(sys.version_info < (3, 10))"; then
+    echo "${RED}Error: backend requires Python 3.10+; $BACKEND_PY is $("$BACKEND_PY" --version 2>&1)${RESET}"
+    exit 1
+  fi
+  if [ ! -x "$BACKEND_CELERY" ]; then
+    echo "${RED}Error: missing celery in backend virtualenv; run: cd backend && .venv/bin/python -m pip install -r requirements.txt${RESET}"
     exit 1
   fi
 }
@@ -185,13 +200,13 @@ main() {
   echo ">>> Step 3: Running database migrations..."
   printf "alembic upgrade... "
   cd "$BACKEND"
-  alembic upgrade head > "$LOG_DIR/alembic.log" 2>&1
+  "$BACKEND_PY" -m alembic upgrade head > "$LOG_DIR/alembic.log" 2>&1
   printf "${GREEN}ok${RESET}\n"
 
   echo ""
   echo ">>> Step 4: Starting backend (uvicorn)..."
   printf "backend... "
-  uvicorn app.main:app --host 0.0.0.0 --port 8000 > "$LOG_DIR/backend.log" 2>&1 &
+  "$BACKEND_PY" -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > "$LOG_DIR/backend.log" 2>&1 &
   echo $! > "$PID_DIR/backend.pid"
   printf "${GREEN}ok${RESET}\n"
 
@@ -202,7 +217,7 @@ main() {
   echo ""
   echo ">>> Step 6: Running seed data script..."
   printf "seed data... "
-  python3 "$ROOT/scripts/seed_demo.py" > "$LOG_DIR/seed.log" 2>&1 || {
+  "$BACKEND_PY" "$ROOT/scripts/seed_demo.py" > "$LOG_DIR/seed.log" 2>&1 || {
     echo "${YELLOW}Warning: seed script failed, continuing...${RESET}"
   }
   printf "${GREEN}ok${RESET}\n"
@@ -211,14 +226,14 @@ main() {
   echo ">>> Step 7: Starting Celery Beat..."
   printf "celery-beat... "
   cd "$BACKEND"
-  celery -A services.tasks beat --loglevel=warning > "$LOG_DIR/celery-beat.log" 2>&1 &
+  "$BACKEND_CELERY" -A services.tasks beat --loglevel=warning > "$LOG_DIR/celery-beat.log" 2>&1 &
   echo $! > "$PID_DIR/celery-beat.pid"
   printf "${GREEN}ok${RESET}\n"
 
   echo ""
   echo ">>> Step 8: Starting Celery Worker..."
   printf "celery-worker... "
-  celery -A services.tasks worker --pool=solo --loglevel=warning > "$LOG_DIR/celery-worker.log" 2>&1 &
+  "$BACKEND_CELERY" -A services.tasks worker --pool=solo --loglevel=warning > "$LOG_DIR/celery-worker.log" 2>&1 &
   echo $! > "$PID_DIR/celery-worker.pid"
   printf "${GREEN}ok${RESET}\n"
 

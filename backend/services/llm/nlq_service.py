@@ -640,6 +640,42 @@ _FIELD_CONSISTENCY_RETRY_TEMPLATE = """你生成的 VizQL JSON 中以下 fieldCa
 直接输出 JSON，不要包含任何解释文字："""
 
 
+def _get_datasource_field_keys(asset_id: int) -> List[str]:
+    """
+    获取 field_caption 和 field_name 的稳定并集。
+
+    Redis 缓存只保存一个展示字段名，遇到本地 caption 为空或缓存差异时容易把真实字段误判为缺失；
+    一致性校验因此使用数据库中的 caption/name 并集，并把缓存结果作为补充。
+    """
+    from services.tableau.models import TableauDatasourceField
+
+    field_keys = []
+    seen = set()
+
+    for key in get_datasource_fields_cached(asset_id):
+        normalized = str(key).strip() if key else ""
+        if normalized and normalized not in seen:
+            field_keys.append(normalized)
+            seen.add(normalized)
+
+    db = TableauDatabase()
+    session = db.session
+    try:
+        field_records = session.query(TableauDatasourceField).filter(
+            TableauDatasourceField.asset_id == asset_id
+        ).all()
+        for field in field_records:
+            for key in (field.field_caption, field.field_name):
+                normalized = str(key).strip() if key else ""
+                if normalized and normalized not in seen:
+                    field_keys.append(normalized)
+                    seen.add(normalized)
+    finally:
+        session.close()
+
+    return field_keys
+
+
 def validate_field_captions_consistency(
     parsed: dict,
     datasource_luid: str,
@@ -684,11 +720,7 @@ def validate_field_captions_consistency(
                        datasource_luid, get_trace_id())
         return True, [], []
 
-    actual_captions = get_datasource_fields_cached(asset.id)
-    available_fields_str = "\n".join(
-        f"- {fc}" for fc in actual_captions
-    )
-
+    actual_captions = _get_datasource_field_keys(asset.id)
     # 检查每个 LLM 输出的 fieldCaption
     missing_fields = []
     for f in llm_fields:
@@ -756,6 +788,8 @@ async def _retry_field_consistency(
     if parse_err:
         return None, f"一致性重试 JSON 解析失败：{parse_err}"
 
+    normalize_one_pass_output(parsed_retry, ds_luid)
+
     is_valid, validation_err = validate_one_pass_output(parsed_retry)
     if not is_valid:
         return None, f"一致性重试 JSON 校验仍失败：{validation_err}"
@@ -780,6 +814,108 @@ _FUNCTION_NORMALIZE_MAP = {
     "dimension": "NONE", "dim": "NONE", "none": "NONE",
     "unspecified": "UNSPECIFIED",
 }
+_VALID_FUNCTIONS = set(
+    ONE_PASS_OUTPUT_SCHEMA["properties"]["vizql_json"]["properties"]["fields"]["items"]["properties"]["function"]["enum"]
+)
+_DATE_TYPE_MARKERS = ("DATE", "DATETIME", "TIMESTAMP", "TIME")
+
+
+def _normalize_field_function(field: dict) -> None:
+    func = field.get("function")
+    if func is None:
+        field.pop("function", None)  # null → 移除键（无聚合的维度字段）
+        return
+    if not isinstance(func, str):
+        return
+
+    stripped = func.strip()
+    normalized = _FUNCTION_NORMALIZE_MAP.get(stripped.lower())
+    if normalized:
+        field["function"] = normalized
+        return
+
+    upper_func = stripped.upper()
+    if upper_func in _VALID_FUNCTIONS:
+        field["function"] = upper_func
+
+
+def _is_year_value(value: Any) -> bool:
+    return bool(re.fullmatch(r"\d{4}", str(value).strip()))
+
+
+def _extract_filter_field_caption(filter_item: dict) -> str:
+    field = filter_item.get("field")
+    if isinstance(field, dict):
+        return str(field.get("fieldCaption") or field.get("fieldName") or "").strip()
+    return ""
+
+
+def _get_datasource_date_field_keys(datasource_luid: str) -> set:
+    if not datasource_luid:
+        return set()
+
+    from services.tableau.models import TableauDatasourceField
+
+    db = TableauDatabase()
+    session = db.session
+    try:
+        asset = session.query(TableauAsset).filter(
+            TableauAsset.tableau_id == datasource_luid
+        ).first()
+        if not asset:
+            return set()
+
+        field_records = session.query(TableauDatasourceField).filter(
+            TableauDatasourceField.asset_id == asset.id
+        ).all()
+        date_fields = set()
+        for field in field_records:
+            data_type = (field.data_type or "").upper()
+            if any(marker in data_type for marker in _DATE_TYPE_MARKERS):
+                for key in (field.field_caption, field.field_name):
+                    if key:
+                        date_fields.add(str(key).strip())
+        return date_fields
+    finally:
+        session.close()
+
+
+def normalize_one_pass_output(raw: Any, datasource_luid: str = "") -> Any:
+    """就地规范化 LLM 输出中已知可修复的 VizQL 形态。"""
+    if not isinstance(raw, dict):
+        return raw
+
+    vizql = raw.get("vizql_json", {})
+    if not isinstance(vizql, dict):
+        return raw
+
+    for field in vizql.get("fields", []):
+        if isinstance(field, dict):
+            _normalize_field_function(field)
+
+    date_field_keys = _get_datasource_date_field_keys(datasource_luid)
+    if date_field_keys:
+        for filter_item in vizql.get("filters", []):
+            if not isinstance(filter_item, dict) or filter_item.get("filterType") != "SET":
+                continue
+            field_caption = _extract_filter_field_caption(filter_item)
+            values = filter_item.get("values")
+            if (
+                field_caption in date_field_keys
+                and isinstance(values, list)
+                and len(values) == 1
+                and _is_year_value(values[0])
+            ):
+                year = str(values[0]).strip()
+                filter_item["filterType"] = "QUANTITATIVE_DATE"
+                filter_item["quantitativeFilterType"] = "RANGE"
+                filter_item["minDate"] = f"{year}-01-01"
+                filter_item["maxDate"] = f"{year}-12-31"
+                filter_item.pop("values", None)
+                filter_item.pop("exclude", None)
+                filter_item.pop("context", None)
+
+    return raw
 
 
 def validate_one_pass_output(raw: Any) -> Tuple[bool, Optional[str]]:
@@ -790,16 +926,7 @@ def validate_one_pass_output(raw: Any) -> Tuple[bool, Optional[str]]:
     if not isinstance(raw, dict):
         return False, f"输出不是 JSON 对象：{type(raw)}"
 
-    # 规范化 vizql_json.fields[].function（就地修改，避免 LLM 返回无效聚合名导致反复重试）
-    for f in raw.get("vizql_json", {}).get("fields", []):
-        if isinstance(f, dict):
-            func = f.get("function")
-            if func is None:
-                f.pop("function", None)  # null → 移除键（无聚合的维度字段）
-            elif isinstance(func, str):
-                normalized = _FUNCTION_NORMALIZE_MAP.get(func.lower())
-                if normalized:
-                    f["function"] = normalized
+    normalize_one_pass_output(raw)
 
     # 校验 required 字段
     for field in ONE_PASS_OUTPUT_SCHEMA.get("required", []):
@@ -941,13 +1068,16 @@ async def one_pass_llm(
     parsed, parse_err = parse_json_from_response(content)
     if parse_err:
         # JSON 解析失败，尝试带反馈重试
-        parsed, parse_err = _retry_with_feedback(
+        parsed, parse_err = await _retry_with_feedback(
             prompt=prompt,
             system_prompt=system_prompt,
             error_details=parse_err,
+            datasource_luid=datasource_luid,
         )
         if parse_err:
             raise NLQError("NLQ_003", message=f"JSON 解析失败：{parse_err}")
+
+    normalize_one_pass_output(parsed, datasource_luid)
 
     # Schema 校验
     is_valid, validation_err = validate_one_pass_output(parsed)
@@ -957,6 +1087,7 @@ async def one_pass_llm(
             prompt=prompt,
             system_prompt=system_prompt,
             error_details=validation_err,
+            datasource_luid=datasource_luid,
         )
         if validation_err:
             raise NLQError("NLQ_003", message=f"JSON 校验失败：{validation_err}")
@@ -990,6 +1121,7 @@ async def _retry_with_feedback(
     prompt: str,
     system_prompt: str,
     error_details: str,
+    datasource_luid: str = "",
 ) -> Tuple[Optional[Dict], Optional[str]]:
     """
     带反馈的 JSON 重试（PRD §5.4）。
@@ -1027,6 +1159,8 @@ async def _retry_with_feedback(
     parsed, parse_err = parse_json_from_response(content)
     if parse_err:
         return None, f"重试 JSON 解析失败：{parse_err}"
+
+    normalize_one_pass_output(parsed, datasource_luid)
 
     is_valid, validation_err = validate_one_pass_output(parsed)
     if not is_valid:

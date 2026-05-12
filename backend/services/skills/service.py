@@ -14,6 +14,7 @@ from cachetools import TTLCache
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
+from services.auth.models import User
 from services.skills.models import AgentSkill, AgentSkillVersion
 
 logger = logging.getLogger(__name__)
@@ -40,10 +41,10 @@ STATIC_SKILL_KEYS: frozenset = frozenset([
 ])
 
 # ---------------------------------------------------------------------------
-# Dispatch 缓存 — TTLCache(maxsize=100, ttl=60s)
+# Dispatch 缓存 — TTLCache(maxsize=100, ttl=10s)
 # Spec §6.5: 单进程内存缓存，版本切换时主动失效
 # ---------------------------------------------------------------------------
-_dispatch_cache: TTLCache = TTLCache(maxsize=100, ttl=60)
+_dispatch_cache: TTLCache = TTLCache(maxsize=100, ttl=10)
 DISPATCH_CACHE_KEY = "dispatch:all"
 
 
@@ -198,6 +199,50 @@ def _atomic_activate_version(
 # ---------------------------------------------------------------------------
 # Public Service API
 # ---------------------------------------------------------------------------
+
+
+def get_active_skill_version(db: Session, skill_key: str) -> Dict[str, Any]:
+    """查询 skill 当前 active version 配置，供 deterministic route 做只读感知。
+
+    skill 不存在或无 active version 时返回可判定状态，不抛业务异常。
+    """
+    skill = db.query(AgentSkill).filter(AgentSkill.skill_key == skill_key).first()
+    if not skill:
+        return {
+            "is_configured": False,
+            "is_enabled": False,
+            "version_id": None,
+            "version_number": None,
+            "description": None,
+            "input_schema": None,
+        }
+
+    active_ver = (
+        db.query(AgentSkillVersion)
+        .filter(
+            AgentSkillVersion.skill_id == skill.id,
+            AgentSkillVersion.is_active == True,  # noqa: E712
+        )
+        .first()
+    )
+    if not active_ver:
+        return {
+            "is_configured": True,
+            "is_enabled": skill.is_enabled,
+            "version_id": None,
+            "version_number": None,
+            "description": None,
+            "input_schema": None,
+        }
+
+    return {
+        "is_configured": True,
+        "is_enabled": skill.is_enabled,
+        "version_id": str(active_ver.id),
+        "version_number": active_ver.version_number,
+        "description": active_ver.description,
+        "input_schema": active_ver.input_schema,
+    }
 
 
 def create_skill(
@@ -492,15 +537,20 @@ def get_skill(db: Session, *, skill_id: str) -> Dict[str, Any]:
     if not skill:
         raise LookupError(f"SKILLS_004:技能不存在: {skill_id}")
 
-    versions = (
-        db.query(AgentSkillVersion)
+    rows = (
+        db.query(AgentSkillVersion, User.display_name, User.username)
+        .outerjoin(User, User.id == AgentSkillVersion.created_by)
         .filter(AgentSkillVersion.skill_id == skill_id)
         .order_by(AgentSkillVersion.created_at.desc())
         .all()
     )
 
     result = skill.to_dict()
-    result["versions"] = [v.to_dict() for v in versions]
+    result["versions"] = []
+    for version, display_name, username in rows:
+        item = version.to_dict()
+        item["created_by_name"] = display_name or username
+        result["versions"].append(item)
     return result
 
 

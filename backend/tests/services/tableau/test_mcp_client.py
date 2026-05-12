@@ -29,6 +29,7 @@ from services.tableau.mcp_client import (
     TableauMCPError,
     _extract_text,
     _map_mcp_error,
+    _normalize_query_datasource_result,
     _parse_sse,
 )
 
@@ -325,6 +326,48 @@ class TestInvalidJsonInContentText:
 
         assert exc_info.value.code == "NLQ_006"
         assert "非 JSON" in exc_info.value.message
+
+
+class TestOfficialMcpDataShape:
+    """Official @tableau/mcp-server returns {"data": [{...}]} for query-datasource."""
+
+    def test_data_records_are_normalized_to_fields_rows(self):
+        raw = {
+            "data": [
+                {"YEAR(订单日期)": 2025, "销售额": 150036, "利润": 81736},
+            ]
+        }
+
+        normalized = _normalize_query_datasource_result(raw)
+
+        assert normalized["fields"] == ["YEAR(订单日期)", "销售额", "利润"]
+        assert normalized["rows"] == [[2025, 150036, 81736]]
+        assert normalized["data"] == raw["data"]
+
+
+class TestGatewayTimeoutBudget:
+    def test_post_mcp_passes_gateway_timeout_below_http_timeout(self):
+        captured = {}
+
+        def fake_post(url, json=None, headers=None, timeout=None):
+            captured["headers"] = headers
+            captured["timeout"] = timeout
+            resp = mock.Mock()
+            resp.status_code = 200
+            resp.text = 'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"ok":true}}\n\n'
+            return resp
+
+        http_session = mcp_mod._get_http_session()
+        with mock.patch.object(http_session, "post", fake_post):
+            result = mcp_mod._post_mcp(
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/call"},
+                method="tools/call",
+                timeout=30,
+            )
+
+        assert result["result"]["ok"] is True
+        assert captured["timeout"] == 30
+        assert captured["headers"]["X-Mulan-MCP-Timeout"] == "29"
 
 
 class TestContextvarsIsolation:

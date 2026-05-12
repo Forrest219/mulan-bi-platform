@@ -90,7 +90,13 @@ def _sync_to_redbeat(schedule: BiSyncSchedule, task_name: str) -> bool:
             day_of_month=dom, month_of_year=month, day_of_week=dow,
         )
         key = f"sync-schedule-{schedule.id}"
-        entry = RedBeatSchedulerEntry(key, task_name, celery_schedule, app=celery_app)
+        entry = RedBeatSchedulerEntry(
+            key,
+            task_name,
+            celery_schedule,
+            args=[schedule.id],
+            app=celery_app,
+        )
         entry.save()
         logger.info("Registered RedBeat entry %s → %s", key, schedule.cron_expr)
         return True

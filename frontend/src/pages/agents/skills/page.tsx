@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
 import {
-  listSkills, createSkill,
+  listSkills, createSkill, patchSkill,
   type AgentSkill, type SkillListParams, type CreateSkillPayload,
 } from '../../../api/skills';
 
@@ -47,6 +47,20 @@ const ENDPOINT_TYPES = [
   { value: 'static', label: 'static（静态）' },
 ];
 
+const CONFIG_SYNC_MESSAGE = '配置已保存，最多约 10 秒后在所有服务实例生效';
+
+function parseJsonObject(text: string): Record<string, unknown> {
+  const parsed = JSON.parse(text) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('JSON 顶层必须是对象');
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function formatJsonText(text: string): string {
+  return JSON.stringify(parseJsonObject(text), null, 2);
+}
+
 // ── 新建技能 Modal ─────────────────────────────────────────────────────────────
 
 interface CreateModalProps {
@@ -73,9 +87,9 @@ function CreateSkillModal({ onClose, onCreated }: CreateModalProps) {
     }
     let parsedSchema: Record<string, unknown>;
     try {
-      parsedSchema = JSON.parse(schemaText);
-    } catch {
-      setError('Input Schema 格式不正确，请输入合法 JSON');
+      parsedSchema = parseJsonObject(schemaText);
+    } catch (e) {
+      setError(`Input Schema 格式不正确：${e instanceof Error ? e.message : '未知错误'}`);
       return;
     }
     const payload: CreateSkillPayload = {
@@ -100,6 +114,15 @@ function CreateSkillModal({ onClose, onCreated }: CreateModalProps) {
       setError(e instanceof Error ? e.message : '创建失败');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleFormatJson = () => {
+    try {
+      setSchemaText(formatJsonText(schemaText));
+      setError('');
+    } catch (e) {
+      setError(`Input Schema 格式不正确：${e instanceof Error ? e.message : '未知错误'}`);
     }
   };
 
@@ -182,9 +205,18 @@ function CreateSkillModal({ onClose, onCreated }: CreateModalProps) {
                 />
               </div>
               <div>
-                <label className="block text-[12px] font-medium text-slate-600 mb-1">
-                  Input Schema（JSON）
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[12px] font-medium text-slate-600">
+                    Input Schema（JSON）
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleFormatJson}
+                    className="text-[12px] text-blue-600 hover:text-blue-500 px-2 py-1 rounded hover:bg-blue-50"
+                  >
+                    格式化 JSON
+                  </button>
+                </div>
                 <textarea
                   value={schemaText}
                   onChange={e => setSchemaText(e.target.value)}
@@ -267,7 +299,9 @@ export default function SkillsPage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const loadSkills = useCallback(async () => {
     setLoading(true);
@@ -298,6 +332,26 @@ export default function SkillsPage() {
   const handleCategoryChange = (key: string) => {
     setCategoryFilter(key);
     setPage(1);
+  };
+
+  const showSuccess = (msg: string) => {
+    setSuccessMsg(msg);
+    setTimeout(() => setSuccessMsg(''), 3000);
+  };
+
+  const handleToggleEnabled = async (skill: AgentSkill) => {
+    if (!isAdmin || togglingId) return;
+    setTogglingId(skill.id);
+    setError('');
+    try {
+      const updated = await patchSkill(skill.id, { is_enabled: !skill.is_enabled });
+      setSkills(prev => prev.map(item => (item.id === skill.id ? { ...item, ...updated } : item)));
+      showSuccess(CONFIG_SYNC_MESSAGE);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '更新失败');
+    } finally {
+      setTogglingId(null);
+    }
   };
 
   const totalPages = Math.ceil(total / pageSize);
@@ -331,6 +385,14 @@ export default function SkillsPage() {
             <div className="mb-4 px-4 py-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-[13px] flex items-center justify-between">
               <span>{error}</span>
               <button onClick={() => setError('')} className="text-red-400 hover:text-red-600">
+                <i className="ri-close-line" />
+              </button>
+            </div>
+          )}
+          {successMsg && (
+            <div className="mb-4 px-4 py-3 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-[13px] flex items-center justify-between">
+              <span>{successMsg}</span>
+              <button onClick={() => setSuccessMsg('')} className="text-emerald-400 hover:text-emerald-600">
                 <i className="ri-close-line" />
               </button>
             </div>
@@ -413,7 +475,12 @@ export default function SkillsPage() {
                       key={skill.id}
                       skill={skill}
                       isAdmin={isAdmin}
+                      toggling={togglingId === skill.id}
                       onRowClick={() => navigate(`/agents/skills/${skill.id}`)}
+                      onToggleEnabled={(e) => {
+                        e.stopPropagation();
+                        handleToggleEnabled(skill);
+                      }}
                       onPublishClick={(e) => {
                         e.stopPropagation();
                         navigate(`/agents/skills/${skill.id}`);
@@ -480,11 +547,13 @@ export default function SkillsPage() {
 interface SkillRowProps {
   skill: AgentSkill;
   isAdmin: boolean;
+  toggling: boolean;
   onRowClick: () => void;
+  onToggleEnabled: (e: React.MouseEvent) => void;
   onPublishClick: (e: React.MouseEvent) => void;
 }
 
-function SkillRow({ skill, isAdmin, onRowClick, onPublishClick }: SkillRowProps) {
+function SkillRow({ skill, isAdmin, toggling, onRowClick, onToggleEnabled, onPublishClick }: SkillRowProps) {
   const categoryColor = CATEGORY_COLORS[skill.category] ?? CATEGORY_COLORS.general;
   const categoryLabel = CATEGORY_LABELS[skill.category] ?? skill.category;
 
@@ -516,14 +585,37 @@ function SkillRow({ skill, isAdmin, onRowClick, onPublishClick }: SkillRowProps)
       </td>
       {/* 状态 */}
       <td className="px-4 py-3">
-        <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium ${
-          skill.is_enabled
-            ? 'bg-emerald-50 text-emerald-700'
-            : 'bg-slate-100 text-slate-500'
-        }`}>
-          <span className={`w-1.5 h-1.5 rounded-full ${skill.is_enabled ? 'bg-emerald-500' : 'bg-slate-400'}`} />
-          {skill.is_enabled ? '已启用' : '已禁用'}
-        </span>
+        {isAdmin ? (
+          <button
+            type="button"
+            onClick={onToggleEnabled}
+            disabled={toggling}
+            className="inline-flex items-center gap-2 disabled:opacity-50"
+            aria-label={skill.is_enabled ? '禁用技能' : '启用技能'}
+          >
+            <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+              skill.is_enabled ? 'bg-blue-600' : 'bg-slate-200'
+            }`}>
+              <span
+                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                  skill.is_enabled ? 'translate-x-4' : 'translate-x-0.5'
+                }`}
+              />
+            </span>
+            <span className="text-[11px] text-slate-600">
+              {toggling ? '保存中' : skill.is_enabled ? '已启用' : '已禁用'}
+            </span>
+          </button>
+        ) : (
+          <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium ${
+            skill.is_enabled
+              ? 'bg-emerald-50 text-emerald-700'
+              : 'bg-slate-100 text-slate-500'
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${skill.is_enabled ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+            {skill.is_enabled ? '已启用' : '已禁用'}
+          </span>
+        )}
       </td>
       {/* 最近更新 */}
       <td className="px-4 py-3 text-[12px] text-slate-500">

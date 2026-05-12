@@ -17,6 +17,7 @@ import {
 const SyncSchedulesTab = lazy(() => import('./SyncSchedulesTab'));
 const SyncTasksTab    = lazy(() => import('./SyncTasksTab'));
 const TaskQueueTab    = lazy(() => import('./TaskQueueTab'));
+const SyncCalendarTab = lazy(() => import('./SyncCalendarTab'));
 
 function formatDuration(ms: number | null): string {
   if (ms === null) return '—';
@@ -257,7 +258,8 @@ export default function AdminTasksPage() {
   const [runs, setRuns] = useState<TaskRun[]>([]);
   const [runsTotal, setRunsTotal] = useState(0);
   const [runsPages, setRunsPages] = useState(0);
-  const [activeTab, setActiveTab] = useState<'schedules' | 'history' | 'sync' | 'tasks' | 'queue'>('schedules');
+  const [activeTab, setActiveTab] = useState<'calendar' | 'rules' | 'history' | 'system'>('calendar');
+  const [systemTab, setSystemTab] = useState<'platform' | 'runs' | 'queue'>('platform');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [taskFilter, setTaskFilter] = useState<string>('');
   const [page, setPage] = useState(1);
@@ -346,55 +348,48 @@ export default function AdminTasksPage() {
     await loadData();
   }
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <span className="text-slate-400 text-[13px]">加载中…</span>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-slate-50">
       {/* 页头 */}
       <div className="bg-white border-b border-slate-200 px-8 py-5">
         <div className="max-w-6xl mx-auto">
           <div className="flex items-center gap-2 mb-0.5">
-            <i className="ri-task-line text-slate-500 text-base" />
-            <h1 className="text-lg font-semibold text-slate-800">任务管理</h1>
+            <i className="ri-calendar-check-line text-slate-500 text-base" />
+            <h1 className="text-lg font-semibold text-slate-800">同步运维</h1>
           </div>
-          <p className="text-[13px] text-slate-400 ml-7">管理平台定时任务、同步计划与执行队列</p>
+          <p className="text-[13px] text-slate-400 ml-7">查看 Tableau 同步安排、同步规则和运行结果</p>
         </div>
       </div>
 
       {/* Tab strip */}
       <div className="bg-white border-b border-slate-100 px-8">
-        <div className="flex gap-1 py-2">
-          {([
-            ['schedules', '平台任务'],
-            ['history',   '执行历史'],
-            ['sync',      '同步计划'],
-            ['tasks',     '任务清单'],
-            ['queue',     '执行队列'],
-          ] as const).map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => setActiveTab(key)}
-              className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
-                activeTab === key
-                  ? 'bg-slate-800 text-white'
-                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="max-w-6xl mx-auto">
+          <div className="flex gap-1 py-2">
+            {([
+              ['calendar', '同步日历'],
+              ['rules',    '同步规则'],
+              ['history',  '运行历史'],
+              ['system',   '系统任务'],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setActiveTab(key)}
+                className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
+                  activeTab === key
+                    ? 'bg-slate-800 text-white'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       <div className="px-8 py-7">
         <div className="max-w-6xl mx-auto">
       {/* Error banner */}
-      {error && (
+      {activeTab === 'system' && error && (
         <div className="bg-red-50 text-red-700 border border-red-200 rounded-lg p-3 mb-4 text-[12px] flex items-center justify-between">
           <span>{error}</span>
           <button onClick={() => setError('')} className="text-red-400 hover:text-red-600">
@@ -402,6 +397,53 @@ export default function AdminTasksPage() {
           </button>
         </div>
       )}
+
+      {activeTab === 'calendar' && (
+        <Suspense fallback={<div className="bg-white rounded-xl border border-slate-200 py-16 text-center text-[13px] text-slate-400">加载同步日历中…</div>}>
+          <SyncCalendarTab />
+        </Suspense>
+      )}
+
+      {activeTab === 'rules' && (
+        <Suspense fallback={<div className="bg-white rounded-xl border border-slate-200 py-16 text-center text-[13px] text-slate-400">加载同步规则中…</div>}>
+          <SyncSchedulesTab />
+        </Suspense>
+      )}
+
+      {activeTab === 'history' && (
+        <Suspense fallback={<div className="bg-white rounded-xl border border-slate-200 py-16 text-center text-[13px] text-slate-400">加载运行历史中…</div>}>
+          <SyncTasksTab />
+        </Suspense>
+      )}
+
+      {activeTab === 'system' && (
+        <>
+          <div className="bg-white rounded-xl border border-slate-200 px-4 py-3 mb-4 flex flex-wrap items-center gap-2">
+            {([
+              ['platform', '平台任务'],
+              ['runs', '执行历史'],
+              ['queue', '执行队列'],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setSystemTab(key)}
+                className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
+                  systemTab === key
+                    ? 'bg-slate-800 text-white'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+            <span className="ml-auto text-[12px] text-slate-400">内部任务视图，用于排查平台后台作业</span>
+          </div>
+
+          {loading && (
+            <div className="bg-white rounded-xl border border-slate-200 py-8 mb-4 text-center text-[13px] text-slate-400">
+              加载系统任务数据中…
+            </div>
+          )}
 
       {/* KPI Stats row */}
       {stats && (
@@ -471,7 +513,7 @@ export default function AdminTasksPage() {
 
 
       {/* Tab 1: Schedules table */}
-      {activeTab === 'schedules' && (
+      {systemTab === 'platform' && (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <table className="w-full">
             <thead>
@@ -575,7 +617,7 @@ export default function AdminTasksPage() {
       )}
 
       {/* Tab 2: Runs table with filters */}
-      {activeTab === 'history' && (
+      {systemTab === 'runs' && (
         <>
           {/* Filters */}
           <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
@@ -698,25 +740,14 @@ export default function AdminTasksPage() {
         </>
       )}
 
-      {/* Tab 3: 同步计划 */}
-      {activeTab === 'sync' && (
-        <Suspense fallback={<div className="bg-white rounded-xl border border-slate-200 py-16 text-center text-[13px] text-slate-400">加载中…</div>}>
-          <SyncSchedulesTab />
-        </Suspense>
-      )}
-
-      {/* Tab 4: 任务清单 */}
-      {activeTab === 'tasks' && (
-        <Suspense fallback={<div className="bg-white rounded-xl border border-slate-200 py-16 text-center text-[13px] text-slate-400">加载中…</div>}>
-          <SyncTasksTab />
-        </Suspense>
-      )}
-
-      {/* Tab 5: 执行队列 */}
-      {activeTab === 'queue' && (
+      {/* 执行队列 */}
+      {systemTab === 'queue' && (
         <Suspense fallback={<div className="bg-white rounded-xl border border-slate-200 py-16 text-center text-[13px] text-slate-400">加载中…</div>}>
           <TaskQueueTab />
         </Suspense>
+      )}
+
+        </>
       )}
 
       {/* Cron edit modal */}

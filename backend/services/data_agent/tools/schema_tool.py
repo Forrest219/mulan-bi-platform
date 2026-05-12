@@ -8,9 +8,11 @@ import logging
 import time
 from typing import Any, Dict, Optional
 
+from app.core.crypto import get_tableau_crypto
 from app.core.database import SessionLocal
 from services.data_agent.tool_base import BaseTool, ToolContext, ToolMetadata, ToolResult
-from services.tableau.models import TableauAsset, TableauConnection, TableauDatasourceField
+from services.tableau.models import TableauAsset, TableauConnection, TableauDatabase, TableauDatasourceField
+from services.tableau.sync_service import TableauRestSyncService
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +182,12 @@ class SchemaTool(BaseTool):
                 field_records = db.query(TableauDatasourceField).filter(
                     TableauDatasourceField.asset_id == target_asset.id,
                 ).all()
+                if not field_records:
+                    sync_result = self._sync_missing_tableau_fields(db, tc, target_asset)
+                    if sync_result.get("synced", 0) > 0:
+                        field_records = db.query(TableauDatasourceField).filter(
+                            TableauDatasourceField.asset_id == target_asset.id,
+                        ).all()
                 fields[target_asset.name] = [
                     {
                         "name": field.field_name,
@@ -192,7 +200,12 @@ class SchemaTool(BaseTool):
                 ]
                 field_count = len(fields[target_asset.name])
                 if field_count == 0:
-                    warning = "已匹配到 Tableau 资产，但未同步到字段元数据"
+                    sync_error = sync_result.get("error") if "sync_result" in locals() else None
+                    warning = (
+                        f"已匹配到 Tableau 资产，但自动同步字段元数据未返回字段：{sync_error}"
+                        if sync_error
+                        else "已匹配到 Tableau 资产，但 Tableau 未返回字段元数据"
+                    )
 
         result: Dict[str, Any] = {
             "connection_id": tc.id,
@@ -222,6 +235,69 @@ class SchemaTool(BaseTool):
             })
 
         return result
+
+    def _sync_missing_tableau_fields(
+        self,
+        db,
+        tc: "TableauConnection",
+        asset: "TableauAsset",
+    ) -> Dict[str, Any]:
+        """Fetch and cache fields for a matched Tableau datasource on demand."""
+        try:
+            token_value = get_tableau_crypto().decrypt(tc.token_encrypted)
+        except Exception as e:
+            logger.warning("SchemaTool field sync skipped: token decrypt failed for connection_id=%s", tc.id)
+            return {"synced": 0, "error": f"Token 解密失败: {e}"}
+
+        service = TableauRestSyncService(
+            server_url=tc.server_url,
+            site=tc.site,
+            token_name=tc.token_name,
+            token_value=token_value,
+            api_version=tc.api_version or "3.21",
+        )
+        try:
+            if not service.connect():
+                return {"synced": 0, "error": "Tableau REST API 认证失败"}
+
+            raw_fields = service._get_datasource_fields(asset.tableau_id)
+            parsed_fields = [
+                service._parse_field_metadata(field)
+                for field in raw_fields
+            ]
+            parsed_fields = [
+                field
+                for field in parsed_fields
+                if field.get("field_name") or field.get("field_caption")
+            ]
+            if not parsed_fields:
+                return {"synced": 0, "error": "Tableau 未返回字段列表"}
+
+            TableauDatabase(session=db).upsert_datasource_fields(
+                asset.id,
+                asset.tableau_id,
+                parsed_fields,
+            )
+            asset.field_count = len(parsed_fields)
+            db.commit()
+            logger.info(
+                "SchemaTool auto-synced %d fields for Tableau asset_id=%s datasource=%s",
+                len(parsed_fields),
+                asset.id,
+                asset.name,
+            )
+            return {"synced": len(parsed_fields)}
+        except Exception as e:
+            logger.warning(
+                "SchemaTool auto field sync failed for asset_id=%s datasource=%s: %s",
+                asset.id,
+                asset.name,
+                e,
+                exc_info=True,
+            )
+            return {"synced": 0, "error": str(e)}
+        finally:
+            service.disconnect()
 
     def _find_tableau_asset(
         self, db, connection_id: int, table_name: str

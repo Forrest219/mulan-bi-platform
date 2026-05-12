@@ -66,6 +66,8 @@ class TestWhitelistSimple:
 
     @pytest.mark.parametrize("question", [
         # 时间区间
+        "这些渠道过去几年的利润情况如何？",
+        "哪些渠道过去几年的利润一直在涨？",
         "过去3年的销售额",
         "过去12个月的销售数据",
         "2024年的总收入",
@@ -84,6 +86,10 @@ class TestWhitelistSimple:
         "销售额走势如何",
         "利润变化趋势",
         "收入趋势分析",
+        # deterministic TopN + 占比
+        "按销售额排，2024 年 Top10 大客户是谁？分别占当年销售额的比例是多少？",
+        # deterministic customer churn
+        "哪些 2021 年的老客户流失了（定义 2021 年有订单，但最近一年没有订单）？",
     ])
     def test_whitelist_returns_true(self, question: str):
         assert is_direct_query(question) is True, \
@@ -107,6 +113,11 @@ class TestExcludedFromWhitelist:
         # 同比/环比（需二次计算）
         "销售额同比增长",
         "环比上月变化",
+        # schema / metadata questions
+        "请查看 Tableau 数据资产 bidm_ai_metric_summary_mth-月度指标汇总表 有哪些字段？",
+        "customers-客户维度表有哪些字段？",
+        "查看订单表的表结构",
+        "这个数据资产的 schema 是什么？",
     ])
     def test_excluded_returns_false(self, question: str):
         assert is_direct_query(question) is False, \

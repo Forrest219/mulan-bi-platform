@@ -105,7 +105,9 @@ preflight() {
     fail "Docker Compose is not installed; install Docker Compose v2 or docker-compose"
   fi
   if [ -z "$SKIP_BACKEND_CHECK" ]; then
-    [ -x "$BACKEND_PY" ] || fail "missing backend virtualenv: $BACKEND_PY; create it and run 'cd backend && python3 -m pip install -r requirements.txt'"
+    [ -x "$BACKEND_PY" ] || fail "missing backend virtualenv: $BACKEND_PY; create it with Python 3.10+ and run 'cd backend && .venv/bin/python -m pip install -r requirements.txt'"
+    "$BACKEND_PY" -c "import sys; raise SystemExit(sys.version_info < (3, 10))" \
+      || fail "backend requires Python 3.10+; $BACKEND_PY is $("$BACKEND_PY" --version 2>&1)"
     [ -x "$BACKEND_CELERY" ] || fail "missing celery in backend virtualenv; run 'cd backend && .venv/bin/python -m pip install -r requirements.txt'"
     "$BACKEND_PY" -c "import fastapi, uvicorn, pandas, requests, pgvector, tiktoken, redbeat, openpyxl, croniter" \
       || fail "backend dependencies are incomplete; run 'cd backend && .venv/bin/python -m pip install -r requirements.txt'"
@@ -182,7 +184,7 @@ if [ -z "$SKIP_BACKEND_CHECK" ]; then
 
   # Celery Beat
   printf "celery-beat... "
-  nohup "$BACKEND_CELERY" -A services.tasks beat --loglevel=warning > "$LOG_DIR/celery-beat.log" 2>&1 < /dev/null &
+  nohup "$BACKEND_CELERY" -A services.tasks beat -S redbeat.RedBeatScheduler --loglevel=warning > "$LOG_DIR/celery-beat.log" 2>&1 < /dev/null &
   echo $! > "$PID_DIR/celery-beat.pid"
   printf "${GREEN}ok${RESET}\n"
 

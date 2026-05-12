@@ -10,7 +10,7 @@
  * 绝对禁止修改！本次重构仅限于前端视图路由（React Router 路径）。
  */
 import { lazy } from 'react';
-import { type RouteObject, Navigate } from 'react-router-dom';
+import { type RouteObject, Navigate, useLocation } from 'react-router-dom';
 import NotFound from '../pages/NotFound';
 import Home from '../pages/home/page';
 import LoginPage from '../pages/login/page';
@@ -19,6 +19,7 @@ import ForbiddenPage from '../pages/ForbiddenPage';
 import ProtectedRoute from '../components/auth/ProtectedRoute';
 import AppShellLayout from '../components/layout/AppShellLayout';
 import { ConversationProvider } from '../store/conversationStore';
+import { useAuth } from '../context/AuthContext';
 
 // ──────────────────────────────────────────────────────────────
 // 代码分割：每个域独立 chunk（Spec 18 §4.3）
@@ -81,6 +82,7 @@ const DataWorkbenchPage = lazy(() => import('../pages/agents/data-workbench/page
 const DataWorkbenchHistoryPage = lazy(() => import('../pages/agents/data-workbench/history/page'));
 const SqlAgentPage = lazy(() => import('../pages/agents/sql-agent/page'));
 const MetricsAgentPage = lazy(() => import('../pages/agents/metrics-agent/page'));
+const HelpAgentPage = lazy(() => import('../pages/agents/help-agent/page'));
 const SkillsPage = lazy(() => import('../pages/agents/skills/page'));
 const SkillDetailPage = lazy(() => import('../pages/agents/skills/detail'));
 
@@ -93,6 +95,30 @@ const DwAssetDetailPage = lazy(() => import('../pages/assets/dw/detail'));
 const DwTaxonomyPage = lazy(() => import('../pages/assets/dw/taxonomy/page'));
 const StarRocksInspectionPage = lazy(() => import('../pages/assets/starrocks-inspection/page'));
 const ConnectionCenterPage = lazy(() => import('../pages/assets/connection-center/page'));
+
+// eslint-disable-next-line react-refresh/only-export-components
+function SkillsRouteGuard({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="text-slate-500">加载中...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  if (user.role !== 'admin' && user.role !== 'data_admin') {
+    return <Navigate to="/403" state={{ from: location }} replace />;
+  }
+
+  return <>{children}</>;
+}
 
 // ──────────────────────────────────────────────────────────────
 // 路由定义
@@ -522,6 +548,14 @@ const routes: RouteObject[] = [
             ),
           },
           {
+            path: 'help',
+            element: (
+              <ProtectedRoute>
+                <HelpAgentPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
             path: 'agent-monitor',
             element: (
               <ProtectedRoute requiredPermission="user_management">
@@ -532,17 +566,17 @@ const routes: RouteObject[] = [
           {
             path: 'skills',
             element: (
-              <ProtectedRoute>
+              <SkillsRouteGuard>
                 <SkillsPage />
-              </ProtectedRoute>
+              </SkillsRouteGuard>
             ),
           },
           {
             path: 'skills/:skillId',
             element: (
-              <ProtectedRoute>
+              <SkillsRouteGuard>
                 <SkillDetailPage />
-              </ProtectedRoute>
+              </SkillsRouteGuard>
             ),
           },
         ],

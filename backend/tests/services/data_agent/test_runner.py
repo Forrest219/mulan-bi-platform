@@ -62,12 +62,30 @@ class _FakeEngine:
         yield AgentEvent(type="answer", content="无法读取字段。")
 
 
+class _CapturingEngine:
+    def __init__(self):
+        self.kwargs = None
+
+    async def run(self, query, context, session=None, **kwargs):
+        self.kwargs = kwargs
+        yield AgentEvent(type="answer", content="ok")
+
+
+class _FakeMessage:
+    role = "assistant"
+    tools_used = ["schema"]
+    content = "数据资产 **orders-订单明细表** 返回了 **16 个字段**："
+
+
 class _FakeSessionManager:
     def __init__(self):
         self.messages = []
 
     def persist_message(self, **kwargs):
         self.messages.append(kwargs)
+
+    def get_conversation_messages(self, **kwargs):
+        return [_FakeMessage()]
 
 
 @pytest.mark.asyncio
@@ -111,3 +129,42 @@ async def test_failed_tool_result_persists_error_summary(monkeypatch):
     assert tool_result_steps[0].tool_name == "schema"
     assert tool_result_steps[0].tool_result_summary == "Tableau asset fields are unavailable"
     assert db.updates[-1][BiAgentRun.status] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_direct_query_followup_uses_recent_schema_asset_as_datasource(monkeypatch):
+    """追问问数时应继承上轮 schema 查到的数据资产。"""
+    monkeypatch.setattr("services.data_agent.runner.is_direct_query", lambda question: True)
+
+    db = _FakeDb()
+    session_mgr = _FakeSessionManager()
+    session = AgentSession(conversation_id=uuid.uuid4(), user_id=7)
+    context = ToolContext(
+        session_id=str(session.conversation_id),
+        user_id=7,
+        connection_id=2,
+        trace_id="t-runner",
+    )
+    engine = _CapturingEngine()
+
+    events = [
+        event
+        async for event in run_agent(
+            engine=engine,
+            context=context,
+            session_mgr=session_mgr,
+            session=session,
+            question="过去四年的销售额、利润趋势如何？",
+            trace_id="t-runner",
+            current_user={"id": 7},
+            db=db,
+            connection_id=2,
+        )
+    ]
+
+    assert [event.type for event in events] == ["metadata", "done"]
+    assert engine.kwargs["force_first_tool"] == "query"
+    assert engine.kwargs["force_first_params"] == {
+        "question": "过去四年的销售额、利润趋势如何？",
+        "datasource_name": "orders-订单明细表",
+    }

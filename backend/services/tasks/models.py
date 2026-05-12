@@ -24,6 +24,7 @@ class BiTaskRun(Base):
     duration_ms = Column(Integer, nullable=True)
     result_summary = Column(JSONB, nullable=True)
     error_message = Column(Text, nullable=True)
+    structured_error = Column(JSONB, nullable=True)
     retry_count = Column(Integer, nullable=False, server_default=sa_text("0"))
     parent_run_id = Column(BigInteger, ForeignKey("bi_task_runs.id", ondelete="SET NULL"), nullable=True)
     triggered_by = Column(BigInteger, ForeignKey("auth_users.id", ondelete="SET NULL"), nullable=True)
@@ -49,6 +50,7 @@ class BiTaskRun(Base):
             "duration_ms": self.duration_ms,
             "result_summary": self.result_summary,
             "error_message": self.error_message,
+            "structured_error": self.structured_error,
             "retry_count": self.retry_count,
             "parent_run_id": self.parent_run_id,
             "triggered_by": self.triggered_by,
