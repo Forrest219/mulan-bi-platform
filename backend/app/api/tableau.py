@@ -552,12 +552,22 @@ async def get_sync_status(conn_id: int, request: Request, db: Session = Depends(
 
     next_sync_at = None
     if conn.auto_sync_enabled:
-        from datetime import timedelta  # 局部导入
-        if conn.last_sync_at:
-            next_dt = conn.last_sync_at + timedelta(hours=conn.sync_interval_hours or 24)
-            next_sync_at = next_dt.strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            next_sync_at = "即将执行"
+        from datetime import datetime
+        from services.tasks.models import BiSyncTask
+        next_task = (
+            db.query(BiSyncTask)
+            .filter(
+                BiSyncTask.connection_id == conn_id,
+                BiSyncTask.status == "pending",
+                BiSyncTask.scheduled_at >= datetime.now(),
+            )
+            .order_by(BiSyncTask.scheduled_at)
+            .first()
+        )
+        next_sync_at = (
+            next_task.scheduled_at.strftime("%Y-%m-%d %H:%M:%S")
+            if next_task else "待规划"
+        )
 
     return {
         "status": conn.sync_status or "idle",

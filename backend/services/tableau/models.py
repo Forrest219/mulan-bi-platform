@@ -40,26 +40,38 @@ class TableauConnection(Base):
     assets = relationship("TableauAsset", back_populates="connection", cascade="all, delete-orphan")
     schedule = relationship("BiSyncSchedule")
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self, db=None) -> Dict[str, Any]:
         next_sync_at = None
         if self.auto_sync_enabled:
-            if self.schedule_id and self.schedule:
-                # 优先用关联计划的 cron 计算下次执行时间
-                from croniter import croniter
+            if db is not None:
                 from datetime import datetime
-                try:
-                    cron = croniter(self.schedule.cron_expr, datetime.now())
-                    next_dt = cron.get_next(datetime)
-                    next_sync_at = next_dt.strftime("%Y-%m-%d %H:%M:%S")
-                except Exception:
-                    next_sync_at = "调度异常"
-            else:
-                from datetime import timedelta  # 局部导入，避免循环依赖
-                if self.last_sync_at:
-                    next_dt = self.last_sync_at + timedelta(hours=self.sync_interval_hours or 24)
-                    next_sync_at = next_dt.strftime("%Y-%m-%d %H:%M:%S")
+                from services.tasks.models import BiSyncTask
+                next_task = (
+                    db.query(BiSyncTask)
+                    .filter(
+                        BiSyncTask.connection_id == self.id,
+                        BiSyncTask.status == "pending",
+                        BiSyncTask.scheduled_at >= datetime.now(),
+                    )
+                    .order_by(BiSyncTask.scheduled_at)
+                    .first()
+                )
+                if next_task:
+                    next_sync_at = next_task.scheduled_at.strftime("%Y-%m-%d %H:%M:%S")
                 else:
-                    next_sync_at = "即将执行"
+                    next_sync_at = "待规划"
+            else:
+                # 无 db 时降级：用 schedule cron 算下次时间（仅 fallback）
+                if self.schedule_id and self.schedule:
+                    from croniter import croniter
+                    from datetime import datetime
+                    try:
+                        cron = croniter(self.schedule.cron_expr, datetime.now())
+                        next_sync_at = cron.get_next(datetime).strftime("%Y-%m-%d %H:%M:%S")
+                    except Exception:
+                        next_sync_at = "调度异常"
+                else:
+                    next_sync_at = "待规划"
 
         return {
             "id": self.id,

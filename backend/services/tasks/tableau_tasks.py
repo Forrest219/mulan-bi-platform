@@ -14,8 +14,30 @@ from services.tasks.decorators import beat_guarded
 logger = logging.getLogger(__name__)
 
 
+def _update_sync_task(sync_task_id: int, status: str, sync_log_id: int = None, error_message: str = None):
+    """更新 BiSyncTask 执行状态（Spec 43 §4.3）。忽略所有异常，不影响主任务。"""
+    if not sync_task_id:
+        return
+    try:
+        from datetime import datetime
+        from services.tasks.models import BiSyncTask
+        from app.core.database import get_db_context
+        with get_db_context() as db:
+            task = db.query(BiSyncTask).filter(BiSyncTask.id == sync_task_id).first()
+            if task:
+                task.status = status
+                task.updated_at = datetime.now()
+                if sync_log_id:
+                    task.sync_log_id = sync_log_id
+                if error_message:
+                    task.error_message = error_message[:1000]
+                db.commit()
+    except Exception as e:
+        logger.warning("_update_sync_task(%d): failed: %s", sync_task_id, e)
+
+
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=30)
-def sync_connection_task(self, conn_id: int, sync_log_id: int = None, trigger_type: str = "manual"):
+def sync_connection_task(self, conn_id: int, sync_log_id: int = None, trigger_type: str = "manual", sync_task_id: int = None):
     """
     单个连接的异步同步任务。
     由 API 手动触发或 scheduled_sync_all Beat 调度触发。
@@ -72,6 +94,7 @@ def sync_connection_task(self, conn_id: int, sync_log_id: int = None, trigger_ty
                 _db.set_sync_status(conn_id, "failed")
                 _db.update_connection_health(conn_id, False, msg)
                 _db.increment_sync_failures(conn_id)
+                _update_sync_task(sync_task_id, "failed", sync_log_id=log_id, error_message=msg)
                 return {"status": "error", "message": msg}
 
             try:
@@ -97,11 +120,12 @@ def sync_connection_task(self, conn_id: int, sync_log_id: int = None, trigger_ty
                         raise self.retry(
                             exc=Exception("连接失败"),
                             args=(),
-                            kwargs={"conn_id": conn_id, "sync_log_id": log_id, "trigger_type": trigger_type},
+                            kwargs={"conn_id": conn_id, "sync_log_id": log_id, "trigger_type": trigger_type, "sync_task_id": sync_task_id},
                         )
                     _db.finish_sync_log(log_id, "failed", error_message="连接失败，已达最大重试次数")
                     _db.set_sync_status(conn_id, "failed")
                     _db.increment_sync_failures(conn_id)
+                    _update_sync_task(sync_task_id, "failed", sync_log_id=log_id, error_message="连接失败，已达最大重试次数")
                     return {"status": "error", "message": "连接失败"}
 
                 try:
@@ -111,6 +135,7 @@ def sync_connection_task(self, conn_id: int, sync_log_id: int = None, trigger_ty
                         conn_id, result["status"], result["total"], result.get("duration_sec", 0),
                     )
                     _db.reset_sync_failures(conn_id)
+                    _update_sync_task(sync_task_id, "completed", sync_log_id=log_id)
                     return {
                         "status": result["status"],
                         "total": result["total"],
@@ -126,6 +151,7 @@ def sync_connection_task(self, conn_id: int, sync_log_id: int = None, trigger_ty
                 _db.finish_sync_log(log_id, "failed", error_message="同步失败，已达最大重试次数")
                 _db.set_sync_status(conn_id, "failed")
                 _db.increment_sync_failures(conn_id)
+                _update_sync_task(sync_task_id, "failed", sync_log_id=log_id, error_message="同步失败，已达最大重试次数")
                 return {"status": "error", "message": "同步失败，已达最大重试次数"}
             except Exception as e:
                 logger.error("Sync task error for conn %d: %s", conn_id, e, exc_info=True)
@@ -133,12 +159,13 @@ def sync_connection_task(self, conn_id: int, sync_log_id: int = None, trigger_ty
                     raise self.retry(
                         exc=e,
                         args=(),
-                        kwargs={"conn_id": conn_id, "sync_log_id": log_id, "trigger_type": trigger_type},
+                        kwargs={"conn_id": conn_id, "sync_log_id": log_id, "trigger_type": trigger_type, "sync_task_id": sync_task_id},
                     )
                 db.rollback()
                 _db.finish_sync_log(log_id, "failed", error_message=str(e))
                 _db.set_sync_status(conn_id, "failed")
                 _db.increment_sync_failures(conn_id)
+                _update_sync_task(sync_task_id, "failed", sync_log_id=log_id, error_message=str(e))
                 return {"status": "error", "message": str(e)}
     finally:
         if redis_client:
@@ -273,7 +300,7 @@ def sync_by_schedule(self, schedule_id: int):
         redis_client = None
 
     try:
-        from services.tableau.models import TableauDatabase
+        from services.tableau.models import TableauDatabase, TableauConnection
         from app.core.database import get_db_context
 
         with get_db_context() as db:
@@ -308,34 +335,63 @@ def sync_by_schedule(self, schedule_id: int):
             # 桥接 MCP
             _bridge_mcp_to_connections(_db, db)
 
-            if schedule.execution_mode == "sequential":
-                results = []
-                for conn in connections:
-                    result = sync_connection_task.delay(conn.id, trigger_type="scheduled")
-                    results.append(result.id)
-                return {
-                    "status": "dispatched",
-                    "schedule_id": schedule_id,
-                    "schedule_name": schedule.name,
-                    "connection_count": len(connections),
-                    "execution_mode": "sequential",
-                    "tasks": results,
-                }
-            else:
-                # parallel: 用 group 并行触发
-                job = group(
-                    sync_connection_task.s(conn.id, None, "scheduled")
-                    for conn in connections
+            # 查找对应的预生成任务清单
+            from datetime import timedelta
+            from services.tasks.models import BiSyncTask
+
+            window_start = datetime.now() - timedelta(minutes=10)
+            window_end   = datetime.now() + timedelta(minutes=10)
+
+            pending_tasks = db.query(BiSyncTask).filter(
+                BiSyncTask.schedule_id == schedule_id,
+                BiSyncTask.status == "pending",
+                BiSyncTask.scheduled_at.between(window_start, window_end),
+            ).order_by(BiSyncTask.connection_id).all()
+
+            # fallback：planner 未来得及预生成时，现场创建
+            if not pending_tasks:
+                logger.info(
+                    "sync_by_schedule[%d]: no pre-generated tasks found, creating on-the-fly",
+                    schedule_id,
                 )
-                result = job.apply_async()
-                return {
-                    "status": "dispatched",
-                    "schedule_id": schedule_id,
-                    "schedule_name": schedule.name,
-                    "connection_count": len(connections),
-                    "execution_mode": "parallel",
-                    "group_id": result.id,
-                }
+                now_dt = datetime.now()
+                for conn in connections:
+                    task = BiSyncTask(
+                        schedule_id=schedule_id,
+                        connection_id=conn.id,
+                        scheduled_at=now_dt,
+                        status="pending",
+                        trigger_type="scheduled",
+                    )
+                    db.add(task)
+                db.flush()
+                pending_tasks = db.query(BiSyncTask).filter(
+                    BiSyncTask.schedule_id == schedule_id,
+                    BiSyncTask.status == "pending",
+                    BiSyncTask.scheduled_at.between(now_dt - timedelta(seconds=5), now_dt + timedelta(seconds=5)),
+                ).order_by(BiSyncTask.connection_id).all()
+
+            # 标记 running，dispatch
+            for task in pending_tasks:
+                task.status = "running"
+                task.updated_at = datetime.now()
+            db.commit()
+
+            for task in pending_tasks:
+                logger.info(
+                    "sync_by_schedule[%d]: dispatching conn %d (task_id=%d)",
+                    schedule_id, task.connection_id, task.id,
+                )
+                sync_connection_task.delay(task.connection_id, trigger_type="scheduled", sync_task_id=task.id)
+
+            return {
+                "status": "dispatched",
+                "schedule_id": schedule_id,
+                "schedule_name": schedule.name,
+                "connection_count": len(pending_tasks),
+                "execution_mode": schedule.execution_mode,
+                "tasks": [t.id for t in pending_tasks],
+            }
 
     finally:
         if redis_client:
@@ -343,3 +399,78 @@ def sync_by_schedule(self, schedule_id: int):
                 redis_client.delete(lock_key)
             except Exception:
                 pass
+
+
+@celery_app.task
+@beat_guarded("plan-daily-sync-tasks")
+def plan_daily_sync_tasks():
+    """
+    每日 00:05 预生成未来 24h 内所有同步任务清单（Spec 43 §4.1）。
+    幂等：ON CONFLICT DO NOTHING，重复运行安全。
+    """
+    from datetime import datetime, timedelta
+    from croniter import croniter
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from services.tasks.models import BiSyncSchedule, BiSyncTask
+    from services.tableau.models import TableauConnection
+    from app.core.database import get_db_context
+
+    now = datetime.now()
+    future_end = now + timedelta(hours=24)
+    total_created = 0
+    total_skipped = 0
+
+    with get_db_context() as db:
+        schedules = db.query(BiSyncSchedule).filter(
+            BiSyncSchedule.is_enabled == True
+        ).all()
+
+        for s in schedules:
+            try:
+                cr = croniter(s.cron_expr, now)
+            except Exception as e:
+                logger.warning("plan_daily_sync_tasks: invalid cron for schedule %d: %s", s.id, e)
+                continue
+
+            # 收集未来 24h 内的所有触发时间
+            fire_times = []
+            while True:
+                next_dt = cr.get_next(datetime)
+                if next_dt > future_end:
+                    break
+                fire_times.append(next_dt)
+
+            if not fire_times:
+                continue
+
+            # 获取该计划绑定的活跃连接
+            connections = db.query(TableauConnection).filter(
+                TableauConnection.schedule_id == s.id,
+                TableauConnection.auto_sync_enabled == True,
+                TableauConnection.is_active == True,
+            ).all()
+
+            for conn in connections:
+                for fire_time in fire_times:
+                    stmt = pg_insert(BiSyncTask).values(
+                        schedule_id=s.id,
+                        connection_id=conn.id,
+                        scheduled_at=fire_time,
+                        status="pending",
+                        trigger_type="scheduled",
+                    ).on_conflict_do_nothing(
+                        index_elements=["schedule_id", "connection_id", "scheduled_at"]
+                    )
+                    result = db.execute(stmt)
+                    if result.rowcount > 0:
+                        total_created += 1
+                    else:
+                        total_skipped += 1
+
+        db.commit()
+
+    logger.info(
+        "plan_daily_sync_tasks: created=%d skipped=%d schedules=%d",
+        total_created, total_skipped, len(schedules),
+    )
+    return {"created": total_created, "skipped": total_skipped, "schedule_count": len(schedules)}

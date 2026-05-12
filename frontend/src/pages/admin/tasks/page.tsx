@@ -15,7 +15,8 @@ import {
 } from '../../../api/tasks';
 
 const SyncSchedulesTab = lazy(() => import('./SyncSchedulesTab'));
-const TaskQueueTab = lazy(() => import('./TaskQueueTab'));
+const SyncTasksTab    = lazy(() => import('./SyncTasksTab'));
+const TaskQueueTab    = lazy(() => import('./TaskQueueTab'));
 
 function formatDuration(ms: number | null): string {
   if (ms === null) return '—';
@@ -256,7 +257,7 @@ export default function AdminTasksPage() {
   const [runs, setRuns] = useState<TaskRun[]>([]);
   const [runsTotal, setRunsTotal] = useState(0);
   const [runsPages, setRunsPages] = useState(0);
-  const [activeTab, setActiveTab] = useState<'schedules' | 'history' | 'sync' | 'queue'>('schedules');
+  const [activeTab, setActiveTab] = useState<'schedules' | 'history' | 'sync' | 'tasks' | 'queue'>('schedules');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [taskFilter, setTaskFilter] = useState<string>('');
   const [page, setPage] = useState(1);
@@ -369,46 +370,25 @@ export default function AdminTasksPage() {
       {/* Tab strip */}
       <div className="bg-white border-b border-slate-100 px-8">
         <div className="flex gap-1 py-2">
-          <button
-            onClick={() => setActiveTab('schedules')}
-            className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
-              activeTab === 'schedules'
-                ? 'bg-slate-800 text-white'
-                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
-            }`}
-          >
-            定时任务
-          </button>
-          <button
-            onClick={() => setActiveTab('history')}
-            className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
-              activeTab === 'history'
-                ? 'bg-slate-800 text-white'
-                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
-            }`}
-          >
-            执行历史
-          </button>
-          <button
-            onClick={() => setActiveTab('sync')}
-            className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
-              activeTab === 'sync'
-                ? 'bg-slate-800 text-white'
-                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
-            }`}
-          >
-            同步计划
-          </button>
-          <button
-            onClick={() => setActiveTab('queue')}
-            className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
-              activeTab === 'queue'
-                ? 'bg-slate-800 text-white'
-                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
-            }`}
-          >
-            执行队列
-          </button>
+          {([
+            ['schedules', '平台任务'],
+            ['history',   '执行历史'],
+            ['sync',      '同步计划'],
+            ['tasks',     '任务清单'],
+            ['queue',     '执行队列'],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
+                activeTab === key
+                  ? 'bg-slate-800 text-white'
+                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
       <div className="px-8 py-7">
@@ -725,7 +705,14 @@ export default function AdminTasksPage() {
         </Suspense>
       )}
 
-      {/* Tab 4: 执行队列 */}
+      {/* Tab 4: 任务清单 */}
+      {activeTab === 'tasks' && (
+        <Suspense fallback={<div className="bg-white rounded-xl border border-slate-200 py-16 text-center text-[13px] text-slate-400">加载中…</div>}>
+          <SyncTasksTab />
+        </Suspense>
+      )}
+
+      {/* Tab 5: 执行队列 */}
       {activeTab === 'queue' && (
         <Suspense fallback={<div className="bg-white rounded-xl border border-slate-200 py-16 text-center text-[13px] text-slate-400">加载中…</div>}>
           <TaskQueueTab />

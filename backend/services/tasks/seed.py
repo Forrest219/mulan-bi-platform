@@ -21,6 +21,8 @@ SEED_DATA = [
      "清理过期 DQC 分析记录与 Cycle", "每日 03:30", "30 3 * * *"),
     ("task-runs-cleanup", "services.tasks.cleanup_tasks.cleanup_old_task_runs",
      "清理 90 天前的任务运行记录", "每日 02:00", "0 2 * * *"),
+    ("plan-daily-sync-tasks", "services.tasks.tableau_tasks.plan_daily_sync_tasks",
+     "预生成未来 24h 同步任务清单（Spec 43）", "每日 00:05", "5 0 * * *"),
 ]
 
 # 同步计划（BiSyncSchedule）种子数据

@@ -1,5 +1,20 @@
 import { API_BASE } from '../config';
 
+async function apiError(res: Response, fallback: string): Promise<Error> {
+  const statusMsg: Record<number, string> = {
+    403: '权限不足，当前账号无访问权限',
+    404: '接口不存在，请确认数据库迁移已执行',
+    500: '服务器内部错误，请检查后端日志',
+  };
+  if (statusMsg[res.status]) return new Error(statusMsg[res.status]);
+  try {
+    const err = await res.json();
+    return new Error(err.detail?.message || err.detail || fallback);
+  } catch {
+    return new Error(`${fallback}（HTTP ${res.status}）`);
+  }
+}
+
 // Types
 export interface TaskSchedule {
   id: number;
@@ -128,7 +143,7 @@ export interface SyncScheduleListResponse extends PaginatedResponse<SyncSchedule
 
 export async function fetchTaskSchedules(): Promise<{ items: TaskSchedule[]; total: number }> {
   const res = await fetch(`${API_BASE}/api/tasks/schedules`, { credentials: 'include' });
-  if (!res.ok) throw new Error('获取定时任务列表失败');
+  if (!res.ok) throw await apiError(res, '获取定时任务列表失败');
   return res.json();
 }
 
@@ -142,7 +157,7 @@ export async function fetchTaskRuns(params?: TaskRunsParams): Promise<PaginatedR
   if (params?.start_time) sp.set('start_time', params.start_time);
   if (params?.end_time) sp.set('end_time', params.end_time);
   const res = await fetch(`${API_BASE}/api/tasks/runs?${sp}`, { credentials: 'include' });
-  if (!res.ok) throw new Error('获取执行历史失败');
+  if (!res.ok) throw await apiError(res, '获取执行历史失败');
   return res.json();
 }
 
@@ -233,7 +248,7 @@ export async function fetchSyncSchedules(params?: {
   if (params?.page_size) sp.set('page_size', String(params.page_size));
   if (params?.enabled_only) sp.set('enabled_only', 'true');
   const res = await fetch(`${API_BASE}/api/tasks/sync-schedules?${sp}`, { credentials: 'include' });
-  if (!res.ok) throw new Error('获取同步计划列表失败');
+  if (!res.ok) throw await apiError(res, '获取同步计划列表失败');
   return res.json();
 }
 
@@ -323,5 +338,46 @@ export async function fetchTaskQueue(pastHours = 24, futureHours = 24): Promise<
   });
   const res = await fetch(`${API_BASE}/api/tasks/tasks/queue?${sp}`, { credentials: 'include' });
   if (!res.ok) throw new Error('获取任务队列失败');
+  return res.json();
+}
+
+// ── Spec 43 同步任务清单 ──────────────────────────────────────────
+
+export interface SyncTask {
+  id: number;
+  schedule_id: number | null;
+  schedule_name: string;
+  connection_id: number;
+  connection_name: string;
+  scheduled_at: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+  trigger_type: 'scheduled' | 'manual';
+  sync_log_id: number | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SyncTasksParams {
+  schedule_id?: number;
+  connection_id?: number;
+  status?: string;
+  date?: string;
+  page?: number;
+  page_size?: number;
+}
+
+export async function fetchSyncTasks(
+  params?: SyncTasksParams,
+): Promise<PaginatedResponse<SyncTask>> {
+  const sp = new URLSearchParams();
+  if (params?.schedule_id != null) sp.set('schedule_id', String(params.schedule_id));
+  if (params?.connection_id != null) sp.set('connection_id', String(params.connection_id));
+  if (params?.status) sp.set('status', params.status);
+  if (params?.date) sp.set('date', params.date);
+  if (params?.page) sp.set('page', String(params.page));
+  if (params?.page_size) sp.set('page_size', String(params.page_size));
+  const res = await fetch(`${API_BASE}/api/tasks/sync-tasks?${sp}`, { credentials: 'include' });
+  if (!res.ok) throw await apiError(res, '获取任务清单失败');
   return res.json();
 }

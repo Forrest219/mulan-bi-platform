@@ -445,6 +445,9 @@ export default function SyncSchedulesTab() {
                   >
                     {s.connection_count ?? 0} 个连接
                   </button>
+                  {s.is_enabled && (s.connection_count ?? 0) === 0 && (
+                    <p className="text-[10px] text-amber-500 mt-0.5" title="计划已启用但无绑定连接，不会产生任务">⚠ 无绑定连接</p>
+                  )}
                 </td>
                 <td className="px-3 py-2.5"><StatusBadge enabled={s.is_enabled} /></td>
                 <td className="px-3 py-2.5 text-[12px] text-slate-500">{formatDateTime(s.next_run_at ?? null)}</td>

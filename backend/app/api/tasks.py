@@ -585,6 +585,115 @@ async def parse_cron(request: Request):
     return {"cron_expr": cron_expr, "next_runs": next_runs}
 
 
+# ─── Spec 43 同步任务清单 ────────────────────────────────────────
+
+@router.get("/sync-tasks")
+async def list_sync_tasks(
+    request: Request,
+    schedule_id: int = None,
+    connection_id: int = None,
+    status: str = None,
+    date: str = None,
+    page: int = 1,
+    page_size: int = 50,
+):
+    """列出同步任务清单（Spec 43 §5.1）。analyst 及以上可查看。"""
+    _get_user(request)  # analyst+ 权限检查
+
+    from datetime import datetime, timedelta, date as date_type
+    from services.tasks.models import BiSyncTask, BiSyncSchedule
+    from services.tableau.models import TableauConnection, TableauDatabase
+
+    with SessionLocal() as db:
+        q = db.query(BiSyncTask)
+
+        if schedule_id is not None:
+            q = q.filter(BiSyncTask.schedule_id == schedule_id)
+        if connection_id is not None:
+            q = q.filter(BiSyncTask.connection_id == connection_id)
+        if status:
+            q = q.filter(BiSyncTask.status == status)
+
+        # 默认今日
+        if date:
+            try:
+                day = datetime.strptime(date, "%Y-%m-%d").date()
+            except ValueError:
+                raise HTTPException(status_code=400, detail="date 格式应为 YYYY-MM-DD")
+        else:
+            day = datetime.now().date()
+
+        day_start = datetime.combine(day, datetime.min.time())
+        day_end   = day_start + timedelta(days=1)
+        q = q.filter(BiSyncTask.scheduled_at >= day_start, BiSyncTask.scheduled_at < day_end)
+
+        total = q.count()
+        tasks = (
+            q.order_by(BiSyncTask.scheduled_at, BiSyncTask.id)
+             .offset((page - 1) * page_size)
+             .limit(page_size)
+             .all()
+        )
+
+        # 预取关联名称
+        schedule_names = {}
+        for s in db.query(BiSyncSchedule).all():
+            schedule_names[s.id] = s.name
+
+        conn_names = {}
+        for c in db.query(TableauConnection).all():
+            conn_names[c.id] = c.name
+
+        items = []
+        for t in tasks:
+            d = t.to_dict()
+            d["schedule_name"] = schedule_names.get(t.schedule_id, "")
+            d["connection_name"] = conn_names.get(t.connection_id, "")
+            items.append(d)
+
+    return JSONResponse({
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    })
+
+
+@router.get("/sync-tasks/{task_id}")
+async def get_sync_task(request: Request, task_id: int):
+    """同步任务详情，含关联执行日志（Spec 43 §5.2）。analyst 及以上可查看。"""
+    _get_user(request)
+
+    from services.tasks.models import BiSyncTask, BiSyncSchedule
+    from services.tableau.models import TableauConnection, TableauSyncLog
+
+    with SessionLocal() as db:
+        task = db.query(BiSyncTask).filter(BiSyncTask.id == task_id).first()
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        d = task.to_dict()
+
+        # 关联名称
+        if task.schedule_id:
+            s = db.query(BiSyncSchedule).filter(BiSyncSchedule.id == task.schedule_id).first()
+            d["schedule_name"] = s.name if s else ""
+        else:
+            d["schedule_name"] = ""
+
+        conn = db.query(TableauConnection).filter(TableauConnection.id == task.connection_id).first()
+        d["connection_name"] = conn.name if conn else ""
+
+        # 关联执行日志（tableau_sync_logs）
+        if task.sync_log_id:
+            log = db.query(TableauSyncLog).filter(TableauSyncLog.id == task.sync_log_id).first()
+            d["sync_log"] = log.to_dict() if log else None
+        else:
+            d["sync_log"] = None
+
+    return JSONResponse(d)
+
+
 @router.get("/preview-cron")
 async def preview_cron(request: Request, cron_expr: str, n: int = 3):
     """计算 cron 表达式的下次 N 次执行时间（只读，不写库）"""

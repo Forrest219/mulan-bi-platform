@@ -277,5 +277,6 @@ def build_session_context(
                 ))
         except Exception as e:
             logger.warning("构建上下文时查询数据源失败: %s", e)
+            db.rollback()
 
     return ctx

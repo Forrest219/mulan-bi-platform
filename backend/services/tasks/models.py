@@ -3,7 +3,7 @@ from typing import Dict, Any
 
 from sqlalchemy import (
     Column, BigInteger, Integer, String, DateTime,
-    Boolean, Text, ForeignKey, Index
+    Boolean, Text, ForeignKey, Index, UniqueConstraint
 )
 
 from app.core.database import Base, JSONB, sa_func, sa_text
@@ -119,6 +119,46 @@ class BiSyncSchedule(Base):
             "execution_mode": self.execution_mode,
             "is_enabled": self.is_enabled,
             "created_by": self.created_by,
+            "created_at": self.created_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.created_at else None,
+            "updated_at": self.updated_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.updated_at else None,
+        }
+
+
+class BiSyncTask(Base):
+    """同步任务清单表 bi_sync_tasks（Spec 43）
+
+    三层调度模型中间层：BiSyncSchedule → BiSyncTask → TableauSyncLog
+    由 plan_daily_sync_tasks() 每日预生成，执行后关联 tableau_sync_logs。
+    """
+    __tablename__ = "bi_sync_tasks"
+    __table_args__ = (
+        UniqueConstraint("schedule_id", "connection_id", "scheduled_at", name="uq_sync_task"),
+        Index("ix_sync_tasks_connection", "connection_id", "scheduled_at"),
+        Index("ix_sync_tasks_schedule", "schedule_id", "scheduled_at"),
+        Index("ix_sync_tasks_status", "status", "scheduled_at"),
+    )
+
+    id            = Column(BigInteger, primary_key=True, autoincrement=True)
+    schedule_id   = Column(Integer, ForeignKey("bi_sync_schedules.id", ondelete="SET NULL"), nullable=True)
+    connection_id = Column(Integer, ForeignKey("tableau_connections.id", ondelete="CASCADE"), nullable=False)
+    scheduled_at  = Column(DateTime, nullable=False)
+    status        = Column(String(16), nullable=False, server_default=sa_text("'pending'"))
+    trigger_type  = Column(String(16), nullable=False, server_default=sa_text("'scheduled'"))
+    sync_log_id   = Column(BigInteger, ForeignKey("tableau_sync_logs.id", ondelete="SET NULL"), nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at    = Column(DateTime, nullable=False, server_default=sa_func.now())
+    updated_at    = Column(DateTime, nullable=False, server_default=sa_func.now())
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "schedule_id": self.schedule_id,
+            "connection_id": self.connection_id,
+            "scheduled_at": self.scheduled_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.scheduled_at else None,
+            "status": self.status,
+            "trigger_type": self.trigger_type,
+            "sync_log_id": self.sync_log_id,
+            "error_message": self.error_message,
             "created_at": self.created_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.created_at else None,
             "updated_at": self.updated_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.updated_at else None,
         }

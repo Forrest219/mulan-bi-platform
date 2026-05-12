@@ -15,6 +15,7 @@ import json
 import logging
 import time
 import uuid as uuid_lib
+from datetime import datetime, timezone
 from typing import AsyncGenerator, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -50,6 +51,7 @@ from services.agent.dual_write import (
     check_and_trigger_auto_rollback,
 )
 from services.data_agent.intent import IntentRecognizer
+from services.data_agent.intent.keyword_match import is_direct_query
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["Data Agent"])
@@ -164,6 +166,208 @@ def _require_agent_role(role: str) -> None:
             status_code=403,
             detail={"error_code": "AGENT_005", "message": "无权限使用 Agent"},
         )
+
+
+# ─── Fast-path 可观测性事件 ───────────────────────────────────────────
+_FAST_ATTEMPTED = "FAST_ATTEMPTED"   # 快通尝试
+_FAST_FAILED = "FAST_FAILED"          # 快通失败（fallback 到 ReAct）
+_FAST_SUCCESS = "FAST_SUCCESS"        # 快通成功
+_SLOW_FALLBACK = "SLOW_FALLBACK"     # 跳过快通或失败后走 ReAct
+
+# 仅对可恢复错误触发 fallback（不走快通的场景不算错）
+# 不包括：NLQ_009/010/011（认证/权限/限流），这些走快通反而会漏安全问题
+_FAST_RECOVERABLE_ERRORS = frozenset([
+    "NLQ_006",   # VizQL 执行失败
+    "NLQ_007",   # 查询超时
+    "NLQ_008",   # 数据源路由失败
+    "MCP_010",   # MCP 连接异常
+    "QUERY_001", # 字段不匹配
+])
+
+
+async def try_fast_mcp_stream(
+    question: str,
+    context: ToolContext,
+    current_user: dict,
+    req_connection_id: Optional[int],
+    db: Session,
+    session,  # AgentSession from session_mgr
+    session_mgr,  # SessionManager instance
+) -> Optional[tuple[Optional[uuid_lib.UUID], AsyncGenerator[str, None]]]:
+    """
+    快通 MCP 路径：绕过 ReAct 引擎，直接 route → VizQL → MCP 查询 → SSE。
+
+    返回 None 表示不满足快通条件（应 fallback 到 run_agent）。
+    返回 (run_id, generator) 时 generator 正常时应 yield 完整 SSE 事件流（含 done / error）。
+
+    可恢复错误（_FAST_RECOVERABLE_ERRORS）不向上抛，直接返回 None 触发 fallback。
+    其他错误（认证/权限/限流/未知）向上抛，不触发 fallback。
+    """
+    from services.llm.nlq_service import route_datasource, get_datasource_fields_cached
+    from services.llm.query_executor import execute_query, QueryExecutorError
+    from services.tableau.mcp_client import TableauMCPError
+
+    logger.info("[FAST_ATTEMPTED] question=%s, trace=%s", question[:80], context.trace_id)
+
+    # 1. 数据源路由（已有 Redis 缓存，<10ms）
+    try:
+        ds_info = route_datasource(question, connection_id=req_connection_id)
+    except Exception as e:
+        logger.warning("[FAST_FAILED] route_datasource error=%s, trace=%s", e, context.trace_id)
+        # 路由异常走 ReAct，不算快通失败
+        return None
+
+    if not ds_info:
+        logger.info("[SLOW_FALLBACK] route_datasource returned None, trace=%s", context.trace_id)
+        return None
+
+    datasource_luid = ds_info.get("luid")
+    datasource_name = ds_info.get("name")
+    asset_id = ds_info.get("asset_id")
+
+    if not datasource_luid:
+        logger.info("[SLOW_FALLBACK] no datasource_luid, trace=%s", context.trace_id)
+        return None
+
+    # 2. 获取字段列表（Redis 缓存）
+    field_captions: List[str] = []
+    try:
+        field_captions = get_datasource_fields_cached(asset_id) if asset_id else []
+    except Exception:
+        pass
+
+    # 3. 构建直接 VizQL（无 LLM，<1ms）
+    from services.data_agent.tools.query_tool import _build_direct_vizql
+
+    vizql_json = _build_direct_vizql(question, field_captions)
+    if not vizql_json:
+        logger.info("[SLOW_FALLBACK] _build_direct_vizql returned None, trace=%s", context.trace_id)
+        return None
+
+    # 4. 通过 execute_query 走 MCP 执行（阻塞，~300-800ms）
+    try:
+        result = execute_query(
+            datasource_luid=datasource_luid,
+            vizql_json=vizql_json,
+            limit=1000,
+            connection_id=req_connection_id,
+        )
+    except (TableauMCPError, QueryExecutorError) as e:
+        code = getattr(e, "code", None) or (getattr(e, "error_code", None) if hasattr(e, "error_code") else None)
+        if code in _FAST_RECOVERABLE_ERRORS:
+            logger.warning(
+                "[FAST_FAILED] recoverable error code=%s message=%s trace=%s",
+                code, getattr(e, "message", str(e)), context.trace_id,
+            )
+            return None
+        # 认证/权限/限流错误不 fallback，直接抛给上层
+        raise
+    except Exception as e:
+        logger.warning("[FAST_FAILED] execute_query unexpected error=%s trace=%s", e, context.trace_id)
+        return None
+
+    # 5. 格式化结果为 SSE stream
+    fields = result.get("fields", [])
+    rows = result.get("rows", [])
+
+    logger.info("[FAST_SUCCESS] datasource=%s rows=%d trace=%s", datasource_luid, len(rows), context.trace_id)
+
+    run_id: Optional[uuid_lib.UUID] = None
+
+    async def fast_event_generator() -> AsyncGenerator[str, None]:
+        # fast_event_generator accesses run_id from enclosing function scope
+        t0 = time.monotonic()
+        # 构造回答文本（L2 修复：使用 fields 和 datasource_name）
+        answer_text = _build_fast_answer(question, fields, rows, datasource_name or datasource_luid)
+
+        # H4 修复：持久化 assistant 回复到会话历史
+        try:
+            session_mgr.persist_message(
+                session=session,
+                role="assistant",
+                content=answer_text,
+                trace_id=context.trace_id,
+                response_type="table",
+                response_data={"fields": fields, "rows": rows},
+                tools_used=["query"],
+                steps_count=1,
+            )
+        except Exception as e:
+            logger.warning("[FAST] persist_message assistant failed: %s", e)
+
+        # H5 修复：写入 BiAgentRun 记录（可观测性 + 反馈可用）
+        # 使用 ORM 实际字段：question/status/steps_count/tools_used/response_type/execution_time_ms
+        try:
+            run_id = uuid_lib.uuid4()
+            with get_db_context() as _db:
+                run = BiAgentRun(
+                    id=run_id,
+                    conversation_id=uuid_lib.UUID(context.session_id),
+                    user_id=current_user["id"],
+                    connection_id=req_connection_id,
+                    question=question,
+                    status="completed",
+                    steps_count=1,
+                    tools_used=["query"],
+                    response_type="table",
+                    execution_time_ms=int((time.monotonic() - t0) * 1000),
+                    completed_at=datetime.now(timezone.utc),
+                )
+                _db.add(run)
+                _db.commit()
+        except Exception as e:
+            logger.warning("[FAST] BiAgentRun write failed: %s", e)
+            run_id = None
+
+        # 流式输出 table_data
+        table_payload = json.dumps({'type': 'table_data', 'fields': fields, 'rows': rows, 'col_types': []}, ensure_ascii=False)
+        yield f"data: {table_payload}\n\n"
+        # 流式输出 token
+        for char in answer_text:
+            yield f"data: {json.dumps({'type': 'token', 'content': char}, ensure_ascii=False)}\n\n"
+            await asyncio.sleep(0.01)
+        # done（L1 修复：直接使用外层 run_id 变量，不再用 dir() 检测）
+        done_payload = json.dumps({
+            'type': 'done',
+            'answer': answer_text,
+            'trace_id': context.trace_id,
+            'run_id': str(run_id) if run_id else '',
+            'tools_used': ['query'],
+            'response_type': 'table',
+            'response_data': {'fields': fields, 'rows': rows},
+            'steps_count': 1,
+            'execution_time_ms': int((time.monotonic() - t0) * 1000),
+            'sources_count': 0,
+            'top_sources': [],
+        }, ensure_ascii=False)
+        yield f"data: {done_payload}\n\n"
+        # 可观测性日志（log_nlq_query）
+        log_nlq_query(
+            user_id=current_user.get("id"),
+            question=question,
+            response_type="table",
+            execution_time_ms=int((time.monotonic() - t0) * 1000),
+            error_code=None,
+        )
+
+    return (run_id, fast_event_generator())
+
+
+def _build_fast_answer(question: str, fields: List, rows: List, datasource_name: str) -> str:
+    """根据查询结果生成自然语言回答。"""
+    if not rows:
+        return f"没有找到符合「{question}」的数据。"
+    row_count = len(rows)
+    if row_count == 1:
+        vals = ", ".join(str(r) for r in rows[0] if str(r) not in ('', 'None'))
+        return f"「{question}」的结果是：{vals}。"
+    # 前3行预览
+    preview = "; ".join(
+        ", ".join(str(v) for v in row[:3] if str(v) not in ('', 'None'))
+        for row in rows[:3]
+    )
+    more = f"（共 {row_count} 条）" if row_count > 3 else ""
+    return f"「{question}」共有 {row_count} 条结果，前几名为：{preview}{more}。"
 
 
 def _validate_connection_access(
@@ -303,6 +507,35 @@ async def agent_stream(
 
     async def event_generator() -> AsyncGenerator[str, None]:
         _t0 = time.monotonic()
+
+        # ── 快通 MCP 路径：意图命中的简单问数直连 VizQL ──────────────────────
+        if is_direct_query(req.question):
+            logger.info("[FAST_ATTEMPTED] question=%s, trace=%s", req.question[:80], trace_id)
+            run_id: Optional[uuid_lib.UUID] = None
+            try:
+                fast_result = await try_fast_mcp_stream(
+                    question=req.question,
+                    context=context,
+                    current_user=current_user,
+                    req_connection_id=req.connection_id,
+                    db=db,
+                    session=session,
+                    session_mgr=session_mgr,
+                )
+                if fast_result is not None:
+                    run_id, fast_gen = fast_result
+                    # 先发 metadata（含 conversation_id），run_id 等 BiAgentRun commit 后再补
+                    yield f"data: {json.dumps({'type': 'metadata', 'conversation_id': conversation_id_str, 'run_id': str(run_id) if run_id else ''}, ensure_ascii=False)}\n\n"
+                    async for chunk in fast_gen:
+                        yield chunk
+                    return
+            except Exception:
+                # H2 修复：外层仅捕获已知的、可恢复的错误；
+                # 认证/权限/限流（NLQ_009/010/011）不应 fallback 到 ReAct，
+                # 而是让其继续到标准 SSE 错误处理（event_generator 外层）。
+                logger.warning("[FAST_FALLBACK] 快通异常 fallback 到 run_agent, trace=%s", trace_id)
+
+        # ── 标准 ReAct 路径 ──────────────────────────────────────────────────
         async for event in run_agent(
             engine=engine,
             context=context,
