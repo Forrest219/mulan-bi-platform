@@ -271,6 +271,7 @@ class QueryErrorListResponse(BaseModel):
 
 class NlqLogItem(BaseModel):
     id: int
+    run_id: str
     username: Optional[str] = None
     question: str
     intent: Optional[str] = None
@@ -336,6 +337,7 @@ def list_nlq_logs(
     items = [
         NlqLogItem(
             id=log.id,
+            run_id=f"nlq-{log.id}",
             username=username,
             question=log.question,
             intent=log.intent,

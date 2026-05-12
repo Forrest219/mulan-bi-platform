@@ -1,22 +1,16 @@
 """
-SchemaTool — Phase 2: 数据源 schema/表结构查询
+SchemaTool — Phase 2: Tableau schema/资产结构查询
 
 Spec: docs/specs/36-data-agent-architecture-spec.md §3.1 ToolRegistry + §9.2 downstream
 """
 
-import asyncio
 import logging
 import time
-import urllib.parse
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from sqlalchemy import create_engine, text
-
-from app.core.crypto import get_datasource_crypto
 from app.core.database import SessionLocal
-from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
-from services.datasources.models import DataSource
-from services.tableau.models import TableauConnection, TableauAsset, TableauDatasourceField
+from services.data_agent.tool_base import BaseTool, ToolContext, ToolMetadata, ToolResult
+from services.tableau.models import TableauAsset, TableauConnection, TableauDatasourceField
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +19,7 @@ class SchemaTool(BaseTool):
     """
     Phase 2 Data Agent Tool: Schema / Table Structure Query.
 
-    Queries table structures, field metadata from data sources.
+    Queries Tableau asset structures and field metadata.
     Used when user asks "what tables exist", "what fields does X table have",
     "show me the schema/data structure".
 
@@ -37,7 +31,7 @@ class SchemaTool(BaseTool):
     metadata = ToolMetadata(
         category="query",
         version="1.0.0",
-        dependencies=["requires_database"],
+        dependencies=["requires_tableau"],
         tags=["schema", "metadata", "table-structure"],
     )
     parameters_schema = {
@@ -62,13 +56,12 @@ class SchemaTool(BaseTool):
 
     async def execute(self, params: dict, context: ToolContext) -> ToolResult:
         """
-        Execute a schema query.
+        Execute a Tableau schema query.
 
         Pipeline:
         1. Resolve connection_id (param overrides context)
-        2. Fetch DataSource from bi_data_sources
-        3. Query INFORMATION_SCHEMA for table/column metadata
-        4. Return structured table/field info
+        2. Fetch active TableauConnection
+        3. Return Tableau asset/field metadata
 
         Args:
             params: {"connection_id"?: int, "table_name"?: str, "limit"?: int}
@@ -99,7 +92,6 @@ class SchemaTool(BaseTool):
                 context.trace_id,
             )
 
-            # ── Stage 1: Resolve connection type ────────────────────────────────
             db = SessionLocal()
             try:
                 tc = db.query(TableauConnection).filter(
@@ -107,32 +99,15 @@ class SchemaTool(BaseTool):
                     TableauConnection.is_active == True,
                 ).first()
 
-                if tc:
-                    result = self._query_tableau_schema(db, tc, table_name, limit)
-                else:
-                    ds: Optional[DataSource] = db.query(DataSource).filter(
-                        DataSource.id == connection_id
-                    ).first()
+                if not tc:
+                    return ToolResult(
+                        success=False,
+                        data=None,
+                        error="Tableau 连接不存在或已停用",
+                        execution_time_ms=int((time.time() - start_time) * 1000),
+                    )
 
-                    if not ds:
-                        return ToolResult(
-                            success=False,
-                            data=None,
-                            error=f"Data source not found: connection_id={connection_id}",
-                            execution_time_ms=int((time.time() - start_time) * 1000),
-                        )
-
-                    crypto = get_datasource_crypto()
-                    password = crypto.decrypt(ds.password_encrypted)
-
-                    if ds.db_type == "postgresql":
-                        result = await self._query_postgresql_schema(ds, password, table_name, limit)
-                    elif ds.db_type in ("mysql", "mariadb"):
-                        result = await self._query_mysql_schema(ds, password, table_name, limit)
-                    elif ds.db_type == "sqlserver":
-                        result = await self._query_sqlserver_schema(ds, password, table_name, limit)
-                    else:
-                        result = await self._query_postgresql_schema(ds, password, table_name, limit)
+                result = self._query_tableau_schema(db, tc, table_name, limit)
             finally:
                 db.close()
 
@@ -162,324 +137,127 @@ class SchemaTool(BaseTool):
     def _query_tableau_schema(
         self, db, tc: "TableauConnection", table_name: Optional[str], limit: int
     ) -> Dict[str, Any]:
-        """Query Tableau assets and fields as the 'schema' for a Tableau connection."""
+        """Query Tableau assets and fields as the schema for a Tableau connection."""
         assets = db.query(TableauAsset).filter(
             TableauAsset.connection_id == tc.id,
             TableauAsset.is_deleted == False,
         ).order_by(TableauAsset.asset_type, TableauAsset.name).limit(limit).all()
 
         asset_types = {}
-        for a in assets:
-            asset_types.setdefault(a.asset_type, []).append({
-                "name": a.name,
-                "project": a.project_name,
-                "tableau_id": a.tableau_id,
-                "web_url": a.web_url,
+        for asset in assets:
+            asset_types.setdefault(asset.asset_type, []).append({
+                "name": asset.name,
+                "project": asset.project_name,
+                "tableau_id": asset.tableau_id,
+                "web_url": asset.web_url,
             })
 
         tables = [
-            {"name": a.name, "type": a.asset_type, "project": a.project_name, "web_url": a.web_url}
-            for a in assets
+            {
+                "name": asset.name,
+                "type": asset.asset_type,
+                "project": asset.project_name,
+                "web_url": asset.web_url,
+            }
+            for asset in assets
         ]
 
         fields: Dict[str, Any] = {}
+        matched_asset = None
+        matched_table = None
+        field_count = 0
+        warning = None
         if table_name:
-            target_asset = db.query(TableauAsset).filter(
-                TableauAsset.connection_id == tc.id,
-                TableauAsset.is_deleted == False,
-                TableauAsset.name == table_name,
-            ).first()
+            target_asset = self._find_tableau_asset(db, tc.id, table_name)
             if target_asset:
+                matched_asset = self._serialize_tableau_asset(target_asset)
+                matched_table = {
+                    "name": target_asset.name,
+                    "type": target_asset.asset_type,
+                    "project": target_asset.project_name,
+                    "web_url": target_asset.web_url,
+                }
                 field_records = db.query(TableauDatasourceField).filter(
                     TableauDatasourceField.asset_id == target_asset.id,
                 ).all()
-                fields[table_name] = [
+                fields[target_asset.name] = [
                     {
-                        "name": f.field_name,
-                        "caption": f.field_caption,
-                        "data_type": f.data_type,
-                        "role": f.role,
-                        "is_calculated": f.is_calculated,
+                        "name": field.field_name,
+                        "caption": field.field_caption,
+                        "data_type": field.data_type,
+                        "role": field.role,
+                        "is_calculated": field.is_calculated,
                     }
-                    for f in field_records
+                    for field in field_records
                 ]
+                field_count = len(fields[target_asset.name])
+                if field_count == 0:
+                    warning = "已匹配到 Tableau 资产，但未同步到字段元数据"
 
-        return {
+        result: Dict[str, Any] = {
             "connection_id": tc.id,
             "datasource_name": tc.name,
             "db_type": "tableau",
             "server_url": tc.server_url,
             "site": tc.site,
-            "tables": tables,
-            "fields": fields,
-            "asset_summary": {k: len(v) for k, v in asset_types.items()},
         }
-
-    def _query_postgresql_schema_sync(
-        self, ds: DataSource, password: str, table_name: Optional[str], limit: int
-    ) -> Dict[str, Any]:
-        """Query PostgreSQL INFORMATION_SCHEMA for table/column metadata."""
-        db_url = (
-            f"postgresql://{ds.username}:{urllib.parse.quote_plus(password)}@"
-            f"{ds.host}:{ds.port}/{ds.database_name}"
-        )
-
-        remote_engine = create_engine(db_url, pool_pre_ping=True, pool_size=1)
-        remote_conn = remote_engine.connect()
-
-        try:
-            if table_name:
-                tables_query = text("""
-                    SELECT table_name, table_type, is_insertable_into
-                    FROM information_schema.tables
-                    WHERE table_schema = 'public'
-                      AND table_name = :table_name
-                    ORDER BY table_name
-                    LIMIT :limit
-                """)
-            else:
-                tables_query = text("""
-                    SELECT table_name, table_type, is_insertable_into
-                    FROM information_schema.tables
-                    WHERE table_schema = 'public'
-                    ORDER BY table_name
-                    LIMIT :limit
-                """)
-
-            tables_result = remote_conn.execute(tables_query, {"table_name": table_name or "", "limit": limit})
-            tables = [
-                {
-                    "name": row[0],
-                    "type": row[1],
-                    "is_insertable": row[2],
-                }
-                for row in tables_result
-            ]
-
-            fields = {}
-            if table_name:
-                columns_query = text("""
-                    SELECT
-                        c.column_name,
-                        c.data_type,
-                        c.character_maximum_length,
-                        c.is_nullable,
-                        c.column_default,
-                        c.identity_generation
-                    FROM information_schema.columns c
-                    WHERE c.table_schema = 'public' AND c.table_name = :table_name
-                    ORDER BY c.ordinal_position
-                """)
-                columns_result = remote_conn.execute(columns_query, {"table_name": table_name})
-                fields[table_name] = [
-                    {
-                        "name": row[0],
-                        "data_type": row[1],
-                        "max_length": row[2],
-                        "nullable": row[3] == "YES",
-                        "default": row[4],
-                        "identity": row[5],
-                    }
-                    for row in columns_result
-                ]
-
-            if table_name:
-                pk_query = text("""
-                    SELECT kcu.column_name
-                    FROM information_schema.table_constraints tc
-                    JOIN information_schema.key_column_usage kcu
-                      ON tc.constraint_name = kcu.constraint_name
-                      AND tc.table_schema = kcu.table_schema
-                    WHERE tc.constraint_type = 'PRIMARY KEY'
-                      AND tc.table_schema = 'public'
-                      AND tc.table_name = :table_name
-                """)
-                pk_result = remote_conn.execute(pk_query, {"table_name": table_name})
-                pk_columns = [row[0] for row in pk_result]
-                if table_name in fields:
-                    for f in fields[table_name]:
-                        f["is_primary_key"] = f["name"] in pk_columns
-
-            return {
-                "connection_id": ds.id,
-                "datasource_name": ds.name,
-                "db_type": ds.db_type,
+        if table_name:
+            result.update({
+                "requested_table_name": table_name,
+                "matched_asset": matched_asset,
+                "field_count": field_count,
+                "fields": fields,
+                "tables": [matched_table] if matched_table else [],
+            })
+            if warning:
+                result["warning"] = warning
+        else:
+            result.update({
                 "tables": tables,
                 "fields": fields,
-            }
-        finally:
-            remote_conn.close()
-            remote_engine.dispose()
+                "asset_summary": {
+                    asset_type: len(items)
+                    for asset_type, items in asset_types.items()
+                },
+            })
 
-    async def _query_postgresql_schema(
-        self, ds: DataSource, password: str, table_name: Optional[str], limit: int
-    ) -> Dict[str, Any]:
-        """Query PostgreSQL INFORMATION_SCHEMA for table/column metadata."""
-        return await asyncio.to_thread(
-            self._query_postgresql_schema_sync, ds, password, table_name, limit
-        )
+        return result
 
-    def _query_mysql_schema_sync(
-        self, ds: DataSource, password: str, table_name: Optional[str], limit: int
-    ) -> Dict[str, Any]:
-        """Query MySQL INFORMATION_SCHEMA for table/column metadata."""
-        db_url = (
-            f"mysql+pymysql://{ds.username}:{urllib.parse.quote_plus(password)}@"
-            f"{ds.host}:{ds.port}/{ds.database_name}"
-        )
+    def _find_tableau_asset(
+        self, db, connection_id: int, table_name: str
+    ) -> Optional["TableauAsset"]:
+        """Find a Tableau asset by exact name first, then by case-insensitive containment."""
+        target_asset = db.query(TableauAsset).filter(
+            TableauAsset.connection_id == connection_id,
+            TableauAsset.is_deleted == False,
+            TableauAsset.name == table_name,
+        ).first()
+        if target_asset:
+            return target_asset
 
-        remote_engine = create_engine(db_url, pool_pre_ping=True, pool_size=1)
-        remote_conn = remote_engine.connect()
+        normalized_table_name = table_name.casefold()
+        candidates = db.query(TableauAsset).filter(
+            TableauAsset.connection_id == connection_id,
+            TableauAsset.is_deleted == False,
+        ).order_by(TableauAsset.asset_type, TableauAsset.name).all()
 
-        try:
-            schema = ds.database_name
+        for asset in candidates:
+            asset_name = (asset.name or "").casefold()
+            if asset_name == normalized_table_name:
+                return asset
 
-            if table_name:
-                tables_query = text("""
-                    SELECT table_name, table_type
-                    FROM information_schema.tables
-                    WHERE table_schema = :schema AND table_name = :table_name
-                    ORDER BY table_name
-                    LIMIT :limit
-                """)
-            else:
-                tables_query = text("""
-                    SELECT table_name, table_type
-                    FROM information_schema.tables
-                    WHERE table_schema = :schema
-                    ORDER BY table_name
-                    LIMIT :limit
-                """)
+        for asset in candidates:
+            asset_name = (asset.name or "").casefold()
+            if normalized_table_name in asset_name or asset_name in normalized_table_name:
+                return asset
 
-            tables_result = remote_conn.execute(
-                tables_query, {"schema": schema, "table_name": table_name or "", "limit": limit}
-            )
-            tables = [
-                {"name": row[0], "type": row[1]}
-                for row in tables_result
-            ]
+        return None
 
-            fields = {}
-            if table_name:
-                columns_query = text("""
-                    SELECT
-                        column_name, data_type, character_maximum_length,
-                        is_nullable, column_default, column_key
-                    FROM information_schema.columns
-                    WHERE table_schema = :schema AND table_name = :table_name
-                    ORDER BY ordinal_position
-                """)
-                columns_result = remote_conn.execute(
-                    columns_query, {"schema": schema, "table_name": table_name}
-                )
-                fields[table_name] = [
-                    {
-                        "name": row[0],
-                        "data_type": row[1],
-                        "max_length": row[2],
-                        "nullable": row[3] == "YES",
-                        "default": row[4],
-                        "key": row[5],
-                    }
-                    for row in columns_result
-                ]
-
-            return {
-                "connection_id": ds.id,
-                "datasource_name": ds.name,
-                "db_type": ds.db_type,
-                "tables": tables,
-                "fields": fields,
-            }
-        finally:
-            remote_conn.close()
-            remote_engine.dispose()
-
-    async def _query_mysql_schema(
-        self, ds: DataSource, password: str, table_name: Optional[str], limit: int
-    ) -> Dict[str, Any]:
-        """Query MySQL INFORMATION_SCHEMA for table/column metadata."""
-        return await asyncio.to_thread(
-            self._query_mysql_schema_sync, ds, password, table_name, limit
-        )
-
-    def _query_sqlserver_schema_sync(
-        self, ds: DataSource, password: str, table_name: Optional[str], limit: int
-    ) -> Dict[str, Any]:
-        """Query SQL Server INFORMATION_SCHEMA for table/column metadata."""
-        db_url = (
-            f"mssql+pyodbc://{ds.username}:{urllib.parse.quote_plus(password)}@"
-            f"{ds.host}:{ds.port}/{ds.database_name}?driver=ODBC+Driver+17+for+SQL+Server"
-        )
-
-        remote_engine = create_engine(db_url, pool_pre_ping=True, pool_size=1)
-        remote_conn = remote_engine.connect()
-
-        try:
-            if table_name:
-                tables_query = text("""
-                    SELECT TABLE_NAME, TABLE_TYPE
-                    FROM INFORMATION_SCHEMA.TABLES
-                    WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = :table_name
-                    ORDER BY TABLE_NAME
-                """)
-            else:
-                tables_query = text("""
-                    SELECT TOP(:limit) TABLE_NAME, TABLE_TYPE
-                    FROM INFORMATION_SCHEMA.TABLES
-                    WHERE TABLE_SCHEMA = 'dbo'
-                    ORDER BY TABLE_NAME
-                """)
-
-            tables_result = remote_conn.execute(
-                tables_query, {"table_name": table_name or "", "limit": limit}
-            )
-            tables = [
-                {"name": row[0], "type": row[1]}
-                for row in tables_result
-            ]
-
-            fields = {}
-            if table_name:
-                columns_query = text("""
-                    SELECT
-                        c.COLUMN_NAME, c.DATA_TYPE, c.CHARACTER_MAXIMUM_LENGTH,
-                        c.IS_NULLABLE, c.COLUMN_DEFAULT,
-                        COLUMNPROPERTY(OBJECT_ID(:schema_table), c.COLUMN_NAME, 'IsIdentity') as is_identity
-                    FROM INFORMATION_SCHEMA.COLUMNS c
-                    WHERE c.TABLE_SCHEMA = 'dbo' AND c.TABLE_NAME = :table_name
-                    ORDER BY c.ORDINAL_POSITION
-                """)
-                columns_result = remote_conn.execute(
-                    columns_query, {"table_name": table_name, "schema_table": f"dbo.{table_name}"}
-                )
-                fields[table_name] = [
-                    {
-                        "name": row[0],
-                        "data_type": row[1],
-                        "max_length": row[2],
-                        "nullable": row[3] == "YES",
-                        "default": row[4],
-                        "identity": bool(row[5]) if row[5] is not None else False,
-                    }
-                    for row in columns_result
-                ]
-
-            return {
-                "connection_id": ds.id,
-                "datasource_name": ds.name,
-                "db_type": ds.db_type,
-                "tables": tables,
-                "fields": fields,
-            }
-        finally:
-            remote_conn.close()
-            remote_engine.dispose()
-
-    async def _query_sqlserver_schema(
-        self, ds: DataSource, password: str, table_name: Optional[str], limit: int
-    ) -> Dict[str, Any]:
-        """Query SQL Server INFORMATION_SCHEMA for table/column metadata."""
-        return await asyncio.to_thread(
-            self._query_sqlserver_schema_sync, ds, password, table_name, limit
-        )
+    def _serialize_tableau_asset(self, asset: "TableauAsset") -> Dict[str, Any]:
+        return {
+            "name": asset.name,
+            "type": asset.asset_type,
+            "project": asset.project_name,
+            "tableau_id": asset.tableau_id,
+            "web_url": asset.web_url,
+        }

@@ -25,7 +25,10 @@ def _extract_user_hint(exc: Exception) -> Optional[str]:
     if hasattr(exc, "message") and isinstance(exc.message, str) and exc.message:
         return exc.message[:120]
     return None
-from .intent.keyword_match import is_chart_request as _is_chart_request
+from .intent.keyword_match import (
+    is_chart_request as _is_chart_request,
+    is_schema_inventory_request,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +154,7 @@ class ReActEngine:
         # 构建 system prompt（尝试注入数据源字段上下文，让 LLM 直接生成 VizQL）
         tool_descriptions = self.registry.get_tool_descriptions()
         datasource_context = None
-        if context.connection_id:
+        if context.connection_id and not is_schema_inventory_request(query):
             try:
                 from services.llm.nlq_service import route_datasource, get_datasource_fields_cached
                 _ds = route_datasource(query, connection_id=context.connection_id)
@@ -432,6 +435,9 @@ class ReActEngine:
         except Exception as e:
             logger.exception("LLM 调用失败")
             return {"error": "LLM 服务暂时不可用", "error_code": "AGENT_006"}
+
+        if isinstance(result_data, dict) and "action" in result_data:
+            return result_data
 
         if "error" in result_data:
             return {"error": result_data["error"], "error_code": "AGENT_006"}

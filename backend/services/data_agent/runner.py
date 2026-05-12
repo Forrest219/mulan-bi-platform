@@ -132,7 +132,17 @@ async def run_agent(
             elif event.type == "tool_result":
                 tool_name = event.content.get("tool", "")
                 result_data = event.content.get("result", {})
-                summary = result_data.get("data") if isinstance(result_data, dict) else result_data
+                if isinstance(result_data, dict) and (
+                    result_data.get("success") is False or result_data.get("error")
+                ):
+                    summary = (
+                        result_data.get("error")
+                        or result_data.get("message")
+                        or result_data.get("error_message")
+                        or result_data
+                    )
+                else:
+                    summary = result_data.get("data") if isinstance(result_data, dict) else result_data
                 summary_str = str(summary)[:500] if summary else ""
                 step_number += 1
                 step = BiAgentStep(
@@ -185,13 +195,18 @@ async def run_agent(
                 )
                 db.add(step)
 
-                # Update run status to completed
-                run.status = "completed"
-                run.steps_count = steps_count
-                run.tools_used = tools_used if tools_used else None
-                run.response_type = response_type
-                run.execution_time_ms = execution_time_ms
-                run.completed_at = datetime.utcnow()
+                completed_at = datetime.utcnow()
+                db.query(BiAgentRun).filter(BiAgentRun.id == run_id).update(
+                    {
+                        BiAgentRun.status: "completed",
+                        BiAgentRun.steps_count: steps_count,
+                        BiAgentRun.tools_used: tools_used if tools_used else None,
+                        BiAgentRun.response_type: response_type,
+                        BiAgentRun.execution_time_ms: execution_time_ms,
+                        BiAgentRun.completed_at: completed_at,
+                    },
+                    synchronize_session=False,
+                )
                 db.commit()
 
                 # Build sources metadata from connection context
@@ -254,10 +269,17 @@ async def run_agent(
                     content=error_content.get("message", "")[:500],
                 )
                 db.add(step)
-                run.status = "failed"
-                run.error_code = err_code
-                run.execution_time_ms = int((time.time() - total_start) * 1000)
-                run.completed_at = datetime.utcnow()
+                execution_time_ms = int((time.time() - total_start) * 1000)
+                completed_at = datetime.utcnow()
+                db.query(BiAgentRun).filter(BiAgentRun.id == run_id).update(
+                    {
+                        BiAgentRun.status: "failed",
+                        BiAgentRun.error_code: err_code,
+                        BiAgentRun.execution_time_ms: execution_time_ms,
+                        BiAgentRun.completed_at: completed_at,
+                    },
+                    synchronize_session=False,
+                )
                 db.commit()
 
                 yield AgentEvent(type="error", content=error_content)
@@ -266,10 +288,17 @@ async def run_agent(
         logger.exception("Agent runner exception")
         if run_id:
             try:
-                run.status = "failed"
-                run.error_code = "AGENT_003"
-                run.execution_time_ms = int((time.time() - total_start) * 1000)
-                run.completed_at = datetime.utcnow()
+                execution_time_ms = int((time.time() - total_start) * 1000)
+                completed_at = datetime.utcnow()
+                db.query(BiAgentRun).filter(BiAgentRun.id == run_id).update(
+                    {
+                        BiAgentRun.status: "failed",
+                        BiAgentRun.error_code: "AGENT_003",
+                        BiAgentRun.execution_time_ms: execution_time_ms,
+                        BiAgentRun.completed_at: completed_at,
+                    },
+                    synchronize_session=False,
+                )
                 db.commit()
             except Exception:
                 logger.warning("Failed to update run status on exception")

@@ -1,8 +1,9 @@
 # Data Agent 架构技术规格书
 
-> 版本：v0.2 | 状态：Engineering Spec — minimax 可开发（首页 Agent 灰度迁移已设计于 §15） | 日期：2026-04-28 | 关联 PRD：批次 0 T0.3 待 PM 决策（不阻塞 T2.3 启动）
+> 版本：v0.3 | 状态：Engineering Spec — minimax 可开发（首页 Agent 灰度迁移已设计于 §15） | 日期：2026-05-12 | 关联 PRD：批次 0 T0.3 待 PM 决策（不阻塞 T2.3 启动）
 >
 > **变更记录**
+> - v0.3（2026-05-12）— 首页问答临时收敛为 Tableau-only：`/api/agent/stream`、QueryTool、SchemaTool 禁止 fallback 到普通 `bi_data_sources`；历史会话中的停用 Tableau 连接必须解析到 active Tableau 或明确报错；Agent Monitor 必须保留工具失败摘要。
 > - v0.2（2026-04-28）— 0.5d.1 补丁：§15 首页 Agent 灰度迁移与回滚（4 态 feature flag / 双写规约 / 自动回滚阈值 / 3 意图策略决策树 / `bi_agent_dual_write_audit` + `bi_agent_intent_log` 两张新表 / 5 P0 + 2 P1 测试 / 红线 + 强制清单 + grep + 正错示范）
 > - v0.1（2026-04-24）— 初版草稿
 
@@ -60,6 +61,8 @@ Spec 36（本文档）          Spec 28
 ### 2.1 架构定位
 
 Data Agent 是首页的唯一 Agent 入口。所有内部服务（NLQ、SQL Agent、Metrics Agent、Viz Agent）作为 Data Agent 的工具被调用，不直接暴露给用户。
+
+> **MVP 运行约束（2026-05-12）**：首页 AskBar 的所有问答暂时只面向 Tableau / Tableau MCP。`connection_id` 在首页 Agent 链路中只允许解释为 `tableau_connections.id` 或 Tableau MCP 虚拟连接；不得 fallback 到普通 `bi_data_sources.id`。普通数据库自然语言问答另行设计和启用。
 
 ```
 ┌──────────────────────────────────────────────────┐
@@ -470,12 +473,22 @@ ReAct 的第一步 Think 自然包含意图判断：
 
 ### 8.2 工具执行安全
 
-- 工具只能访问用户有权限的数据源（connection_id 校验）
+- 首页 Agent 工具只能访问用户有权限的 Tableau 连接（connection_id 校验）；MVP 阶段不得访问普通 `bi_data_sources`
+- `connection_id` 不具备跨表全局唯一性，禁止在 Tableau 连接停用/不存在时用同值普通数据源接管
+- 历史会话绑定停用 Tableau 连接时，运行时必须解析到明确的 active Tableau 连接，或返回明确错误；不得静默切到普通数据库
 - SQL 执行走 SQL Agent 安全校验（Spec 29 sqlglot AST 检查）
 - 工具输出视为**惰性证据**，不作为可执行指令（防 prompt injection）
 - LLM 返回的工具参数做 JSON Schema 校验后再执行
 - LLM 返回的工具参数先做 JSON Schema 校验（jsonschema.validate），校验失败返回 AGENT_002
-- connection_id 权限校验：Phase 1 信任 API 层传入的 connection_id（已通过角色检查），Phase 2 增加数据源归属校验
+- connection_id 权限校验：Phase 1 由 API 层完成 Tableau 连接 active 状态、角色和 owner 校验；Phase 2 增加更细粒度资产权限
+
+### 8.3 Tableau-only 工具约束
+
+- `SchemaTool` 只查询 active Tableau 连接的 `tableau_assets` / `tableau_datasource_fields` 缓存；找不到 active Tableau 连接时返回明确错误，不得 fallback 到普通数据库连接。
+- Tableau asset 匹配顺序：精确匹配 `name`，再做大小写不敏感/包含匹配。示例：用户输入 `订单明细表` 应匹配 `orders-订单明细表`。
+- 找到 Tableau datasource 但字段缓存为空时，返回 `success=true` + 空字段列表 + warning，表示“已找到资产但字段未同步/无缓存”，不得包装成系统失败。
+- `QueryTool` 只通过 Tableau 路由和 Tableau MCP 执行 VizQL；找不到匹配 Tableau datasource 时返回明确业务错误，不得访问普通 `DataSource`。
+- `BiAgentStep.tool_result_summary` 必须保存失败工具的 `error` 摘要，Agent Monitor 展开运行记录时必须能看到失败原因。
 
 ---
 
@@ -598,7 +611,7 @@ sequenceDiagram
 | Session Manager | session.py |
 | POST /api/agent/stream 端点 | api.py |
 
-**验收标准**：首页问"Q4 销售额是多少"→ Data Agent → QueryTool → NLQ → 返回正确结果。
+**验收标准**：首页问"Q4 销售额是多少"→ Data Agent → QueryTool → Tableau NLQ/MCP → 返回正确结果；首页问"我要分析 订单明细表"→ SchemaTool 命中 Tableau datasource `orders-订单明细表`，不得访问普通 `bi_data_sources`。
 
 ### Phase 1b：迁移
 
@@ -879,6 +892,7 @@ context_aware → keyword_match → llm_classify → fallback("chat")
 3. 双写结果对比的 `result_hash` 算法在 `services/agent/dual_write/hashing.py` **唯一**实现；其他位置出现等价算法（独立 SHA256 + 自定义规范化）视为违规
 4. 自动回滚操作必须写 audit log（actor=`system`，原因=阈值告警 + 指标快照 JSON）
 5. 意图识别 `fallback_chain` 必须落 `bi_agent_intent_log`；禁止只在内存中转或仅打 logger.info
+6. 首页 Agent 链路禁止引用普通 `bi_data_sources` 作为问答目标；`DataSource` 同 ID 记录不得接管 Tableau connection_id
 
 #### 强制检查清单
 
@@ -913,4 +927,3 @@ test "$(grep -rl 'def result_hash' backend/services backend/app | wc -l | tr -d 
 | HA-B | divergence > 30% 时是否阻塞 `agent_only` 切换 | P1 | 倾向阻塞，但需要 admin 一键 override |
 | HA-C | 多用户并发 override 与全局开关冲突解决 | P2 | 当前规则：用户 override > 全局；冲突仅在 admin 误操作时出现 |
 | HA-D | 意图识别 LLM 调用成本归因 | P2 | 依赖 Spec 20 OI-D（capability wrapper 计费维度） |
-

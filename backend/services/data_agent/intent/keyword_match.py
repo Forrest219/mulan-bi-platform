@@ -95,6 +95,24 @@ def is_direct_query(question: str) -> bool:
     return False
 
 
+SCHEMA_INVENTORY_PATTERNS = [
+    r'有哪些\s*(数据源|数据来源|表|表格|资产)',
+    r'(数据源|数据来源|表|表格|资产)\s*有哪些',
+    r'(列出|展示|显示|查看|查询).{0,8}(数据源|数据来源|表|表格|资产)',
+    r'(数据源|数据来源).{0,8}(列表|清单|目录)',
+]
+
+
+def is_schema_inventory_request(question: str) -> bool:
+    """判断是否为连接级元数据枚举问题。
+
+    这类问题需要列出当前连接下的 Tableau 资产/数据源，而不是预选一个
+    route_datasource 候选注入 prompt，否则 LLM 会把单一候选误当成全集。
+    """
+    normalized = _normalize(question)
+    return any(re.search(pattern, normalized) for pattern in SCHEMA_INVENTORY_PATTERNS)
+
+
 # 意图关键词定义（优先级从高到低）
 INTENT_KEYWORDS = {
     "report": [

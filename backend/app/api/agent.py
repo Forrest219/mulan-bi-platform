@@ -39,7 +39,6 @@ from services.data_agent.runner import run_agent
 from services.data_agent.session import SessionManager, AgentSession
 from services.data_agent.tool_base import ToolContext, ToolRegistry
 from services.data_agent.context import build_session_context
-from services.datasources.models import DataSource
 from services.llm.models import log_nlq_query
 from services.llm.service import llm_user_id_var
 from services.tableau.models import TableauConnection
@@ -55,6 +54,7 @@ from services.data_agent.intent.keyword_match import is_direct_query
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["Data Agent"])
+MCP_VIRTUAL_CONNECTION_OFFSET = 10000
 
 
 # ============================================================================
@@ -375,12 +375,12 @@ def _validate_connection_access(
     current_user: dict,
     db: Session,
 ) -> None:
-    """校验用户对数据源的访问权限。
+    """校验用户对 Tableau 连接的访问权限。
 
     - connection_id 为 None 时跳过（下游工具自行处理）
-    - 数据源不存在或已停用 → 404 AGENT_004
-    - admin / data_admin 可访问任意活跃数据源
-    - analyst 仅可访问 owner_id == 自身 ID 的数据源
+    - Tableau 连接不存在或已停用 → 404 AGENT_004
+    - admin / data_admin 可访问任意活跃 Tableau 连接
+    - analyst 仅可访问 owner_id == 自身 ID 的 Tableau 连接
     - 其他情况 → 403 AGENT_005
     """
     if connection_id is None:
@@ -401,26 +401,120 @@ def _validate_connection_access(
             )
         return
 
-    ds = db.query(DataSource).filter(
-        DataSource.id == connection_id,
-        DataSource.is_active == True,  # noqa: E712
+    raise HTTPException(
+        status_code=404,
+        detail={"error_code": "AGENT_004", "message": "Tableau 连接不存在或已停用"},
+    )
+
+
+def _find_compatible_active_tableau_connection(
+    db: Session,
+    *,
+    name: Optional[str] = None,
+    server_url: Optional[str] = None,
+    site: Optional[str] = None,
+) -> Optional[TableauConnection]:
+    active_query = db.query(TableauConnection).filter(
+        TableauConnection.is_active == True,  # noqa: E712
+    )
+
+    if server_url and site and name:
+        matched = active_query.filter(
+            TableauConnection.server_url == server_url,
+            TableauConnection.site == site,
+            TableauConnection.name == name,
+        ).order_by(TableauConnection.id.asc()).first()
+        if matched:
+            return matched
+
+    active_connections = active_query.order_by(TableauConnection.id.asc()).all()
+    if len(active_connections) == 1:
+        return active_connections[0]
+
+    return None
+
+
+def _resolve_agent_connection_id(
+    connection_id: Optional[int],
+    db: Session,
+) -> tuple[Optional[int], Optional[Any]]:
+    """Resolve AskBar connection IDs before access validation.
+
+    /api/tableau/connections exposes active Tableau MCP configs as virtual IDs
+    (10000 + mcp_servers.id) when no bridged tableau_connections row exists.
+    The Data Agent cannot use that virtual ID directly, so it must resolve to
+    an active real Tableau connection before access validation.
+    """
+    if connection_id is None:
+        return None, None
+
+    if connection_id < MCP_VIRTUAL_CONNECTION_OFFSET:
+        direct_tableau = db.query(TableauConnection).filter(
+            TableauConnection.id == connection_id,
+            TableauConnection.is_active == True,  # noqa: E712
+        ).first()
+        if direct_tableau:
+            return connection_id, None
+
+        historical_tableau = db.query(TableauConnection).filter(
+            TableauConnection.id == connection_id,
+        ).first()
+        compatible = _find_compatible_active_tableau_connection(
+            db,
+            name=getattr(historical_tableau, "name", None),
+            server_url=getattr(historical_tableau, "server_url", None),
+            site=getattr(historical_tableau, "site", None),
+        )
+        if compatible:
+            logger.info(
+                "Resolved stale Tableau connection_id=%s to active Tableau connection_id=%s",
+                connection_id,
+                compatible.id,
+            )
+            return compatible.id, None
+
+        return connection_id, None
+
+    try:
+        from services.mcp.models import McpServer
+    except Exception:
+        logger.exception("Failed to import McpServer while resolving connection_id=%s", connection_id)
+        return connection_id, None
+
+    mcp_id = connection_id - MCP_VIRTUAL_CONNECTION_OFFSET
+    mcp_server = db.query(McpServer).filter(
+        McpServer.id == mcp_id,
+        McpServer.type == "tableau",
+        McpServer.is_active == True,  # noqa: E712
     ).first()
+    if not mcp_server:
+        return connection_id, None
 
-    if ds is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"error_code": "AGENT_004", "message": "数据源不存在或已停用"},
+    credentials = mcp_server.credentials or {}
+    bridged = db.query(TableauConnection).filter(
+        TableauConnection.is_active == True,  # noqa: E712
+        TableauConnection.server_url == (credentials.get("tableau_server") or mcp_server.server_url),
+        TableauConnection.site == (credentials.get("site_name") or mcp_server.site_name or ""),
+        TableauConnection.name == mcp_server.name,
+    ).first()
+    if bridged:
+        return bridged.id, mcp_server
+
+    compatible = _find_compatible_active_tableau_connection(
+        db,
+        name=mcp_server.name,
+        server_url=credentials.get("tableau_server") or mcp_server.server_url,
+        site=credentials.get("site_name") or mcp_server.site_name,
+    )
+    if compatible:
+        logger.info(
+            "Resolved virtual MCP connection_id=%s to active Tableau connection_id=%s",
+            connection_id,
+            compatible.id,
         )
+        return compatible.id, mcp_server
 
-    role = current_user.get("role", "user")
-    if role in ("admin", "data_admin"):
-        return
-
-    if ds.owner_id != current_user["id"]:
-        raise HTTPException(
-            status_code=403,
-            detail={"error_code": "AGENT_005", "message": "无权限访问该数据源"},
-        )
+    return connection_id, mcp_server
 
 
 @router.post("/stream")
@@ -434,7 +528,8 @@ async def agent_stream(
     认证：analyst+ 角色。
     """
     _require_agent_role(current_user.get("role", "user"))
-    _validate_connection_access(req.connection_id, current_user, db)
+    effective_connection_id, virtual_mcp_server = _resolve_agent_connection_id(req.connection_id, db)
+    _validate_connection_access(effective_connection_id, current_user, db)
 
     llm_user_id_var.set(current_user["id"])  # 为 token 消耗日志注入用户上下文
     session_mgr = SessionManager(db)
@@ -454,7 +549,7 @@ async def agent_stream(
     else:
         session = session_mgr.create_session(
             user_id=current_user["id"],
-            connection_id=req.connection_id,
+            connection_id=effective_connection_id,
         )
         is_new_session = True
 
@@ -463,22 +558,20 @@ async def agent_stream(
     # 解析连接名称和类型（用于 LLM prompt 上下文）
     conn_name: Optional[str] = None
     conn_type: Optional[str] = None
-    if req.connection_id:
-        tc = db.query(TableauConnection).filter(TableauConnection.id == req.connection_id).first()
+    if effective_connection_id:
+        tc = db.query(TableauConnection).filter(TableauConnection.id == effective_connection_id).first()
         if tc:
             conn_name = tc.name
             conn_type = "tableau"
-        else:
-            ds = db.query(DataSource).filter(DataSource.id == req.connection_id).first()
-            if ds:
-                conn_name = ds.name
-                conn_type = ds.db_type
+    elif virtual_mcp_server:
+        conn_name = virtual_mcp_server.name
+        conn_type = "tableau_mcp"
 
     # 构建 ToolContext
     context = ToolContext(
         session_id=conversation_id_str,
         user_id=current_user["id"],
-        connection_id=req.connection_id,
+        connection_id=effective_connection_id,
         connection_name=conn_name,
         connection_type=conn_type,
         trace_id=trace_id,
@@ -490,7 +583,7 @@ async def agent_stream(
         session_id=conversation_id_str,
         trace_id=trace_id,
         current_user=current_user,
-        connection_id=req.connection_id,
+        connection_id=effective_connection_id,
         db=db,
     )
 
@@ -517,7 +610,7 @@ async def agent_stream(
                     question=req.question,
                     context=context,
                     current_user=current_user,
-                    req_connection_id=req.connection_id,
+                    req_connection_id=effective_connection_id,
                     db=db,
                     session=session,
                     session_mgr=session_mgr,
@@ -545,7 +638,7 @@ async def agent_stream(
             trace_id=trace_id,
             current_user=current_user,
             db=db,
-            connection_id=req.connection_id,
+            connection_id=effective_connection_id,
         ):
             if event.type == "metadata":
                 yield f"data: {json.dumps({'type': 'metadata', 'conversation_id': event.content['conversation_id'], 'run_id': event.content['run_id']}, ensure_ascii=False)}\n\n"

@@ -7,6 +7,7 @@ Spec: docs/specs/29-sql-agent-spec.md — SQL Agent
 """
 
 import logging
+import inspect
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -366,6 +367,8 @@ class QueryTool(BaseTool):
                 limit=1000,
                 connection_id=connection_id,
             )
+            if inspect.isawaitable(result):
+                result = await result
         except NLQError as e:
             logger.warning("QueryTool execute_query failed: code=%s, message=%s", e.code, e.message)
             return ToolResult(

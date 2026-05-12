@@ -9,7 +9,7 @@
  *   GET /api/admin/agent/runs
  *   GET /api/admin/agent/runs/{run_id}/steps
  */
-import { useState, useEffect, useCallback } from 'react';
+import { Fragment, useState, useEffect, useCallback, type MouseEvent } from 'react';
 import {
   agentAdminApi,
   type AgentStats,
@@ -28,6 +28,7 @@ type OverviewTable = 'runs' | 'nlq';
 
 interface NlqLogItem {
   id: number;
+  run_id?: string;
   username: string | null;
   question: string;
   intent: string | null;
@@ -81,6 +82,35 @@ function formatDateTime(dateStr: string): string {
 
 function truncate(text: string, maxLen = 80): string {
   return text.length > maxLen ? text.slice(0, maxLen) + '...' : text;
+}
+
+function shortRunId(id: string): string {
+  if (!id) return '-';
+  if (id.length <= 16) return id;
+  return `${id.slice(0, 8)}...${id.slice(-4)}`;
+}
+
+function copyRunId(id: string, e: MouseEvent<HTMLButtonElement>) {
+  e.stopPropagation();
+  void navigator.clipboard?.writeText(id);
+}
+
+function RunIdCell({ id }: { id: string }) {
+  return (
+    <div className="flex items-center gap-1.5 whitespace-nowrap">
+      <code className="text-[11px] font-mono text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded" title={id}>
+        {shortRunId(id)}
+      </code>
+      <button
+        type="button"
+        onClick={(e) => copyRunId(id, e)}
+        className="w-6 h-6 inline-flex items-center justify-center rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+        title="复制 run_id"
+      >
+        <i className="ri-file-copy-line text-xs" />
+      </button>
+    </div>
+  );
 }
 
 function formatDate(dateStr: string | null): string {
@@ -649,6 +679,7 @@ export default function AgentMonitorPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 text-slate-500 text-xs">
+                    <th className="text-left px-4 py-2.5 font-medium">Run ID</th>
                     <th className="text-left px-4 py-2.5 font-medium">时间</th>
                     <th className="text-left px-4 py-2.5 font-medium">用户</th>
                     <th className="text-left px-4 py-2.5 font-medium">问题</th>
@@ -661,21 +692,23 @@ export default function AgentMonitorPage() {
                 <tbody className="divide-y divide-slate-100">
                   {runs.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                      <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
                         <i className="ri-robot-line text-3xl mb-2 block" />
                         暂无运行记录
                       </td>
                     </tr>
                   ) : (
                     runs.map((run) => (
-                      <>
+                      <Fragment key={run.id}>
                         <tr
-                          key={run.id}
                           className={`hover:bg-slate-50/50 cursor-pointer transition-colors ${
                             expandedRunId === run.id ? 'bg-cyan-50/30' : ''
                           }`}
                           onClick={() => toggleExpand(run.id)}
                         >
+                          <td className="px-4 py-3">
+                            <RunIdCell id={run.id} />
+                          </td>
                           <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
                             {formatDate(run.created_at)}
                           </td>
@@ -720,8 +753,8 @@ export default function AgentMonitorPage() {
                           </td>
                         </tr>
                         {expandedRunId === run.id && (
-                          <tr key={`${run.id}-steps`}>
-                            <td colSpan={6} className="px-0 py-0">
+                          <tr>
+                            <td colSpan={8} className="px-0 py-0">
                               <div className="bg-slate-50/80 border-t border-slate-200 px-6 py-4">
                                 <h4 className="text-xs font-semibold text-slate-500 mb-3">执行步骤</h4>
                                 {stepsLoading ? (
@@ -760,7 +793,7 @@ export default function AgentMonitorPage() {
                             </td>
                           </tr>
                         )}
-                      </>
+                      </Fragment>
                     ))
                   )}
                 </tbody>
@@ -796,6 +829,7 @@ export default function AgentMonitorPage() {
             <table className="w-full">
               <thead>
                 <tr className="bg-slate-50 text-slate-500 text-xs">
+                  <th className="text-left px-4 py-2.5 font-medium whitespace-nowrap">Run ID</th>
                   <th className="text-left px-4 py-2.5 font-medium whitespace-nowrap">时间</th>
                   <th className="text-left px-4 py-2.5 font-medium whitespace-nowrap">用户</th>
                   <th className="text-left px-4 py-2.5 font-medium">问题</th>
@@ -807,19 +841,22 @@ export default function AgentMonitorPage() {
               <tbody className="divide-y divide-slate-100">
                 {queryLoading ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center text-slate-400">
+                    <td colSpan={7} className="px-4 py-12 text-center text-slate-400">
                       <i className="ri-loader-4-line text-2xl animate-spin mb-2 block" />加载中...
                     </td>
                   </tr>
                 ) : queryItems.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center text-slate-400">
+                    <td colSpan={7} className="px-4 py-12 text-center text-slate-400">
                       <i className="ri-file-list-3-line text-3xl mb-2 block" />暂无记录
                     </td>
                   </tr>
                 ) : (
                   queryItems.map((log) => (
                     <tr key={log.id} className="hover:bg-slate-50/50">
+                      <td className="px-4 py-3">
+                        <RunIdCell id={log.run_id ?? `nlq-${log.id}`} />
+                      </td>
                       <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
                         {formatDateTime(log.created_at)}
                       </td>

@@ -176,8 +176,7 @@ async def test_tc_engine_004_tool_not_found(mock_registry, mock_llm, tool_contex
     events = [e async for e in engine.run("分析数据", tool_context)]
     event_types = [e.type for e in events]
 
-    # 应该有 thinking 和 error 事件
-    assert "thinking" in event_types
+    # LLM 在 Think 阶段失败时直接返回 error
     assert "error" in event_types
 
 
@@ -194,8 +193,7 @@ async def test_tc_engine_005_llm_error(mock_registry, mock_llm, tool_context):
     events = [e async for e in engine.run("分析数据", tool_context)]
     event_types = [e.type for e in events]
 
-    # 应该有 thinking 和 error 事件
-    assert "thinking" in event_types
+    # LLM 在 Think 阶段失败时直接返回 error
     assert "error" in event_types
 
 
@@ -355,3 +353,46 @@ async def test_tc_engine_010_multi_tool_collaboration(mock_registry, mock_llm, t
     assert len(tool_calls) == 2
     assert tool_calls[0].content.get("tool") == "query"
     assert tool_calls[1].content.get("tool") == "metrics"
+
+
+@pytest.mark.asyncio
+async def test_schema_inventory_question_does_not_preload_single_datasource(
+    mock_registry,
+    mock_llm,
+    tool_context,
+    monkeypatch,
+):
+    """回归：'你有哪些数据源' 不能被 route_datasource 预加载成单一数据源。"""
+    route_mock = MagicMock(return_value={
+        "luid": "superstore-luid",
+        "name": "Superstore Datasource",
+        "asset_id": 261,
+    })
+    fields_mock = MagicMock(return_value=["Sales", "Order Date"])
+    monkeypatch.setattr("services.llm.nlq_service.route_datasource", route_mock)
+    monkeypatch.setattr("services.llm.nlq_service.get_datasource_fields_cached", fields_mock)
+
+    mock_llm.complete = AsyncMock(return_value={
+        "action": "tool_call",
+        "tool_name": "schema",
+        "tool_params": {},
+        "reasoning": "用户询问当前连接有哪些数据源，应查询 schema 列表",
+    })
+
+    class MockSchemaTool(BaseTool):
+        name = "schema"
+        description = "查询数据源列表"
+        parameters_schema = {"type": "object"}
+
+        async def execute(self, params, context):
+            return ToolResult(success=True, data={"tables": [{"name": "orders-订单明细表"}]})
+
+    reg = ToolRegistry()
+    reg.register(MockSchemaTool())
+    engine = ReActEngine(registry=reg, llm_service=mock_llm, max_steps=1)
+
+    events = [e async for e in engine.run("你有哪些数据源？", tool_context)]
+
+    assert route_mock.call_count == 0
+    assert fields_mock.call_count == 0
+    assert any(e.type == "tool_call" and e.content.get("tool") == "schema" for e in events)
