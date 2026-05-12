@@ -1,6 +1,6 @@
 # Mulan BI Platform — 技术规格书索引
 
-> 最后更新：2026-05-09
+> 最后更新：2026-05-13
 
 ## 状态说明
 
@@ -73,6 +73,7 @@
 |---|------|------|------|
 | — | [Command Palette 搜索](42-command-palette-spec.md) | 全局命令面板搜索（Spotlight 风格） | :white_check_mark: |
 | 44 | [Data Agent 确定性 Schema Inventory Skill](44-data-agent-deterministic-schema-inventory-spec.md) | “有哪些数据源/表”类问题的确定性路由、渲染与测试规范 | :next_track_button: Ready for Implementation |
+| 45 | [Help Agent](45-help-agent-spec.md) | 面向用户和管理员的只读诊断、Inline 排障、进度步骤树、并行下钻与页面上下文支持 Agent | :next_track_button: Ready for Implementation |
 | — | [MCP 统一配置](spec-mcp-configs.md) | MCP Server CRUD + AI 解析（v1.1 补 credentials） | :white_check_mark: |
 | [LLM-Tableau-MCP 配置](spec-llm-tableau-mcp-config.md) | 早期 MCP 状态卡（部分被 spec-mcp-configs 取代） | :white_check_mark: |
 | [首页 UI 修复](spec-homepage-ui-bug-fix.md) | 首页 Bug 修复 | :white_check_mark: |
