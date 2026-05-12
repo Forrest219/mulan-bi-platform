@@ -613,6 +613,9 @@ class TableauActionIntentResult:
 def classify_intent(question: str) -> Optional[IntentResult]:
     """返回 None 表示需走 One-Pass LLM；返回 IntentResult 表示规则命中"""
     q = question.lower()
+    import re
+    if re.search(r"(前|后)\s*(\d+|n)", q, re.IGNORECASE):
+        return IntentResult(type="ranking", confidence=0.90, source="rule")
     for intent, keywords in INTENT_KEYWORDS.items():
         for kw in keywords:
             if kw.lower() in q:
@@ -1322,7 +1325,10 @@ def format_response(
             else:
                 value = first_row
         elif not isinstance(raw_result, list):
-            value = raw_result
+            if isinstance(raw_result, dict) and len(raw_result) == 1:
+                label, value = next(iter(raw_result.items()))
+            else:
+                value = raw_result
 
         if isinstance(value, (int, float)):
             formatted = f"{value:,.2f}" if isinstance(value, float) else str(value)
@@ -1330,6 +1336,7 @@ def format_response(
             formatted = str(value)
 
         return {
+            "response_type": "number",
             "value": value,
             "label": label,
             "unit": "",
@@ -1340,12 +1347,14 @@ def format_response(
         if isinstance(raw_result, list) and len(raw_result) > 0:
             columns = [{"name": k, "label": k, "type": "string"} for k in raw_result[0].keys()]
             return {
+                "response_type": "table",
                 "columns": columns,
                 "rows": raw_result,
                 "total_rows": len(raw_result),
                 "truncated": False,
             }
         return {
+            "response_type": "table",
             "columns": [],
             "rows": [],
             "total_rows": 0,
@@ -1354,6 +1363,7 @@ def format_response(
 
     else:  # text
         return {
+            "response_type": "text",
             "content": str(raw_result),
             "suggestions": [],
         }

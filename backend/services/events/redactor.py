@@ -37,6 +37,13 @@ def redact_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             result[key] = REDACTED
         elif isinstance(value, dict):
             result[key] = redact_payload(value)
+        elif isinstance(value, list):
+            result[key] = [
+                redact_payload(item) if isinstance(item, dict)
+                else _redact_string(item) if isinstance(item, str)
+                else item
+                for item in value
+            ]
         elif isinstance(value, str):
             result[key] = _redact_string(value)
         else:

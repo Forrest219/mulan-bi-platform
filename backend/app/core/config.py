@@ -34,6 +34,10 @@ class Settings:
     ADMIN_USERNAME: Optional[str] = os.environ.get("ADMIN_USERNAME")
     ADMIN_PASSWORD: Optional[str] = os.environ.get("ADMIN_PASSWORD")
 
+    # Auth rate limits
+    AUTH_LOGIN_RATE_LIMIT: int = int(os.environ.get("AUTH_LOGIN_RATE_LIMIT", "30"))
+    AUTH_LOGIN_RATE_WINDOW: int = int(os.environ.get("AUTH_LOGIN_RATE_WINDOW", "60"))
+
     # Internal API
     INTERNAL_API_BASE: str = os.environ.get("INTERNAL_API_BASE", "http://localhost:8000")
 

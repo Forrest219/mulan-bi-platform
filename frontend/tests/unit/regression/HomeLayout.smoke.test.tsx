@@ -1,24 +1,10 @@
-// 防止回归：⌘N 快捷键不得调用 addConversation（写库），只应 navigate('/')
-// Bug 复现：HomeLayout 的 keydown handler 曾调用 addConversation()，导致大量空对话堆积
+// 防止回归：应用外壳快捷键不得调用 addConversation（写库）。
+// 当前统一布局为 AppShellLayout；历史 HomeLayout 已由 AppShellLayout 替代。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
-
-// ── 最小 mock ──────────────────────────────────────────────────────────────────
-
-const mockNavigate = vi.fn();
-
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>();
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-    // HomeLayout 内嵌 ConversationBar，Outlet 需要保持
-    Outlet: () => <div data-testid="outlet" />,
-  };
-});
 
 const mockAddConversation = vi.fn();
 
@@ -33,93 +19,60 @@ vi.mock('../../../src/store/conversationStore', () => ({
   }),
 }));
 
-vi.mock('../../../src/context/AuthContext', () => ({
-  useAuth: () => ({
-    user: {
-      id: 1,
-      username: 'test',
-      display_name: '测试用户',
-      role: 'user',
-      permissions: [],
-      is_active: true,
-      email: null,
-      created_at: '',
-      last_login: null,
-    },
-    loading: false,
-    logout: vi.fn(),
-  }),
+vi.mock('../../../src/components/layout/AppHeader', () => ({
+  default: () => <div data-testid="app-header" />,
 }));
 
-vi.mock('../../../src/config', () => ({
-  LOGO_URL: '/logo.png',
-  API_BASE: '',
+vi.mock('../../../src/components/layout/AppSidebar', () => ({
+  default: () => <aside data-testid="app-sidebar" />,
 }));
 
-// ── import 组件（必须在 vi.mock 之后）─────────────────────────────────────────
+vi.mock('../../../src/components/layout/PageSkeleton', () => ({
+  default: () => <div data-testid="page-skeleton" />,
+}));
 
-import HomeLayout from '../../../src/components/layout/HomeLayout';
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>();
+  return {
+    ...actual,
+    Outlet: () => <div data-testid="outlet" />,
+  };
+});
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+import AppShellLayout from '../../../src/components/layout/AppShellLayout';
 
-describe('HomeLayout 回归：⌘N 快捷键不写库', () => {
+describe('AppShellLayout 回归：布局快捷键不写库', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
+    Object.defineProperty(window, 'innerWidth', { value: 1280, writable: true, configurable: true });
   });
 
-  it('⌘N (metaKey + n) 不调用 addConversation', () => {
+  it('⌘+\\ 不调用 addConversation', () => {
     render(
       <MemoryRouter initialEntries={['/']}>
-        <HomeLayout />
+        <AppShellLayout />
       </MemoryRouter>
     );
 
     document.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'n', metaKey: true, bubbles: true })
+      new KeyboardEvent('keydown', { key: '\\', metaKey: true, bubbles: true })
     );
 
     expect(mockAddConversation).not.toHaveBeenCalled();
   });
 
-  it('⌘N (metaKey + n) 触发 navigate("/")', () => {
+  it('Ctrl+\\ 不调用 addConversation', () => {
     render(
       <MemoryRouter initialEntries={['/']}>
-        <HomeLayout />
+        <AppShellLayout />
       </MemoryRouter>
     );
 
     document.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'n', metaKey: true, bubbles: true })
-    );
-
-    expect(mockNavigate).toHaveBeenCalledWith('/');
-  });
-
-  it('Ctrl+N (ctrlKey + n) 同样不调用 addConversation', () => {
-    render(
-      <MemoryRouter initialEntries={['/']}>
-        <HomeLayout />
-      </MemoryRouter>
-    );
-
-    document.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'n', ctrlKey: true, bubbles: true })
+      new KeyboardEvent('keydown', { key: '\\', ctrlKey: true, bubbles: true })
     );
 
     expect(mockAddConversation).not.toHaveBeenCalled();
-  });
-
-  it('Ctrl+N (ctrlKey + n) 触发 navigate("/")', () => {
-    render(
-      <MemoryRouter initialEntries={['/']}>
-        <HomeLayout />
-      </MemoryRouter>
-    );
-
-    document.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'n', ctrlKey: true, bubbles: true })
-    );
-
-    expect(mockNavigate).toHaveBeenCalledWith('/');
   });
 });

@@ -31,9 +31,10 @@ class TestUrlValidator:
         """合法 https URL"""
         validate("https://example.com/webhook")
 
-    def test_http_localhost_allowed(self):
-        """开发环境 http://localhost 允许"""
-        validate("http://localhost/webhook")
+    def test_http_localhost_rejected(self):
+        """localhost URL 拒绝"""
+        with pytest.raises(ValueError, match="EVT_011"):
+            validate("http://localhost/webhook")
 
     def test_http_non_localhost_rejected(self):
         """非 localhost 的 http URL 拒绝"""

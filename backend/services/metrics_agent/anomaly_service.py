@@ -8,10 +8,12 @@
 5. 状态流转管理
 """
 
+import hashlib
+import json
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import HTTPException
@@ -57,6 +59,88 @@ _VALID_TRANSITIONS: dict[str, set[str]] = {
 
 def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _compute_dimension_context_hash(dimension_context: Optional[dict]) -> Optional[str]:
+    """Stable hash for anomaly dimension/filter context."""
+    if not dimension_context:
+        return None
+    canonical = json.dumps(dimension_context, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _compute_magnitude_bucket(deviation_score: float, threshold: float) -> str:
+    """Bucket anomaly magnitude by score/threshold ratio."""
+    if threshold <= 0:
+        return "tiny"
+    ratio = abs(deviation_score) / threshold
+    if ratio <= 1:
+        return "tiny"
+    if ratio <= 2:
+        return "small"
+    if ratio <= 4:
+        return "medium"
+    if ratio <= 6:
+        return "large"
+    return "extreme"
+
+
+def _compute_direction(metric_value: float, expected_value: float) -> str:
+    """Return anomaly direction. Equal values are treated as down by convention."""
+    return "up" if metric_value > expected_value else "down"
+
+
+def _check_dedup_window(
+    session: Session,
+    metric_id: uuid.UUID,
+    algorithm: str,
+    direction: str,
+    dimension_context_hash: Optional[str],
+    now: Optional[datetime] = None,
+) -> bool:
+    """Return True when an equivalent anomaly exists in the 1h dedup window."""
+    current = now or _now()
+    window_start = current - timedelta(hours=1)
+    q = session.query(BiMetricAnomaly).filter(
+        BiMetricAnomaly.metric_id == metric_id,
+        BiMetricAnomaly.algorithm == algorithm,
+        BiMetricAnomaly.direction == direction,
+        BiMetricAnomaly.status.in_(["detected", "resolved"]),
+        BiMetricAnomaly.detected_at >= window_start,
+    )
+    if dimension_context_hash is None:
+        q = q.filter(BiMetricAnomaly.dimension_context_hash.is_(None))
+    else:
+        q = q.filter(BiMetricAnomaly.dimension_context_hash == dimension_context_hash)
+
+    existing = q.order_by(BiMetricAnomaly.detected_at.desc()).first()
+    if not existing:
+        return False
+    existing.last_seen_at = current
+    session.flush()
+    return True
+
+
+def _auto_suppress_false_positives(session: Session, anomaly: BiMetricAnomaly) -> int:
+    """Suppress same-feature active anomalies after a false_positive decision."""
+    window_start = _now() - timedelta(hours=24)
+    q = session.query(BiMetricAnomaly).filter(
+        BiMetricAnomaly.id != anomaly.id,
+        BiMetricAnomaly.tenant_id == anomaly.tenant_id,
+        BiMetricAnomaly.metric_id == anomaly.metric_id,
+        BiMetricAnomaly.algorithm == anomaly.algorithm,
+        BiMetricAnomaly.direction == anomaly.direction,
+        BiMetricAnomaly.magnitude_bucket == anomaly.magnitude_bucket,
+        BiMetricAnomaly.detected_at >= window_start,
+        BiMetricAnomaly.status.in_(["detected", "investigating", "resolved"]),
+    )
+    updated = 0
+    for candidate in q.all():
+        candidate.status = "auto_suppressed"
+        updated += 1
+    if updated:
+        session.flush()
+    return updated
 
 
 def _get_datasource_config(db: Session, datasource_id: int) -> tuple[str, dict]:
@@ -305,17 +389,43 @@ async def run_anomaly_detection(
         if not result.is_anomaly:
             continue
 
+        direction = _compute_direction(result.metric_value, result.expected_value)
+        dimension_context = metric.filters
+        dimension_context_hash = _compute_dimension_context_hash(dimension_context)
+        magnitude_bucket = _compute_magnitude_bucket(result.deviation_score, threshold)
+
+        if _check_dedup_window(
+            session=db,
+            metric_id=metric.id,
+            algorithm=detection_method,
+            direction=direction,
+            dimension_context_hash=dimension_context_hash,
+        ):
+            logger.info(
+                "异常命中去重窗口：metric_id=%s, method=%s, direction=%s",
+                metric.id,
+                detection_method,
+                direction,
+            )
+            continue
+
         # 写入异常记录
         anomaly = BiMetricAnomaly(
             tenant_id=tenant_id,
             metric_id=metric.id,
             datasource_id=metric.datasource_id,
             detection_method=detection_method,
+            algorithm=detection_method,
+            direction=direction,
+            dimension_context=dimension_context,
+            dimension_context_hash=dimension_context_hash,
+            magnitude_bucket=magnitude_bucket,
             metric_value=result.metric_value,
             expected_value=result.expected_value,
             deviation_score=result.deviation_score,
             deviation_threshold=result.deviation_threshold,
             detected_at=_now(),
+            last_seen_at=_now(),
             status="detected",
         )
         db.add(anomaly)
@@ -341,6 +451,7 @@ async def run_anomaly_detection(
             "detection_method": detection_method,
             "deviation_score": result.deviation_score,
             "tenant_id": tenant_id,
+            "detected_at": anomaly.detected_at,
         })
 
     # P1-3：批量 commit 失败保护，commit 失败时回滚并抛 500，不返回已失效的 anomaly_ids
@@ -354,21 +465,24 @@ async def run_anomaly_detection(
         )
 
     # commit 成功后批量发射事件（失败不阻断）
-    from services.metrics_agent.events import emit_anomaly_detected as _emit_anomaly
+    from services.metrics_agent import events as _events
     for _evt in _pending_anomaly_events:
         try:
-            _emit_anomaly(
+            _events.publish_anomaly_event(
                 db=db,
-                anomaly_id=_evt["anomaly_id"],
                 metric_id=_evt["metric_id"],
                 metric_name=_evt["metric_name"],
-                detection_method=_evt["detection_method"],
-                deviation_score=_evt["deviation_score"],
+                algorithm=_evt["detection_method"],
+                anomaly_count=1,
+                max_score=_evt["deviation_score"],
+                window_start=(_evt["detected_at"] - timedelta(days=window_days)).isoformat(),
+                window_end=_evt["detected_at"].isoformat(),
                 tenant_id=_evt["tenant_id"],
+                detected_at=_evt["detected_at"].isoformat(),
             )
         except Exception as _exc:
             logger.warning(
-                "emit_anomaly_detected 失败（已忽略）：anomaly_id=%s, error=%s",
+                "publish_anomaly_event 失败（已忽略）：anomaly_id=%s, error=%s",
                 _evt["anomaly_id"],
                 _exc,
             )
@@ -445,6 +559,9 @@ def update_anomaly_status(
     elif resolution_note is not None:
         # false_positive / investigating 也可以记录备注
         anomaly.resolution_note = resolution_note
+
+    if new_status == "false_positive":
+        _auto_suppress_false_positives(db, anomaly)
 
     db.commit()
     db.refresh(anomaly)

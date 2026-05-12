@@ -6,6 +6,7 @@
 返回方向为 current - history，负值代表下降。
 """
 from datetime import datetime
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
@@ -38,4 +39,5 @@ class DriftDetector:
         """单点漂移：当前 - 前值。prev 为空返回 None。"""
         if prev_score is None:
             return None
-        return round(current_score - prev_score, 4)
+        drift = Decimal(str(current_score)) - Decimal(str(prev_score))
+        return float(drift.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))

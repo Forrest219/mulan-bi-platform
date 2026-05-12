@@ -123,7 +123,7 @@ function validateSmtpForm(form: SmtpForm): Record<string, string> {
   return errors;
 }
 
-async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
+async function apiFetch<T>(url: string, options?: globalThis.RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...options,
     headers: { 'Content-Type': 'application/json', ...options?.headers },

@@ -38,6 +38,7 @@ app = FastAPI(
     description="DDL 规范管理平台后端 API",
     version="1.0.0",
     lifespan=lifespan,
+    redirect_slashes=False,
 )
 
 # CORS 配置 - 仅允许明确的前端域名

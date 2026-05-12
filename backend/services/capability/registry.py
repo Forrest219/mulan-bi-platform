@@ -85,8 +85,14 @@ def _parse_rate_limit(raw: str) -> RateLimitConfig:
     window_raw = parts[1]
     scope = parts[2]
 
-    # window 支持 s, m, h 后缀
-    if window_raw.endswith("s"):
+    # window 支持 bare units (min/h/s), numeric seconds, and numeric suffixes
+    if window_raw in {"s", "sec", "second", "seconds"}:
+        window = rate
+    elif window_raw in {"min", "minute", "minutes"}:
+        window = 60
+    elif window_raw in {"h", "hour", "hours"}:
+        window = 3600
+    elif window_raw.endswith("s"):
         window = int(window_raw[:-1])
     elif window_raw.endswith("m"):
         window = int(window_raw[:-1]) * 60

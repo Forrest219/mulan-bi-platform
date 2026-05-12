@@ -197,7 +197,11 @@ class LLMService:
 
         Returns: { "content": str } or { "error": str, "attempts": [...] }
         """
-        configs = self._config_db.get_active_configs(purpose=purpose)
+        configs = list(self._config_db.get_active_configs(purpose=purpose) or [])
+        if not configs:
+            config = self._load_config(purpose=purpose)
+            if config and getattr(config, "is_active", False):
+                configs = [config]
         if not configs:
             return {"error": "LLM 未配置，请联系管理员"}
 

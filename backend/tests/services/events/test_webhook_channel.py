@@ -60,6 +60,12 @@ def fernet_key() -> str:
     return get_valid_fernet_key()
 
 
+@pytest.fixture(autouse=True)
+def fernet_env(monkeypatch):
+    """Ensure _get_fernet() sees the same valid key used by encrypt_secret()."""
+    monkeypatch.setenv("FERNET_MASTER_KEY", get_valid_fernet_key())
+
+
 @pytest.fixture
 def mock_fernet(fernet_key: str) -> Generator[Mock, None, None]:
     """Mock Fernet 实例"""

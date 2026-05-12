@@ -26,6 +26,7 @@ class TestMinimaxEmbedding:
         mock_config.is_active = True
         mock_config.api_key_encrypted = "encrypted_key"
         mock_config.model = "embo-01"
+        mock_config.purpose = "embedding"
 
         async def mock_post(url, json=None, headers=None, timeout=None):
             return mock.Mock(
@@ -64,6 +65,7 @@ class TestMinimaxEmbedding:
         mock_config.is_active = True
         mock_config.api_key_encrypted = "encrypted_key"
         mock_config.model = "embo-01"
+        mock_config.purpose = "embedding"
 
         async def mock_post(url, json=None, headers=None, timeout=None):
             return mock.Mock(
@@ -101,6 +103,7 @@ class TestMinimaxEmbedding:
         mock_config.is_active = True
         mock_config.api_key_encrypted = "encrypted_key"
         mock_config.model = "embo-01"
+        mock_config.purpose = "embedding"
 
         async def mock_post(url, json=None, headers=None, timeout=None):
             resp = mock.Mock()
@@ -137,6 +140,7 @@ class TestMinimaxEmbedding:
         mock_config.is_active = True
         mock_config.api_key_encrypted = "encrypted_key"
         mock_config.model = "embo-01"
+        mock_config.purpose = "embedding"
 
         async def mock_post(url, json=None, headers=None, timeout=None):
             return mock.Mock(

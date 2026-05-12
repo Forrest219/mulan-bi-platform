@@ -16,7 +16,7 @@
  *   - 通过展开折叠面板触发 GET 加载
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
 
@@ -63,7 +63,6 @@ import McpConfigsPage from '@/pages/admin/mcp-configs/page';
 
 const QUERY_ADMIN_BASE = '/api/admin/query';
 const MCP_API_BASE = '/api/mcp-configs';
-const TABLEAU_API = '/api/tableau/connections?include_inactive=false';
 
 const FAKE_CONNECTION = {
   id: 1,
@@ -203,7 +202,7 @@ describe('ConnectedAppPanel — 已配置状态', () => {
     await user.click(screen.getByRole('button', { name: /Tableau Dev/ }));
 
     await waitFor(() => {
-      expect(screen.getByText('已配置')).toBeInTheDocument();
+      expect(screen.getByText('已配置密钥')).toBeInTheDocument();
     });
   });
 

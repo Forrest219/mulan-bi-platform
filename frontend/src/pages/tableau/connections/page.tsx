@@ -77,7 +77,7 @@ const TableauConnectionsPage = forwardRef<TableauConnectionsPageRef, { headerles
   const handleUpdate = async () => {
     if (!editingConn) return;
     try {
-      const updateData: any = {
+      const updateData: Parameters<typeof updateConnection>[1] = {
         name: formData.name,
         server_url: formData.server_url,
         site: formData.site,
@@ -147,7 +147,7 @@ const TableauConnectionsPage = forwardRef<TableauConnectionsPageRef, { headerles
       token_name: conn.token_name,
       token_value: '',
       auto_sync_enabled: conn.auto_sync_enabled || false,
-      schedule_id: (conn as any).schedule_id || null
+      schedule_id: conn.schedule_id || null
     });
     setShowModal(true);
   };
@@ -245,7 +245,7 @@ const TableauConnectionsPage = forwardRef<TableauConnectionsPageRef, { headerles
                   </div>
                 )}
                 {conn.auto_sync_enabled && (
-                  <div><span className="text-slate-400">自动同步:</span> {(conn as any).schedule_name || (conn as any).schedule_id ? `计划 #${(conn as any).schedule_id}` : `每${conn.sync_interval_hours || 24}小时`}</div>
+                  <div><span className="text-slate-400">自动同步:</span> {conn.schedule_name || conn.schedule_id ? `计划 #${conn.schedule_id}` : `每${conn.sync_interval_hours || 24}小时`}</div>
                 )}
                 {conn.auto_sync_enabled && conn.next_sync_at && (
                   <div><span className="text-slate-400">下次同步:</span> {conn.next_sync_at}</div>

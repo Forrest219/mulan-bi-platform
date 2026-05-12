@@ -6,7 +6,7 @@ Metrics Agent — 异常检测服务编排层测试
 
 策略：
 - mock _fetch_daily_values，绕开数据源/SQL 层
-- mock emit_anomaly_detected，验证事件发射
+- mock publish_anomaly_event，验证事件发射
 - 使用真实 db_session + PostgreSQL test DB，测试写 BiMetricAnomaly 路径
 - 每个测试后由 conftest 的 rollback 清理数据
 
@@ -181,7 +181,7 @@ async def test_run_anomaly_detection_no_anomaly(db_session):
 # =============================================================================
 
 async def test_run_anomaly_detection_with_anomaly_writes_db_and_emits_event(db_session):
-    """最后一天异常值（999），zscore 应检测为异常，写 DB，并调用 emit_anomaly_detected。"""
+    """最后一天异常值（999），zscore 应检测为异常，写 DB，并调用 publish_anomaly_event。"""
     from services.metrics_agent.anomaly_service import run_anomaly_detection
 
     metric = _make_active_metric(db_session)
@@ -191,8 +191,8 @@ async def test_run_anomaly_detection_with_anomaly_writes_db_and_emits_event(db_s
         "services.metrics_agent.anomaly_service._fetch_daily_values",
         return_value=spike_vals,
     ), patch(
-        "services.metrics_agent.events.emit_anomaly_detected"
-    ) as mock_emit:
+        "services.metrics_agent.events.publish_anomaly_event"
+    ) as mock_publish:
         result = await run_anomaly_detection(
             db=db_session,
             tenant_id=TENANT_ID,
@@ -215,7 +215,12 @@ async def test_run_anomaly_detection_with_anomaly_writes_db_and_emits_event(db_s
     assert record.status == "detected"
 
     # 确认事件被发射一次
-    mock_emit.assert_called_once()
+    mock_publish.assert_called_once()
+    call_kwargs = mock_publish.call_args.kwargs
+    assert call_kwargs["metric_id"] == metric.id
+    assert call_kwargs["metric_name"] == metric.name
+    assert call_kwargs["algorithm"] == "zscore"
+    assert call_kwargs["anomaly_count"] == 1
 
 
 # =============================================================================
@@ -321,7 +326,7 @@ async def test_run_anomaly_detection_executor_exception_is_resilient(db_session)
         "services.metrics_agent.anomaly_service._fetch_daily_values",
         side_effect=_side_effect,
     ), patch(
-        "services.metrics_agent.events.emit_anomaly_detected"
+        "services.metrics_agent.events.publish_anomaly_event"
     ):
         result = await run_anomaly_detection(
             db=db_session,
@@ -355,8 +360,8 @@ async def test_run_anomaly_detection_threshold_breach(db_session):
         "services.metrics_agent.anomaly_service._fetch_daily_values",
         return_value=vals,
     ), patch(
-        "services.metrics_agent.events.emit_anomaly_detected"
-    ) as mock_emit:
+        "services.metrics_agent.events.publish_anomaly_event"
+    ) as mock_publish:
         result = await run_anomaly_detection(
             db=db_session,
             tenant_id=TENANT_ID,
@@ -368,7 +373,7 @@ async def test_run_anomaly_detection_threshold_breach(db_session):
 
     assert result["anomaly_count"] == 1
     assert len(result["anomaly_ids"]) == 1
-    mock_emit.assert_called_once()
+    mock_publish.assert_called_once()
 
 
 # =============================================================================

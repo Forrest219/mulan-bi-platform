@@ -134,7 +134,7 @@ class TestOutboxServiceGetNextAttemptAt:
     def test_email_first_attempt_immediate(self):
         svc = OutboxService()
         result = svc.get_next_attempt_at("email", 0)
-        assert result == datetime.utcnow()
+        assert abs((result - datetime.utcnow()).total_seconds()) < 2
 
     def test_email_second_attempt_30s(self):
         svc = OutboxService()

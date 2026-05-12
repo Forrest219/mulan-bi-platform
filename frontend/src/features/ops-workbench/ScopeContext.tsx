@@ -1,6 +1,7 @@
 import {
   createContext,
   useContext,
+  useCallback,
   useEffect,
   useState,
   type ReactNode,
@@ -18,11 +19,26 @@ interface ScopeContextValue {
 
 const ScopeContext = createContext<ScopeContextValue | null>(null);
 
-export function ScopeProvider({ children }: { children: ReactNode }) {
-  const [connectionId, setConnectionId] = useState<string | null>(null);
+interface ScopeProviderProps {
+  children: ReactNode;
+  initialConnectionId?: string | null;
+  onConnectionIdChange?: (id: string | null) => void;
+}
+
+export function ScopeProvider({
+  children,
+  initialConnectionId = null,
+  onConnectionIdChange,
+}: ScopeProviderProps) {
+  const [connectionId, setConnectionIdState] = useState<string | null>(null);
   const [scopeProject, setScopeProject] = useState<string | null>(null);
   const [connections, setConnections] = useState<TableauConnection[]>([]);
   const [connectionsLoading, setConnectionsLoading] = useState(true);
+
+  const setConnectionId = useCallback((id: string | null) => {
+    setConnectionIdState(id);
+    onConnectionIdChange?.(id);
+  }, [onConnectionIdChange]);
 
   useEffect(() => {
     setConnectionsLoading(true);
@@ -30,9 +46,6 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
       .then((res) => {
         const active = res.connections.filter((c) => c.is_active);
         setConnections(active);
-        if (active.length > 0) {
-          setConnectionId(String(active[0].id));
-        }
       })
       .catch(() => {
         setConnections([]);
@@ -41,6 +54,26 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
         setConnectionsLoading(false);
       });
   }, []);
+
+  useEffect(() => {
+    if (connectionsLoading) return;
+
+    const requestedId = initialConnectionId ? String(initialConnectionId) : null;
+    const requestedIsActive = requestedId
+      ? connections.some((c) => String(c.id) === requestedId)
+      : false;
+    const nextConnectionId = requestedIsActive
+      ? requestedId
+      : (connections[0] ? String(connections[0].id) : null);
+
+    setConnectionIdState((prev) => (
+      prev === nextConnectionId ? prev : nextConnectionId
+    ));
+
+    if (requestedId !== nextConnectionId) {
+      onConnectionIdChange?.(nextConnectionId);
+    }
+  }, [connections, connectionsLoading, initialConnectionId, onConnectionIdChange]);
 
   return (
     <ScopeContext.Provider

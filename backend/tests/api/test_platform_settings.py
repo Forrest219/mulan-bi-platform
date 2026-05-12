@@ -183,16 +183,20 @@ def test_put_platform_settings_subtitle_too_long(admin_client: TestClient):
 # -------------------------------------------------------------------
 
 def test_put_without_trailing_slash_no_redirect(admin_client: TestClient):
-    """PUT /api/platform-settings（无斜杠）应返回 307 而非成功，防止浏览器静默失败"""
+    """PUT /api/platform-settings（无斜杠）不应跟随重定向后成功落库"""
     payload = {
-        "platform_name": "回归测试",
-        "logo_url": "https://httpbin.org/image/png",
+        "platform_name": "should-not-persist",
+        "logo_url": "https://example.com/logo.png",
         "platform_subtitle": None,
         "favicon_url": None,
     }
-    resp = admin_client.put("/api/platform-settings", json=payload)
+    resp = admin_client.put(
+        "/api/platform-settings",
+        json=payload,
+        follow_redirects=False,
+    )
     # redirect_slashes=False 后，无斜杠路径不再被重定向
-    # 期望：404（路径不存在）或 307（明确拒绝重定向），绝不应该是 200
+    # 期望：404（路径不存在）或 307（明确拒绝重定向），绝不应该跟随后成功写库
     assert resp.status_code in (307, 404), (
         f"PUT 无 trailing slash 应拒绝重定向，实际返回 {resp.status_code}。"
         "若返回 200 说明修复失效，浏览器会因 307 变成 GET 而报 Failed to fetch"

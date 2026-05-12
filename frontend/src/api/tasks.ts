@@ -137,7 +137,7 @@ export interface TaskQueueResponse {
   future_range: string;
 }
 
-export interface SyncScheduleListResponse extends PaginatedResponse<SyncSchedule> {}
+export type SyncScheduleListResponse = PaginatedResponse<SyncSchedule>;
 
 // API functions — follow the exact pattern from health-scan.ts
 

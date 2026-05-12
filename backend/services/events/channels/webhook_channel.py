@@ -135,7 +135,13 @@ class WebhookChannel(BaseChannel):
 
         try:
             start = time.time()
-            with httpx.Client(timeout=httpx.Timeout(_CONNECT_TIMEOUT, _READ_TIMEOUT)) as client:
+            timeout = httpx.Timeout(
+                connect=_CONNECT_TIMEOUT,
+                read=_READ_TIMEOUT,
+                write=_READ_TIMEOUT,
+                pool=_CONNECT_TIMEOUT,
+            )
+            with httpx.Client(timeout=timeout) as client:
                 resp = client.post(recipient, content=canonical, headers=headers)
             latency_ms = int((time.time() - start) * 1000)
 

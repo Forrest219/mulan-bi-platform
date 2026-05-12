@@ -25,18 +25,25 @@ from services.capability.errors import (
 from services.capability.wrapper import CapabilityResult, CapabilityWrapper
 
 
+VALID_QUERY_PARAMS = {
+    "datasource_luid": "ds-1",
+    "vizql_json": {"fields": ["sales"]},
+}
+
+
+@pytest.fixture
+def wrapper():
+    return CapabilityWrapper()
+
+
 class TestCapabilityWrapperInvoke:
     """invoke() 完整调用链"""
-
-    @pytest.fixture
-    def wrapper(self):
-        return CapabilityWrapper()
 
     def test_invoke_generates_trace_id(self, wrapper):
         principal = {"id": 1, "role": "analyst"}
 
         with mock.patch.object(wrapper, "_dispatch_capability", return_value={"ok": True}):
-            result = asyncio.run(wrapper.invoke(principal, "query_metric", {"datasource_id": 1, "metric": "sales"}))
+            result = asyncio.run(wrapper.invoke(principal, "query_metric", VALID_QUERY_PARAMS))
 
         assert isinstance(result, CapabilityResult)
         assert result.meta["trace_id"] is not None
@@ -46,7 +53,7 @@ class TestCapabilityWrapperInvoke:
         principal = {"id": 1, "role": "analyst"}
 
         with mock.patch.object(wrapper, "_dispatch_capability", return_value={"ok": True}):
-            result = asyncio.run(wrapper.invoke(principal, "query_metric", {"datasource_id": 1, "metric": "sales"}, trace_id="my_trace_123"))
+            result = asyncio.run(wrapper.invoke(principal, "query_metric", VALID_QUERY_PARAMS, trace_id="my_trace_123"))
 
         assert result.meta["trace_id"] == "my_trace_123"
 
@@ -54,7 +61,7 @@ class TestCapabilityWrapperInvoke:
         principal = {"id": 1, "role": "user"}  # user 不在 query_metric 的 roles 里
 
         with pytest.raises(Exception) as exc_info:
-            asyncio.run(wrapper.invoke(principal, "query_metric", {"datasource_id": 1, "metric": "sales"}))
+            asyncio.run(wrapper.invoke(principal, "query_metric", VALID_QUERY_PARAMS))
 
         # 应该抛出 CapabilityError（CAP_001）
         assert "CAP_001" in str(exc_info.value) or "not allowed" in str(exc_info.value)
@@ -64,7 +71,7 @@ class TestCapabilityWrapperInvoke:
 
         with mock.patch.object(wrapper.rate_limiter, "acquire", side_effect=CapabilityRateLimited("Rate limit exceeded")):
             with pytest.raises(CapabilityRateLimited) as exc_info:
-                asyncio.run(wrapper.invoke(principal, "query_metric", {"datasource_id": 1, "metric": "sales"}))
+                asyncio.run(wrapper.invoke(principal, "query_metric", VALID_QUERY_PARAMS))
 
             assert exc_info.value.code == "CAP_004"
 
@@ -77,7 +84,7 @@ class TestCapabilityWrapperInvoke:
         wrapper._circuit_breakers["query_metric"] = mock_cb
 
         with pytest.raises(CapabilityCircuitOpen) as exc_info:
-            asyncio.run(wrapper.invoke(principal, "query_metric", {"datasource_id": 1, "metric": "sales"}))
+            asyncio.run(wrapper.invoke(principal, "query_metric", VALID_QUERY_PARAMS))
 
         assert exc_info.value.code == "CAP_006"
 
@@ -87,7 +94,7 @@ class TestCapabilityWrapperInvoke:
 
         with mock.patch.object(wrapper.result_cache, "get", return_value=cached_data):
             with mock.patch.object(wrapper, "_write_audit"):
-                result = asyncio.run(wrapper.invoke(principal, "query_metric", {"datasource_id": 1, "metric": "sales"}))
+                result = asyncio.run(wrapper.invoke(principal, "query_metric", VALID_QUERY_PARAMS))
 
         assert result.meta["cached"] is True
         assert result.data == cached_data
@@ -100,7 +107,7 @@ class TestCapabilityWrapperInvoke:
                 with mock.patch.object(wrapper.result_cache, "set", return_value=True):
                     with mock.patch.object(wrapper.cost_meter, "record"):
                         with mock.patch.object(wrapper, "_write_audit"):
-                            result = asyncio.run(wrapper.invoke(principal, "query_metric", {"datasource_id": 1, "metric": "sales"}))
+                            result = asyncio.run(wrapper.invoke(principal, "query_metric", VALID_QUERY_PARAMS))
 
         assert result.meta["cached"] is False
         assert result.data == {"rows": [1, 2]}
@@ -120,9 +127,10 @@ class TestCapabilityWrapperInvoke:
 
         with mock.patch.object(wrapper.result_cache, "get", return_value=None):
             with mock.patch.object(wrapper, "_dispatch_capability", side_effect=RuntimeError("Something went wrong")):
-                with mock.patch.object(wrapper.cb, "record_failure"):
-                    with pytest.raises(CapabilityInternalError) as exc_info:
-                        asyncio.run(wrapper.invoke(principal, "query_metric", {"datasource_id": 1, "metric": "sales"}))
+                mock_cb = mock.Mock()
+                wrapper._circuit_breakers["query_metric"] = mock_cb
+                with pytest.raises(CapabilityInternalError) as exc_info:
+                    asyncio.run(wrapper.invoke(principal, "query_metric", VALID_QUERY_PARAMS))
 
             assert exc_info.value.code == "CAP_009"
 
@@ -138,7 +146,7 @@ class TestWrapperCircuitBreakerIntegration:
                 with mock.patch.object(wrapper.result_cache, "set", return_value=True):
                     with mock.patch.object(wrapper.cost_meter, "record"):
                         with mock.patch.object(wrapper, "_write_audit"):
-                            asyncio.run(wrapper.invoke(principal, "query_metric", {"datasource_id": 1, "metric": "sales"}))
+                            asyncio.run(wrapper.invoke(principal, "query_metric", VALID_QUERY_PARAMS))
 
         # Verify the circuit breaker's record_success was called
         # (We can't easily verify this without more mocking, but the flow exists)

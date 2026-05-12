@@ -134,46 +134,70 @@ async def list_connections(request: Request, db: Session = Depends(get_db), incl
 
     connection_dicts = [c.to_dict() for c in connections]
 
-    # 补充 mcp_servers 表中 type='tableau' 且 is_active=True 的记录，
-    # 让前端 ScopePicker 在 tableau_connections 表为空时也能看到连接
+    # 仅在没有真实 tableau_connections 时保留 10000+ 虚拟连接兜底。
+    # 正常路径应由 MCP 配置创建/更新时桥接到 tableau_connections。
     try:
         from services.mcp.models import McpServer
-        mcp_servers = db.query(McpServer).filter(
-            McpServer.type == "tableau",
-            McpServer.is_active == True,
-        ).all()
+        if connection_dicts:
+            active_mcp_count = db.query(McpServer).filter(
+                McpServer.type == "tableau",
+                McpServer.is_active == True,
+            ).count()
+            if active_mcp_count:
+                logger.info(
+                    "Skipping %d virtual Tableau MCP connection fallback rows because real tableau_connections exist",
+                    active_mcp_count,
+                )
+        else:
+            from app.api.mcp_configs import _normalize_tableau_credentials
+            mcp_servers = db.query(McpServer).filter(
+                McpServer.type == "tableau",
+                McpServer.is_active == True,
+            ).all()
 
-        # 按 name 建立已有连接的索引，tableau_connections 优先
-        existing_names = {d["name"] for d in connection_dicts}
-
-        for mcp in mcp_servers:
-            if mcp.name in existing_names:
-                continue  # tableau_connections 中已有同名记录，跳过
-            connection_dicts.append({
-                "id": 10000 + mcp.id,
-                "name": mcp.name,
-                "server_url": mcp.server_url or "",
-                "site": mcp.server_url or "",
-                "api_version": "3.21",
-                "connection_type": "mcp",
-                "token_name": "",
-                "owner_id": None,
-                "is_active": True,
-                "auto_sync_enabled": False,
-                "sync_interval_hours": 24,
-                "last_test_at": None,
-                "last_test_success": None,
-                "last_test_message": None,
-                "last_sync_at": None,
-                "last_sync_duration_sec": None,
-                "sync_status": "idle",
-                "mcp_direct_enabled": True,
-                "mcp_server_url": mcp.server_url or "",
-                "next_sync_at": None,
-                "created_at": mcp.created_at.strftime("%Y-%m-%d %H:%M:%S") if mcp.created_at else None,
-                "updated_at": mcp.updated_at.strftime("%Y-%m-%d %H:%M:%S") if mcp.updated_at else None,
-            })
-            existing_names.add(mcp.name)
+            for mcp in mcp_servers:
+                try:
+                    creds = _normalize_tableau_credentials(mcp.credentials)
+                except Exception as exc:
+                    logger.warning(
+                        "Skipping virtual Tableau MCP fallback for mcp_server id=%s name=%s: credential decrypt failed: %s",
+                        mcp.id,
+                        mcp.name,
+                        exc,
+                    )
+                    continue
+                if not (creds.get("pat_value") and creds.get("tableau_server") and creds.get("pat_name")):
+                    logger.warning(
+                        "Skipping virtual Tableau MCP fallback for mcp_server id=%s name=%s: incomplete credentials",
+                        mcp.id,
+                        mcp.name,
+                    )
+                    continue
+                connection_dicts.append({
+                    "id": 10000 + mcp.id,
+                    "name": mcp.name,
+                    "server_url": creds.get("tableau_server") or mcp.server_url or "",
+                    "site": creds.get("site_name") or "",
+                    "api_version": "3.21",
+                    "connection_type": "mcp",
+                    "token_name": creds.get("pat_name") or "",
+                    "owner_id": None,
+                    "is_active": True,
+                    "auto_sync_enabled": False,
+                    "sync_interval_hours": 24,
+                    "last_test_at": None,
+                    "last_test_success": None,
+                    "last_test_message": "virtual MCP fallback; bridge to tableau_connections pending",
+                    "last_sync_at": None,
+                    "last_sync_duration_sec": None,
+                    "sync_status": "idle",
+                    "mcp_direct_enabled": True,
+                    "mcp_server_url": mcp.server_url or "",
+                    "next_sync_at": None,
+                    "created_at": mcp.created_at.strftime("%Y-%m-%d %H:%M:%S") if mcp.created_at else None,
+                    "updated_at": mcp.updated_at.strftime("%Y-%m-%d %H:%M:%S") if mcp.updated_at else None,
+                    "source": "mcp_virtual_fallback",
+                })
     except Exception:
         logger.exception("从 mcp_servers 聚合 Tableau 连接时出错，返回仅 tableau_connections 的结果")
 

@@ -16,23 +16,41 @@ from services.llm.service import llm_service
 logger = logging.getLogger(__name__)
 
 
+def _normalize_tableau_credentials(credentials: Optional[dict]) -> dict:
+    """Return plaintext Tableau MCP credentials, decrypting fields when flagged."""
+    from app.core.crypto import get_mcp_crypto
+
+    raw = credentials or {}
+    mcp_crypto = get_mcp_crypto()
+    normalized = {}
+    for key, value in raw.items():
+        if key.endswith("_encrypted"):
+            continue
+        if raw.get(f"{key}_encrypted") and isinstance(value, str) and value:
+            normalized[key] = mcp_crypto.decrypt(value)
+        else:
+            normalized[key] = value
+    return normalized
+
+
 def _sync_mcp_to_tableau(mcp_name: str, mcp_server_url: str,
                           credentials: dict, owner_id: int,
-                          is_active: bool = True) -> None:
+                          is_active: bool = True, db_session=None) -> dict:
     """Synchronously bridge an MCP server record to tableau_connections."""
     from services.tableau.models import TableauDatabase
     from app.core.crypto import get_tableau_crypto
 
-    creds = credentials or {}
+    creds = _normalize_tableau_credentials(credentials)
     pat_value = creds.get("pat_value", "")
     if not pat_value:
+        message = "tableau MCP credentials missing pat_value; tableau_connection was not bridged"
         logger.warning("Sync bridge: mcp '%s' has no pat_value, skipping", mcp_name)
-        return
+        return {"success": False, "message": message}
 
     crypto = get_tableau_crypto()
     token_encrypted = crypto.encrypt(pat_value)
 
-    tab_db = TableauDatabase()
+    tab_db = TableauDatabase(session=db_session)
     conn, created = tab_db.ensure_connection_from_mcp(
         mcp_name=mcp_name,
         server_url=creds.get("tableau_server", mcp_server_url or ""),
@@ -45,6 +63,12 @@ def _sync_mcp_to_tableau(mcp_name: str, mcp_server_url: str,
     )
     action = "created" if created else "updated"
     logger.info("Sync bridge: %s tableau_connection '%s' (id=%d)", action, mcp_name, conn.id)
+    return {
+        "success": True,
+        "connection_id": conn.id,
+        "created": created,
+        "message": f"tableau_connection {action}",
+    }
 
 router = APIRouter()
 
@@ -167,18 +191,29 @@ async def create_mcp_server(req: McpServerCreateRequest, request: Request):
         db.commit()
         db.refresh(record)
 
+        bridge_result = None
         if record.type == "tableau":
             try:
-                _sync_mcp_to_tableau(
+                bridge_result = _sync_mcp_to_tableau(
                     mcp_name=record.name,
                     mcp_server_url=record.server_url,
                     credentials=record.credentials,
                     owner_id=user["id"],
+                    is_active=record.is_active,
+                    db_session=db,
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception("Sync bridge failed on CREATE for mcp '%s'", record.name)
+                bridge_result = {
+                    "success": False,
+                    "message": "tableau_connection bridge failed after MCP config create",
+                    "error": str(exc),
+                }
 
-        return record.to_dict()
+        result = record.to_dict()
+        if bridge_result is not None:
+            result["tableau_bridge"] = bridge_result
+        return result
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail=f"名称 '{req.name}' 已存在")
@@ -220,22 +255,32 @@ async def update_mcp_server(id: int, req: McpServerUpdateRequest, request: Reque
         db.commit()
         db.refresh(record)
 
+        bridge_result = None
         if record.type == "tableau":
             try:
                 if old_name != record.name:
                     from services.tableau.models import TableauDatabase as _TDB
-                    _TDB().deactivate_connection_by_name(old_name)
-                _sync_mcp_to_tableau(
+                    _TDB(session=db).deactivate_connection_by_name(old_name)
+                bridge_result = _sync_mcp_to_tableau(
                     mcp_name=record.name,
                     mcp_server_url=record.server_url,
                     credentials=record.credentials,
                     owner_id=user["id"],
                     is_active=record.is_active,
+                    db_session=db,
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception("Sync bridge failed on UPDATE for mcp '%s'", record.name)
+                bridge_result = {
+                    "success": False,
+                    "message": "tableau_connection bridge failed after MCP config update",
+                    "error": str(exc),
+                }
 
-        return record.to_dict()
+        result = record.to_dict()
+        if bridge_result is not None:
+            result["tableau_bridge"] = bridge_result
+        return result
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="名称已存在")
@@ -260,7 +305,7 @@ async def delete_mcp_server(id: int, request: Request):
         if mcp_type == "tableau":
             try:
                 from services.tableau.models import TableauDatabase
-                tab_db = TableauDatabase()
+                tab_db = TableauDatabase(session=db)
                 tab_db.deactivate_connection_by_name(mcp_name)
                 logger.info("Sync bridge: deactivated tableau_connection '%s'", mcp_name)
             except Exception:

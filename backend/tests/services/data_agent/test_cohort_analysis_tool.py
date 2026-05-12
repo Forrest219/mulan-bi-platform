@@ -45,7 +45,7 @@ class TestCohortAnalysisTool:
     # =============================================================================
     @pytest.mark.asyncio
     async def test_tc_cohort_002_missing_cohort_type(self, tool, context):
-        """TC-COHORT-002: 缺少 cohort_type 返回错误"""
+        """TC-COHORT-002: 缺少 cohort_type 使用默认 time"""
         result = await tool.execute(
             {
                 "time_range": {"start": "2026-01-01", "end": "2026-06-30"},
@@ -53,8 +53,8 @@ class TestCohortAnalysisTool:
             context,
         )
 
-        assert result.success is False
-        assert "cohort_type" in result.error
+        assert result.success is True
+        assert result.data["cohort_type"] == "time"
 
     # =============================================================================
     # TC-COHORT-003: 缺少 time_range

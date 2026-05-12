@@ -9,7 +9,6 @@
   3. 后端验证 Refresh Token，颁发新 Access Token
   4. 前端重试原请求
 """
-import os
 import time
 from collections import defaultdict
 from typing import Optional
@@ -18,6 +17,7 @@ import jwt
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
+from app.core.config import get_settings
 from app.core.constants import (
     JWT_ALGORITHM,
     JWT_EXPIRE_SECONDS,
@@ -42,15 +42,20 @@ _register_attempts: dict[str, list[float]] = defaultdict(list)
 _REGISTER_RATE_LIMIT = 5
 _REGISTER_RATE_WINDOW = 60  # seconds
 
-# 登录速率限制：每个 IP+用户名 每 60 秒最多 5 次
+# 登录速率限制：每个 IP+用户名 每个窗口最多 N 次，默认 60 秒 30 次
 _login_attempts: dict[str, list[float]] = defaultdict(list)
-_LOGIN_RATE_LIMIT = 5
-_LOGIN_RATE_WINDOW = 60  # seconds
+_LOGIN_RATE_LIMIT = max(1, get_settings().AUTH_LOGIN_RATE_LIMIT)
+_LOGIN_RATE_WINDOW = max(1, get_settings().AUTH_LOGIN_RATE_WINDOW)  # seconds
 
 # MFA 验证速率限制：每个 session 每 60 秒最多 5 次
 _mfa_verify_attempts: dict[str, list[float]] = defaultdict(list)
 _MFA_VERIFY_RATE_LIMIT = 5
 _MFA_VERIFY_RATE_WINDOW = 60  # seconds
+
+
+def _secure_cookies_enabled() -> bool:
+    """Return whether auth cookies should include the Secure flag."""
+    return get_settings().SECURE_COOKIES
 
 
 def _create_session_token(user_id: int, username: str, role: str, mfa_pending: bool = False) -> str:
@@ -178,7 +183,7 @@ async def login(request: LoginRequest, response: Response, http_request: Request
     if user.get("mfa_enabled"):
         # MFA 启用：颁发 pending session cookie，返回 MFA challenge，不返回完整用户
         token = _create_session_token(user["id"], user["username"], user["role"], mfa_pending=True)
-        _is_secure = os.environ.get("SECURE_COOKIES", "true").lower() == "true"
+        _is_secure = _secure_cookies_enabled()
         response.set_cookie(
             key="session",
             value=token,
@@ -196,7 +201,7 @@ async def login(request: LoginRequest, response: Response, http_request: Request
 
     # MFA 未启用：完整登录流程
     token = _create_session_token(user["id"], user["username"], user["role"])
-    _is_secure = os.environ.get("SECURE_COOKIES", "true").lower() == "true"
+    _is_secure = _secure_cookies_enabled()
     response.set_cookie(
         key="session",
         value=token,
@@ -266,7 +271,7 @@ async def register(request: RegisterRequest, req: Request, response: Response):
 
     # 自动登录（使用 JWT）
     token = _create_session_token(user["id"], user["username"], user["role"])
-    _is_secure = os.environ.get("SECURE_COOKIES", "true").lower() == "true"
+    _is_secure = _secure_cookies_enabled()
     response.set_cookie(
         key="session",
         value=token,
@@ -445,7 +450,7 @@ async def mfa_verify(request: MFAVerifyRequest, response: Response, http_request
 
     # MFA 验证成功：颁发新的非 pending session cookie + Refresh Token
     new_token = _create_session_token(user_info["id"], user_info["username"], user_info["role"], mfa_pending=False)
-    _is_secure = os.environ.get("SECURE_COOKIES", "true").lower() == "true"
+    _is_secure = _secure_cookies_enabled()
     response.set_cookie(
         key="session",
         value=new_token,
@@ -516,7 +521,7 @@ async def refresh_token(request: Request, response: Response):
 
     # 颁发新的 Access Token
     new_access_token = _create_session_token(user["id"], user["username"], user["role"])
-    _is_secure = os.environ.get("SECURE_COOKIES", "true").lower() == "true"
+    _is_secure = _secure_cookies_enabled()
     response.set_cookie(
         key="session",
         value=new_access_token,

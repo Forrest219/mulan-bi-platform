@@ -12,6 +12,8 @@ export interface TableauConnection {
   is_active: boolean;
   auto_sync_enabled: boolean;
   sync_interval_hours: number;
+  schedule_id: number | null;
+  schedule_name?: string | null;
   last_test_at: string | null;
   last_test_success: boolean | null;
   last_test_message: string | null;
@@ -34,6 +36,7 @@ export interface TableauAsset {
   owner_name: string | null;
   thumbnail_url: string | null;
   content_url: string | null;
+  web_url?: string | null;
   is_deleted: boolean;
   synced_at: string;
   // Phase 2a: hierarchy
@@ -56,6 +59,7 @@ export interface TableauAsset {
   // Detail enrichment
   datasources?: TableauAssetDatasource[];
   server_url?: string;
+  site?: string | null;
 }
 
 export interface TableauAssetDatasource {
@@ -77,6 +81,9 @@ export interface TableauSyncLog {
   dashboards_synced: number;
   datasources_synced: number;
   assets_deleted: number;
+  fields_added?: number | null;
+  fields_deleted?: number | null;
+  connection_name?: string | null;
   error_message: string | null;
   duration_sec: number | null;
 }
@@ -114,6 +121,8 @@ export async function createConnection(data: {
   connection_type?: 'mcp' | 'tsc';
   token_name: string;
   token_value: string;
+  auto_sync_enabled?: boolean;
+  schedule_id?: number | null;
 }): Promise<{ connection: TableauConnection; message: string }> {
   const res = await fetch(`${API_BASE}/api/tableau/connections`, {
     method: 'POST',
@@ -139,6 +148,7 @@ export async function updateConnection(id: number, data: Partial<{
   is_active: boolean;
   auto_sync_enabled: boolean;
   sync_interval_hours: number;
+  schedule_id: number | null;
 }>): Promise<{ message: string }> {
   const res = await fetch(`${API_BASE}/api/tableau/connections/${id}`, {
     method: 'PUT',
@@ -254,6 +264,27 @@ export async function listSyncLogs(connId: number, params?: {
   return res.json();
 }
 
+export async function listAllSyncLogs(params?: {
+  connection_id?: number;
+  status?: string;
+  start_date?: string;
+  end_date?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<{ logs: TableauSyncLog[]; total: number; page: number; page_size: number; pages: number }> {
+  const sp = new URLSearchParams({
+    ...(params?.connection_id != null && { connection_id: String(params.connection_id) }),
+    ...(params?.status && { status: params.status }),
+    ...(params?.start_date && { start_date: params.start_date }),
+    ...(params?.end_date && { end_date: params.end_date }),
+    ...(params?.page && { page: String(params.page) }),
+    ...(params?.page_size && { page_size: String(params.page_size) }),
+  });
+  const res = await fetch(`${API_BASE}/api/tableau/sync-logs?${sp}`, { credentials: 'include' });
+  if (!res.ok) throw new Error('获取同步日志列表失败');
+  return res.json();
+}
+
 export async function getSyncLog(connId: number, logId: number): Promise<TableauSyncLog> {
   const res = await fetch(`${API_BASE}/api/tableau/connections/${connId}/sync-logs/${logId}`, { credentials: 'include' });
   if (!res.ok) throw new Error('获取同步日志详情失败');
@@ -330,7 +361,18 @@ export interface HealthOverview {
   avg_level: string;
   level_distribution: { excellent: number; good: number; warning: number; poor: number };
   top_issues: { check: string; count: number }[];
-  assets: { asset_id: number; name: string; asset_type: string; score: number; level: string }[];
+  assets: HealthOverviewAsset[];
+}
+
+export interface HealthOverviewAsset {
+  asset_id: number;
+  name: string;
+  asset_type: string;
+  score: number;
+  level: string;
+  failed_checks?: string[];
+  connection_name?: string;
+  checked_at?: string;
 }
 
 export async function getAssetHealth(assetId: number): Promise<AssetHealth> {

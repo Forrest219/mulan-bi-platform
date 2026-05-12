@@ -482,8 +482,11 @@ def _sensitivity_rank(level: str) -> int:
     """
     ranking = {
         "public": 0,
+        "low": 0,
         "internal": 1,
+        "medium": 1,
         "confidential": 2,
+        "high": 2,
         "restricted": 3,
     }
     return ranking.get(level.lower(), 0)
@@ -495,15 +498,13 @@ def _check_sensitivity_level_upgrade(db, metric: BiMetricDefinition) -> tuple[st
 
     流程：
     1. 从 bi_metric_lineage 查出该指标的所有上游字段（同一 datasource_id）
-    2. 字段的 sensitivity_level 存储在语义层（bi_field_semantics），通过 datasource_id+table_name+column_name 查找
+    2. 字段的 sensitivity_level 存储在语义层，通过血缘字段查找
     3. 取上游 max sensitivity_level 与指标的 sensitivity_level 比较
     4. 若指标级别 < 上游最高级别 → 自动升级到上游最高级别，返回警告信息
 
     Returns:
         (actual_sensitivity_level, warning_message or None)
     """
-    from services.semantic_maintenance.models import FieldSemantics
-
     lineage_records = (
         db.query(BiMetricLineage)
         .filter(BiMetricLineage.metric_id == metric.id)
@@ -512,16 +513,19 @@ def _check_sensitivity_level_upgrade(db, metric: BiMetricDefinition) -> tuple[st
     if not lineage_records:
         return metric.sensitivity_level, None
 
+    from services.semantic_maintenance.models import TableauFieldSemantics
+
     # 收集上游字段 sensitivity_level
     upstream_levels: list[str] = []
     for rec in lineage_records:
-        # 通过 datasource_id + table_name + column_name 查语义层
+        # 当前语义层使用 TableauFieldSemantics；历史血缘中的 datasource_id
+        # 对应语义 connection_id，字段名可能是裸 column 或 table.column。
+        field_ids = [rec.column_name, f"{rec.table_name}.{rec.column_name}"]
         field_sem = (
-            db.query(FieldSemantics)
+            db.query(TableauFieldSemantics)
             .filter(
-                FieldSemantics.datasource_id == rec.datasource_id,
-                FieldSemantics.table_name == rec.table_name,
-                FieldSemantics.column_name == rec.column_name,
+                TableauFieldSemantics.connection_id == rec.datasource_id,
+                TableauFieldSemantics.tableau_field_id.in_(field_ids),
             )
             .first()
         )

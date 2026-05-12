@@ -25,6 +25,30 @@ const BACKEND = process.env.BACKEND_URL || 'http://localhost:8000';
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 
+const DEFAULT_PLATFORM_SETTINGS = {
+  platform_name: 'MULAN',
+  platform_subtitle: '企业经营语义与 Data Agent 能力平台',
+  logo_url: 'https://public.readdy.ai/ai/img_res/d9bf8fa2-dfff-4c50-98cf-7b635309e7d6.png',
+  favicon_url: null,
+};
+
+const LOGIN_RATE_LIMIT_RETRY_MS = 61_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function loginForCleanup(ctx: APIRequestContext) {
+  const payload = { username: ADMIN_USERNAME, password: ADMIN_PASSWORD };
+  const login = await ctx.post('/api/auth/login', { data: payload });
+  if (login.status() !== 429) {
+    return login;
+  }
+  console.warn('[teardown] login rate limited, retrying after rate window');
+  await sleep(LOGIN_RATE_LIMIT_RETRY_MS);
+  return ctx.post('/api/auth/login', { data: payload });
+}
+
 async function cleanupLLMConfigs(ctx: APIRequestContext): Promise<void> {
   const listResp = await ctx.get('/api/llm/configs');
   if (!listResp.ok()) {
@@ -109,12 +133,21 @@ async function cleanupGroups(ctx: APIRequestContext): Promise<void> {
   console.log(`[teardown] cleaned ${deleted}/${targets.length} test groups`);
 }
 
+async function restorePlatformSettings(ctx: APIRequestContext): Promise<void> {
+  const resp = await ctx.put('/api/platform-settings/', {
+    data: DEFAULT_PLATFORM_SETTINGS,
+  });
+  if (!resp.ok()) {
+    console.warn(`[teardown] restore platform settings failed: ${resp.status()}`);
+    return;
+  }
+  console.log('[teardown] restored platform settings');
+}
+
 export default async function globalTeardown() {
   const ctx = await request.newContext({ baseURL: BACKEND });
   try {
-    const login = await ctx.post('/api/auth/login', {
-      data: { username: ADMIN_USERNAME, password: ADMIN_PASSWORD },
-    });
+    const login = await loginForCleanup(ctx);
     if (!login.ok()) {
       console.warn(`[teardown] login failed: ${login.status()}`);
       return;
@@ -122,6 +155,7 @@ export default async function globalTeardown() {
     await cleanupLLMConfigs(ctx);
     await cleanupUsers(ctx);
     await cleanupGroups(ctx);
+    await restorePlatformSettings(ctx);
   } catch (e) {
     console.warn('[teardown] error:', e);
   } finally {

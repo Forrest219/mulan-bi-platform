@@ -158,6 +158,7 @@ async def test_dedup_window_hits_updates_last_seen_at_no_new_insert(db_session):
     from services.metrics_agent.anomaly_service import (
         run_anomaly_detection,
         _check_dedup_window,
+        _compute_dimension_context_hash,
     )
 
     metric = _make_active_metric(db_session, filters={"region": "us"})
@@ -172,7 +173,7 @@ async def test_dedup_window_hits_updates_last_seen_at_no_new_insert(db_session):
         algorithm="zscore",
         magnitude_bucket="large",
         detected_at=now - timedelta(minutes=30),  # 30分钟前
-        dimension_context_hash="abc123",
+        dimension_context_hash=_compute_dimension_context_hash(metric.filters),
     )
     existing_id = existing_anomaly.id
     original_last_seen = existing_anomaly.last_seen_at
@@ -415,7 +416,7 @@ async def test_dedup_respects_direction(db_session):
 
     # 产生 "up" 方向的异常数据
     # 当前值 > 期望值 → up
-    spike_vals = [100.0] * 29 + [999.0]  # 异常高值 = up
+    spike_vals = _spike_values(30, spike=999.0)  # 异常高值 = up
 
     with patch(
         "services.metrics_agent.anomaly_service._fetch_daily_values",

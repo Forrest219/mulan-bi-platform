@@ -108,7 +108,7 @@ class RollbackService:
         if log.status == PublishStatus.ROLLED_BACK:
             return False, f"该发布日志已回滚（status={log.status}）"
         # pending / failed / not_supported 状态不允许回滚
-        return False, f"只有 success 状态的发布日志可回滚，当前状态：{log.status}"
+        return False, f"只能回滚 success 状态的发布日志，当前状态：{log.status}"
 
     def determine_rollback_type(self, log: TableauPublishLog) -> str:
         """

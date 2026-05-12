@@ -151,20 +151,18 @@ export function ConversationBar({ collapsed, onToggleCollapse, onNew }: Conversa
           {collapsed ? (
             <button
               onClick={handleNew}
-              title={currentId ? '新建对话' : '请先选择或进入对话'}
+              title="新建对话"
               aria-label="新建对话"
-              disabled={!currentId}
-              className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors disabled:text-slate-300 disabled:cursor-not-allowed text-blue-600 hover:bg-blue-50"
+              className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors text-blue-600 hover:bg-blue-50"
             >
               <i className="ri-add-line text-base" />
             </button>
           ) : (
             <button
               onClick={handleNew}
-              title={currentId ? '新建对话  ⌘N' : '请先选择或进入对话'}
+              title="新建对话  ⌘N"
               aria-label="新建对话"
-              disabled={!currentId}
-              className="w-full h-8 flex items-center justify-center gap-1.5 rounded-[10px] text-sm transition-colors duration-150 disabled:border disabled:border-slate-200 disabled:text-slate-300 disabled:cursor-not-allowed border border-blue-600 text-blue-600 hover:bg-blue-50"
+              className="w-full h-8 flex items-center justify-center gap-1.5 rounded-[10px] text-sm transition-colors duration-150 border border-blue-600 text-blue-600 hover:bg-blue-50"
             >
               <i className="ri-add-line text-base" />
               新建对话

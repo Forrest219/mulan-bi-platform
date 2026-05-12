@@ -7,7 +7,7 @@ Datasource Router 单元测试（Spec 14 §12.2）
 - 最低分拒绝
 """
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from services.llm.datasource_router import (
     calculate_routing_score,
@@ -106,12 +106,12 @@ class TestCalculateRoutingScore:
         score = calculate_routing_score(terms, fields)
         # field_coverage = 2/2 = 1.0
         # freshness = 0.5 (default)
-        # field_count_score = 1.0
+        # field_count_score = 0.8 (默认 field_count=0，小于合理范围)
         # usage = 0.0
         expected = (
             WEIGHT_FIELD_COVERAGE * 1.0 +
             WEIGHT_FRESHNESS * 0.5 +
-            WEIGHT_FIELD_COUNT * 1.0 +
+            WEIGHT_FIELD_COUNT * 0.8 +
             WEIGHT_USAGE_FREQUENCY * 0.0
         )
         assert score == round(expected, 4)
@@ -123,12 +123,12 @@ class TestCalculateRoutingScore:
         score = calculate_routing_score(terms, fields)
         # field_coverage = 0/1 = 0
         # freshness = 0.5
-        # field_count_score = 1.0
+        # field_count_score = 0.8 (默认 field_count=0，小于合理范围)
         # usage = 0.0
         expected = (
             WEIGHT_FIELD_COVERAGE * 0.0 +
             WEIGHT_FRESHNESS * 0.5 +
-            WEIGHT_FIELD_COUNT * 1.0 +
+            WEIGHT_FIELD_COUNT * 0.8 +
             WEIGHT_USAGE_FREQUENCY * 0.0
         )
         assert score == round(expected, 4)
@@ -142,7 +142,7 @@ class TestCalculateRoutingScore:
         expected = (
             WEIGHT_FIELD_COVERAGE * 0.5 +
             WEIGHT_FRESHNESS * 0.5 +
-            WEIGHT_FIELD_COUNT * 1.0 +
+            WEIGHT_FIELD_COUNT * 0.8 +
             WEIGHT_USAGE_FREQUENCY * 0.0
         )
         assert score == round(expected, 4)

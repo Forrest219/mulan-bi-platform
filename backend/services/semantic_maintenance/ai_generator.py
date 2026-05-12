@@ -118,10 +118,10 @@ def parse_json_from_response(content: str) -> Tuple[Optional[Dict[str, Any]], Op
     """
     content = content.strip()
 
-    # 处理 ```json 代码块包裹
+    # 处理 ```json / ```javascript 等 Markdown 代码块包裹
     if content.startswith("```"):
         import re
-        match = re.search(r"```(?:json)?\s*([\s\S]+?)```", content)
+        match = re.search(r"```[^\n`]*\n?([\s\S]+?)```", content)
         if match:
             content = match.group(1).strip()
 
@@ -276,11 +276,6 @@ class AIGenerator:
             - 成功：success=True, result=包含生成结果的字典
             - 失败：success=False, result=错误消息字符串
         """
-        # 检查 LLM 可用性
-        err = self._check_llm_available()
-        if err:
-            return False, err
-
         # 敏感度检查
         sensitivity_err = pre_llm_sensitivity_check(
             field_metadata.get("sensitivity_level"),
@@ -288,6 +283,11 @@ class AIGenerator:
         )
         if sensitivity_err:
             return False, sensitivity_err
+
+        # 检查 LLM 可用性
+        err = self._check_llm_available()
+        if err:
+            return False, err
 
         # 构建 Prompt
         from services.llm.prompts import AI_SEMANTIC_FIELD_TEMPLATE
@@ -399,11 +399,6 @@ class AIGenerator:
         Returns:
             (success, result_or_error) 元组
         """
-        # 检查 LLM 可用性
-        err = self._check_llm_available()
-        if err:
-            return False, err
-
         # 敏感度检查
         sensitivity_err = pre_llm_sensitivity_check(
             ds_metadata.get("sensitivity_level"),
@@ -411,6 +406,11 @@ class AIGenerator:
         )
         if sensitivity_err:
             return False, sensitivity_err
+
+        # 检查 LLM 可用性
+        err = self._check_llm_available()
+        if err:
+            return False, err
 
         # 构建 Prompt
         from services.llm.prompts import AI_SEMANTIC_DS_TEMPLATE

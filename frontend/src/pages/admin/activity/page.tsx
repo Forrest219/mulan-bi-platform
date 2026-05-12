@@ -147,12 +147,12 @@ export default function ActivityPage() {
     fetchUsers();
     fetchStats();
     fetchTypes();
-  }, []);
+  }, [fetchUsers, fetchStats, fetchTypes]);
 
   useEffect(() => {
     setPage(1);
     fetchLogs(1);
-  }, [timeRange, customStart, customEnd, opTypeFilter, lockedOperatorId]);
+  }, [fetchLogs, timeRange, customStart, customEnd, opTypeFilter, lockedOperatorId]);
 
   const handlePageChange = (newPage: number) => {
     setPage(newPage);

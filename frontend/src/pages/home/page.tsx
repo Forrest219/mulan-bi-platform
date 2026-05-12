@@ -9,7 +9,7 @@
  * 对话历史存 localStorage（C2），由 HomeLayout 提供的 ConversationProvider 管理。
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { ConversationBar } from './components/ConversationBar';
 import { useAuth } from '../../context/AuthContext';
 import { usePlatformSettings } from '../../context/PlatformSettingsContext';
@@ -33,8 +33,6 @@ type HomeUiState = 'HOME_IDLE' | 'HOME_SUBMITTING' | 'HOME_RESULT' | 'HOME_ERROR
 const USE_MOCK = false;
 
 function HomePageInner() {
-  const navigate = useNavigate();
-
   const [homeState, setHomeState] = useState<HomeUiState>('HOME_IDLE');
   const stateBeforeOfflineRef = useRef<HomeUiState>('HOME_IDLE');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
@@ -429,8 +427,13 @@ function HomePageInner() {
 }
 
 export default function HomePage() {
+  const { connectionId, setConnection } = useHomeUrlState();
+
   return (
-    <ScopeProvider>
+    <ScopeProvider
+      initialConnectionId={connectionId}
+      onConnectionIdChange={setConnection}
+    >
       <HomePageInner />
     </ScopeProvider>
   );

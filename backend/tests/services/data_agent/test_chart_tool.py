@@ -1,10 +1,10 @@
 """
-ChartTool 单元测试 — stub 实现验证
+ChartTool 单元测试 — Viz Agent 集成版契约验证
 """
 
 import pytest
 
-from services.data_agent.tools.chart_tool import ChartTool
+from services.data_agent.tools.chart_tool import ChartTool, VALID_CHART_TYPES
 from services.data_agent.tool_base import ToolContext, ToolResult
 
 
@@ -32,11 +32,11 @@ class TestChartTool:
         }
 
     # =============================================================================
-    # TC-CHART-001: 正常调用返回 stub 结果
+    # TC-CHART-001: 正常调用返回规格卡片结果
     # =============================================================================
     @pytest.mark.asyncio
-    async def test_tc_chart_001_stub_result(self, tool, context, sample_data):
-        """TC-CHART-001: 正常参数返回结构化 stub 结果"""
+    async def test_tc_chart_001_card_result(self, tool, context, sample_data):
+        """TC-CHART-001: 显式图表类型和字段返回结构化规格卡片"""
         result = await tool.execute(
             {
                 "chart_type": "bar",
@@ -49,26 +49,27 @@ class TestChartTool:
         )
 
         assert result.success is True
-        assert result.data["status"] == "not_implemented"
-        assert result.data["message"] == "图表生成功能开发中"
+        assert result.data["output_mode"] == "card"
         assert result.data["chart_type"] == "bar"
-        assert result.data["title"] == "月度销售"
-        assert result.data["x_field"] == "month"
-        assert result.data["y_field"] == "sales"
+        assert result.data["field_mapping"]["x"] == "month"
+        assert result.data["field_mapping"]["y"] == "sales"
+        assert result.data["tableau_mark_type"] == "Bar"
+        assert "spec_card" in result.data
 
     # =============================================================================
-    # TC-CHART-002: 缺少 chart_type
+    # TC-CHART-002: 缺少 schema/data
     # =============================================================================
     @pytest.mark.asyncio
     async def test_tc_chart_002_missing_chart_type(self, tool, context, sample_data):
-        """TC-CHART-002: 缺少 chart_type 返回错误"""
+        """TC-CHART-002: schema 和 data 同时缺失返回错误"""
         result = await tool.execute(
-            {"data": sample_data},
+            {"chart_type": "bar"},
             context,
         )
 
         assert result.success is False
-        assert "chart_type" in result.error
+        assert "schema" in result.error
+        assert "data" in result.error
 
     # =============================================================================
     # TC-CHART-003: 缺少 data
@@ -102,11 +103,16 @@ class TestChartTool:
     # TC-CHART-005: 所有合法 chart_type 均可通过
     # =============================================================================
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("chart_type", ["bar", "line", "pie", "scatter", "table"])
+    @pytest.mark.parametrize("chart_type", VALID_CHART_TYPES)
     async def test_tc_chart_005_all_valid_chart_types(self, tool, context, sample_data, chart_type):
         """TC-CHART-005: 所有合法 chart_type 均返回成功"""
         result = await tool.execute(
-            {"chart_type": chart_type, "data": sample_data},
+            {
+                "chart_type": chart_type,
+                "data": sample_data,
+                "x_field": "month",
+                "y_field": "sales",
+            },
             context,
         )
 
@@ -118,16 +124,28 @@ class TestChartTool:
     # =============================================================================
     @pytest.mark.asyncio
     async def test_tc_chart_006_minimal_params(self, tool, context, sample_data):
-        """TC-CHART-006: 只传必填参数，可选参数使用默认值"""
+        """TC-CHART-006: 未指定 chart_type 时使用 Viz Agent 推荐"""
+        async def fake_recommend(schema, user_intent, connection_id):
+            return {
+                "rank": 1,
+                "chart_type": "line",
+                "confidence": 0.9,
+                "reason": "趋势字段推荐折线图",
+                "field_mapping": {"x": "month", "y": "sales"},
+                "tableau_mark_type": "Line",
+                "suggested_title": "月度销售趋势",
+            }
+
+        tool._call_viz_agent_recommend = fake_recommend
         result = await tool.execute(
-            {"chart_type": "pie", "data": sample_data},
+            {"data": sample_data},
             context,
         )
 
         assert result.success is True
-        assert result.data["title"] == ""
-        assert result.data["x_field"] == ""
-        assert result.data["y_field"] == ""
+        assert result.data["chart_type"] == "line"
+        assert result.data["field_mapping"]["x"] == "month"
+        assert result.data["field_mapping"]["y"] == "sales"
 
     # =============================================================================
     # TC-CHART-007: 工具元数据正确
@@ -138,18 +156,30 @@ class TestChartTool:
         assert "图表" in tool.description
         assert "chart_type" in tool.parameters_schema["properties"]
         assert "data" in tool.parameters_schema["properties"]
-        assert set(tool.parameters_schema["required"]) == {"chart_type", "data"}
+        assert tool.parameters_schema["required"] == []
 
     # =============================================================================
     # TC-CHART-008: 空字符串 chart_type 视为缺失
     # =============================================================================
     @pytest.mark.asyncio
     async def test_tc_chart_008_empty_chart_type(self, tool, context, sample_data):
-        """TC-CHART-008: 空字符串 chart_type 返回错误"""
+        """TC-CHART-008: 空字符串 chart_type 视为未指定并使用推荐器"""
+        async def fake_recommend(schema, user_intent, connection_id):
+            return {
+                "rank": 1,
+                "chart_type": "bar",
+                "confidence": 0.8,
+                "reason": "默认推荐柱状图",
+                "field_mapping": {"x": "month", "y": "sales"},
+                "tableau_mark_type": "Bar",
+                "suggested_title": "月度销售",
+            }
+
+        tool._call_viz_agent_recommend = fake_recommend
         result = await tool.execute(
             {"chart_type": "", "data": sample_data},
             context,
         )
 
-        assert result.success is False
-        assert "chart_type" in result.error
+        assert result.success is True
+        assert result.data["chart_type"] == "bar"

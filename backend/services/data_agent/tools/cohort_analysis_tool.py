@@ -74,7 +74,7 @@ class CohortAnalysisTool(BaseTool):
                 "description": "队列分析维度（如 channel, region）",
             },
         },
-        "required": ["cohort_type", "time_range"],
+        "required": ["time_range"],
     }
 
     async def execute(self, params: dict, context: ToolContext) -> ToolResult:

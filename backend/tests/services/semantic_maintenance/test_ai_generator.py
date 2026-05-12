@@ -9,6 +9,7 @@ AI Generator 单元测试（Spec 12 §10.1）
 """
 import pytest
 import json
+import asyncio
 
 from services.semantic_maintenance.ai_generator import (
     parse_json_from_response,
@@ -282,6 +283,6 @@ class TestAIGenerator:
             "field_name": "Salary",
             "sensitivity_level": "high",  # 高敏感
         }
-        success, result = generator.generate_field_semantic(field_metadata)
+        success, result = asyncio.run(generator.generate_field_semantic(field_metadata))
         assert not success
         assert "SLI_005" in result

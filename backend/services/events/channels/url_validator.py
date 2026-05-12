@@ -33,7 +33,7 @@ def validate(url: str) -> None:
     校验 Webhook URL，合法时返回 None，非法时抛 EVT_011。
 
     规则：
-    - 协议必须为 https://（开发环境允许 http://localhost）
+    - 协议必须为 https://
     - hostname DNS 解析后所有 IP 不得命中私网段
     - DNS 必须可解析
     - 不允许为内网 hostname（如 localhost）
@@ -46,7 +46,7 @@ def validate(url: str) -> None:
     if parsed.scheme not in ("https", "http"):
         raise ValueError("EVT_011: URL 协议必须为 https:// 或 http://localhost")
 
-    # 开发环境允许 http://localhost，生产强制 https
+    # 生产强制 https，禁止 localhost/内网目标以降低 SSRF 风险
     if parsed.scheme == "http" and parsed.hostname != "localhost":
         raise ValueError("EVT_011: 非 localhost URL 必须使用 https://")
 

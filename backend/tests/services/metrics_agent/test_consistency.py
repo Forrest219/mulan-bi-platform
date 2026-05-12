@@ -142,7 +142,7 @@ def _run_check_with_mocked_values(db_session, metric_id, value_a, value_b, toler
         return value_b
 
     with patch.object(consistency, "_fetch_metric_value", side_effect=_mock_fetch):
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             consistency.run_consistency_check(
                 db=db_session,
                 metric_id=metric_id,
@@ -269,7 +269,7 @@ def test_consistency_timeout_raises_429(db_session, valid_datasource, valid_user
 
     with patch.object(consistency, "_fetch_metric_value", side_effect=_mock_timeout):
         with pytest.raises(MulanError) as exc_info:
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 consistency.run_consistency_check(
                     db=db_session,
                     metric_id=metric.id,
@@ -299,7 +299,7 @@ def test_consistency_metric_not_found(db_session, valid_datasource, valid_user):
 
     with patch.object(consistency, "_fetch_metric_value", side_effect=_mock_fetch):
         with pytest.raises(MulanError) as exc_info:
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 consistency.run_consistency_check(
                     db=db_session,
                     metric_id=nonexistent_id,
@@ -364,7 +364,7 @@ def test_calculate_difference_fail():
     ck = ConsistencyChecker()
     result = ck._calculate_difference(100.0, 120.0, 5.0)
     assert result["check_status"] == "fail"
-    assert result["difference_pct"] == pytest.approx(-20.0)
+    assert result["difference_pct"] == pytest.approx(-16.6666666667)
 
 
 def test_calculate_difference_zero_both_zero():

@@ -4,6 +4,7 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 from app.core.database import Base, JSONB, sa_func, sa_text # 导入中央配置的 Base, JSONB, func, text
+from services.tasks.models import BiSyncSchedule
 
 class TableauConnection(Base):
     """Tableau 连接表"""
@@ -38,7 +39,7 @@ class TableauConnection(Base):
     updated_at = Column(DateTime, server_default=sa_func.now(), onupdate=sa_func.now()) # DateTime 默认值和更新
 
     assets = relationship("TableauAsset", back_populates="connection", cascade="all, delete-orphan")
-    schedule = relationship("BiSyncSchedule")
+    schedule = relationship(BiSyncSchedule)
 
     def to_dict(self, db=None) -> Dict[str, Any]:
         next_sync_at = None
@@ -119,6 +120,7 @@ class TableauAsset(Base):
     owner_name = Column(String(128), nullable=True)
     thumbnail_url = Column(String(512), nullable=True)
     content_url = Column(String(512), nullable=True)
+    web_url = Column(String(1024), nullable=True)
     raw_metadata = Column(JSONB, nullable=True) # 改为 JSONB
     is_deleted = Column(Boolean, default=False, server_default=sa_text('false')) # Boolean 默认值
     synced_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值

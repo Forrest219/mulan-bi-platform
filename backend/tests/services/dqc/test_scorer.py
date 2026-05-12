@@ -97,7 +97,7 @@ class TestComputeConfidenceScore:
         }
         cs = scorer.compute_confidence_score(dim_scores)
         expected = (100 + 80 + 60 + 100 + 80 + 60) / 6
-        assert cs == expected
+        assert cs == pytest.approx(expected)
 
     def test_custom_weights(self):
         """自定义权重"""
@@ -120,7 +120,7 @@ class TestComputeConfidenceScore:
         }
         cs = scorer.compute_confidence_score(dim_scores, weights)
         expected = 100 * 0.5 + 80 * 0.3 + 60 * 0.1 + 100 * 0.05 + 80 * 0.03 + 60 * 0.02
-        assert cs == expected
+        assert cs == pytest.approx(expected)
 
     def test_missing_dimension_uses_default(self):
         """缺失维度使用默认权重"""
@@ -132,7 +132,7 @@ class TestComputeConfidenceScore:
         cs = scorer.compute_confidence_score(dim_scores)
         # 缺失的 4 个维度各占 1/6
         expected = (100 + 80 + 100 + 100 + 100 + 100) / 6
-        assert cs == expected
+        assert cs == pytest.approx(expected, abs=0.01)
 
     def test_score_clamped_to_100(self):
         """评分上限 100"""

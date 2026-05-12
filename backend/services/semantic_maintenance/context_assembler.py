@@ -127,12 +127,12 @@ def _classify_priority(field: Dict[str, Any]) -> str:
         return "P0"
     elif is_core and role == "dimension":
         return "P1"
+    elif has_formula:
+        return "P4"
     elif role == "measure":
         return "P2"
     elif role == "dimension":
         return "P3"
-    elif has_formula:
-        return "P4"
     else:
         return "P5"
 

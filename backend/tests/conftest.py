@@ -55,6 +55,9 @@ def _reset_test_database_schema(database_url: str):
         conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
         conn.execute(text("CREATE SCHEMA public"))
         conn.execute(text("GRANT ALL ON SCHEMA public TO public"))
+        # VECTOR columns require the pgvector extension. Dropping public also
+        # removes extension-owned types in this test database, so recreate it.
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     engine.dispose()
 
 
@@ -106,12 +109,12 @@ def _run_alembic_migrations():
             result.stdout,
         )
         _reset_test_database_schema(database_url)
-        _create_auth_tables()
+        _create_tables()
 
 
 def _create_tables():
     """确保所有 ORM 模型对应的表已创建"""
-    from app.core.database import SessionLocal
+    from sqlalchemy import text
     # 触发所有模型的 import 以注册到 Base.metadata
     import services.auth.models  # noqa: F401
     import services.logs.models  # noqa: F401
@@ -125,6 +128,11 @@ def _create_tables():
     import services.task_runtime.models_db  # noqa: F401 — registers bi_taskrun_* tables
     import services.tasks.models  # noqa: F401 — registers bi_sync_schedules
     import services.events.models  # noqa: F401 — registers event/outbox tables
+    import services.platform_settings.models  # noqa: F401 — registers platform_settings
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        # Mirrors hand-written Alembic prerequisites that are not represented
+        # in Base.metadata but are required by server_default expressions.
+        conn.execute(text("CREATE SEQUENCE IF NOT EXISTS bi_analysis_session_steps_seq"))
     Base.metadata.create_all(bind=engine)
 
 
@@ -194,11 +202,35 @@ def _ensure_admin():
         session.close()
 
 
+def _relax_auth_rate_limits_for_tests():
+    """Avoid cross-test login throttling from function-scoped TestClient logins."""
+    import app.api.auth as auth_api
+
+    auth_api._login_attempts.clear()
+    auth_api._LOGIN_RATE_LIMIT = 10000
+
+
 # 注册自定义 markers
 def pytest_configure(config):
     config.addinivalue_line(
         "markers", "skip_db: skip database setup for this test module"
     )
+
+
+@pytest.fixture(autouse=True)
+def reset_capability_contextvars():
+    """Keep capability trace/principal context from leaking between tests."""
+    try:
+        from services.capability.audit import _principal_var, _trace_id_var
+    except Exception:
+        yield
+        return
+
+    _trace_id_var.set(None)
+    _principal_var.set(None)
+    yield
+    _trace_id_var.set(None)
+    _principal_var.set(None)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -235,6 +267,7 @@ def setup_database(request):
 
     _run_alembic_migrations()
     _ensure_admin()
+    _relax_auth_rate_limits_for_tests()
     yield
 
 

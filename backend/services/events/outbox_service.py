@@ -1,6 +1,7 @@
 """出站服务（Outbox Service）"""
 import hashlib
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
@@ -34,15 +35,9 @@ def _matches_pattern(event_type: str, pattern: str) -> bool:
     # 精确匹配
     if pattern == event_type:
         return True
-    # 通配符处理（如 health.* 匹配 health.scan.completed）
-    parts = pattern.split(".")
-    event_parts = event_type.split(".")
-    if len(parts) != len(event_parts):
-        return False
-    for p, e in zip(parts, event_parts):
-        if p != "*" and p != e:
-            return False
-    return True
+    # 通配符处理：health.* 匹配 health.scan.completed 这类多级事件名
+    regex = "^" + re.escape(pattern).replace(r"\*", ".*") + "$"
+    return re.match(regex, event_type) is not None
 
 
 class OutboxService:
@@ -155,6 +150,8 @@ class OutboxService:
             BiNotificationOutbox.status == "dead",
         ).first()
         if not outbox:
+            raise ValueError(f"Outbox {outbox_id} 不是 dead 状态，无法重试")
+        if outbox.status != "dead":
             raise ValueError(f"Outbox {outbox_id} 不是 dead 状态，无法重试")
 
         outbox.status = "pending"

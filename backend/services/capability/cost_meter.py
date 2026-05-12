@@ -44,16 +44,10 @@ class CostMeter:
         这里只负责聚合日志记录。
         """
         logger.info(
-            "CostMeter: trace_id=%s capability=%s user=%d role=%s "
-            "tokens_in=%d tokens_out=%d latency_ms=%d cached=%s",
-            cost.trace_id,
-            cost.capability,
-            cost.principal_id,
-            cost.principal_role,
-            cost.input_tokens,
-            cost.output_tokens,
-            cost.latency_ms,
-            cost.cached,
+            f"CostMeter: trace_id={cost.trace_id} capability={cost.capability} "
+            f"user={cost.principal_id} role={cost.principal_role} "
+            f"tokens_in={cost.input_tokens} tokens_out={cost.output_tokens} "
+            f"latency_ms={cost.latency_ms} cached={cost.cached}"
         )
 
     @staticmethod

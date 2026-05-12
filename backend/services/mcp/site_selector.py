@@ -13,6 +13,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Optional
 
+from app.core.database import SessionLocal
 from services.mcp.models import McpServer, SiteInfo
 
 logger = logging.getLogger(__name__)
@@ -50,9 +51,6 @@ class SiteSelector:
         Returns:
             SiteInfo for the selected site, or None if no healthy site available
         """
-        from services.tableau.models import TableauConnection, TableauAsset
-        from app.core.database import SessionLocal
-        
         # Strategy 1: If datasource_luid provided, find owning site
         if datasource_luid:
             return self._select_by_datasource_luid(datasource_luid)
@@ -67,7 +65,6 @@ class SiteSelector:
     def _select_by_datasource_luid(self, datasource_luid: str) -> Optional[SiteInfo]:
         """Find the site that owns the given datasource."""
         from services.tableau.models import TableauAsset, TableauConnection
-        from app.core.database import SessionLocal
         
         session = SessionLocal()
         try:
@@ -99,7 +96,6 @@ class SiteSelector:
     def _select_default_metrics_site(self) -> Optional[SiteInfo]:
         """Select the default metrics site (is_default=True, healthy)."""
         from services.tableau.models import TableauConnection
-        from app.core.database import SessionLocal
         
         session = SessionLocal()
         try:
@@ -145,7 +141,6 @@ class SiteSelector:
         global _rr_state
         
         from services.tableau.models import TableauConnection
-        from app.core.database import SessionLocal
         
         session = SessionLocal()
         try:
@@ -171,6 +166,8 @@ class SiteSelector:
             
             # Build from McpServers
             for mcp in mcp_servers:
+                if getattr(mcp, "health_status", None) != "healthy":
+                    continue
                 sites.append(SiteInfo(
                     site_id=f"mcp_{mcp.id}",
                     site_name=mcp.site_name or mcp.name,

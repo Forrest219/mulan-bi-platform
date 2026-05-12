@@ -70,6 +70,7 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
 
     const scopeContext = useScope();
     const noConnection = !scopeContext.connectionsLoading && scopeContext.connections.length === 0;
+    const connectionUnavailable = scopeContext.connectionsLoading || noConnection;
 
     // B24: Support ?prefill= URL parameter to pre-fill the question input
     useEffect(() => {
@@ -120,6 +121,7 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
 
     const submit = () => {
       if (!input.trim() || loading) return;
+      if (scopeContext.connectionsLoading) return;
       if (noConnection) {
         setNoConnectionHint(true);
         return;
@@ -168,7 +170,7 @@ const AskBarBase = forwardRef<HTMLTextAreaElement, AskBarProps>(
       onAbort?.();
     };
 
-    const canSubmit = input.trim().length > 0 && !loading;
+    const canSubmit = input.trim().length > 0 && !loading && !connectionUnavailable;
 
     return (
       <div

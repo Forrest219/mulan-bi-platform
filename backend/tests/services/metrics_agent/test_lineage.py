@@ -113,7 +113,7 @@ _LLM_RESPONSE_MULTI_FIELDS = {
 
 def _run_async(coro):
     """在同步测试中运行异步函数的辅助函数。"""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 # =============================================================================

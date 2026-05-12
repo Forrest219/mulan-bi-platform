@@ -14,6 +14,7 @@ const ADMIN_USER = process.env.SMOKE_ADMIN_USERNAME ?? 'admin';
 const ADMIN_PASS = process.env.SMOKE_ADMIN_PASSWORD ?? 'admin123';
 
 async function loginAsAdmin(page: any) {
+  await page.context().clearCookies();
   await page.goto('/login');
   await page.getByPlaceholder('用户名').fill(ADMIN_USER);
   await page.getByPlaceholder('密码').fill(ADMIN_PASS);
@@ -21,7 +22,26 @@ async function loginAsAdmin(page: any) {
   await page.waitForURL('/', { timeout: 8000 });
 }
 
+async function readPlatformSettingsForm(page: any) {
+  const inputs = page.locator('form input[type="text"], form input[type="url"]');
+  return {
+    platformName: await inputs.nth(0).inputValue(),
+    platformSubtitle: await inputs.nth(1).inputValue(),
+  };
+}
+
+async function savePlatformSettingsForm(
+  page: any,
+  settings: { platformName: string; platformSubtitle: string },
+) {
+  const inputs = page.locator('form input[type="text"], form input[type="url"]');
+  await inputs.nth(0).fill(settings.platformName);
+  await inputs.nth(1).fill(settings.platformSubtitle);
+  await page.getByRole('button', { name: '保存设置' }).click();
+}
+
 test.describe('平台设置', () => {
+  test.describe.configure({ mode: 'serial' });
 
   test('页面加载时正确显示平台设置表单', async ({ page }) => {
     await loginAsAdmin(page);
@@ -39,7 +59,7 @@ test.describe('平台设置', () => {
     await expect(page.locator('img[alt="Logo 预览"]')).toBeVisible();
 
     // 验证配置说明区域
-    await expect(page.locator('text=Logo 建议使用 1:1 比例')).toBeVisible();
+    await expect(page.locator('text=Logo 建议 1:1 PNG/SVG')).toBeVisible();
   });
 
   test('修改平台名称和副标题后保存成功并持久化', async ({ page }) => {
@@ -49,27 +69,32 @@ test.describe('平台设置', () => {
     await page.waitForSelector('form input', { timeout: 5000 });
 
     const inputs = page.locator('form input[type="text"], form input[type="url"]');
+    const originalSettings = await readPlatformSettingsForm(page);
 
-    // 修改平台名称和副标题
-    const testName = 'MULAN-TEST-' + Date.now();
-    const testSubtitle = '测试副标题-' + Date.now();
-    await inputs.nth(0).fill(testName);
-    await inputs.nth(1).fill(testSubtitle);
+    try {
+      // 修改平台名称和副标题
+      const testName = 'MULAN-TEST-' + Date.now();
+      const testSubtitle = '测试副标题-' + Date.now();
+      await inputs.nth(0).fill(testName);
+      await inputs.nth(1).fill(testSubtitle);
 
-    await page.getByRole('button', { name: '保存设置' }).click();
-    await page.waitForTimeout(1500);
+      await page.getByRole('button', { name: '保存设置' }).click();
+      await page.waitForTimeout(1500);
 
-    // 验证保存成功提示
-    await expect(page.locator('text=保存成功')).toBeVisible();
+      // 验证保存成功提示
+      await expect(page.locator('text=保存成功')).toBeVisible();
 
-    // 刷新页面验证数据已持久化
-    await page.reload();
-    await page.waitForLoadState('networkidle');
-    await page.waitForSelector('form input', { timeout: 5000 });
+      // 刷新页面验证数据已持久化
+      await page.reload();
+      await page.waitForLoadState('networkidle');
+      await page.waitForSelector('form input', { timeout: 5000 });
 
-    const inputsAfter = page.locator('form input[type="text"], form input[type="url"]');
-    await expect(inputsAfter.nth(0)).toHaveValue(testName);
-    await expect(inputsAfter.nth(1)).toHaveValue(testSubtitle);
+      const inputsAfter = page.locator('form input[type="text"], form input[type="url"]');
+      await expect(inputsAfter.nth(0)).toHaveValue(testName);
+      await expect(inputsAfter.nth(1)).toHaveValue(testSubtitle);
+    } finally {
+      await savePlatformSettingsForm(page, originalSettings);
+    }
   });
 
   test('无效 Logo URL 实时显示格式错误', async ({ page }) => {
@@ -97,6 +122,7 @@ test.describe('平台设置', () => {
 
   test('非 admin 用户访问被拒绝并跳转到 403', async ({ page }) => {
     // 使用普通用户登录
+    await page.context().clearCookies();
     await page.goto('/login');
     await page.getByPlaceholder('用户名').fill('smoke_analyst');
     await page.getByPlaceholder('密码').fill('analyst123');

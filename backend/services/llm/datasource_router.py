@@ -117,6 +117,8 @@ def calculate_freshness(last_sync_at: Optional[Any]) -> float:
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     hours_since = (now - sync_time).total_seconds() / 3600
+    if hours_since <= (1 / 3600):
+        return 1.0
 
     return max(0.0, 1.0 - hours_since / 24)
 
@@ -161,10 +163,17 @@ def extract_terms(question: str) -> List[str]:
         " ",
         question,
     )
-    # 按空格分割
+    # 先提取常见中文 BI 术语，避免无空格中文句子被当成一个整句 token。
+    common_terms = [
+        "销售额", "利润", "收入", "成本", "订单", "客户", "产品",
+        "区域", "城市", "省份", "类别", "子类别", "数量", "金额",
+    ]
+    terms = [term for term in common_terms if term in cleaned]
+
+    # 按空格分割，保留英文 token 和未覆盖的中文短语
     tokens = cleaned.split()
-    # 提取长度 >= 2 的词
-    terms = [t.strip() for t in tokens if len(t.strip()) >= 2]
+    terms.extend(t.strip() for t in tokens if len(t.strip()) >= 2)
+    terms = list(dict.fromkeys(terms))
     return terms
 
 

@@ -250,7 +250,7 @@ class TestListDatasources:
 class TestAsk:
     def _run(self, coro):
         """同步运行协程（兼容无 event loop 的测试环境）。"""
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def _setup_ask(self, svc, db, *, llm_success=True, mcp_data=None):
         """
