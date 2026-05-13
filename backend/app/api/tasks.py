@@ -271,6 +271,37 @@ def _iso(dt):
     return dt.strftime("%Y-%m-%dT%H:%M:%S") if dt else None
 
 
+STALE_SYNC_TASK_TIMEOUT_MINUTES = 60
+
+
+def _reconcile_stale_sync_tasks(db, now=None, timeout_minutes=STALE_SYNC_TASK_TIMEOUT_MINUTES):
+    """Mark dispatched sync tasks that never created an execution log as failed."""
+    from services.tasks.models import BiSyncTask
+
+    now = now or datetime.now()
+    cutoff = now - timedelta(minutes=timeout_minutes)
+    stale_tasks = (
+        db.query(BiSyncTask)
+        .filter(
+            BiSyncTask.status == "running",
+            BiSyncTask.sync_log_id.is_(None),
+            BiSyncTask.scheduled_at <= cutoff,
+        )
+        .all()
+    )
+    if not stale_tasks:
+        return 0
+
+    message = f"同步子任务派发后超过 {timeout_minutes} 分钟未创建执行日志，已自动标记为失败"
+    for task in stale_tasks:
+        task.status = "failed"
+        task.error_message = message
+        task.updated_at = now
+    db.commit()
+    logger.warning("reconciled %d stale Tableau sync tasks", len(stale_tasks))
+    return len(stale_tasks)
+
+
 def _check_sync_health():
     """Best-effort Celery health check; never fail the overview endpoint."""
     health = {
@@ -377,6 +408,7 @@ async def get_sync_overview(request: Request):
     today = now.date()
 
     with SessionLocal() as db:
+        _reconcile_stale_sync_tasks(db)
         connections = db.query(TableauConnection).order_by(TableauConnection.id).all()
         schedules = {
             s.id: s
@@ -947,6 +979,7 @@ async def list_sync_tasks(
     from services.tableau.models import TableauConnection, TableauDatabase
 
     with SessionLocal() as db:
+        _reconcile_stale_sync_tasks(db)
         q = db.query(BiSyncTask)
 
         if schedule_id is not None:

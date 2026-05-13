@@ -1,6 +1,7 @@
 import pytest
 
 from services.auth.models import User
+from services.logs.models import OperationLog
 from services.skills import service as skill_svc
 from services.skills.models import AgentSkill, AgentSkillVersion
 
@@ -210,3 +211,91 @@ def test_get_skill_versions_include_created_by_name_without_breaking_created_by(
 
     assert detail["versions"][0]["created_by"] == admin_user.id
     assert detail["versions"][0]["created_by_name"] == admin_user.display_name
+
+
+def test_registered_tools_marks_configured_tool_and_is_read_only(
+    db_session, clean_skills
+):
+    created = _create_skill(db_session, "schema")
+    schema_skill_count_before = (
+        db_session.query(AgentSkill).filter(AgentSkill.skill_key == "schema").count()
+    )
+    schema_version_count_before = (
+        db_session.query(AgentSkillVersion)
+        .filter(AgentSkillVersion.skill_id == created["id"])
+        .count()
+    )
+
+    result = skill_svc.list_registered_tools(db_session)
+
+    schema_tool = next(tool for tool in result["tools"] if tool["skill_key"] == "schema")
+    assert result["total"] == len(skill_svc.STATIC_SKILL_KEYS)
+    assert schema_tool["configured"] is True
+    assert schema_tool["skill_id"] == created["id"]
+    assert schema_tool["active_version_id"] == created["active_version"]["id"]
+    assert schema_tool["active_version_number"] == "v1"
+
+    chart_tool = next(tool for tool in result["tools"] if tool["skill_key"] == "chart")
+    assert chart_tool["configured"] is False
+    assert chart_tool["skill_id"] is None
+    assert chart_tool["active_version_id"] is None
+
+    assert (
+        db_session.query(AgentSkill).filter(AgentSkill.skill_key == "schema").count()
+        == schema_skill_count_before
+    )
+    assert (
+        db_session.query(AgentSkillVersion)
+        .filter(AgentSkillVersion.skill_id == created["id"])
+        .count()
+        == schema_version_count_before
+    )
+
+
+def test_skill_mutations_write_operation_logs(db_session, clean_skills, admin_user):
+    created = _create_skill(db_session, "schema", created_by_id=admin_user.id)
+    published = skill_svc.publish_version(
+        db_session,
+        skill_id=created["id"],
+        description="schema v2 prompt",
+        input_schema=_schema("table_name"),
+        endpoint_type="static",
+        change_notes="publish v2",
+        created_by_id=admin_user.id,
+    )
+    skill_svc.patch_skill(
+        db_session,
+        skill_id=created["id"],
+        name="Schema updated",
+        updated_by_id=admin_user.id,
+    )
+    skill_svc.rollback_version(
+        db_session,
+        skill_id=created["id"],
+        version_id=created["active_version"]["id"],
+        user_id=admin_user.id,
+    )
+
+    logs = (
+        db_session.query(OperationLog)
+        .filter(
+            OperationLog.operation_type.in_(
+                [
+                    "skill_create",
+                    "skill_update",
+                    "skill_version_publish",
+                    "skill_version_rollback",
+                ]
+            ),
+            OperationLog.target.like("skill:schema%"),
+        )
+        .all()
+    )
+    by_type = {log.operation_type: log for log in logs}
+
+    assert by_type["skill_create"].target == "skill:schema"
+    assert by_type["skill_update"].target == "skill:schema"
+    assert by_type["skill_version_publish"].target == "skill:schema:version:v2"
+    assert by_type["skill_version_rollback"].target == "skill:schema:version:v1"
+    assert by_type["skill_version_publish"].details["to_version"] == published["version_number"]
+    assert all(log.operator_id == admin_user.id for log in by_type.values())

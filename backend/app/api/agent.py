@@ -30,6 +30,7 @@ from app.core.dependencies import get_current_user
 from services.data_agent.factory import create_engine, create_engine_with_skills
 from services.data_agent.deterministic import (
     DeterministicRouteResult,
+    build_schema_inventory_tool_params,
     detect_deterministic_route,
     run_schema_inventory_route,
 )
@@ -220,7 +221,6 @@ def _write_schema_inventory_success(
     execution_time_ms: int,
     step_durations_ms: Optional[Dict[int, int]] = None,
 ) -> None:
-    now = datetime.now(timezone.utc)
     skill_version_uuid = _uuid_or_none(result.skill_version_id)
     step_durations_ms = step_durations_ms or {}
 
@@ -235,7 +235,7 @@ def _write_schema_inventory_success(
         tools_used=result.tools_used,
         response_type=result.response_type,
         execution_time_ms=execution_time_ms,
-        completed_at=now,
+        completed_at=func.now(),
     )
     db.add(run)
     db.flush()
@@ -311,7 +311,7 @@ def _write_schema_inventory_error_run(
         tools_used=["schema"],
         response_type="error",
         execution_time_ms=execution_time_ms,
-        completed_at=datetime.now(timezone.utc),
+        completed_at=func.now(),
     )
     db.add(run)
     db.flush()
@@ -347,8 +347,8 @@ async def try_fast_mcp_stream(
     可恢复错误（_FAST_RECOVERABLE_ERRORS）不向上抛，直接返回 None 触发 fallback。
     其他错误（认证/权限/限流/未知）向上抛，不触发 fallback。
     """
-    from services.llm.nlq_service import route_datasource, get_datasource_fields_cached
-    from services.llm.query_executor import execute_query, QueryExecutorError
+    from services.llm.nlq_service import route_datasource, get_datasource_fields_cached, NLQError
+    from services.llm.query_executor import QueryExecutorError
     from services.tableau.mcp_client import TableauMCPError
     from services.data_agent.tools.query_tool import _lookup_datasource_by_name
 
@@ -392,6 +392,7 @@ async def try_fast_mcp_stream(
         _build_customer_churn_vizqls,
         _build_direct_vizql,
         _calculate_customer_churn,
+        _execute_query_with_date_fallback,
         _normalize_result_table,
         _postprocess_rows,
     )
@@ -406,19 +407,22 @@ async def try_fast_mcp_stream(
     query_start = time.monotonic()
     try:
         if churn_plan:
-            base_result = execute_query(
+            base_result, _base_vizql, base_substitutions = await _execute_query_with_date_fallback(
                 datasource_luid=datasource_luid,
                 vizql_json=churn_plan["base_vizql"],
-                limit=1000,
                 connection_id=req_connection_id,
+                question=question,
+                limit=1000,
             )
             base_fields, base_rows = _normalize_result_table(base_result)
+            recent_substitutions: List[Dict[str, str]] = []
             if base_rows:
-                recent_result = execute_query(
+                recent_result, _recent_vizql, recent_substitutions = await _execute_query_with_date_fallback(
                     datasource_luid=datasource_luid,
                     vizql_json=churn_plan["recent_vizql"],
-                    limit=1000,
                     connection_id=req_connection_id,
+                    question=question,
+                    limit=1000,
                 )
                 recent_fields, recent_rows = _normalize_result_table(recent_result)
             else:
@@ -436,22 +440,28 @@ async def try_fast_mcp_stream(
                 "confidence": 0.95,
                 "datasource_name": datasource_name,
             })
+            field_substitutions = base_substitutions + recent_substitutions
+            if field_substitutions:
+                response_data["field_substitutions"] = field_substitutions
             fields = response_data["fields"]
             rows = response_data["rows"]
         else:
-            result = execute_query(
+            result, _effective_vizql, field_substitutions = await _execute_query_with_date_fallback(
                 datasource_luid=datasource_luid,
                 vizql_json=vizql_json,
-                limit=1000,
                 connection_id=req_connection_id,
+                question=question,
+                limit=1000,
             )
             fields, rows = _normalize_result_table(result)
             processed = _postprocess_rows(question, fields, rows)
             fields = processed.get("fields", fields)
             rows = processed.get("rows", rows)
             response_data = {"fields": fields, "rows": rows}
+            if field_substitutions:
+                response_data["field_substitutions"] = field_substitutions
             response_data.update({k: v for k, v in processed.items() if k not in {"fields", "rows"}})
-    except (TableauMCPError, QueryExecutorError) as e:
+    except (TableauMCPError, QueryExecutorError, NLQError) as e:
         code = getattr(e, "code", None) or (getattr(e, "error_code", None) if hasattr(e, "error_code") else None)
         if code in _FAST_RECOVERABLE_ERRORS:
             logger.warning(
@@ -487,7 +497,7 @@ async def try_fast_mcp_stream(
                 response_type="table",
                 response_data=response_data,
                 tools_used=["query"],
-                steps_count=1,
+                steps_count=3,
             )
         except Exception as e:
             logger.warning("[FAST] persist_message assistant failed: %s", e)
@@ -505,11 +515,11 @@ async def try_fast_mcp_stream(
                     connection_id=req_connection_id,
                     question=question,
                     status="completed",
-                    steps_count=1,
+                    steps_count=3,
                     tools_used=["query"],
                     response_type="table",
                     execution_time_ms=total_ms,
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=func.now(),
                 )
                 _db.add(run)
                 _db.flush()
@@ -559,7 +569,7 @@ async def try_fast_mcp_stream(
             'tools_used': ['query'],
             'response_type': 'table',
             'response_data': response_data,
-            'steps_count': 1,
+            'steps_count': 3,
             'execution_time_ms': int((time.monotonic() - t0) * 1000),
             'sources_count': 0,
             'top_sources': [],
@@ -586,15 +596,16 @@ def _build_fast_answer(
 ) -> str:
     """根据查询结果生成自然语言回答。"""
     response_data = response_data or {}
+    substitution_note = _format_field_substitution_note(response_data.get("field_substitutions"))
     churn = response_data.get("customer_churn")
     if isinstance(churn, dict):
         count = int(churn.get("churned_customer_count") or 0)
         definition = churn.get("definition") or "指定基准期有订单，但最近一年没有订单"
         if count == 0:
-            return f"没有找到符合「{definition}」定义的流失客户。"
+            return f"{substitution_note}没有找到符合「{definition}」定义的流失客户。"
         preview = ", ".join(str(row[0]) for row in rows[:10] if row)
         suffix = f"（共 {count} 个）" if count > 10 else ""
-        return f"符合「{definition}」定义的流失客户为：{preview}{suffix}。"
+        return f"{substitution_note}符合「{definition}」定义的流失客户为：{preview}{suffix}。"
 
     increasing = response_data.get("monotonic_increasing")
     if isinstance(increasing, list) and ("一直在涨" in question or "持续增长" in question):
@@ -604,22 +615,69 @@ def _build_fast_answer(
             if isinstance(item, dict) and item.get("is_increasing") is True and item.get("dimension") is not None
         ]
         if matched:
-            return f"「{question}」中符合利润持续上涨条件的渠道是：{', '.join(matched)}。"
-        return f"「{question}」中没有找到利润持续上涨的渠道。"
+            return f"{substitution_note}「{question}」中符合利润持续上涨条件的渠道是：{', '.join(matched)}。"
+        return f"{substitution_note}「{question}」中没有找到利润持续上涨的渠道。"
 
     if not rows:
-        return f"没有找到符合「{question}」的数据。"
+        return f"{substitution_note}没有找到符合「{question}」的数据。"
+    enum_answer = _format_dimension_enum_answer(fields, rows, substitution_note)
+    if enum_answer:
+        return enum_answer
     row_count = len(rows)
     if row_count == 1:
         vals = ", ".join(str(r) for r in rows[0] if str(r) not in ('', 'None'))
-        return f"「{question}」的结果是：{vals}。"
+        return f"{substitution_note}「{question}」的结果是：{vals}。"
     # 前3行预览
     preview = "; ".join(
         ", ".join(str(v) for v in row[:3] if str(v) not in ('', 'None'))
         for row in rows[:3]
     )
     more = f"（共 {row_count} 条）" if row_count > 3 else ""
-    return f"「{question}」共有 {row_count} 条结果，前几名为：{preview}{more}。"
+    return f"{substitution_note}「{question}」共有 {row_count} 条结果，前几名为：{preview}{more}。"
+
+
+def _format_dimension_enum_answer(fields: List, rows: List, prefix: str = "") -> Optional[str]:
+    if len(fields) != 1:
+        return None
+    field_name = str(fields[0].get("name") if isinstance(fields[0], dict) else fields[0])
+    if not field_name or any(marker in field_name.upper() for marker in ("SUM(", "AVG(", "COUNT", "MIN(", "MAX(")):
+        return None
+
+    values = []
+    seen = set()
+    for row in rows:
+        if not isinstance(row, list) or not row:
+            continue
+        value = row[0]
+        if value is None or str(value) == "":
+            continue
+        key = str(value)
+        if key in seen:
+            continue
+        seen.add(key)
+        values.append(key)
+    if not values:
+        return None
+
+    preview = "、".join(values[:20])
+    suffix = f"（共 {len(values)} 个）" if len(values) > 20 else ""
+    return f"{prefix}「{field_name}」共有 {len(values)} 个取值：{preview}{suffix}。"
+
+
+def _format_field_substitution_note(field_substitutions: Any) -> str:
+    if not isinstance(field_substitutions, list) or not field_substitutions:
+        return ""
+    parts = []
+    for item in field_substitutions:
+        if not isinstance(item, dict):
+            continue
+        requested = item.get("requested")
+        used = item.get("used")
+        if requested and used:
+            parts.append(f"「{requested}」不可用，已改用「{used}」")
+    if not parts:
+        return ""
+    return "注意：" + "；".join(parts) + "统计。"
 
 
 def _validate_connection_access(
@@ -900,8 +958,9 @@ async def agent_stream(
 
             version_for_route = active_skill_version if active_skill_version.get("version_id") else None
             thinking_text = "识别为数据源清单问题，准备读取当前连接的 schema 信息。"
+            schema_tool_params = build_schema_inventory_tool_params(req.question)
             yield _sse_data({"type": "thinking", "content": thinking_text})
-            yield _sse_data({"type": "tool_call", "tool": "schema", "params": {}})
+            yield _sse_data({"type": "tool_call", "tool": "schema", "params": schema_tool_params})
 
             try:
                 route_start = time.monotonic()

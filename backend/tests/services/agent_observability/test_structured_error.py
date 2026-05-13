@@ -26,3 +26,17 @@ def test_best_effort_structured_error_from_message():
     assert payload["error_code"] == "MCP_010"
     assert "abcd12345678wxyz" not in str(payload)
     assert "abcd******wxyz" in str(payload)
+
+
+def test_best_effort_structured_error_keeps_structured_dict():
+    payload = best_effort_structured_error({
+        "error_type": "TimeoutError",
+        "message": "provider timeout",
+        "error_code": "AGENT_006",
+        "caused_by": [{"type": "ReadTimeout", "message": "token=abcd12345678wxyz"}],
+    })
+
+    assert payload["error_type"] == "TimeoutError"
+    assert payload["error_code"] == "AGENT_006"
+    assert payload["caused_by"][0]["type"] == "ReadTimeout"
+    assert "abcd12345678wxyz" not in str(payload)

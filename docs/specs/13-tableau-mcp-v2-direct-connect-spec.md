@@ -702,6 +702,20 @@ V2 继续使用 PAT (Personal Access Token) 认证，与 V1 共享 `tableau_conn
 
 ## 4. 数据源元数据缓存
 
+### 4.0 字段口径边界：metadata_fields vs queryable_fields
+
+Tableau 集成必须把两类字段严格分开：
+
+- `metadata_fields`：资产导入/API 同步看到的 Tableau 元数据层字段全集或字段快照，用于资产治理、字段盘点、血缘分析、语义维护和字段描述展示。
+- `queryable_fields`：当前 published datasource 通过 Tableau MCP / VizQL `query-datasource` 实际可查询的字段子集，是首页数据问答、QueryTool、LLM 查询 prompt 和 direct VizQL 的唯一可信字段来源。
+
+刚性规则：
+
+1. `metadata_fields` 不得被当作可查询字段直接注入 VizQL 查询构造、LLM 查询 prompt 或 QueryTool 入参。
+2. 所有 `query-datasource` 前的字段校验必须基于 MCP 返回或经 MCP 校验过的 `queryable_fields`。
+3. 当用户提到的字段只存在于 `metadata_fields`、不存在于 `queryable_fields` 时，系统应返回业务解释：该字段存在于资产元数据/治理视图，但当前 published datasource 不支持通过 MCP/VizQL 查询；同时基于 `queryable_fields` 给出可替代字段建议。不得把这种情况渲染成“工具执行失败”。
+4. 字段元数据页未来应展示 MCP 查询状态标识，例如 `mcp_queryable`、`mcp_checked_at`、`mcp_status`；本 spec 当前仅固化口径，不要求本轮新增数据库列或 UI。
+
 ### 4.1 缓存存储
 
 V2 复用 V1 中已有的 `tableau_datasource_fields` 表作为字段级元数据缓存。该表已在 `backend/services/tableau/models.py` 中定义（`TableauDatasourceField`）。

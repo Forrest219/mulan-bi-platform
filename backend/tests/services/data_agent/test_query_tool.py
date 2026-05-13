@@ -99,6 +99,21 @@ class TestQueryTool:
             ],
         }
 
+    def test_direct_vizql_each_year_category_sales_uses_requested_date_dimension(self):
+        vizql = _build_direct_vizql(
+            "输出错误！我要的是每个类别、每年的销售额。用订单日期统计",
+            ["订单日期", "类别", "销售额", "利润"],
+        )
+
+        assert vizql == {
+            "fields": [
+                {"fieldCaption": "订单日期", "function": "YEAR"},
+                {"fieldCaption": "类别"},
+                {"fieldCaption": "销售额", "function": "SUM"},
+            ],
+            "filters": [],
+        }
+
     def test_direct_vizql_counts_distinct_channels(self):
         vizql = _build_direct_vizql(
             "我们有多少个渠道？",
@@ -107,6 +122,17 @@ class TestQueryTool:
 
         assert vizql == {
             "fields": [{"fieldCaption": "渠道名称", "function": "COUNTD"}],
+            "filters": [],
+        }
+
+    def test_direct_vizql_dimension_enumeration_uses_dimension_only(self):
+        vizql = _build_direct_vizql(
+            "类别 都有什么",
+            ["订单日期", "类别", "销售额"],
+        )
+
+        assert vizql == {
+            "fields": [{"fieldCaption": "类别"}],
             "filters": [],
         }
 
@@ -232,6 +258,81 @@ class TestQueryTool:
             "fields": [{"fieldCaption": "渠道名称", "function": "COUNTD"}],
             "filters": [],
         }
+
+    @pytest.mark.asyncio
+    async def test_direct_path_retries_with_available_mcp_date_field(self, tool, tool_context):
+        mock_ds_info = {
+            "luid": "test-luid",
+            "name": "订单+ (示例 - 超市)",
+            "asset_id": 123,
+        }
+
+        with patch("services.data_agent.tools.query_tool.route_datasource", return_value=mock_ds_info):
+            with patch("services.data_agent.tools.query_tool.get_datasource_fields_cached", return_value=["订单日期", "发货日期", "类别", "销售额"]):
+                with patch("services.data_agent.tools.query_tool._get_mcp_date_field_candidates", return_value=["发货日期"]):
+                    with patch("services.data_agent.tools.query_tool.one_pass_llm", new_callable=AsyncMock) as mock_nlq:
+                        with patch("services.data_agent.tools.query_tool.execute_query", new_callable=AsyncMock) as mock_exec:
+                            mock_exec.side_effect = [
+                                NLQError(
+                                    code="NLQ_006",
+                                    message="MCP 工具执行失败: Field '订单日期' was not found in the datasource.",
+                                ),
+                                {
+                                    "fields": ["YEAR(发货日期)", "类别", "SUM(销售额)"],
+                                    "rows": [[2024, "技术", 10]],
+                                },
+                            ]
+
+                            result = await tool.execute(
+                                {"question": "输出错误！我要的是每个类别、每年的销售额。用订单日期统计"},
+                                tool_context,
+                            )
+
+        assert result.success is True
+        mock_nlq.assert_not_called()
+        first_vizql = mock_exec.call_args_list[0].kwargs["vizql_json"]
+        second_vizql = mock_exec.call_args_list[1].kwargs["vizql_json"]
+        assert first_vizql["fields"][0] == {"fieldCaption": "订单日期", "function": "YEAR"}
+        assert second_vizql["fields"][0] == {"fieldCaption": "发货日期", "function": "YEAR"}
+        assert result.data["fields"] == ["YEAR(发货日期)", "类别", "SUM(销售额)"]
+        assert result.data["rows"] == [[2024, "技术", 10]]
+        assert result.data["field_substitutions"] == [{
+            "requested": "订单日期",
+            "used": "发货日期",
+            "reason": "requested field is not available from Tableau MCP metadata",
+        }]
+
+    @pytest.mark.asyncio
+    async def test_direct_path_missing_dimension_returns_field_unavailable(self, tool, tool_context):
+        mock_ds_info = {
+            "luid": "test-luid",
+            "name": "订单+ (示例 - 超市)",
+            "asset_id": 123,
+        }
+
+        with patch("services.data_agent.tools.query_tool.route_datasource", return_value=mock_ds_info):
+            with patch("services.data_agent.tools.query_tool.get_datasource_fields_cached", return_value=["国家/地区", "省/自治区", "类别"]):
+                with patch("services.data_agent.tools.query_tool._get_mcp_queryable_field_candidates", return_value=["省/自治区", "类别"]):
+                    with patch("services.data_agent.tools.query_tool.execute_query", new_callable=AsyncMock) as mock_exec:
+                        mock_exec.side_effect = NLQError(
+                            code="NLQ_006",
+                            message="MCP 工具执行失败: Field '国家/地区' was not found in the datasource.",
+                        )
+
+                        result = await tool.execute(
+                            {"question": "国家/地区 都有哪些值？", "datasource_name": "订单+ (示例 - 超市)"},
+                            tool_context,
+                        )
+
+        assert result.success is True
+        assert result.data["intent"] == "field_unavailable"
+        assert result.data["field_unavailable"] == {
+            "requested": "国家/地区",
+            "available_fields": ["省/自治区", "类别"],
+            "suggestion": "省/自治区",
+            "reason": "requested field is not available from Tableau MCP metadata",
+        }
+        assert result.data["rows"] == []
 
     @pytest.mark.asyncio
     async def test_direct_path_top10_customers_sorts_and_calculates_share_locally(self, tool, tool_context):

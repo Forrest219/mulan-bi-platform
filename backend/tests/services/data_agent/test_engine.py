@@ -7,7 +7,7 @@ Data Agent Engine 单元测试
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from services.data_agent.engine import ReActEngine
+from services.data_agent.engine import ReActEngine, _format_direct_answer
 from services.data_agent.tool_base import ToolRegistry, ToolResult, ToolContext, BaseTool
 from services.data_agent.response import AgentEvent
 
@@ -195,6 +195,25 @@ async def test_tc_engine_005_llm_error(mock_registry, mock_llm, tool_context):
 
     # LLM 在 Think 阶段失败时直接返回 error
     assert "error" in event_types
+    error_event = next(e for e in events if e.type == "error")
+    assert error_event.content["message"] == "LLM 服务暂时不可用"
+    assert error_event.content["structured_error"]["error_type"] == "Exception"
+    assert error_event.content["structured_error"]["message"] == "LLM 服务不可用"
+
+
+def test_format_direct_answer_dimension_enumeration():
+    answer = _format_direct_answer(
+        "类别 都有什么",
+        {
+            "data": {
+                "fields": ["类别"],
+                "rows": [["家具"], ["办公用品"], ["技术"]],
+                "datasource_name": "订单+ (示例 - 超市)",
+            }
+        },
+    )
+
+    assert answer == "「类别」共有 3 个取值：家具、办公用品、技术。"
 
 
 # =============================================================================

@@ -52,6 +52,11 @@ class SchemaTool(BaseTool):
                 "description": "返回的表数量上限（默认 100）",
                 "default": 100,
             },
+            "include_all_asset_types": {
+                "type": "boolean",
+                "description": "是否返回 view/workbook 等非 Published Datasource 资产；默认 false",
+                "default": False,
+            },
         },
         "required": [],
     }
@@ -77,6 +82,7 @@ class SchemaTool(BaseTool):
         connection_id = params.get("connection_id") or context.connection_id
         table_name = params.get("table_name")
         limit = params.get("limit", 100)
+        include_all_asset_types = bool(params.get("include_all_asset_types", False))
 
         if not connection_id:
             return ToolResult(
@@ -109,7 +115,13 @@ class SchemaTool(BaseTool):
                         execution_time_ms=int((time.time() - start_time) * 1000),
                     )
 
-                result = self._query_tableau_schema(db, tc, table_name, limit)
+                result = self._query_tableau_schema(
+                    db,
+                    tc,
+                    table_name,
+                    limit,
+                    include_all_asset_types=include_all_asset_types,
+                )
             finally:
                 db.close()
 
@@ -137,13 +149,22 @@ class SchemaTool(BaseTool):
             )
 
     def _query_tableau_schema(
-        self, db, tc: "TableauConnection", table_name: Optional[str], limit: int
+        self,
+        db,
+        tc: "TableauConnection",
+        table_name: Optional[str],
+        limit: int,
+        *,
+        include_all_asset_types: bool = False,
     ) -> Dict[str, Any]:
         """Query Tableau assets and fields as the schema for a Tableau connection."""
-        assets = db.query(TableauAsset).filter(
+        asset_query = db.query(TableauAsset).filter(
             TableauAsset.connection_id == tc.id,
             TableauAsset.is_deleted == False,
-        ).order_by(TableauAsset.asset_type, TableauAsset.name).limit(limit).all()
+        )
+        if not include_all_asset_types:
+            asset_query = asset_query.filter(TableauAsset.asset_type == "datasource")
+        assets = asset_query.order_by(TableauAsset.asset_type, TableauAsset.name).limit(limit).all()
 
         asset_types = {}
         for asset in assets:
@@ -306,6 +327,7 @@ class SchemaTool(BaseTool):
         target_asset = db.query(TableauAsset).filter(
             TableauAsset.connection_id == connection_id,
             TableauAsset.is_deleted == False,
+            TableauAsset.asset_type == "datasource",
             TableauAsset.name == table_name,
         ).first()
         if target_asset:
@@ -315,6 +337,7 @@ class SchemaTool(BaseTool):
         candidates = db.query(TableauAsset).filter(
             TableauAsset.connection_id == connection_id,
             TableauAsset.is_deleted == False,
+            TableauAsset.asset_type == "datasource",
         ).order_by(TableauAsset.asset_type, TableauAsset.name).all()
 
         for asset in candidates:

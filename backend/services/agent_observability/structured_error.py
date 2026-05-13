@@ -87,6 +87,8 @@ class StructuredBIError:
 def best_effort_structured_error(value: Any, *, error_code: str | None = None) -> dict[str, Any]:
     if isinstance(value, StructuredBIError):
         return value.to_dict()
+    if isinstance(value, dict):
+        return redact_value(value)
     if isinstance(value, BaseException):
         return StructuredBIError.from_exception(value, error_code=error_code).to_dict()
     return StructuredBIError.from_message(value, error_code=error_code).to_dict()

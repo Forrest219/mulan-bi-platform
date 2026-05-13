@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
 import {
@@ -27,6 +27,14 @@ const CATEGORY_OPTIONS = [
 ];
 
 const CONFIG_SYNC_MESSAGE = '配置已保存，最多约 10 秒后在所有服务实例生效';
+const EMPTY_SCHEMA_TEXT = '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}';
+
+interface PublishDraft {
+  desc: string;
+  schemaText: string;
+  codeRef: string;
+  changeNotes: string;
+}
 
 function parseJsonObject(text: string): Record<string, unknown> {
   const parsed = JSON.parse(text) as unknown;
@@ -38,6 +46,65 @@ function parseJsonObject(text: string): Record<string, unknown> {
 
 function formatJsonText(text: string): string {
   return JSON.stringify(parseJsonObject(text), null, 2);
+}
+
+function createDraftFromVersion(activeVersion: SkillVersion | null): PublishDraft {
+  return {
+    desc: activeVersion?.description ?? '',
+    schemaText: activeVersion ? JSON.stringify(activeVersion.input_schema, null, 2) : EMPTY_SCHEMA_TEXT,
+    codeRef: activeVersion?.code_ref ?? '',
+    changeNotes: '',
+  };
+}
+
+function draftsEqual(a: PublishDraft, b: PublishDraft): boolean {
+  return a.desc === b.desc
+    && a.schemaText === b.schemaText
+    && a.codeRef === b.codeRef
+    && a.changeNotes === b.changeNotes;
+}
+
+function readPublishDraft(storageKey: string): PublishDraft | null {
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PublishDraft>;
+    if (typeof parsed.desc !== 'string' || typeof parsed.schemaText !== 'string') return null;
+    return {
+      desc: parsed.desc,
+      schemaText: parsed.schemaText,
+      codeRef: typeof parsed.codeRef === 'string' ? parsed.codeRef : '',
+      changeNotes: typeof parsed.changeNotes === 'string' ? parsed.changeNotes : '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function schemaPathJoin(base: string, key: string): string {
+  return `${base}/${key.replace(/~/g, '~0').replace(/\//g, '~1')}`;
+}
+
+function diffValues(previous: unknown, next: unknown, path = ''): Array<{ op: string; path: string; value?: unknown }> {
+  if (JSON.stringify(previous) === JSON.stringify(next)) return [];
+  if (
+    previous && next
+    && typeof previous === 'object'
+    && typeof next === 'object'
+    && !Array.isArray(previous)
+    && !Array.isArray(next)
+  ) {
+    const prevObj = previous as Record<string, unknown>;
+    const nextObj = next as Record<string, unknown>;
+    const keys = Array.from(new Set([...Object.keys(prevObj), ...Object.keys(nextObj)])).sort();
+    return keys.flatMap(key => {
+      const childPath = schemaPathJoin(path, key);
+      if (!(key in nextObj)) return [{ op: 'remove', path: childPath }];
+      if (!(key in prevObj)) return [{ op: 'add', path: childPath, value: nextObj[key] }];
+      return diffValues(prevObj[key], nextObj[key], childPath);
+    });
+  }
+  return [{ op: 'replace', path: path || '/', value: next }];
 }
 
 // ── Schema Drawer ─────────────────────────────────────────────────────────────
@@ -205,46 +272,124 @@ function SchemaDrawer({ version, activeVersion, skillId, isAdmin, onClose, onRol
   );
 }
 
-// ── 发布版本 Modal ─────────────────────────────────────────────────────────────
+// ── 发布版本 Drawer ────────────────────────────────────────────────────────────
 
-interface PublishModalProps {
+interface PublishDrawerProps {
   skillId: string;
+  skillKey: string;
   activeVersion: SkillVersion | null;
   nextVersionNumber: string;
   onClose: () => void;
   onPublished: () => void;
 }
 
-function PublishVersionModal({ skillId, activeVersion, nextVersionNumber, onClose, onPublished }: PublishModalProps) {
-  const [desc, setDesc] = useState(activeVersion?.description ?? '');
-  const [schemaText, setSchemaText] = useState(
-    activeVersion ? JSON.stringify(activeVersion.input_schema, null, 2) : '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}',
-  );
-  const [codeRef, setCodeRef] = useState(activeVersion?.code_ref ?? '');
-  const [changeNotes, setChangeNotes] = useState('');
+function PublishVersionDrawer({
+  skillId,
+  skillKey,
+  activeVersion,
+  nextVersionNumber,
+  onClose,
+  onPublished,
+}: PublishDrawerProps) {
+  const initialDraft = useMemo(() => createDraftFromVersion(activeVersion), [activeVersion]);
+  const storageKey = `skill_draft_publish:${skillId}:${activeVersion?.id ?? 'new'}`;
+  const [draft, setDraft] = useState<PublishDraft>(initialDraft);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const isDirty = !draftsEqual(draft, initialDraft);
 
-  const handleSubmit = async () => {
-    if (!desc.trim()) { setError('请填写 LLM 工具描述'); return; }
+  useEffect(() => {
+    const saved = readPublishDraft(storageKey);
+    if (!saved || draftsEqual(saved, initialDraft)) return;
+    if (window.confirm('发现上次未发布的本地草稿，是否恢复？')) {
+      setDraft(saved);
+    }
+  }, [initialDraft, storageKey]);
+
+  useEffect(() => {
+    if (!isDirty) return;
+    const timer = window.setTimeout(() => {
+      window.localStorage.setItem(storageKey, JSON.stringify({ ...draft, savedAt: new Date().toISOString() }));
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [draft, isDirty, storageKey]);
+
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isDirty]);
+
+  const parsedSchema = (() => {
+    try {
+      return parseJsonObject(draft.schemaText);
+    } catch {
+      return null;
+    }
+  })();
+
+  const schemaPatch = parsedSchema && activeVersion
+    ? diffValues(activeVersion.input_schema, parsedSchema)
+    : [];
+  const descriptionChanged = draft.desc.trim() !== (activeVersion?.description ?? '').trim();
+  const codeRefChanged = draft.codeRef.trim() !== (activeVersion?.code_ref ?? '').trim();
+  const hasContentChange = descriptionChanged || schemaPatch.length > 0 || codeRefChanged;
+
+  const setDraftField = (field: keyof PublishDraft, value: string) => {
+    setDraft(prev => ({ ...prev, [field]: value }));
+    setShowConfirm(false);
+  };
+
+  const handleRequestClose = () => {
+    if (isDirty && !window.confirm('发布草稿尚未提交，确定关闭？本地草稿会保留。')) return;
+    if (isDirty) {
+      window.localStorage.setItem(storageKey, JSON.stringify({ ...draft, savedAt: new Date().toISOString() }));
+    }
+    onClose();
+  };
+
+  const validateDraft = (): Record<string, unknown> | null => {
+    if (!draft.desc.trim()) { setError('请填写 LLM 工具描述'); return null; }
     let parsedSchema: Record<string, unknown>;
     try {
-      parsedSchema = parseJsonObject(schemaText);
+      parsedSchema = parseJsonObject(draft.schemaText);
     } catch (e) {
       setError(`Input Schema 格式不正确：${e instanceof Error ? e.message : '未知错误'}`);
-      return;
+      return null;
     }
+    if (!hasContentChange) {
+      setError('当前草稿与活跃版本一致，请先修改描述、Schema 或代码引用');
+      return null;
+    }
+    setError('');
+    return parsedSchema;
+  };
+
+  const handlePreview = () => {
+    if (!validateDraft()) return;
+    setShowConfirm(true);
+  };
+
+  const handleConfirmPublish = async () => {
+    const parsedSchema = validateDraft();
+    if (!parsedSchema) return;
     const payload: PublishVersionPayload = {
-      description: desc.trim(),
+      description: draft.desc.trim(),
       input_schema: parsedSchema,
       endpoint_type: 'static',
-      code_ref: codeRef.trim() || undefined,
-      change_notes: changeNotes.trim() || undefined,
+      code_ref: draft.codeRef.trim() || undefined,
+      change_notes: draft.changeNotes.trim() || undefined,
     };
     setSubmitting(true);
     setError('');
     try {
       await publishVersion(skillId, payload);
+      window.localStorage.removeItem(storageKey);
       onPublished();
     } catch (e) {
       setError(e instanceof Error ? e.message : '发布失败');
@@ -255,7 +400,7 @@ function PublishVersionModal({ skillId, activeVersion, nextVersionNumber, onClos
 
   const handleFormatJson = () => {
     try {
-      setSchemaText(formatJsonText(schemaText));
+      setDraftField('schemaText', formatJsonText(draft.schemaText));
       setError('');
     } catch (e) {
       setError(`Input Schema 格式不正确：${e instanceof Error ? e.message : '未知错误'}`);
@@ -263,91 +408,163 @@ function PublishVersionModal({ skillId, activeVersion, nextVersionNumber, onClos
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-2xl w-[600px] max-h-[90vh] overflow-y-auto">
-        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-          <h2 className="text-[15px] font-semibold text-slate-800">发布新版本 {nextVersionNumber}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+    <>
+      <div className="fixed inset-0 bg-black/30 z-40" onClick={handleRequestClose} />
+      <div className="fixed right-0 top-0 h-full w-[min(980px,calc(100vw-48px))] bg-white shadow-2xl z-50 flex flex-col">
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between shrink-0">
+          <div>
+            <h2 className="text-[15px] font-semibold text-slate-800">发布新版本 {nextVersionNumber}</h2>
+            <p className="text-[12px] text-slate-400 mt-0.5">
+              基于当前活跃版本 {activeVersion?.version_number ?? 'v1'} 编辑，技能标识 {skillKey}
+            </p>
+          </div>
+          <button onClick={handleRequestClose} className="text-slate-400 hover:text-slate-600 p-1">
             <i className="ri-close-line text-lg" />
           </button>
         </div>
-        <div className="px-6 py-5 space-y-4">
+
+        <div className="flex-1 overflow-y-auto px-6 py-5">
           {error && (
-            <div className="px-3 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg text-[13px]">
+            <div className="mb-4 px-3 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg text-[13px]">
               {error}
             </div>
           )}
-          <div>
-            <label className="block text-[12px] font-medium text-slate-600 mb-1">
-              LLM 工具描述（注入 System Prompt）<span className="text-red-500">*</span>
-            </label>
-            <textarea
-              value={desc}
-              onChange={e => setDesc(e.target.value)}
-              rows={4}
-              placeholder="描述此技能的功能，供 LLM 理解和调用..."
-              className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 resize-none"
-            />
-          </div>
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-[12px] font-medium text-slate-600">
-                Input Schema（JSON Schema）
-              </label>
-              <button
-                type="button"
-                onClick={handleFormatJson}
-                className="text-[12px] text-blue-600 hover:text-blue-500 px-2 py-1 rounded hover:bg-blue-50"
-              >
-                格式化 JSON
-              </button>
+
+          <div className="grid grid-cols-[minmax(0,1fr)_320px] gap-5 items-start">
+            <div className="space-y-4 min-w-0">
+              <div>
+                <label className="block text-[12px] font-medium text-slate-600 mb-1">
+                  LLM 工具描述（注入 System Prompt）<span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={draft.desc}
+                  onChange={e => setDraftField('desc', e.target.value)}
+                  rows={5}
+                  placeholder="描述此技能的功能，供 LLM 理解和调用..."
+                  className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 resize-y min-h-[120px]"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[12px] font-medium text-slate-600">
+                    Input Schema（JSON Schema）
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleFormatJson}
+                    className="text-[12px] text-blue-600 hover:text-blue-500 px-2 py-1 rounded hover:bg-blue-50"
+                  >
+                    格式化 JSON
+                  </button>
+                </div>
+                <textarea
+                  value={draft.schemaText}
+                  onChange={e => setDraftField('schemaText', e.target.value)}
+                  rows={18}
+                  className="w-full px-3 py-2 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 font-mono resize-y bg-slate-50 min-h-[420px]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[12px] font-medium text-slate-600 mb-1">代码引用（可选）</label>
+                  <input
+                    value={draft.codeRef}
+                    onChange={e => setDraftField('codeRef', e.target.value)}
+                    placeholder="如：ExecuteQueryTool"
+                    className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[12px] font-medium text-slate-600 mb-1">变更说明</label>
+                  <input
+                    value={draft.changeNotes}
+                    onChange={e => setDraftField('changeNotes', e.target.value)}
+                    placeholder="本次修改了什么..."
+                    className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400"
+                  />
+                </div>
+              </div>
             </div>
-            <textarea
-              value={schemaText}
-              onChange={e => setSchemaText(e.target.value)}
-              rows={8}
-              className="w-full px-3 py-2 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 font-mono resize-none bg-slate-50"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[12px] font-medium text-slate-600 mb-1">代码引用（可选）</label>
-              <input
-                value={codeRef}
-                onChange={e => setCodeRef(e.target.value)}
-                placeholder="如：ExecuteQueryTool"
-                className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 font-mono"
-              />
-            </div>
-            <div>
-              <label className="block text-[12px] font-medium text-slate-600 mb-1">变更说明</label>
-              <input
-                value={changeNotes}
-                onChange={e => setChangeNotes(e.target.value)}
-                placeholder="本次修改了什么..."
-                className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400"
-              />
+
+            <div className="border border-slate-200 rounded-xl bg-slate-50 p-4 sticky top-0">
+              <div className="flex items-center gap-2 mb-3">
+                <i className="ri-git-compare-line text-slate-400" />
+                <h3 className="text-[13px] font-semibold text-slate-700">发布前 Diff 摘要</h3>
+              </div>
+
+              <div className="space-y-2 text-[12px]">
+                <div className={`px-3 py-2 rounded-lg border ${descriptionChanged ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-white border-slate-200 text-slate-500'}`}>
+                  LLM 描述：{descriptionChanged ? '已修改' : '无变化'}
+                </div>
+                <div className={`px-3 py-2 rounded-lg border ${codeRefChanged ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-white border-slate-200 text-slate-500'}`}>
+                  代码引用：{codeRefChanged ? '已修改' : '无变化'}
+                </div>
+                <div className={`px-3 py-2 rounded-lg border ${parsedSchema ? (schemaPatch.length > 0 ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-white border-slate-200 text-slate-500') : 'bg-red-50 border-red-200 text-red-700'}`}>
+                  Input Schema：{parsedSchema ? `${schemaPatch.length} 处差异` : 'JSON 无效'}
+                </div>
+
+                {schemaPatch.length > 0 && (
+                  <div className="max-h-64 overflow-y-auto space-y-1.5 pt-1">
+                    {schemaPatch.slice(0, 12).map((patch, i) => (
+                      <div key={`${patch.op}-${patch.path}-${i}`} className="px-2.5 py-1.5 bg-white border border-slate-200 rounded text-[11px] font-mono text-slate-600">
+                        <span className={`font-semibold mr-1 ${
+                          patch.op === 'add' ? 'text-emerald-600' : patch.op === 'remove' ? 'text-red-600' : 'text-amber-600'
+                        }`}>{patch.op}</span>
+                        {patch.path}
+                      </div>
+                    ))}
+                    {schemaPatch.length > 12 && (
+                      <div className="text-[11px] text-slate-400 px-1">还有 {schemaPatch.length - 12} 处差异</div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {showConfirm && (
+                <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-[12px] text-blue-800 leading-5">
+                    请确认发布 {nextVersionNumber}。确认后才会调用发布接口并切换活跃版本。
+                  </p>
+                  <button
+                    onClick={handleConfirmPublish}
+                    disabled={submitting}
+                    className="mt-3 w-full px-4 py-2 text-[13px] text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  >
+                    {submitting && <i className="ri-loader-4-line animate-spin" />}
+                    确认发布
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
-        <div className="px-6 py-4 border-t border-slate-200 flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-[13px] text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
-          >
-            取消
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={submitting}
-            className="px-4 py-2 text-[13px] text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5"
-          >
-            {submitting && <i className="ri-loader-4-line animate-spin" />}
-            发布
-          </button>
+
+        <div className="px-6 py-4 border-t border-slate-200 flex items-center justify-between gap-3 shrink-0">
+          <div className="text-[12px] text-slate-400">
+            {isDirty ? '草稿会自动保存到本地浏览器' : '尚未修改当前活跃版本内容'}
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={handleRequestClose}
+              disabled={submitting}
+              className="px-4 py-2 text-[13px] text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"
+            >
+              取消
+            </button>
+            <button
+              onClick={handlePreview}
+              disabled={submitting}
+              className="px-4 py-2 text-[13px] text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5"
+            >
+              <i className="ri-git-compare-line" />
+              预览 Diff 并确认
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -421,9 +638,9 @@ export default function SkillDetailPage() {
   const [editCategory, setEditCategory] = useState('');
   const [savingField, setSavingField] = useState<string | null>(null);
 
-  // 抽屉、Modal、Dialog 状态
+  // 抽屉、Dialog 状态
   const [drawerVersion, setDrawerVersion] = useState<SkillVersion | null>(null);
-  const [showPublishModal, setShowPublishModal] = useState(false);
+  const [showPublishDrawer, setShowPublishDrawer] = useState(false);
   const [rollbackTarget, setRollbackTarget] = useState<SkillVersion | null>(null);
   const [rollbackLoading, setRollbackLoading] = useState(false);
 
@@ -710,7 +927,7 @@ export default function SkillDetailPage() {
                 {isAdmin && (
                   <div className="mt-5 pt-5 border-t border-slate-100">
                     <button
-                      onClick={() => setShowPublishModal(true)}
+                      onClick={() => setShowPublishDrawer(true)}
                       className="flex items-center gap-1.5 px-4 py-2 text-[13px] text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50"
                     >
                       <i className="ri-add-line" />
@@ -736,14 +953,15 @@ export default function SkillDetailPage() {
         />
       )}
 
-      {/* 发布版本 Modal */}
-      {showPublishModal && (
-        <PublishVersionModal
+      {/* 发布版本抽屉 */}
+      {showPublishDrawer && (
+        <PublishVersionDrawer
           skillId={skill.id}
+          skillKey={skill.skill_key}
           activeVersion={activeVersion}
           nextVersionNumber={nextVersionNumber}
-          onClose={() => setShowPublishModal(false)}
-          onPublished={() => { setShowPublishModal(false); loadSkill(); }}
+          onClose={() => setShowPublishDrawer(false)}
+          onPublished={() => { setShowPublishDrawer(false); loadSkill(); }}
         />
       )}
 

@@ -6,6 +6,7 @@ Spec: docs/specs/14-nl-to-query-pipeline-spec.md — NLQ Service
 Spec: docs/specs/29-sql-agent-spec.md — SQL Agent
 """
 
+import copy
 import logging
 import inspect
 import re
@@ -90,11 +91,23 @@ def _extract_time_filter(question: str, date_caption: str) -> Optional[dict]:
     return None
 
 
+_YEAR_BUCKET_PATTERNS = [
+    r'每\s*年',
+    r'每一\s*年',
+    r'按\s*年',
+    r'分\s*年',
+    r'年度',
+    r'年维度',
+    r'用.*日期.*统计',
+    r'按.*日期.*统计',
+]
+
 _TIME_PATTERNS = [
     r'(过去|近)\s*几\s*年',
     r'过去\s*(\d+|[一二三四五六七八九十]+)\s*(年|个月|月|个季度|季度)',
     r'今年|去年|上季度|上月',
     r'\d{4}\s*年',
+    *_YEAR_BUCKET_PATTERNS,
 ]
 
 
@@ -290,8 +303,236 @@ def _normalize_result_table(result: Dict[str, Any]) -> Tuple[List[Any], List[Lis
     return result.get("fields", []), result.get("rows", [])
 
 
+async def _execute_query_with_date_fallback(
+    *,
+    datasource_luid: str,
+    vizql_json: Dict[str, Any],
+    connection_id: Optional[int],
+    question: str = "",
+    limit: int = 1000,
+) -> Tuple[Dict[str, Any], Dict[str, Any], List[Dict[str, str]]]:
+    """Execute VizQL and retry once when MCP says a requested date field is absent."""
+    try:
+        result = execute_query(
+            datasource_luid=datasource_luid,
+            vizql_json=vizql_json,
+            limit=limit,
+            connection_id=connection_id,
+        )
+        if inspect.isawaitable(result):
+            result = await result
+        return result, vizql_json, []
+    except NLQError as first_error:
+        missing_field = _extract_missing_field_name(first_error.message or str(first_error))
+        if not missing_field or not _is_date_caption(missing_field):
+            raise
+
+        candidates = _get_mcp_date_field_candidates(datasource_luid, connection_id)
+        replacement = _choose_replacement_date_field(question, candidates, missing_field)
+        if not replacement:
+            raise
+
+        retry_vizql = _replace_field_caption(vizql_json, missing_field, replacement)
+        logger.info(
+            "QueryTool date field fallback: datasource=%s requested=%s replacement=%s",
+            datasource_luid,
+            missing_field,
+            replacement,
+        )
+        try:
+            retry_result = execute_query(
+                datasource_luid=datasource_luid,
+                vizql_json=retry_vizql,
+                limit=limit,
+                connection_id=connection_id,
+            )
+            if inspect.isawaitable(retry_result):
+                retry_result = await retry_result
+            return retry_result, retry_vizql, [{
+                "requested": missing_field,
+                "used": replacement,
+                "reason": "requested field is not available from Tableau MCP metadata",
+            }]
+        except NLQError:
+            raise first_error
+
+
 def _compact(value: str) -> str:
     return value.strip().lower().replace(' ', '').replace(' ', '')
+
+
+def _is_date_caption(caption: str) -> bool:
+    return any(keyword in caption for keyword in _DATE_KEYWORDS)
+
+
+def _extract_missing_field_name(message: str) -> Optional[str]:
+    for pattern in (r"Field\s+'([^']+)'\s+was not found", r'字段[「"\']?([^」"\']+)[」"\']?不存在'):
+        match = re.search(pattern, message or "", re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    return None
+
+
+def _get_mcp_date_field_candidates(datasource_luid: str, connection_id: Optional[int]) -> List[str]:
+    if connection_id is None:
+        return []
+    try:
+        from services.tableau.mcp_client import get_tableau_mcp_client
+
+        client = get_tableau_mcp_client(connection_id=connection_id)
+        metadata = client.get_datasource_metadata(datasource_luid, timeout=30)
+        return _extract_date_fields_from_metadata(metadata)
+    except Exception as e:
+        logger.warning(
+            "QueryTool date fallback metadata lookup failed: datasource=%s connection=%s error=%s",
+            datasource_luid,
+            connection_id,
+            e,
+        )
+        return []
+
+
+def _get_mcp_queryable_field_candidates(datasource_luid: str, connection_id: Optional[int]) -> List[str]:
+    if connection_id is None:
+        return []
+    try:
+        from services.tableau.mcp_client import get_tableau_mcp_client
+
+        client = get_tableau_mcp_client(connection_id=connection_id)
+        metadata = client.get_datasource_metadata(datasource_luid, timeout=30)
+        return _extract_queryable_fields_from_metadata(metadata)
+    except Exception as e:
+        logger.warning(
+            "QueryTool field availability metadata lookup failed: datasource=%s connection=%s error=%s",
+            datasource_luid,
+            connection_id,
+            e,
+        )
+        return []
+
+
+def _extract_queryable_fields_from_metadata(metadata: Any) -> List[str]:
+    candidates: List[str] = []
+    seen: set[str] = set()
+
+    def add_name(name: Any) -> None:
+        value = str(name or "").strip()
+        if not value:
+            return
+        compact_value = _compact(value)
+        if compact_value in seen:
+            return
+        seen.add(compact_value)
+        candidates.append(value)
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            has_field_shape = any(key in node for key in ("fieldCaption", "caption", "name", "fieldName"))
+            if has_field_shape and any(key in node for key in ("dataType", "data_type", "role", "columnClass")):
+                add_name(
+                    node.get("fieldCaption")
+                    or node.get("caption")
+                    or node.get("name")
+                    or node.get("fieldName")
+                )
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(metadata)
+    return candidates
+
+
+def _extract_date_fields_from_metadata(metadata: Any) -> List[str]:
+    candidates: List[str] = []
+    seen: set[str] = set()
+
+    def add_field(item: Dict[str, Any]) -> None:
+        name = str(
+            item.get("fieldCaption")
+            or item.get("caption")
+            or item.get("name")
+            or item.get("fieldName")
+            or ""
+        ).strip()
+        if not name:
+            return
+        data_type = str(item.get("dataType") or item.get("data_type") or item.get("type") or "").upper()
+        if not ("DATE" in data_type or "TIME" in data_type or _is_date_caption(name)):
+            return
+        compact_name = _compact(name)
+        if compact_name in seen:
+            return
+        seen.add(compact_name)
+        candidates.append(name)
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            if any(key in node for key in ("fieldCaption", "caption", "name", "fieldName")):
+                add_field(node)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(metadata)
+    return candidates
+
+
+def _choose_replacement_date_field(question: str, candidates: List[str], missing_field: str) -> Optional[str]:
+    usable = [candidate for candidate in candidates if _compact(candidate) != _compact(missing_field)]
+    if not usable:
+        return None
+
+    compact_question = _compact(question)
+    for candidate in usable:
+        if _compact(candidate) in compact_question:
+            return candidate
+    for preferred in _PREFERRED_DATE_KEYWORDS:
+        for candidate in usable:
+            if preferred in candidate:
+                return candidate
+    return usable[0]
+
+
+def _suggest_available_field(missing_field: str, available_fields: List[str]) -> Optional[str]:
+    compact_missing = _compact(missing_field)
+    if not compact_missing:
+        return None
+
+    geo_keywords = ("国家", "地区", "省", "自治区", "城市", "地域", "区域")
+    if any(keyword in missing_field for keyword in geo_keywords):
+        for field in available_fields:
+            if any(keyword in field for keyword in geo_keywords):
+                return field
+
+    for field in available_fields:
+        compact_field = _compact(field)
+        if compact_field and (compact_missing in compact_field or compact_field in compact_missing):
+            return field
+    return None
+
+
+def _replace_field_caption(vizql_json: Dict[str, Any], old: str, new: str) -> Dict[str, Any]:
+    copied = copy.deepcopy(vizql_json)
+    old_compact = _compact(old)
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for key, value in list(node.items()):
+                if key in {"fieldCaption", "fieldName", "name"} and _compact(str(value)) == old_compact:
+                    node[key] = new
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(copied)
+    return copied
 
 
 def _first_existing_caption(field_captions: List[str], candidates: Tuple[str, ...]) -> Optional[str]:
@@ -326,11 +567,17 @@ def _needs_time_dimension(question: str) -> bool:
         return True
     if re.search(r'(过去|近)\s*(几|\d+|[一二三四五六七八九十]+)\s*年', question):
         return True
+    if any(re.search(pattern, question) for pattern in _YEAR_BUCKET_PATTERNS):
+        return True
     return False
 
 
 def _trend_date_function(question: str) -> str:
-    if re.search(r'(过去|近)\s*(几|\d+|[一二三四五六七八九十]+)\s*年', question) or '年' in question:
+    if (
+        re.search(r'(过去|近)\s*(几|\d+|[一二三四五六七八九十]+)\s*年', question)
+        or any(re.search(pattern, question) for pattern in _YEAR_BUCKET_PATTERNS)
+        or '年' in question
+    ):
         return "YEAR"
     if '季度' in question:
         return "QUARTER"
@@ -684,25 +931,24 @@ class QueryTool(BaseTool):
     ) -> ToolResult:
         """Execute the two deterministic queries required by customer churn."""
         try:
-            base_result = execute_query(
+            base_result, _base_vizql, base_substitutions = await _execute_query_with_date_fallback(
                 datasource_luid=datasource_luid,
-                vizql_json=churn_plan["base_vizql"],
-                limit=1000,
                 connection_id=connection_id,
+                vizql_json=churn_plan["base_vizql"],
+                question="",
+                limit=1000,
             )
-            if inspect.isawaitable(base_result):
-                base_result = await base_result
             base_fields, base_rows = _normalize_result_table(base_result)
 
+            recent_substitutions: List[Dict[str, str]] = []
             if base_rows:
-                recent_result = execute_query(
+                recent_result, _recent_vizql, recent_substitutions = await _execute_query_with_date_fallback(
                     datasource_luid=datasource_luid,
-                    vizql_json=churn_plan["recent_vizql"],
-                    limit=1000,
                     connection_id=connection_id,
+                    vizql_json=churn_plan["recent_vizql"],
+                    question="",
+                    limit=1000,
                 )
-                if inspect.isawaitable(recent_result):
-                    recent_result = await recent_result
                 recent_fields, recent_rows = _normalize_result_table(recent_result)
             else:
                 recent_fields, recent_rows = [churn_plan["customer_field"]], []
@@ -729,6 +975,9 @@ class QueryTool(BaseTool):
             "confidence": confidence,
             "datasource_name": datasource_name,
         })
+        substitutions = base_substitutions + recent_substitutions
+        if substitutions:
+            data["field_substitutions"] = substitutions
         return ToolResult(success=True, data=data, execution_time_ms=execution_time_ms)
 
     async def _execute_direct(
@@ -745,15 +994,42 @@ class QueryTool(BaseTool):
     ) -> ToolResult:
         """Execute a pre-built VizQL query directly against Tableau MCP."""
         try:
-            result = execute_query(
+            result, _effective_vizql, field_substitutions = await _execute_query_with_date_fallback(
                 datasource_luid=datasource_luid,
                 vizql_json=vizql_json,
-                limit=1000,
                 connection_id=connection_id,
+                question=question,
+                limit=1000,
             )
-            if inspect.isawaitable(result):
-                result = await result
         except NLQError as e:
+            missing_field = _extract_missing_field_name(e.message or str(e))
+            if missing_field:
+                available_fields = _get_mcp_queryable_field_candidates(datasource_luid, connection_id)
+                suggestion = _suggest_available_field(missing_field, available_fields)
+                logger.warning(
+                    "QueryTool field unavailable: requested=%s datasource=%s available=%s suggestion=%s",
+                    missing_field,
+                    datasource_luid,
+                    available_fields,
+                    suggestion,
+                )
+                return ToolResult(
+                    success=True,
+                    data={
+                        "fields": [],
+                        "rows": [],
+                        "intent": "field_unavailable",
+                        "confidence": confidence,
+                        "datasource_name": datasource_name,
+                        "field_unavailable": {
+                            "requested": missing_field,
+                            "available_fields": available_fields,
+                            "suggestion": suggestion,
+                            "reason": "requested field is not available from Tableau MCP metadata",
+                        },
+                    },
+                    execution_time_ms=int((time.time() - start_time) * 1000),
+                )
             logger.warning("QueryTool execute_query failed: code=%s, message=%s", e.code, e.message)
             return ToolResult(
                 success=False,
@@ -784,6 +1060,7 @@ class QueryTool(BaseTool):
                 "intent": intent,
                 "confidence": confidence,
                 "datasource_name": datasource_name,
+                **({"field_substitutions": field_substitutions} if field_substitutions else {}),
                 **{k: v for k, v in processed.items() if k not in {"fields", "rows"}},
             },
             execution_time_ms=execution_time_ms,

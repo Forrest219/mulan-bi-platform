@@ -46,6 +46,9 @@ def _mock_tableau_schema_db(connection=None, assets=None, fields=None):
         def all(self):
             if self.model is TableauAsset:
                 rows = assets
+                asset_type = _criterion_value(self.criteria, "asset_type")
+                if asset_type is not None:
+                    rows = [asset for asset in rows if asset.asset_type == asset_type]
             elif self.model is TableauDatasourceField:
                 asset_id = _criterion_value(self.criteria, "asset_id")
                 rows = [field for field in fields if field.asset_id == asset_id]
@@ -62,9 +65,13 @@ def _mock_tableau_schema_db(connection=None, assets=None, fields=None):
 
             if self.model is TableauAsset:
                 name = _criterion_value(self.criteria, "name")
+                asset_type = _criterion_value(self.criteria, "asset_type")
+                rows = assets
+                if asset_type is not None:
+                    rows = [asset for asset in rows if asset.asset_type == asset_type]
                 if name is None:
-                    return assets[0] if assets else None
-                return next((asset for asset in assets if asset.name == name), None)
+                    return rows[0] if rows else None
+                return next((asset for asset in rows if asset.name == name), None)
 
             return None
 
@@ -86,11 +93,11 @@ def _tableau_connection(connection_id=1, is_active=True):
     )
 
 
-def _tableau_asset(asset_id=101, name="orders-订单明细表"):
+def _tableau_asset(asset_id=101, name="orders-订单明细表", asset_type="datasource"):
     return TableauAsset(
         id=asset_id,
         connection_id=1,
-        asset_type="datasource",
+        asset_type=asset_type,
         tableau_id="ds-101",
         name=name,
         project_name="数据源",
@@ -137,6 +144,43 @@ class TestSchemaTool:
         assert result.data["db_type"] == "tableau"
         assert result.data["tables"][0]["name"] == "orders-订单明细表"
         assert result.data["asset_summary"] == {"datasource": 1}
+
+    @pytest.mark.asyncio
+    async def test_list_tableau_assets_defaults_to_published_datasources_only(self, tool):
+        datasource = _tableau_asset(asset_id=101, name="orders-订单明细表", asset_type="datasource")
+        view = _tableau_asset(asset_id=102, name="Orders View", asset_type="view")
+        workbook = _tableau_asset(asset_id=103, name="Orders Workbook", asset_type="workbook")
+        mock_db = _mock_tableau_schema_db(
+            connection=_tableau_connection(),
+            assets=[datasource, view, workbook],
+        )
+        context = ToolContext(session_id="s1", user_id=1, connection_id=1, trace_id="t1")
+
+        with patch("services.data_agent.tools.schema_tool.SessionLocal", return_value=mock_db):
+            result = await tool.execute({}, context)
+
+        assert result.success is True
+        assert [table["type"] for table in result.data["tables"]] == ["datasource"]
+        assert result.data["tables"][0]["name"] == "orders-订单明细表"
+        assert result.data["asset_summary"] == {"datasource": 1}
+
+    @pytest.mark.asyncio
+    async def test_list_tableau_assets_can_include_views_when_explicitly_requested(self, tool):
+        datasource = _tableau_asset(asset_id=101, name="orders-订单明细表", asset_type="datasource")
+        view = _tableau_asset(asset_id=102, name="Orders View", asset_type="view")
+        workbook = _tableau_asset(asset_id=103, name="Orders Workbook", asset_type="workbook")
+        mock_db = _mock_tableau_schema_db(
+            connection=_tableau_connection(),
+            assets=[datasource, view, workbook],
+        )
+        context = ToolContext(session_id="s1", user_id=1, connection_id=1, trace_id="t1")
+
+        with patch("services.data_agent.tools.schema_tool.SessionLocal", return_value=mock_db):
+            result = await tool.execute({"include_all_asset_types": True}, context)
+
+        assert result.success is True
+        assert [table["type"] for table in result.data["tables"]] == ["datasource", "view", "workbook"]
+        assert result.data["asset_summary"] == {"datasource": 1, "view": 1, "workbook": 1}
 
     def test_tableau_table_name_matches_asset_suffix_with_empty_fields_warning(self, tool, monkeypatch):
         """table_name='订单明细表' 应匹配 TableauAsset.name='orders-订单明细表'。"""

@@ -896,6 +896,7 @@ context_aware → keyword_match → llm_classify → fallback("chat")
 5. 意图识别 `fallback_chain` 必须落 `bi_agent_intent_log`；禁止只在内存中转或仅打 logger.info
 6. 首页 Agent 链路禁止引用普通 `bi_data_sources` 作为问答目标；`DataSource` 同 ID 记录不得接管 Tableau connection_id
 7. 首页 Agent 的生产验收禁止以“有回复”为成功标准；必须以 Tableau MCP / 底层工具参照链路为准确性基线。任何让首页答案弱于参照链路的改动（口径漂移、字段/维度丢失、错误成功、自由发挥补全）均视为 P0 回归，PR 必须拒绝或回滚。
+8. 首页 Agent、QueryTool、LLM 查询 prompt 和 direct VizQL 只能信任 MCP/VizQL 当前可查询字段 `queryable_fields`。资产同步/API 导入得到的 `metadata_fields` 只是元数据层字段全集/字段快照，用于治理、盘点、血缘和语义维护；不得把 `metadata_fields` 当作可查询字段生成查询。若字段仅存在于 `metadata_fields`，必须解释“元数据存在但当前 published datasource 不支持 MCP 查询”，并基于 `queryable_fields` 给出替代字段建议，不得报成工具执行失败。
 
 #### 强制检查清单
 
@@ -905,6 +906,7 @@ context_aware → keyword_match → llm_classify → fallback("chat")
 - [ ] 新增意图策略必须在 `IntentStrategyRegistry` 注册，并补本 spec §15.D 表
 - [ ] `platform_settings.homepage_agent_mode` 写操作有 admin 角色校验
 - [ ] 首页问答上线前必须提交“Tableau MCP 参照链路 vs 首页链路”对照报告；报告至少覆盖数据源清单、字段清单、简单聚合、趋势、多轮追问、TopN/占比等场景，并明确逐题判定首页是否不劣于参照链路。
+- [ ] 字段可查询性回归用例必须覆盖：字段在 `metadata_fields` 存在但不在 `queryable_fields` 时，首页返回业务解释和替代字段建议，而不是 MCP/工具失败。
 
 #### 验证命令
 

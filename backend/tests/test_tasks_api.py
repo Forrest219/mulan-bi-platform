@@ -11,10 +11,13 @@
 - 未认证访问被拦截
 - analyst 无法操作 admin-only 端点
 """
+from datetime import datetime, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 
-from services.tasks.models import BiTaskRun, BiTaskSchedule
+from services.tableau.models import TableauConnection
+from services.tasks.models import BiSyncSchedule, BiSyncTask, BiTaskRun, BiTaskSchedule
 from app.core.database import Base, engine
 
 
@@ -154,6 +157,62 @@ def test_get_stats_unauthenticated(client: TestClient):
     client.cookies.clear()
     resp = client.get(f"{PREFIX}/stats")
     assert resp.status_code in (401, 403)
+
+
+# ---------------------------------------------------------------------------
+# Sync task reconciliation
+# ---------------------------------------------------------------------------
+
+def test_reconcile_stale_sync_tasks_marks_orphan_running_failed(db_session):
+    """超过阈值且没有执行日志的 running 同步任务会被自动回收。"""
+    from app.api.tasks import _reconcile_stale_sync_tasks
+
+    now = datetime(2026, 5, 13, 10, 0, 0)
+    schedule = BiSyncSchedule(
+        name="pytest stale sync schedule",
+        frequency_type="daily",
+        cron_expr="0 0 * * *",
+    )
+    db_session.add(schedule)
+    db_session.flush()
+
+    conn = TableauConnection(
+        name="pytest Tableau-online",
+        server_url="https://tableau.example.com",
+        site="pytest",
+        token_name="pytest",
+        token_encrypted="encrypted",
+        owner_id=1,
+        is_active=True,
+        auto_sync_enabled=True,
+        schedule_id=schedule.id,
+    )
+    db_session.add(conn)
+    db_session.flush()
+
+    stale_task = BiSyncTask(
+        schedule_id=schedule.id,
+        connection_id=conn.id,
+        scheduled_at=now - timedelta(minutes=90),
+        status="running",
+        trigger_type="scheduled",
+    )
+    recent_task = BiSyncTask(
+        schedule_id=schedule.id,
+        connection_id=conn.id,
+        scheduled_at=now - timedelta(minutes=10),
+        status="running",
+        trigger_type="scheduled",
+    )
+    db_session.add_all([stale_task, recent_task])
+    db_session.commit()
+
+    reconciled = _reconcile_stale_sync_tasks(db_session, now=now, timeout_minutes=60)
+
+    assert reconciled == 1
+    assert stale_task.status == "failed"
+    assert "未创建执行日志" in stale_task.error_message
+    assert recent_task.status == "running"
 
 
 # ---------------------------------------------------------------------------

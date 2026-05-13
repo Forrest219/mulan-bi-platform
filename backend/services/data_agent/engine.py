@@ -267,10 +267,13 @@ class ReActEngine:
 
             if think_result.get("error"):
                 error_code = think_result.get("error_code", "AGENT_006")
-                yield AgentEvent(type="error", content={
+                error_content = {
                     "error_code": error_code,
                     "message": think_result["error"],
-                })
+                }
+                if think_result.get("structured_error"):
+                    error_content["structured_error"] = think_result["structured_error"]
+                yield AgentEvent(type="error", content=error_content)
                 return
 
             reasoning = think_result.get("reasoning", "")
@@ -443,13 +446,29 @@ class ReActEngine:
                     )
         except Exception as e:
             logger.exception("LLM 调用失败")
-            return {"error": "LLM 服务暂时不可用", "error_code": "AGENT_006"}
+            from services.agent_observability.structured_error import StructuredBIError
+
+            return {
+                "error": "LLM 服务暂时不可用",
+                "error_code": "AGENT_006",
+                "structured_error": StructuredBIError.from_exception(e, error_code="AGENT_006").to_dict(),
+            }
 
         if isinstance(result_data, dict) and "action" in result_data:
             return result_data
 
         if "error" in result_data:
-            return {"error": result_data["error"], "error_code": "AGENT_006"}
+            from services.agent_observability.structured_error import StructuredBIError
+
+            return {
+                "error": result_data["error"],
+                "error_code": "AGENT_006",
+                "structured_error": StructuredBIError.from_message(
+                    result_data["error"],
+                    error_type=str(result_data.get("error_type") or "LLMError"),
+                    error_code="AGENT_006",
+                ).to_dict(),
+            }
 
         content = result_data.get("content", "")
         if not content.strip():
@@ -675,16 +694,62 @@ def _build_think_prompt(
 def _format_direct_answer(query: str, result_data: dict) -> str:
     """为直接查询结果生成摘要行（结构化表格数据由 table_data 事件传给前端）"""
     data = result_data.get("data") or {}
+    fields = data.get("fields", [])
     rows = data.get("rows", [])
     ds_name = data.get("datasource_name", "")
     row_count = len(rows)
+
+    unavailable = data.get("field_unavailable")
+    if isinstance(unavailable, dict):
+        requested = unavailable.get("requested") or "该字段"
+        suggestion = unavailable.get("suggestion")
+        available_fields = unavailable.get("available_fields") or []
+        hint = f"数据源「{ds_name}」" if ds_name else "当前数据源"
+        if suggestion:
+            return f"{hint}当前可查询字段里没有「{requested}」。可用的相近字段是「{suggestion}」，你可以改问「{suggestion} 都有哪些值？」。"
+        if available_fields:
+            preview = "、".join(str(field) for field in available_fields[:20])
+            suffix = f"（共 {len(available_fields)} 个）" if len(available_fields) > 20 else ""
+            return f"{hint}当前可查询字段里没有「{requested}」。当前可查询字段包括：{preview}{suffix}。"
+        return f"{hint}当前可查询字段里没有「{requested}」，因此无法返回它的取值。"
 
     if not row_count:
         hint = f"数据源「{ds_name}」" if ds_name else "数据源"
         return f"在{hint}中未查询到符合条件的数据，请确认筛选条件是否正确。"
 
+    enum_answer = _format_dimension_enum_direct_answer(fields, rows)
+    if enum_answer:
+        return enum_answer
+
     hint = f"「{ds_name}」" if ds_name else ""
     return f"已从{hint}查询到 **{row_count}** 条记录，详见下方表格。"
+
+
+def _format_dimension_enum_direct_answer(fields: list, rows: list) -> Optional[str]:
+    if len(fields) != 1:
+        return None
+    field_name = str(fields[0].get("name") if isinstance(fields[0], dict) else fields[0])
+    if not field_name or any(marker in field_name.upper() for marker in ("SUM(", "AVG(", "COUNT", "MIN(", "MAX(")):
+        return None
+
+    values = []
+    seen = set()
+    for row in rows:
+        if not isinstance(row, list) or not row:
+            continue
+        value = row[0]
+        if value is None or str(value) == "":
+            continue
+        key = str(value)
+        if key in seen:
+            continue
+        seen.add(key)
+        values.append(key)
+    if not values:
+        return None
+    preview = "、".join(values[:20])
+    suffix = f"（共 {len(values)} 个）" if len(values) > 20 else ""
+    return f"「{field_name}」共有 {len(values)} 个取值：{preview}{suffix}。"
 
 
 def _format_schema_tool_answer(result_data: dict) -> Optional[str]:

@@ -32,6 +32,17 @@ class DeterministicRouteResult:
     skill_version_id: str | None
 
 
+def build_schema_inventory_tool_params(question: str | None) -> dict[str, Any]:
+    """Return the exact schema tool params implied by a deterministic schema question."""
+    request = _classify_schema_request(question or "")
+    tool_params: dict[str, Any] = {}
+    if request["mode"] == "fields" and request.get("table_name"):
+        tool_params["table_name"] = request["table_name"]
+    elif request["mode"] == "assets":
+        tool_params["include_all_asset_types"] = True
+    return tool_params
+
+
 async def run_schema_inventory_route(
     registry: Any,
     context: Any,
@@ -40,9 +51,7 @@ async def run_schema_inventory_route(
 ) -> DeterministicRouteResult:
     """Run schema inventory through the registered schema tool only."""
     request = _classify_schema_request(question or "")
-    tool_params: dict[str, Any] = {}
-    if request["mode"] == "fields" and request.get("table_name"):
-        tool_params["table_name"] = request["table_name"]
+    tool_params = build_schema_inventory_tool_params(question)
     tool_result = await registry.get("schema").execute(params=tool_params, context=context)
     if not getattr(tool_result, "success", False):
         error = getattr(tool_result, "error", None) or "schema tool failed"

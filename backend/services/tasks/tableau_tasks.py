@@ -58,6 +58,7 @@ def sync_connection_task(self, conn_id: int, sync_log_id: int = None, trigger_ty
         acquired = redis_client.set(lock_key, "1", nx=True, ex=lock_timeout)
         if not acquired:
             logger.warning("sync_connection_task[conn_id=%d]: already running, skipping", conn_id)
+            _update_sync_task(sync_task_id, "skipped", error_message="同步任务正在进行中，已跳过本次调度")
             return {"status": "skipped", "message": "同步任务正在进行中"}
     except Exception as e:
         logger.warning("sync_connection_task[conn_id=%d]: Redis lock failed (%s), proceeding", conn_id, e)
@@ -74,6 +75,7 @@ def sync_connection_task(self, conn_id: int, sync_log_id: int = None, trigger_ty
             conn = _db.get_connection(conn_id)
             if not conn:
                 logger.warning("Sync task: connection %d not found", conn_id)
+                _update_sync_task(sync_task_id, "failed", error_message="连接不存在")
                 return {"status": "error", "message": "连接不存在"}
 
             # 复用已有日志或新建（重试时复用，避免每次重试创建新记录）
@@ -84,6 +86,7 @@ def sync_connection_task(self, conn_id: int, sync_log_id: int = None, trigger_ty
                 log_id = sync_log.id
 
             _db.set_sync_status(conn_id, "running")
+            _update_sync_task(sync_task_id, "running", sync_log_id=log_id)
 
             crypto = get_tableau_crypto()
             try:
@@ -382,7 +385,14 @@ def sync_by_schedule(self, schedule_id: int):
                     "sync_by_schedule[%d]: dispatching conn %d (task_id=%d)",
                     schedule_id, task.connection_id, task.id,
                 )
-                sync_connection_task.delay(task.connection_id, trigger_type="scheduled", sync_task_id=task.id)
+                try:
+                    sync_connection_task.delay(task.connection_id, trigger_type="scheduled", sync_task_id=task.id)
+                except Exception as e:
+                    logger.error(
+                        "sync_by_schedule[%d]: failed to dispatch conn %d (task_id=%d): %s",
+                        schedule_id, task.connection_id, task.id, e, exc_info=True,
+                    )
+                    _update_sync_task(task.id, "failed", error_message=f"同步子任务派发失败: {e}")
 
             return {
                 "status": "dispatched",

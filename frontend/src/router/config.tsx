@@ -84,6 +84,7 @@ const SqlAgentPage = lazy(() => import('../pages/agents/sql-agent/page'));
 const MetricsAgentPage = lazy(() => import('../pages/agents/metrics-agent/page'));
 const HelpAgentPage = lazy(() => import('../pages/agents/help-agent/page'));
 const SkillsPage = lazy(() => import('../pages/agents/skills/page'));
+const SkillCreatePage = lazy(() => import('../pages/agents/skills/create'));
 const SkillDetailPage = lazy(() => import('../pages/agents/skills/detail'));
 
 // Tableau 巡检
@@ -568,6 +569,14 @@ const routes: RouteObject[] = [
             element: (
               <SkillsRouteGuard>
                 <SkillsPage />
+              </SkillsRouteGuard>
+            ),
+          },
+          {
+            path: 'skills/create',
+            element: (
+              <SkillsRouteGuard>
+                <SkillCreatePage />
               </SkillsRouteGuard>
             ),
           },

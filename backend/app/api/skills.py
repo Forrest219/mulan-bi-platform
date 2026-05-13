@@ -126,6 +126,24 @@ def create_skill(
 
 
 # ---------------------------------------------------------------------------
+# 4.0  GET /api/skills/registered-tools — 静态注册工具元数据（admin / data_admin）
+# 注意：此路由必须在 /{id} 之前注册，防止 FastAPI 路由歧义
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/skills/registered-tools")
+def list_registered_tools(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+):
+    """返回真实 ToolRegistry 静态注册工具元数据。
+
+    Spec §4.0
+    """
+    return skill_svc.list_registered_tools(db)
+
+
+# ---------------------------------------------------------------------------
 # 4.5  GET /api/skills — 技能列表（admin / data_admin）
 # ---------------------------------------------------------------------------
 
@@ -219,6 +237,7 @@ def patch_skill(
             description=body.description,
             category=body.category,
             is_enabled=body.is_enabled,
+            updated_by_id=current_user.get("id"),
         )
         db.commit()
         return result

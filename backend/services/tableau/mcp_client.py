@@ -947,13 +947,14 @@ class TableauMCPClient:
         try:
             conn_record = session.query(_TableauConnection).filter(
                 _TableauConnection.is_active == True,
+                _TableauConnection.id == self._connection_id,
             ).order_by(_TableauConnection.id.asc()).first()
 
             if not conn_record:
                 raise TableauMCPError(
                     code="NLQ_009",
                     message="无活跃的 Tableau 连接",
-                    details={},
+                    details={"connection_id": self._connection_id},
                 )
         finally:
             session.close()

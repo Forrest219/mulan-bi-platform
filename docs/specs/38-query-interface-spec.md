@@ -207,6 +207,8 @@ Connected Apps JWT 设计为短效一次性令牌，不需要 refresh 机制：
 
 **禁止行为**：任何场景下禁止 fallback 到运维 PAT，禁止将 JWT 签发错误暴露给前端（技术堆栈信息不外露）。
 
+**字段口径规则**：问数链路只能信任 Tableau MCP / VizQL 当前可查询的 `queryable_fields`。资产导入或 API 同步得到的 `metadata_fields` 只代表 Tableau 元数据层字段全集/字段快照，可用于治理、盘点、血缘和语义维护，不得作为 QueryTool、LLM prompt 或 direct VizQL 的可查询字段来源。若用户询问的字段存在于 `metadata_fields` 但不在 `queryable_fields`，`QueryService` 应返回“该字段在资产元数据中存在，但当前 published datasource 不能通过 MCP/VizQL 查询”的业务解释，并给出可替代字段建议；不得把它归类为 MCP 服务失败或工具执行异常。未来字段元数据页应展示 `mcp_queryable` / `mcp_checked_at` / `mcp_status`，但本 spec 不要求本轮落库或 UI 实现。
+
 **告警机制**：Tableau 返回"用户不存在/身份无效"时，写入 `query_error_events` 表（`error_type='identity_not_found'`）；管理员面板通过 `GET /api/query/admin/error-events` 查看告警用户列表（AC-07-1/07-2 验收需求）。
 
 ---
@@ -691,10 +693,11 @@ CREATE INDEX idx_query_error_events_unresolved
 `QueryService.ask(username, question, session_id, connection_id)` 编排流程：
 1. 调用 `jwt_service.issue(username, connection_id)` 获取 JWT
 2. 调用现有 `nlq_service` 做意图分类和字段准备（复用现有 `classify_intent`、`route_datasource`）
-3. 调用 `mcp_client.query_datasource(..., jwt_token=token)` 执行 MCP 查询
-4. 异常分支：识别 Tableau 401/identity_not_found，写入 `query_error_events`，抛出 `QueryError`
-5. 调用 `llm_service.complete_for_semantic(purpose="query")` 生成自然语言摘要
-6. 写入 `query_messages` 表
+3. 以 MCP/VizQL 可查询字段 `queryable_fields` 校验查询字段；不得用资产同步字段 `metadata_fields` 代替
+4. 调用 `mcp_client.query_datasource(..., jwt_token=token)` 执行 MCP 查询
+5. 异常分支：识别 Tableau 401/identity_not_found，写入 `query_error_events`，抛出 `QueryError`
+6. 调用 `llm_service.complete_for_semantic(purpose="query")` 生成自然语言摘要
+7. 写入 `query_messages` 表
 
 **验收标准**：
 - 后端日志中每次查询可确认 JWT `sub` 字段等于当前 AD 用户名

@@ -675,6 +675,8 @@ erDiagram
 | total | int | — | 命中总数 |
 | **错误码** | DAT_007 / CAP_502_TABLEAU_MCP / CAP_403_SITE | | |
 
+**字段口径约束**：`tableau_query` 返回的资产同步/API 元数据字段应标记为 `metadata_fields`，仅用于资产治理、字段盘点、血缘/语义维护和页面解释。凡是进入 QueryTool、首页问答、LLM 查询 prompt 或 direct VizQL 的字段，必须来自 MCP/VizQL 校验后的 `queryable_fields`。当用户询问的字段只存在于 `metadata_fields` 时，Data Agent 应输出业务解释和 `queryable_fields` 替代建议，不得把它作为工具失败或下游 MCP 异常处理。字段元数据页未来可展示 `mcp_queryable`、`mcp_checked_at`、`mcp_status`，本 spec 当前不要求实现落库/UI。
+
 #### 4.4.4 time_series_compare
 
 | 字段 | 类型 | 必填 | 说明 |

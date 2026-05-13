@@ -36,6 +36,21 @@ INVENTORY_KEYWORDS = (
     "available sources",
 )
 
+FIELD_INVENTORY_PATTERNS = (
+    r"有哪些字段",
+    r"字段有哪些",
+    r"字段是什么",
+    r"字段列表",
+    r"有什么字段",
+    r"包含哪些字段",
+    r"有哪些列",
+    r"列有哪些",
+    r"表结构",
+    r"数据结构",
+    r"\bfields?\b",
+    r"\bcolumns?\b",
+)
+
 EXCLUDED_KEYWORDS = (
     "销售额",
     "收入",
@@ -74,6 +89,8 @@ def detect_deterministic_route(question: str, connection_type: str | None = None
     normalized = _normalize(question)
     if not normalized:
         return None
+    if _is_field_inventory_question(normalized):
+        return "schema_inventory"
     if any(keyword in normalized for keyword in EXCLUDED_KEYWORDS):
         return None
     if any(keyword in normalized for keyword in INVENTORY_KEYWORDS):
@@ -84,3 +101,7 @@ def detect_deterministic_route(question: str, connection_type: str | None = None
 def _normalize(text: str) -> str:
     normalized = unicodedata.normalize("NFKC", text or "").casefold()
     return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _is_field_inventory_question(normalized: str) -> bool:
+    return any(re.search(pattern, normalized) for pattern in FIELD_INVENTORY_PATTERNS)

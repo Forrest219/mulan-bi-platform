@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import exists
+from sqlalchemy import exists, func as sa_func
 from sqlalchemy.orm import Session as DBSession
 
 from services.data_agent.models import AgentConversation, AgentConversationMessage
@@ -219,7 +219,7 @@ class SessionManager:
                 not conversation.title or conversation.title.strip() == "新对话"
             ):
                 conversation.title = content.strip()[:50] or "新对话"
-            conversation.updated_at = datetime.utcnow()
+            conversation.updated_at = sa_func.now()
 
         self.db.commit()
         self.db.refresh(message)

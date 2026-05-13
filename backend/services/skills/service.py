@@ -14,7 +14,9 @@ from cachetools import TTLCache
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
+from services.data_agent.factory import create_engine
 from services.auth.models import User
+from services.logs.models import OperationLog
 from services.skills.models import AgentSkill, AgentSkillVersion
 
 logger = logging.getLogger(__name__)
@@ -23,22 +25,13 @@ logger = logging.getLogger(__name__)
 # 白名单：factory.py 中 register 的所有工具名（v1 硬编码）
 # Spec §3.5: skill_key 必须属于静态 ToolRegistry 已注册的工具
 # ---------------------------------------------------------------------------
-STATIC_SKILL_KEYS: frozenset = frozenset([
-    "query",
-    "schema",
-    "metrics",
-    "causation",
-    "chart",
-    "report_generation",
-    "proactive_insight",
-    "data_comparison",
-    "trend_analysis",
-    "correlation_discovery",
-    "segmentation_analysis",
-    "funnel_analysis",
-    "cohort_analysis",
-    "root_cause_analysis",
-])
+def _create_static_registry():
+    """Build the static ToolRegistry without DB skill overrides."""
+    _, registry = create_engine()
+    return registry
+
+
+STATIC_SKILL_KEYS: frozenset = frozenset(_create_static_registry().list_tool_names())
 
 # ---------------------------------------------------------------------------
 # Dispatch 缓存 — TTLCache(maxsize=100, ttl=10s)
@@ -95,6 +88,36 @@ def _emit_skill_event(
         )
     except Exception as exc:
         logger.warning("skill 审计事件写入失败: %s", exc)
+
+
+def _log_skill_operation(
+    db: Session,
+    *,
+    operation_type: str,
+    target: str,
+    operator_id: Optional[int],
+    details: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Write bi_operation_logs for skill mutations.
+
+    The log is best-effort and enclosed in a SAVEPOINT so logging failures do
+    not poison the caller's transaction.
+    """
+    try:
+        with db.begin_nested():
+            db.add(
+                OperationLog(
+                    operator=f"user:{operator_id}" if operator_id else "anonymous",
+                    operator_id=operator_id,
+                    operation_type=operation_type,
+                    target=target,
+                    status="success",
+                    details=details or {},
+                )
+            )
+            db.flush()
+    except Exception as exc:
+        logger.warning("skill 操作日志写入失败: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +211,22 @@ def _atomic_activate_version(
         actor_id=actor_id,
     )
 
+    _log_skill_operation(
+        db,
+        operation_type="skill_version_rollback"
+        if action == "rollback"
+        else "skill_version_publish",
+        target=f"skill:{skill.skill_key}:version:{target_ver.version_number}",
+        operator_id=actor_id,
+        details={
+            "skill_id": str(skill.id),
+            "skill_key": skill.skill_key,
+            "from_version": from_version,
+            "to_version": target_ver.version_number,
+            "action": action,
+        },
+    )
+
     return {
         "skill_key": skill.skill_key,
         "from_version": from_version,
@@ -243,6 +282,51 @@ def get_active_skill_version(db: Session, skill_key: str) -> Dict[str, Any]:
         "description": active_ver.description,
         "input_schema": active_ver.input_schema,
     }
+
+
+def list_registered_tools(db: Session) -> Dict[str, Any]:
+    """Return static ToolRegistry metadata with DB configuration markers.
+
+    This is intentionally read-only: it only inspects ToolRegistry and existing
+    agent_skills / active versions, and never creates missing skill rows.
+    """
+    registry = _create_static_registry()
+    registry_tools = registry.list_tools()
+    keys = [tool.name for tool in registry_tools]
+
+    configured_rows = (
+        db.query(AgentSkill, AgentSkillVersion)
+        .outerjoin(
+            AgentSkillVersion,
+            (AgentSkillVersion.skill_id == AgentSkill.id)
+            & (AgentSkillVersion.is_active == True),  # noqa: E712
+        )
+        .filter(AgentSkill.skill_key.in_(keys))
+        .all()
+    )
+    configured_by_key = {skill.skill_key: (skill, active_ver) for skill, active_ver in configured_rows}
+
+    tools = []
+    for tool in registry_tools:
+        skill, active_ver = configured_by_key.get(tool.name, (None, None))
+        tools.append(
+            {
+                "skill_key": tool.name,
+                "name": skill.name if skill else tool.name,
+                "description": tool.description,
+                "default_description": tool.description,
+                "input_schema": tool.parameters_schema,
+                "default_parameters_schema": tool.parameters_schema,
+                "category": tool.metadata.category,
+                "code_ref": tool.__class__.__name__,
+                "configured": skill is not None,
+                "skill_id": str(skill.id) if skill else None,
+                "active_version_id": str(active_ver.id) if active_ver else None,
+                "active_version_number": active_ver.version_number if active_ver else None,
+            }
+        )
+
+    return {"tools": tools, "total": len(tools)}
 
 
 def create_skill(
@@ -313,6 +397,18 @@ def create_skill(
 
     # 失效缓存
     _invalidate_dispatch_cache()
+
+    _log_skill_operation(
+        db,
+        operation_type="skill_create",
+        target=f"skill:{skill.skill_key}",
+        operator_id=created_by_id,
+        details={
+            "skill_id": str(skill.id),
+            "skill_key": skill.skill_key,
+            "active_version_number": version.version_number,
+        },
+    )
 
     return {
         "id": str(skill.id),
@@ -431,6 +527,19 @@ def publish_version(
         to_version=new_ver,
         action="publish",
         actor_id=created_by_id,
+    )
+
+    _log_skill_operation(
+        db,
+        operation_type="skill_version_publish",
+        target=f"skill:{skill.skill_key}:version:{new_ver}",
+        operator_id=created_by_id,
+        details={
+            "skill_id": str(skill.id),
+            "skill_key": skill.skill_key,
+            "from_version": prev_version_number,
+            "to_version": new_ver,
+        },
     )
 
     return {
@@ -562,6 +671,7 @@ def patch_skill(
     description: Optional[str] = None,
     category: Optional[str] = None,
     is_enabled: Optional[bool] = None,
+    updated_by_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """更新技能基本信息（白名单字段）。
 
@@ -585,6 +695,27 @@ def patch_skill(
 
     skill.updated_at = datetime.utcnow()
     db.flush()
+
+    _log_skill_operation(
+        db,
+        operation_type="skill_update",
+        target=f"skill:{skill.skill_key}",
+        operator_id=updated_by_id,
+        details={
+            "skill_id": str(skill.id),
+            "skill_key": skill.skill_key,
+            "updated_fields": [
+                field
+                for field, value in {
+                    "name": name,
+                    "description": description,
+                    "category": category,
+                    "is_enabled": is_enabled,
+                }.items()
+                if value is not None
+            ],
+        },
+    )
 
     return skill.to_dict()
 

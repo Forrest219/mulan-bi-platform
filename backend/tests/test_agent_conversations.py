@@ -4,6 +4,8 @@ import pytest
 import uuid
 from unittest.mock import MagicMock
 
+from sqlalchemy.sql.functions import Function
+
 from services.data_agent.session import SessionManager, AgentSession
 
 
@@ -67,6 +69,26 @@ class TestConversationPersistence:
         )
 
         assert mock_conv.title == "本月销售额多少？"
+        mock_db.commit.assert_called()
+
+    def test_persist_message_uses_database_time_for_updated_at(self, session_mgr, mock_db):
+        """回归：会话 updated_at 必须和消息 created_at 使用同一数据库时间源。"""
+        mock_session = AgentSession(
+            conversation_id=uuid.uuid4(),
+            user_id=1,
+        )
+        mock_conv = MagicMock()
+        mock_conv.title = "已有标题"
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_conv
+
+        session_mgr.persist_message(
+            session=mock_session,
+            role="assistant",
+            content="收到",
+        )
+
+        assert isinstance(mock_conv.updated_at, Function)
+        assert mock_conv.updated_at.name == "now"
         mock_db.commit.assert_called()
 
     def test_persist_message_assistant(self, session_mgr, mock_db):

@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
 import {
-  listSkills, createSkill, patchSkill,
-  type AgentSkill, type SkillListParams, type CreateSkillPayload,
+  listSkills, patchSkill,
+  type AgentSkill, type SkillListParams,
 } from '../../../api/skills';
 
 // ── 工具函数 ──────────────────────────────────────────────────────────────────
@@ -43,242 +43,7 @@ const CATEGORIES = [
   { key: 'reporting', label: '报告' },
 ];
 
-const ENDPOINT_TYPES = [
-  { value: 'static', label: 'static（静态）' },
-];
-
 const CONFIG_SYNC_MESSAGE = '配置已保存，最多约 10 秒后在所有服务实例生效';
-
-function parseJsonObject(text: string): Record<string, unknown> {
-  const parsed = JSON.parse(text) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('JSON 顶层必须是对象');
-  }
-  return parsed as Record<string, unknown>;
-}
-
-function formatJsonText(text: string): string {
-  return JSON.stringify(parseJsonObject(text), null, 2);
-}
-
-// ── 新建技能 Modal ─────────────────────────────────────────────────────────────
-
-interface CreateModalProps {
-  onClose: () => void;
-  onCreated: () => void;
-}
-
-function CreateSkillModal({ onClose, onCreated }: CreateModalProps) {
-  const [skillKey, setSkillKey] = useState('');
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('query');
-  const [versionDesc, setVersionDesc] = useState('');
-  const [schemaText, setSchemaText] = useState('{\n  "type": "object",\n  "properties": {},\n  "required": []\n}');
-  const [codeRef, setCodeRef] = useState('');
-  const [changeNotes, setChangeNotes] = useState('初始版本');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-
-  const handleSubmit = async () => {
-    if (!skillKey.trim() || !name.trim() || !versionDesc.trim()) {
-      setError('请填写技能标识、名称和版本描述');
-      return;
-    }
-    let parsedSchema: Record<string, unknown>;
-    try {
-      parsedSchema = parseJsonObject(schemaText);
-    } catch (e) {
-      setError(`Input Schema 格式不正确：${e instanceof Error ? e.message : '未知错误'}`);
-      return;
-    }
-    const payload: CreateSkillPayload = {
-      skill_key: skillKey.trim(),
-      name: name.trim(),
-      description: description.trim() || undefined,
-      category,
-      initial_version: {
-        description: versionDesc.trim(),
-        input_schema: parsedSchema,
-        endpoint_type: 'static',
-        code_ref: codeRef.trim() || undefined,
-        change_notes: changeNotes.trim() || undefined,
-      },
-    };
-    setSubmitting(true);
-    setError('');
-    try {
-      await createSkill(payload);
-      onCreated();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '创建失败');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleFormatJson = () => {
-    try {
-      setSchemaText(formatJsonText(schemaText));
-      setError('');
-    } catch (e) {
-      setError(`Input Schema 格式不正确：${e instanceof Error ? e.message : '未知错误'}`);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-2xl w-[600px] max-h-[90vh] overflow-y-auto">
-        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-          <h2 className="text-[15px] font-semibold text-slate-800">新建技能</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            <i className="ri-close-line text-lg" />
-          </button>
-        </div>
-        <div className="px-6 py-5 space-y-4">
-          {error && (
-            <div className="px-3 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg text-[13px]">
-              {error}
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-[12px] font-medium text-slate-600 mb-1">
-                技能标识 <span className="text-red-500">*</span>
-              </label>
-              <input
-                value={skillKey}
-                onChange={e => setSkillKey(e.target.value)}
-                placeholder="如：execute_query"
-                className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 font-mono"
-              />
-              <p className="text-[11px] text-slate-400 mt-1">必须与静态工具注册名一致</p>
-            </div>
-            <div>
-              <label className="block text-[12px] font-medium text-slate-600 mb-1">
-                技能名称 <span className="text-red-500">*</span>
-              </label>
-              <input
-                value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder="如：SQL 执行"
-                className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-[12px] font-medium text-slate-600 mb-1">管理简介</label>
-            <textarea
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-              placeholder="用于管理界面展示，不进入 LLM Prompt"
-              rows={2}
-              className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 resize-none"
-            />
-          </div>
-          <div>
-            <label className="block text-[12px] font-medium text-slate-600 mb-1">分类</label>
-            <select
-              value={category}
-              onChange={e => setCategory(e.target.value)}
-              className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 bg-white"
-            >
-              {CATEGORIES.filter(c => c.key !== '').map(c => (
-                <option key={c.key} value={c.key}>{c.label}</option>
-              ))}
-              <option value="general">通用</option>
-            </select>
-          </div>
-          <div className="border-t border-slate-100 pt-4">
-            <h3 className="text-[12px] font-semibold text-slate-600 mb-3">初始版本（v1）</h3>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-[12px] font-medium text-slate-600 mb-1">
-                  LLM 工具描述 <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  value={versionDesc}
-                  onChange={e => setVersionDesc(e.target.value)}
-                  placeholder="注入 LLM System Prompt 的工具功能描述"
-                  rows={3}
-                  className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 resize-none"
-                />
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-[12px] font-medium text-slate-600">
-                    Input Schema（JSON）
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleFormatJson}
-                    className="text-[12px] text-blue-600 hover:text-blue-500 px-2 py-1 rounded hover:bg-blue-50"
-                  >
-                    格式化 JSON
-                  </button>
-                </div>
-                <textarea
-                  value={schemaText}
-                  onChange={e => setSchemaText(e.target.value)}
-                  rows={6}
-                  className="w-full px-3 py-2 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 font-mono resize-none bg-slate-50"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[12px] font-medium text-slate-600 mb-1">代码引用（可选）</label>
-                  <input
-                    value={codeRef}
-                    onChange={e => setCodeRef(e.target.value)}
-                    placeholder="如：ExecuteQueryTool"
-                    className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[12px] font-medium text-slate-600 mb-1">变更说明</label>
-                  <input
-                    value={changeNotes}
-                    onChange={e => setChangeNotes(e.target.value)}
-                    placeholder="初始版本"
-                    className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-[12px] font-medium text-slate-600 mb-1">接入类型</label>
-                <select
-                  disabled
-                  className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg bg-slate-50 text-slate-400 cursor-not-allowed"
-                >
-                  {ENDPOINT_TYPES.map(t => (
-                    <option key={t.value} value={t.value}>{t.label}</option>
-                  ))}
-                </select>
-                <p className="text-[11px] text-slate-400 mt-1">v1 仅支持 static 类型</p>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="px-6 py-4 border-t border-slate-200 flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-[13px] text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
-          >
-            取消
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={submitting}
-            className="px-4 py-2 text-[13px] text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5"
-          >
-            {submitting && <i className="ri-loader-4-line animate-spin" />}
-            创建技能
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── 主页面 ─────────────────────────────────────────────────────────────────────
 
@@ -300,7 +65,6 @@ export default function SkillsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [showCreate, setShowCreate] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const loadSkills = useCallback(async () => {
@@ -370,10 +134,10 @@ export default function SkillsPage() {
           </div>
           {isAdmin && (
             <button
-              onClick={() => setShowCreate(true)}
+              onClick={() => navigate('/agents/skills/create')}
               className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white text-[13px] rounded-lg hover:bg-blue-700"
             >
-              <i className="ri-add-line" />新建技能
+              <i className="ri-add-line" />从已注册工具添加
             </button>
           )}
         </div>
@@ -531,13 +295,6 @@ export default function SkillsPage() {
           )}
         </div>
       </div>
-
-      {showCreate && (
-        <CreateSkillModal
-          onClose={() => setShowCreate(false)}
-          onCreated={() => { setShowCreate(false); loadSkills(); }}
-        />
-      )}
     </div>
   );
 }

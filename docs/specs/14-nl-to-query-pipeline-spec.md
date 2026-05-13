@@ -224,6 +224,14 @@ def classify_intent(question: str) -> IntentResult | None:
 
 字段解析的基础数据来自 `tableau_datasource_fields` 表（由 Tableau 同步流水线维护）。
 
+**刚性口径：字段来源必须区分 `metadata_fields` 与 `queryable_fields`。**
+
+- `metadata_fields` 是资产导入/API 同步维护的 Tableau 元数据层字段全集/字段快照，只能用于资产治理、字段盘点、血缘/语义维护和解释型上下文。
+- `queryable_fields` 是当前 published datasource 经 Tableau MCP / VizQL 实际可查询的字段子集，必须作为首页数据问答、QueryTool、LLM 查询 prompt、direct VizQL 查询构造的唯一可信字段清单。
+- NL-to-Query 不得仅凭 `metadata_fields` 生成 `fieldCaption`。字段召回、字段一致性校验、重试 prompt 和最终 VizQL JSON 均必须以 `queryable_fields` 为准。
+- 如果用户问题命中 `metadata_fields` 中存在但 MCP 不可查询的字段，返回可理解的业务解释和 `queryable_fields` 中的替代字段建议；不得把它包装为“工具执行失败”或直接触发无意义重试。
+- 字段元数据页未来可展示 `mcp_queryable`、`mcp_checked_at`、`mcp_status` 等标识，但本 spec 不要求本轮实现数据库/UI 变更。
+
 #### 表结构引用
 
 | 列名 | 说明 | 解析用途 |

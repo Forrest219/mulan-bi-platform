@@ -10,9 +10,9 @@ import logging
 import re
 import time
 import uuid as uuid_lib
-from datetime import datetime
 from typing import AsyncGenerator, Dict, List, Optional
 
+from sqlalchemy import func as sa_func
 from sqlalchemy.orm import Session
 
 from services.agent_observability.structured_error import StructuredBIError, persist_structured_error
@@ -205,7 +205,9 @@ async def run_agent(
                 if last_tool_result and isinstance(last_tool_result, dict):
                     data = last_tool_result.get("data")
                     if isinstance(data, dict):
-                        if "rows" in data and "fields" in data:
+                        if data.get("field_unavailable"):
+                            response_type = "text"
+                        elif "rows" in data and "fields" in data:
                             response_type = "table"
                             response_data = data
                         elif "value" in data:
@@ -226,7 +228,6 @@ async def run_agent(
                 )
                 db.add(step)
 
-                completed_at = datetime.utcnow()
                 db.query(BiAgentRun).filter(BiAgentRun.id == run_id).update(
                     {
                         BiAgentRun.status: "completed",
@@ -234,7 +235,7 @@ async def run_agent(
                         BiAgentRun.tools_used: tools_used if tools_used else None,
                         BiAgentRun.response_type: response_type,
                         BiAgentRun.execution_time_ms: execution_time_ms,
-                        BiAgentRun.completed_at: completed_at,
+                        BiAgentRun.completed_at: sa_func.now(),
                     },
                     synchronize_session=False,
                 )
@@ -301,19 +302,18 @@ async def run_agent(
                     execution_time_ms=_elapsed_ms(last_step_at, event_at),
                 )
                 db.add(step)
-                structured_error = StructuredBIError.from_message(
+                structured_error = error_content.get("structured_error") or StructuredBIError.from_message(
                     error_content.get("message", ""),
                     error_type=str(error_content.get("error_type") or "AgentError"),
                     error_code=err_code,
                 )
                 execution_time_ms = _elapsed_ms(total_start, event_at)
-                completed_at = datetime.utcnow()
                 db.query(BiAgentRun).filter(BiAgentRun.id == run_id).update(
                     {
                         BiAgentRun.status: "failed",
                         BiAgentRun.error_code: err_code,
                         BiAgentRun.execution_time_ms: execution_time_ms,
-                        BiAgentRun.completed_at: completed_at,
+                        BiAgentRun.completed_at: sa_func.now(),
                     },
                     synchronize_session=False,
                 )
@@ -327,7 +327,6 @@ async def run_agent(
         if run_id:
             try:
                 execution_time_ms = max(0, int((time.monotonic() - total_start) * 1000))
-                completed_at = datetime.utcnow()
                 structured_error = StructuredBIError.from_exception(e, error_code="AGENT_003")
                 step = BiAgentStep(
                     run_id=run_id,
@@ -342,7 +341,7 @@ async def run_agent(
                         BiAgentRun.status: "failed",
                         BiAgentRun.error_code: "AGENT_003",
                         BiAgentRun.execution_time_ms: execution_time_ms,
-                        BiAgentRun.completed_at: completed_at,
+                        BiAgentRun.completed_at: sa_func.now(),
                     },
                     synchronize_session=False,
                 )

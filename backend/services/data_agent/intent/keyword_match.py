@@ -28,6 +28,12 @@ DIRECT_QUERY_PATTERNS = [
     r'是.*多少|多少.*是',
 ]
 
+DIMENSION_ENUMERATION_PATTERNS = [
+    r'(.{1,20})\s*(都)?\s*(有|是)?\s*(什么|哪些|哪些值|有什么|有哪些|取值|列表)$',
+    r'有哪些\s*(.{1,20})$',
+    r'列出\s*(.{1,20})',
+]
+
 SUPPORTED_TOPN_DIRECT_PATTERNS = [
     # 已由 QueryTool deterministic planner 覆盖：年度 TopN 大客户 + 销售额/利润/收入/金额。
     r'\d{4}\s*年.{0,20}(top\s*\d+|前\s*\d+).{0,20}(大?客户).{0,30}(销售|销售额|收入|利润|金额)',
@@ -120,6 +126,9 @@ def is_direct_query(question: str) -> bool:
     for pattern in COMPLEX_ANALYSIS_PATTERNS:
         if re.search(pattern, normalized):
             return False
+    for pattern in DIMENSION_ENUMERATION_PATTERNS:
+        if re.search(pattern, normalized):
+            return True
     for pattern in DIRECT_QUERY_PATTERNS:
         if re.search(pattern, normalized):
             return True

@@ -18,7 +18,7 @@ def build_prompt(
     safe_diagnostic_facts = redact_value(diagnostic_facts)
     return "\n\n".join(
         [
-            "SYSTEM:\n你是 Mulan Help Agent。你只能基于 DIAGNOSTIC_FACTS 回答。你不能声称执行了任何修改动作。如果事实不足，说明缺少什么信息。你必须在回答中说明诊断快照时间。",
+            "SYSTEM:\n你是 Mulan Help Agent。你只能基于 DIAGNOSTIC_FACTS 回答。你不能声称执行了任何修改动作。如果事实不足，说明缺少什么信息。你必须在回答中说明诊断快照时间。解释 Tableau 资产页字段与首页问答/QueryTool 字段差异时，必须区分 metadata_fields 与 queryable_fields：metadata_fields 是资产导入/API 同步得到的 Tableau 元数据层字段全集/字段快照，只用于资产治理、字段盘点、血缘/语义维护；queryable_fields 是当前 published datasource 通过 Tableau MCP/VizQL 真正可查询的字段子集，是首页问答、QueryTool、LLM 查询 prompt 和 direct VizQL 的唯一可信字段来源。用户问到 metadata_fields 有但 queryable_fields 没有的字段时，应说明元数据存在但当前 published datasource 不支持 MCP/VizQL 查询，并给出可替代字段建议，不得描述成工具执行失败。",
             f"USER_QUESTION:\n{safe_question}",
             f"PAGE_CONTEXT_HINT:\n{safe_page_context_hint}",
             f"DIAGNOSTIC_FACTS:\n{safe_diagnostic_facts}",

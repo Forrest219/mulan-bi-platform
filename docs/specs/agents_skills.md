@@ -1,10 +1,10 @@
 # Agents Skills Center — 技能中心 Spec
 
-**版本**: v1.1  
+**版本**: v1.2
 **状态**: Approved — 进入实现阶段  
 **作者**: Architect  
 **创建日期**: 2026-05-08  
-**最后修订**: 2026-05-08（P0/P1 审查意见纳入）  
+**最后修订**: 2026-05-13（AI Native 创建体验与防丢失约束纳入）
 **关联模块**: `agents/` 域，智能体技能管理  
 
 ---
@@ -49,6 +49,8 @@
 
 - 现有 14 个静态工具的**执行逻辑**（`execute()` 方法）保持不变；DB 版本只覆盖 `description / input_schema`（LLM 可见 meta）。
 - `BaseTool / ToolRegistry / ToolContext` 框架层接口不变。
+- v1.2 阶段技能中心不是“上传任意可执行代码”的入口，只允许配置已经在后端 ToolRegistry 注册的静态工具。
+- 不得破坏或重置已经配置的 skill。所有同步、导入、模板应用和 AI 生成动作必须默认保留现有 `agent_skills` 与 `agent_skill_versions` 数据，只能在用户显式确认后发布新版本或修改启停状态。
 
 ---
 
@@ -263,6 +265,44 @@ async def seed(db: AsyncSession):
 
 所有接口遵循 `docs/specs/02-api-conventions.md` 错误格式。
 
+### 4.0 `GET /api/skills/registered-tools`
+
+**已注册工具元数据接口**
+
+```
+权限：admin / data_admin
+```
+
+**用途**：返回后端当前 ToolRegistry 已注册的静态工具元数据，作为新建/同步 skill 的唯一可信来源。
+
+**Response 200**:
+```json
+{
+  "tools": [
+    {
+      "skill_key": "schema",
+      "name": "表结构查询",
+      "description": "查询数据源的表结构、字段信息。",
+      "input_schema": {"type": "object", "properties": {}},
+      "category": "query",
+      "code_ref": "SchemaTool",
+      "configured": true,
+      "skill_id": "uuid",
+      "active_version_id": "uuid",
+      "active_version_number": "v2"
+    }
+  ],
+  "total": 14
+}
+```
+
+**业务规则**：
+- 返回值必须来自真实静态 ToolRegistry，不能返回前端 mock。
+- `configured=true` 表示该工具已经存在于 `agent_skills`，前端必须引导用户进入详情页或发布新版本，禁止重复创建。
+- 该接口只读，不改变现有 skill 数据。
+
+---
+
 ### 4.1 `POST /api/skills`
 
 **创建新技能**
@@ -311,6 +351,8 @@ async def seed(db: AsyncSession):
 - `skill_key` 必须在静态 registry 白名单内；不在则返回 `400 SKILLS_006`。
 - `initial_version` 必填；创建时自动将该版本设为 `is_active=true`，版本号为 `v1`。
 - `initial_version.endpoint_type` v1 仅允许 `'static'`；其他值返回 `400 SKILLS_005`。
+- 前端不得把该接口包装成“创建任意新工具”。v1.2 主链路必须是“从已注册工具添加/同步”，由 `GET /api/skills/registered-tools` 预填 `skill_key / description / input_schema / code_ref`。
+- 如果 `skill_key` 已配置，前端必须阻断重复提交，并提供“查看详情”或“发布新版本”入口。
 
 ---
 
@@ -673,6 +715,16 @@ version_map = await skill_loader.load_and_override(registry, db)
 engine = ReActEngine(registry=registry, active_skill_versions=version_map)
 ```
 
+### 6.3.1 Tableau 查询技能字段口径
+
+凡是技能描述、`input_schema` 或动态覆盖后的 LLM 可见 meta 涉及 Tableau 查询字段，必须固化以下口径：
+
+- `metadata_fields` 是资产导入/API 同步得到的 Tableau 元数据层字段全集/字段快照，只能描述为治理、字段盘点、血缘/语义维护用途。
+- `queryable_fields` 是当前 published datasource 通过 Tableau MCP/VizQL 实际可查询的字段子集，是首页问答、QueryTool、LLM 查询 prompt、direct VizQL 的唯一可信字段来源。
+- 技能中心不得发布会诱导 LLM 把 `metadata_fields` 当成可查询字段的 `description` 或 `input_schema`。
+- 当字段只存在于 `metadata_fields` 而不在 `queryable_fields` 时，工具描述应引导模型返回业务解释和替代字段建议，不得描述成工具执行失败。
+- 字段元数据页未来可展示 `mcp_queryable` / `mcp_checked_at` / `mcp_status`，但本 spec 不要求本轮数据库或 UI 实现。
+
 ### 6.4 运行时版本追踪
 
 `bi_agent_steps` 需扩展 `skill_version_id` 字段（独立迁移文件）：
@@ -708,6 +760,7 @@ class SkillService:
 ```
 /agents/skills                     — 技能中心（列表页）
 /agents/skills/{id}                — 技能详情 + 版本历史
+/agents/skills/create              — 从已注册工具添加/同步 skill
 ```
 
 遵循 Slate 风格：`bg-white border border-slate-200 rounded-xl`，与 DQC、资产管理等页面一致。页面容器 `max-w-6xl mx-auto`。
@@ -721,10 +774,10 @@ class SkillService:
 ```
 [ri-puzzle-2-line] 技能中心
   管理 Agent 可调用的技能定义与版本
-                                          [+ 新建技能]
+                                          [从已注册工具添加] [导入/导出]
 ```
 
-`[+ 新建技能]` 仅 admin 可见。
+`[从已注册工具添加]` 仅 admin 可见，点击进入 `/agents/skills/create`。按钮文案禁止使用容易误解为“上传任意工具代码”的“新建技能”。
 
 #### 筛选栏
 
@@ -744,6 +797,56 @@ class SkillService:
 | 操作 | [详情]；admin 额外显示 [发布版本] | 140px |
 
 行点击进入详情页；admin 可通过 toggle 快捷切换 `is_enabled`。
+
+**交互约束**：
+- 列表页的 [发布版本] 必须直接打开发布新版本流程或跳转到详情页并自动打开发布面板，不能只是普通详情跳转。
+- 导入/导出第一阶段只提供 JSON 预览与下载，不允许导入后直接发布。导入数据必须经过白名单校验、Diff 预览和用户确认。
+
+---
+
+### 7.2.1 从已注册工具添加/同步页（`/agents/skills/create`）
+
+该页面替代原居中 Modal。页面采用沉浸式双栏布局，避免长 Prompt 与 JSON Schema 在小弹窗中编辑。
+
+#### 布局
+
+```
+左侧 320px：工具选择与基础配置
+  - 已注册工具选择器（必选，来源 GET /api/skills/registered-tools）
+  - skill_key 只读
+  - 技能名称
+  - 分类
+  - 管理简介
+  - 当前配置状态：未配置 / 已配置 vN
+
+右侧 flex：版本内容编辑
+  - LLM 工具描述 textarea，大尺寸
+  - Input Schema JSON 编辑区，大尺寸
+  - 代码引用 code_ref 只读或可微调
+  - 变更说明
+  - 模板库 / 从静态工具恢复 / AI 帮我写（P1）
+```
+
+#### 主链路
+
+1. 用户选择一个已注册工具。
+2. 页面调用 `GET /api/skills/registered-tools` 的返回数据自动填充 `description / input_schema / code_ref`。
+3. 如果该工具未配置，提交时调用 `POST /api/skills` 创建 v1。
+4. 如果该工具已配置，页面默认不覆盖现有配置，只提供“查看详情”或“基于当前静态定义发布新版本”两个入口。
+5. 所有提交前必须展示关键字段摘要，用户确认后才写库。
+
+#### 防丢失
+
+- 页面存在未保存内容时，路由离开、刷新、点击取消必须触发二次确认。
+- 输入变化后以 debounce 写入 `localStorage`，key 格式为 `skill_draft_create:{skill_key || "unselected"}`。
+- 再次进入页面时，如发现草稿，提示“发现未保存草稿，是否恢复？”。
+- P0 不落库保存半成品草稿；数据库级草稿需要新增状态模型，见 §11 未纳入范围。
+
+#### 模板与 AI 辅助
+
+- P0 模板库至少提供：无参数模板、单字符串参数模板、枚举参数模板。
+- P0 必须提供“从静态工具恢复”按钮，将当前工具的 registry 元数据重新填回编辑区。
+- P1 增加“AI 帮我写”能力，生成结果只能回填编辑区，必须经过 JSON Schema 校验、Diff 展示和用户确认后才能发布。
 
 ---
 
@@ -788,7 +891,7 @@ Timeline 样式：
 - **与当前活跃版本 Diff**（非活跃版本时显示）：调用 `/diff` 接口，JSON Patch 渲染（新增行绿色背景，删除行红色背景，Monaco diff editor）
 - 底部 [回滚到此版本] 按钮（活跃版本隐藏）
 
-#### 发布新版本 Modal
+#### 发布新版本面板
 
 ```
 发布新版本 v4
@@ -806,6 +909,12 @@ Input Schema（JSON Schema）
 
                     [取消]  [发布]
 ```
+
+发布新版本不再使用小尺寸居中 Modal。允许采用详情页内联面板、右侧大 Drawer 或独立编辑页，但必须满足：
+- 编辑区在 1366px 宽度下不出现内层嵌套滚动挤压。
+- 关闭或离开前执行 dirty guard。
+- 初始值复制自活跃版本，避免用户从空白开始。
+- 发布前展示 Diff 摘要，用户确认后调用 `POST /api/skills/{id}/versions`。
 
 Monaco Editor 配置：
 - `language: 'json'`, `theme: 'vs'`, `minimap: { enabled: false }`
@@ -834,6 +943,14 @@ Monaco Editor 配置：
   element: (
     <Suspense fallback={<PageLoader />}>
       <SkillsPage />
+    </Suspense>
+  ),
+},
+{
+  path: 'skills/create',
+  element: (
+    <Suspense fallback={<PageLoader />}>
+      <SkillCreatePage />
     </Suspense>
   ),
 },
@@ -890,6 +1007,17 @@ extra_data  = {
 }
 ```
 
+同时，技能中心的关键写操作必须写入 `bi_operation_logs`，以便 `/system/activity` 可按用户操作追踪：
+
+| 操作 | operation_type | target |
+|------|----------------|--------|
+| 从已注册工具创建 skill | `skill_create` | `skill:{skill_key}` |
+| PATCH 基本信息或启停 | `skill_update` | `skill:{skill_key}` |
+| 发布新版本 | `skill_version_publish` | `skill:{skill_key}:version:{version_number}` |
+| 回滚版本 | `skill_version_rollback` | `skill:{skill_key}:version:{version_number}` |
+
+日志写入失败不得影响主链路，但必须 warning 记录后端日志。
+
 ---
 
 ## 10. 验收标准
@@ -906,6 +1034,7 @@ extra_data  = {
 ### AC-3 白名单校验
 - [ ] `POST /api/skills` 传入不在 registry 的 `skill_key` 返回 `400 SKILLS_006`
 - [ ] `endpoint_type='http'` 发布新版本返回 `400 SKILLS_005`
+- [ ] `GET /api/skills/registered-tools` 返回真实 ToolRegistry 元数据，且标记已配置工具，不修改现有 skill
 
 ### AC-4 LLM 集成
 - [ ] `SkillLoader.load_and_override()` 单测：mock DB 返回 1 条 active 版本，验证 registry 中对应工具的 `description` 被覆盖
@@ -920,14 +1049,28 @@ extra_data  = {
 - [ ] 列表页展示技能名称、分类、活跃版本号、状态、最近更新时间
 - [ ] 版本历史 Timeline 正确区分活跃/历史节点样式
 - [ ] 非活跃版本的 Schema Drawer 展示与活跃版本的 Diff
-- [ ] 发布新版本 Modal Monaco Editor 可编辑、提交后列表刷新
+- [ ] 从已注册工具添加页可以选择真实后端工具并自动回填 schema，不允许重复破坏已配置 skill
+- [ ] 发布新版本编辑体验使用大编辑面板/Drawer/独立页，不再使用小尺寸居中 Modal
+- [ ] 发布新版本编辑区可编辑、提交前展示 Diff，提交后列表刷新
+- [ ] 创建和发布流程具备 dirty guard 与 localStorage 草稿恢复
+- [ ] 模板库可回填无参数、单字符串参数、枚举参数 schema
 - [ ] 回滚有确认弹窗，确认后 Timeline 更新
-- [ ] data_admin 角色看不到 [发布版本] / [回滚] / [新建技能] 按钮
+- [ ] data_admin 角色看不到 [发布版本] / [回滚] / [从已注册工具添加] 按钮
 - [ ] 所有可见文案为中文
 
 ### AC-7 类型检查与 Lint
 - [ ] `npm run type-check` 零错误
 - [ ] `pytest tests/ -x -q` 覆盖 SkillService 的 happy path 及版本切换
+
+### AC-8 操作日志
+- [ ] 创建、PATCH、发布、回滚均写入 `bi_operation_logs`
+- [ ] `/system/activity` 能筛选并看到 skill 相关 operation_type
+- [ ] 审计失败不阻断技能配置主流程
+
+### AC-9 现有数据保护
+- [ ] 当前已配置的 `schema` skill 及其版本记录在迁移、同步、导入、创建页访问后保持不变
+- [ ] 已配置工具在创建页显示为已配置，默认不允许再次创建
+- [ ] 所有导入/模板/静态恢复动作只修改当前编辑草稿，未确认发布前不写库
 
 ---
 
@@ -941,7 +1084,10 @@ extra_data  = {
 | 技能市场 / 跨平台导入导出 | 留给后续迭代 |
 | `bi_agent_steps.skill_version_id` 的聚合分析报表 | 数据积累后有意义，与本 Spec 解耦 |
 | 多进程部署下的 dispatch 缓存强一致 | v1 单进程；多进程场景引入 Redis 时补充 |
+| 上传任意 skill 代码包 / 安装第三方工具运行时 | v1.2 只配置已注册静态工具，避免制造不可执行 skill |
+| 数据库级草稿（`status=draft/published` 或 `draft_skill_versions`） | P0 只做前端本地草稿；落库草稿需要新增状态机、权限、审计和 dispatch 排除规则 |
+| AI 自动发布 | AI 只能生成候选内容，发布必须由 admin 显式确认 |
 
 ---
 
-*v1.1 — 审查意见已纳入，Approved，进入实现阶段*
+*v1.2 — AI Native 创建体验与现有数据保护约束已纳入，Approved，进入实现阶段*

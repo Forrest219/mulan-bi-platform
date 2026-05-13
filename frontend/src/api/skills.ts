@@ -54,6 +54,26 @@ export interface SkillListResponse {
   page_size: number;
 }
 
+export interface RegisteredTool {
+  skill_key: string;
+  name: string;
+  description: string;
+  default_description?: string;
+  input_schema: Record<string, unknown>;
+  default_parameters_schema?: Record<string, unknown>;
+  category: string;
+  code_ref: string | null;
+  configured: boolean;
+  skill_id: string | null;
+  active_version_id: string | null;
+  active_version_number: string | null;
+}
+
+export interface RegisteredToolsResponse {
+  tools: RegisteredTool[];
+  total: number;
+}
+
 export interface CreateSkillPayload {
   skill_key: string;
   name: string;
@@ -111,6 +131,12 @@ export async function listSkills(params: SkillListParams): Promise<SkillListResp
   if (params.page_size) q.set('page_size', String(params.page_size));
   const res = await fetch(`${BASE}?${q}`, { credentials: 'include' });
   if (!res.ok) throw await skillApiError(res, '获取技能列表失败');
+  return res.json();
+}
+
+export async function listRegisteredTools(): Promise<RegisteredToolsResponse> {
+  const res = await fetch(`${BASE}/registered-tools`, { credentials: 'include' });
+  if (!res.ok) throw await skillApiError(res, '获取已注册工具失败');
   return res.json();
 }
 
