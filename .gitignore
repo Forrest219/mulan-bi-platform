@@ -43,6 +43,7 @@ backend/mulan_bi_backend.egg-info/
 backend/uv.lock
 
 # Local runtime state
+.dev-logs/
 .dev-pids/
 cookies.txt
 backend/cookies.txt
