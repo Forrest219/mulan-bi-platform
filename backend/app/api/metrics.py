@@ -38,6 +38,10 @@ if not _SERVICE_JWT_SECRET or len(_SERVICE_JWT_SECRET) < 32:
         "开发环境请在 .env 中设置，生产环境通过 Vault/K8s Secret 注入。"
     )
 
+_DEFAULT_TENANT_ID = uuid.UUID(
+    os.getenv("DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001")
+)
+
 
 def verify_service_jwt(
     x_scan_service_jwt: str = Header(..., alias="X-Scan-Service-JWT"),
@@ -61,15 +65,48 @@ def verify_service_jwt(
         )
 
 
+def _parse_optional_bool(value: Optional[str]) -> Optional[bool]:
+    """Parse query bools while treating blank optional filters as absent."""
+    if value is None or value == "":
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise HTTPException(
+        status_code=422,
+        detail=[
+            {
+                "loc": ["query", "is_active"],
+                "msg": "Input should be a valid boolean",
+                "type": "bool_parsing",
+            }
+        ],
+    )
+
+
+def _tenant_id_from_user(current_user: dict) -> uuid.UUID:
+    tenant_id = current_user.get("tenant_id") or _DEFAULT_TENANT_ID
+    return uuid.UUID(str(tenant_id))
+
+
 # =============================================================================
 # 指标 CRUD
 # =============================================================================
 
 @router.post(
+    "",
+    response_model=MetricCreatedResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="创建指标",
+)
+@router.post(
     "/",
     response_model=MetricCreatedResponse,
     status_code=status.HTTP_201_CREATED,
     summary="创建指标",
+    include_in_schema=False,
 )
 def create_metric(
     data: MetricCreate,
@@ -77,15 +114,21 @@ def create_metric(
     db=Depends(get_db),
 ):
     """创建新指标定义（data_admin+）"""
-    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    tenant_id = _tenant_id_from_user(current_user)
     metric = registry.create_metric(db, data, user_id=current_user["id"], tenant_id=tenant_id)
     return metric
 
 
 @router.get(
+    "",
+    response_model=PaginatedMetrics,
+    summary="指标列表",
+)
+@router.get(
     "/",
     response_model=PaginatedMetrics,
     summary="指标列表",
+    include_in_schema=False,
 )
 def list_metrics(
     page: int = Query(default=1, ge=1),
@@ -93,14 +136,14 @@ def list_metrics(
     business_domain: Optional[str] = Query(default=None),
     metric_type: Optional[str] = Query(default=None),
     datasource_id: Optional[int] = Query(default=None),
-    is_active: Optional[bool] = Query(default=None),
+    is_active: Optional[str] = Query(default=None),
     sensitivity_level: Optional[str] = Query(default=None),
     search: Optional[str] = Query(default=None, description="按 name / name_zh 模糊搜索"),
     current_user: dict = Depends(require_roles(["analyst", "data_admin", "admin"])),
     db=Depends(get_db),
 ):
     """查询指标列表，支持多维过滤与分页（analyst+）"""
-    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    tenant_id = _tenant_id_from_user(current_user)
     items, total = registry.list_metrics(
         db,
         tenant_id=tenant_id,
@@ -109,7 +152,7 @@ def list_metrics(
         business_domain=business_domain,
         metric_type=metric_type,
         datasource_id=datasource_id,
-        is_active=is_active,
+        is_active=_parse_optional_bool(is_active),
         sensitivity_level=sensitivity_level,
         search=search,
     )
@@ -126,6 +169,8 @@ def lookup_metrics(
     names: list[str] = Query(..., description="指标英文名列表"),
     tenant_id: uuid.UUID = Query(...),
     datasource_id: Optional[int] = Query(default=None),
+    tableau_connection_id: Optional[int] = Query(default=None),
+    tableau_datasource_luid: Optional[str] = Query(default=None),
     _jwt_payload: dict = Depends(verify_service_jwt),
     db=Depends(get_db),
 ):
@@ -133,11 +178,15 @@ def lookup_metrics(
     内部 Service 调用接口，使用 X-Scan-Service-JWT Header 鉴权（非用户 Session）。
     Data Agent 通过此接口批量获取指标元数据。
     """
-    result = registry.lookup_metrics(db, names=names, tenant_id=tenant_id, datasource_id=datasource_id)
-    return MetricLookupResponse(
-        metrics=result["metrics"],
-        not_found=result["not_found"],
+    result = registry.lookup_metrics(
+        db,
+        names=names,
+        tenant_id=tenant_id,
+        datasource_id=datasource_id,
+        tableau_connection_id=tableau_connection_id,
+        tableau_datasource_luid=tableau_datasource_luid,
     )
+    return MetricLookupResponse(**result)
 
 
 @router.get(
@@ -151,7 +200,7 @@ def get_metric(
     db=Depends(get_db),
 ):
     """获取指标完整详情（analyst+）"""
-    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    tenant_id = _tenant_id_from_user(current_user)
     return registry.get_metric(db, metric_id=metric_id, tenant_id=tenant_id)
 
 
@@ -167,7 +216,7 @@ def update_metric(
     db=Depends(get_db),
 ):
     """更新指标字段（data_admin+）"""
-    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    tenant_id = _tenant_id_from_user(current_user)
     return registry.update_metric(db, metric_id=metric_id, data=data, user_id=current_user["id"], tenant_id=tenant_id)
 
 
@@ -182,7 +231,7 @@ def archive_metric(
     db=Depends(get_db),
 ):
     """软删除（下线）指标，设置 is_active=False（admin）"""
-    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    tenant_id = _tenant_id_from_user(current_user)
     return registry.archive_metric(db, metric_id=metric_id, user_id=current_user["id"], tenant_id=tenant_id)
 
 
@@ -201,7 +250,7 @@ def submit_review(
     db=Depends(get_db),
 ):
     """将指标提交至审核队列（data_admin+）"""
-    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    tenant_id = _tenant_id_from_user(current_user)
     return registry.submit_review(db, metric_id=metric_id, user_id=current_user["id"], tenant_id=tenant_id)
 
 
@@ -216,7 +265,7 @@ def approve_metric(
     db=Depends(get_db),
 ):
     """批准审核中的指标（data_admin+）"""
-    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    tenant_id = _tenant_id_from_user(current_user)
     return registry.approve_metric(db, metric_id=metric_id, reviewer_id=current_user["id"], tenant_id=tenant_id)
 
 
@@ -232,7 +281,7 @@ def reject_metric(
     db=Depends(get_db),
 ):
     """拒绝审核中的指标，附带原因（data_admin+）"""
-    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    tenant_id = _tenant_id_from_user(current_user)
     return registry.reject_metric(
         db,
         metric_id=metric_id,
@@ -253,7 +302,7 @@ def publish_metric(
     db=Depends(get_db),
 ):
     """发布已批准的指标，激活生效（data_admin+）"""
-    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    tenant_id = _tenant_id_from_user(current_user)
     return registry.publish_metric(db, metric_id=metric_id, user_id=current_user["id"], tenant_id=tenant_id)
 
 
@@ -275,7 +324,7 @@ def list_versions(
     """查询指标变更版本列表，分页（analyst+）"""
     import math
 
-    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    tenant_id = _tenant_id_from_user(current_user)
     items, total = registry.get_versions(
         db,
         metric_id=metric_id,
@@ -319,7 +368,7 @@ def get_lineage(
     db=Depends(get_db),
 ):
     """查询指标血缘关系（analyst+）"""
-    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    tenant_id = _tenant_id_from_user(current_user)
     metric = registry.get_metric(db, metric_id=metric_id, tenant_id=tenant_id)
     records = db.query(BiMetricLineage).filter(
         BiMetricLineage.metric_id == metric_id
@@ -361,7 +410,7 @@ async def resolve_lineage(
     - manual_override=False（默认）：调用 LLM 自动解析公式血缘
     - manual_override=True：跳过 LLM，直接写入 manual_records 手动血缘
     """
-    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    tenant_id = _tenant_id_from_user(current_user)
     result = await _resolve_lineage_service(
         db=db,
         metric_id=metric_id,
@@ -405,7 +454,7 @@ async def detect_anomalies(
     """
     from services.metrics_agent.anomaly_service import run_anomaly_detection
 
-    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    tenant_id = _tenant_id_from_user(current_user)
 
     raw_metric_ids = body.get("metric_ids")
     metric_ids: Optional[list[uuid.UUID]] = None
@@ -458,7 +507,7 @@ def detect_anomalies(
     from models.metrics import BiMetricDefinition, BiMetricAnomaly
     from services.metrics.service import detect_anomalies as _detect
 
-    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    tenant_id = _tenant_id_from_user(current_user)
 
     # 查询指标定义
     metric = db.query(BiMetricDefinition).filter(
@@ -522,7 +571,7 @@ def list_metric_anomalies(
     """查询指定指标的异常记录，支持状态/方法过滤，分页（analyst+）。"""
     from models.metrics import BiMetricAnomaly
 
-    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    tenant_id = _tenant_id_from_user(current_user)
 
     q = db.query(BiMetricAnomaly).filter(
         BiMetricAnomaly.metric_id == metric_id,
@@ -600,7 +649,7 @@ async def run_consistency_check(
     """
     from services.metrics_agent.consistency import run_consistency_check as _run_check
 
-    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    tenant_id = _tenant_id_from_user(current_user)
 
     raw_metric_id = body.get("metric_id")
     if not raw_metric_id:
@@ -651,7 +700,7 @@ def list_consistency_checks(
     """
     from models.metrics import BiMetricConsistencyCheck
 
-    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    tenant_id = _tenant_id_from_user(current_user)
 
     q = db.query(BiMetricConsistencyCheck).filter(
         BiMetricConsistencyCheck.tenant_id == tenant_id,
@@ -726,7 +775,7 @@ def update_anomaly_status(
     """
     from services.metrics_agent.anomaly_service import update_anomaly_status as _update_status
 
-    tenant_id = uuid.UUID(str(current_user.get("tenant_id", uuid.uuid4())))
+    tenant_id = _tenant_id_from_user(current_user)
 
     new_status = body.get("status")
     if not new_status:

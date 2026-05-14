@@ -5,8 +5,8 @@ from datetime import datetime
 from typing import Optional, Any
 
 from sqlalchemy import (
-    Boolean, Float, ForeignKey, Index, Integer, String, Text,
-    UniqueConstraint, func,
+    BigInteger, Boolean, CheckConstraint, Float, ForeignKey, Index, Integer, String, Text,
+    UniqueConstraint, func, text as sa_text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -19,8 +19,9 @@ class BiMetricDefinition(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    name: Mapped[str] = mapped_column(String(128), nullable=False)
-    name_zh: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    metric_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    name_zh: Mapped[str] = mapped_column(String(256), nullable=False)
     metric_type: Mapped[str] = mapped_column(String(16), nullable=False)
     business_domain: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -30,9 +31,9 @@ class BiMetricDefinition(Base):
     result_type: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     unit: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     precision: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
-    datasource_id: Mapped[int] = mapped_column(Integer, ForeignKey("bi_data_sources.id"), nullable=False)
-    table_name: Mapped[str] = mapped_column(String(128), nullable=False)
-    column_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    datasource_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("bi_data_sources.id"), nullable=True)
+    table_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    column_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     filters: Mapped[Optional[Any]] = mapped_column(JSONB, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     lineage_status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="unknown")
@@ -48,13 +49,139 @@ class BiMetricDefinition(Base):
     versions: Mapped[list["BiMetricVersion"]] = relationship(back_populates="metric", cascade="save-update, merge")
     anomalies: Mapped[list["BiMetricAnomaly"]] = relationship(back_populates="metric", cascade="all, delete-orphan")
     consistency_checks: Mapped[list["BiMetricConsistencyCheck"]] = relationship(back_populates="metric", cascade="all, delete-orphan")
+    aliases: Mapped[list["BiMetricAlias"]] = relationship(back_populates="metric", cascade="all, delete-orphan")
+    bindings: Mapped[list["BiMetricBinding"]] = relationship(back_populates="metric", cascade="all, delete-orphan")
+    dependencies: Mapped[list["BiMetricDependency"]] = relationship(
+        back_populates="metric",
+        cascade="all, delete-orphan",
+        foreign_keys="BiMetricDependency.metric_id",
+    )
+    dependents: Mapped[list["BiMetricDependency"]] = relationship(
+        back_populates="depends_on_metric",
+        cascade="all, delete-orphan",
+        foreign_keys="BiMetricDependency.depends_on_metric_id",
+    )
 
     __table_args__ = (
+        UniqueConstraint("tenant_id", "metric_code", name="uq_bmd_tenant_metric_code"),
         UniqueConstraint("tenant_id", "name", name="uq_bmd_tenant_name"),
         Index("ix_bmd_tenant", "tenant_id", "is_active"),
+        Index("ix_bmd_metric_code", "tenant_id", "metric_code"),
         Index("ix_bmd_datasource", "datasource_id"),
         Index("ix_bmd_domain", "tenant_id", "business_domain"),
         Index("ix_bmd_sensitivity", "tenant_id", "sensitivity_level"),
+    )
+
+
+class BiMetricAlias(Base):
+    __tablename__ = "bi_metric_aliases"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    metric_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("bi_metric_definitions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    alias: Mapped[str] = mapped_column(String(128), nullable=False)
+    locale: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())
+
+    metric: Mapped["BiMetricDefinition"] = relationship(back_populates="aliases")
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "metric_id", "alias", name="uq_bma_tenant_metric_alias"),
+        Index("ix_bma_tenant_alias_active", "tenant_id", "alias", "is_active"),
+        Index("ix_bma_metric_active", "metric_id", "is_active"),
+    )
+
+
+class BiMetricBinding(Base):
+    __tablename__ = "bi_metric_bindings"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    metric_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("bi_metric_definitions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    datasource_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    tableau_connection_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    tableau_asset_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    tableau_datasource_luid: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    field_mappings: Mapped[Optional[Any]] = mapped_column(JSONB, nullable=True)
+    required_base_metrics: Mapped[Optional[Any]] = mapped_column(JSONB, nullable=True)
+    formula_expression: Mapped[Optional[Any]] = mapped_column(JSONB, nullable=True)
+    queryable_fields_snapshot: Mapped[Optional[Any]] = mapped_column(JSONB, nullable=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())
+
+    metric: Mapped["BiMetricDefinition"] = relationship(back_populates="bindings")
+
+    __table_args__ = (
+        Index("ix_bmb_tenant_metric_active", "tenant_id", "metric_id", "is_active"),
+        Index("ix_bmb_tableau_source", "tableau_connection_id", "tableau_datasource_luid"),
+        Index("ix_bmb_datasource", "datasource_id"),
+        Index(
+            "uq_bmb_primary_tableau_binding",
+            "tenant_id",
+            "metric_id",
+            unique=True,
+            postgresql_where=sa_text(
+                "is_active = true AND is_primary = true AND source_type = 'tableau_published_datasource'"
+            ),
+        ),
+    )
+
+
+class BiMetricDependency(Base):
+    __tablename__ = "bi_metric_dependencies"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    metric_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("bi_metric_definitions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    depends_on_metric_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("bi_metric_definitions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    dependency_role: Mapped[str] = mapped_column(String(32), nullable=False)
+    expression_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    weight: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+
+    metric: Mapped["BiMetricDefinition"] = relationship(
+        back_populates="dependencies",
+        foreign_keys=[metric_id],
+    )
+    depends_on_metric: Mapped["BiMetricDefinition"] = relationship(
+        back_populates="dependents",
+        foreign_keys=[depends_on_metric_id],
+    )
+
+    __table_args__ = (
+        CheckConstraint("metric_id <> depends_on_metric_id", name="ck_bmdp_no_self_dependency"),
+        UniqueConstraint(
+            "tenant_id",
+            "metric_id",
+            "depends_on_metric_id",
+            "dependency_role",
+            name="uq_bmdp_metric_dep_role",
+        ),
+        Index("ix_bmdp_metric", "tenant_id", "metric_id"),
+        Index("ix_bmdp_depends_on", "tenant_id", "depends_on_metric_id"),
+        Index("ix_bmdp_role", "tenant_id", "dependency_role"),
     )
 
 

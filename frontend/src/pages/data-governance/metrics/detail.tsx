@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   getMetricDetail,
@@ -12,6 +12,7 @@ import {
   ConsistencyCheckResult,
   AnomalyRecord,
 } from '../../../api/metrics';
+import { useHelpAgentSelection } from '../../agents/help-agent/helpAgentContext';
 
 const FormulaTemplatePreview = lazy(() =>
   import('./components/FormulaTemplatePreview').then(m => ({ default: m.default }))
@@ -103,6 +104,16 @@ function getErrorMessage(error: unknown, fallback = '操作失败'): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+function metricDisplayName(metric: Pick<MetricDetail, 'metric_code' | 'name' | 'name_zh'>): string {
+  return metric.name_zh || metric.name || metric.metric_code || '未命名指标';
+}
+
+function stringifyJson(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  return JSON.stringify(value, null, 2);
+}
+
 type TabKey = 'info' | 'lineage' | 'consistency' | 'anomalies';
 
 // ---------------------------------------------------------------------------
@@ -111,7 +122,20 @@ type TabKey = 'info' | 'lineage' | 'consistency' | 'anomalies';
 
 export default function MetricDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { isDataAdmin } = useAuth();
+  const { isAdmin, isDataAdmin } = useAuth();
+  const canManageMetrics = isAdmin || isDataAdmin;
+  const helpAgentSelection = useMemo(
+    () => ({
+      primary_entity: {
+        type: 'metric',
+        id: String(id),
+        source: 'route' as const,
+      },
+    }),
+    [id]
+  );
+
+  useHelpAgentSelection(helpAgentSelection);
 
   const [activeTab, setActiveTab] = useState<TabKey>('info');
   const [metric, setMetric] = useState<MetricDetail | null>(null);
@@ -258,13 +282,13 @@ export default function MetricDetailPage() {
           <div className="flex items-center gap-1.5 text-[12px] text-slate-400 mb-3">
             <Link to="/governance/metrics" className="hover:text-slate-600">指标治理</Link>
             <span>/</span>
-            <span className="text-slate-600">{metric.name}</span>
+            <span className="text-slate-600">{metricDisplayName(metric)}</span>
           </div>
 
           <div className="flex items-center justify-between">
             <div>
               <div className="flex items-center gap-3">
-                <h1 className="text-lg font-semibold text-slate-800">{metric.name}</h1>
+                <h1 className="text-lg font-semibold text-slate-800">{metricDisplayName(metric)}</h1>
                 <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${METRIC_TYPE_BADGE[metric.metric_type] || 'bg-slate-100 text-slate-600'}`}>
                   {METRIC_TYPE_LABEL[metric.metric_type] || metric.metric_type}
                 </span>
@@ -272,9 +296,9 @@ export default function MetricDetailPage() {
                   {metric.is_active ? '已发布' : '草稿'}
                 </span>
               </div>
-              {metric.name_zh && (
-                <p className="text-[13px] text-slate-500 mt-1">{metric.name_zh}</p>
-              )}
+              <p className="text-[13px] text-slate-500 mt-1">
+                {metric.metric_code || '未编号'}{metric.name ? ` · ${metric.name}` : ''}
+              </p>
             </div>
           </div>
         </div>
@@ -316,7 +340,7 @@ export default function MetricDetailPage() {
             status={lineageStatus}
             loading={lineageLoading}
             resolving={resolvingLineage}
-            isDataAdmin={isDataAdmin}
+            isDataAdmin={canManageMetrics}
             onResolve={handleResolveLineage}
           />
         )}
@@ -338,17 +362,22 @@ export default function MetricDetailPage() {
 
 function InfoTab({ metric }: { metric: MetricDetail }) {
   const fields: { label: string; value: string | number | null | undefined; mono?: boolean }[] = [
-    { label: '指标英文名', value: metric.name, mono: true },
+    { label: '指标编号', value: metric.metric_code, mono: true },
     { label: '指标中文名', value: metric.name_zh },
+    { label: '指标英文名', value: metric.name, mono: true },
     { label: '指标类型', value: METRIC_TYPE_LABEL[metric.metric_type] || metric.metric_type },
     { label: '业务域', value: metric.business_domain },
-    { label: '数据源 ID', value: metric.datasource_id },
-    { label: '数据表', value: metric.table_name, mono: true },
-    { label: '字段', value: metric.column_name, mono: true },
-    { label: '聚合方式', value: metric.aggregation_type },
+    { label: 'Tableau 连接', value: metric.tableau_connection_id },
+    { label: 'Tableau 资产', value: metric.tableau_asset_id },
+    { label: 'Tableau Datasource LUID', value: metric.tableau_datasource_luid, mono: true },
+    { label: '旧数据源 ID', value: metric.datasource_id },
+    { label: '旧数据表', value: metric.table_name, mono: true },
+    { label: '旧字段', value: metric.column_name, mono: true },
+    { label: '聚合方式', value: metric.metric_type === 'ratio' ? '—' : metric.aggregation_type },
     { label: '结果类型', value: metric.result_type },
     { label: '单位', value: metric.unit },
     { label: '精度', value: metric.precision },
+    { label: '可查询', value: metric.queryable == null ? undefined : metric.queryable ? '是' : '否' },
     { label: '敏感级别', value: SENSITIVITY_LABEL[metric.sensitivity_level] || metric.sensitivity_level },
     { label: '血缘状态', value: LINEAGE_STATUS_LABEL[metric.lineage_status] || metric.lineage_status },
     { label: '创建时间', value: formatDate(metric.created_at) },
@@ -387,6 +416,50 @@ function InfoTab({ metric }: { metric: MetricDetail }) {
           <h3 className="text-[14px] font-semibold text-slate-700 mb-3">计算公式</h3>
           <pre className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-[13px] text-slate-700 font-mono overflow-x-auto">
             {metric.formula}
+          </pre>
+        </div>
+      )}
+
+      {metric.dependencies && metric.dependencies.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-xl p-6">
+          <h3 className="text-[14px] font-semibold text-slate-700 mb-3">指标依赖</h3>
+          <div className="space-y-2">
+            {metric.dependencies.map((dep) => (
+              <div key={`${dep.depends_on_metric_id}-${dep.dependency_role}`} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-[13px]">
+                <span className="text-slate-700">{dep.name_zh || dep.name || dep.metric_code || dep.depends_on_metric_id}</span>
+                <span className="text-[11px] text-slate-500 bg-slate-100 rounded px-2 py-0.5">{dep.dependency_role}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(metric.field_mappings || metric.required_base_metrics?.length || metric.formula_expression) && (
+        <div className="bg-white border border-slate-200 rounded-xl p-6">
+          <h3 className="text-[14px] font-semibold text-slate-700 mb-3">执行绑定</h3>
+          {metric.field_mappings && (
+            <pre className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-[13px] text-slate-700 font-mono overflow-x-auto mb-3">
+              {stringifyJson(metric.field_mappings)}
+            </pre>
+          )}
+          {metric.required_base_metrics && metric.required_base_metrics.length > 0 && (
+            <div className="mb-3 text-[13px] text-slate-600">
+              依赖基础指标：{metric.required_base_metrics.join('、')}
+            </div>
+          )}
+          {metric.formula_expression && (
+            <pre className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-[13px] text-slate-700 font-mono overflow-x-auto">
+              {stringifyJson(metric.formula_expression)}
+            </pre>
+          )}
+        </div>
+      )}
+
+      {metric.binding_errors && metric.binding_errors.length > 0 && (
+        <div className="bg-white border border-red-100 rounded-xl p-6">
+          <h3 className="text-[14px] font-semibold text-red-700 mb-3">绑定错误</h3>
+          <pre className="bg-red-50 border border-red-100 rounded-lg p-4 text-[13px] text-red-700 font-mono overflow-x-auto">
+            {stringifyJson(metric.binding_errors)}
           </pre>
         </div>
       )}

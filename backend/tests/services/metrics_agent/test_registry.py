@@ -10,6 +10,7 @@ Metrics Agent — Service 层测试
 """
 import os
 import uuid
+import json
 
 # 环境变量必须在所有 import 之前设置
 os.environ.setdefault("DATABASE_URL", "postgresql://mulan:mulan@localhost:5432/mulan_bi_test")
@@ -19,6 +20,7 @@ os.environ.setdefault("TABLEAU_ENCRYPTION_KEY", "test-tableau-key-32-bytes-ok!!"
 os.environ.setdefault("LLM_ENCRYPTION_KEY", "test-llm-key-32-bytes-ok!!!!")
 
 import pytest
+from sqlalchemy import text
 
 from app.core.errors import MulanError
 from services.metrics_agent import registry
@@ -38,14 +40,191 @@ def _make_create_data(**kwargs) -> MetricCreate:
     """生成默认合法的 MetricCreate 数据。"""
     defaults = {
         "name": f"test_metric_{uuid.uuid4().hex[:8]}",
+        "name_zh": f"测试指标{uuid.uuid4().hex[:6]}",
         "metric_type": "atomic",
         "datasource_id": 1,
         "table_name": "fact_orders",
         "column_name": "amount",
         "sensitivity_level": "public",
+        "tableau_connection_id": 2,
+        "tableau_datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+        "field_mappings": {"amount": "销售额"},
     }
     defaults.update(kwargs)
     return MetricCreate(**defaults)
+
+
+def _ensure_lookup_extension_tables(db_session):
+    """Create the v0.3 lookup extension tables needed by M-1/M-3 tests."""
+    db_session.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS bi_metric_aliases (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL,
+                metric_id UUID NOT NULL,
+                alias VARCHAR(128) NOT NULL,
+                locale VARCHAR(16),
+                priority INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMP NOT NULL DEFAULT now(),
+                updated_at TIMESTAMP NOT NULL DEFAULT now()
+            )
+            """
+        )
+    )
+    db_session.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS bi_metric_bindings (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL,
+                metric_id UUID NOT NULL,
+                source_type VARCHAR(32) NOT NULL,
+                datasource_id INTEGER NULL,
+                tableau_connection_id INTEGER NULL,
+                tableau_asset_id BIGINT NULL,
+                tableau_datasource_luid VARCHAR(128) NULL,
+                field_mappings JSONB,
+                required_base_metrics JSONB,
+                formula_expression JSONB,
+                queryable_fields_snapshot JSONB,
+                is_primary BOOLEAN NOT NULL DEFAULT false,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMP NOT NULL DEFAULT now(),
+                updated_at TIMESTAMP NOT NULL DEFAULT now()
+            )
+            """
+        )
+    )
+    db_session.flush()
+
+
+def _publish_test_metric(db_session, tenant_id, **kwargs):
+    metric_type = kwargs.get("metric_type", "atomic")
+    if metric_type in {"derived", "ratio"}:
+        numerator = _publish_test_metric(
+            db_session,
+            tenant_id,
+            name=f"profit_{uuid.uuid4().hex[:8]}",
+            name_zh="利润",
+            metric_type="atomic",
+            field_mappings={"profit": "利润"},
+        )
+        denominator = _publish_test_metric(
+            db_session,
+            tenant_id,
+            name=f"sales_{uuid.uuid4().hex[:8]}",
+            name_zh="销售额",
+            metric_type="atomic",
+            field_mappings={"sales": "销售额"},
+        )
+        if metric_type == "derived":
+            kwargs.setdefault("dependency_metric_ids", [numerator.id, denominator.id])
+            kwargs.setdefault(
+                "formula_expression",
+                {"op": "subtract", "args": [{"metric_code": numerator.metric_code}, {"metric_code": denominator.metric_code}]},
+            )
+        else:
+            kwargs.setdefault("numerator_metric_id", numerator.id)
+            kwargs.setdefault("denominator_metric_id", denominator.id)
+            kwargs.setdefault(
+                "formula_expression",
+                {
+                    "op": "divide",
+                    "left": {"metric": "利润", "aggregation": "SUM"},
+                    "right": {"metric": "销售额", "aggregation": "SUM"},
+                },
+            )
+    data = _make_create_data(**kwargs)
+    metric = registry.create_metric(db_session, data, user_id=USER_A, tenant_id=tenant_id)
+    registry.submit_review(db_session, metric.id, user_id=USER_A, tenant_id=tenant_id)
+    registry.approve_metric(db_session, metric.id, reviewer_id=USER_B, tenant_id=tenant_id)
+    metric.lineage_status = "resolved"
+    db_session.commit()
+    db_session.refresh(metric)
+    return registry.publish_metric(db_session, metric.id, user_id=USER_B, tenant_id=tenant_id)
+
+
+def _insert_alias(db_session, tenant_id, metric_id, alias, locale="zh-CN", priority=100):
+    db_session.execute(
+        text(
+            """
+            INSERT INTO bi_metric_aliases
+                (id, tenant_id, metric_id, alias, locale, priority, is_active)
+            VALUES
+                (:id, :tenant_id, :metric_id, :alias, :locale, :priority, true)
+            """
+        ),
+        {
+            "id": uuid.uuid4(),
+            "tenant_id": tenant_id,
+            "metric_id": metric_id,
+            "alias": alias,
+            "locale": locale,
+            "priority": priority,
+        },
+    )
+
+
+def _insert_tableau_binding(
+    db_session,
+    tenant_id,
+    metric_id,
+    *,
+    tableau_connection_id=2,
+    tableau_datasource_luid="f4290485-26d3-428f-aa8d-ccc33862a411",
+):
+    db_session.execute(
+        text(
+            """
+            UPDATE bi_metric_bindings
+            SET is_primary = false, is_active = false
+            WHERE tenant_id = :tenant_id
+              AND metric_id = :metric_id
+              AND source_type = 'tableau_published_datasource'
+            """
+        ),
+        {"tenant_id": tenant_id, "metric_id": metric_id},
+    )
+    db_session.execute(
+        text(
+            """
+            INSERT INTO bi_metric_bindings
+                (
+                    id, tenant_id, metric_id, source_type, tableau_connection_id,
+                    tableau_datasource_luid, field_mappings, required_base_metrics,
+                    formula_expression, is_primary, is_active
+                )
+            VALUES
+                (
+                    :id, :tenant_id, :metric_id, 'tableau_published_datasource',
+                    :tableau_connection_id, :tableau_datasource_luid,
+                    CAST(:field_mappings AS JSONB),
+                    CAST(:required_base_metrics AS JSONB),
+                    CAST(:formula_expression AS JSONB),
+                    true, true
+                )
+            """
+        ),
+        {
+            "id": uuid.uuid4(),
+            "tenant_id": tenant_id,
+            "metric_id": metric_id,
+            "tableau_connection_id": tableau_connection_id,
+            "tableau_datasource_luid": tableau_datasource_luid,
+            "field_mappings": json.dumps({"profit": "利润", "sales": "销售额"}, ensure_ascii=False),
+            "required_base_metrics": json.dumps(["利润", "销售额"], ensure_ascii=False),
+            "formula_expression": json.dumps(
+                {
+                    "op": "divide",
+                    "left": {"metric": "利润", "aggregation": "SUM"},
+                    "right": {"metric": "销售额", "aggregation": "SUM"},
+                },
+                ensure_ascii=False,
+            ),
+        },
+    )
 
 
 @pytest.fixture()
@@ -104,6 +283,7 @@ def test_create_metric_success(db_session, valid_datasource, valid_user):
     metric = registry.create_metric(db_session, data, user_id=USER_A, tenant_id=TENANT_ID)
 
     assert metric.id is not None
+    assert metric.metric_code.startswith("MET-")
     assert metric.name == data.name
     assert metric.tenant_id == TENANT_ID
     assert metric.is_active is False
@@ -113,6 +293,27 @@ def test_create_metric_success(db_session, valid_datasource, valid_user):
 
     # 初始状态应为 draft
     assert registry._get_metric_status(metric) == "draft"
+
+
+def test_create_metric_allows_null_name_and_requires_name_zh(db_session, valid_datasource, valid_user):
+    data = _make_create_data(name=None, name_zh="中文必填指标")
+    metric = registry.create_metric(db_session, data, user_id=USER_A, tenant_id=TENANT_ID)
+
+    assert metric.name is None
+    assert metric.name_zh == "中文必填指标"
+    assert metric.metric_code.startswith("MET-")
+
+    with pytest.raises(ValueError):
+        MetricCreate(
+            name=None,
+            metric_type="atomic",
+            datasource_id=1,
+            table_name="fact_orders",
+            column_name="amount",
+            tableau_connection_id=2,
+            tableau_datasource_luid="f4290485-26d3-428f-aa8d-ccc33862a411",
+            field_mappings={"amount": "销售额"},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -254,10 +455,132 @@ def test_lookup_published_and_not_found(db_session, valid_datasource, valid_user
         tenant_id=TENANT_ID,
     )
 
-    found_names = [m.name for m in result["metrics"]]
+    found_names = [m["name"] for m in result["metrics"]]
     assert published_name in found_names
     assert missing_name in result["not_found"]
     assert missing_name not in found_names
+
+
+def test_lookup_matches_name_zh_and_aliases_to_same_metric(db_session, valid_datasource, valid_user):
+    _ensure_lookup_extension_tables(db_session)
+    lookup_tenant = uuid.uuid4()
+    metric = _publish_test_metric(
+        db_session,
+        lookup_tenant,
+        name=f"profit_margin_{uuid.uuid4().hex[:8]}",
+        name_zh="利润率",
+        metric_type="ratio",
+        formula="SUM(profit) / SUM(sales)",
+        aggregation_type="SUM",
+        result_type="percentage",
+        unit="%",
+        precision=2,
+    )
+    _insert_alias(db_session, lookup_tenant, metric.id, "毛利率", locale="zh-CN", priority=100)
+    _insert_alias(db_session, lookup_tenant, metric.id, "profit margin", locale="en", priority=90)
+    _insert_tableau_binding(db_session, lookup_tenant, metric.id)
+    db_session.commit()
+
+    result = registry.lookup_metrics(
+        db_session,
+        names=["利润率", "毛利率", "profit margin"],
+        tenant_id=lookup_tenant,
+        tableau_connection_id=2,
+        tableau_datasource_luid="f4290485-26d3-428f-aa8d-ccc33862a411",
+    )
+
+    assert result["not_found"] == []
+    assert result["binding_errors"] == []
+    assert len(result["metrics"]) == 1
+    found = result["metrics"][0]
+    assert found["name"] == metric.name
+    assert found["name_zh"] == "利润率"
+    assert set(found["aliases"]) == {"毛利率", "profit margin"}
+    assert found["tableau_connection_id"] == 2
+    assert found["tableau_datasource_luid"] == "f4290485-26d3-428f-aa8d-ccc33862a411"
+
+
+def test_lookup_ratio_returns_structured_formula_expression(db_session, valid_datasource, valid_user):
+    _ensure_lookup_extension_tables(db_session)
+    lookup_tenant = uuid.uuid4()
+    metric = _publish_test_metric(
+        db_session,
+        lookup_tenant,
+        name=f"profit_margin_{uuid.uuid4().hex[:8]}",
+        name_zh="利润率",
+        metric_type="ratio",
+        formula="SUM(profit) / SUM(sales)",
+        aggregation_type="SUM",
+        result_type="percentage",
+        unit="%",
+        precision=2,
+    )
+    _insert_alias(db_session, lookup_tenant, metric.id, "profit margin", locale="en", priority=100)
+    _insert_tableau_binding(db_session, lookup_tenant, metric.id)
+    db_session.commit()
+
+    result = registry.lookup_metrics(
+        db_session,
+        names=["profit margin"],
+        tenant_id=lookup_tenant,
+        tableau_connection_id=2,
+        tableau_datasource_luid="f4290485-26d3-428f-aa8d-ccc33862a411",
+    )
+
+    found = result["metrics"][0]
+    assert found["metric_type"] == "ratio"
+    assert found["result_type"] == "percentage"
+    assert found["unit"] == "%"
+    assert found["precision"] == 2
+    assert found["required_base_metrics"] == ["利润", "销售额"]
+    assert found["formula_expression"] == {
+        "op": "divide",
+        "left": {"metric": "利润", "aggregation": "SUM"},
+        "right": {"metric": "销售额", "aggregation": "SUM"},
+    }
+    assert found["field_mappings"] == {"profit": "利润", "sales": "销售额"}
+    assert found["metric_code"] == metric.metric_code
+    assert found["queryable"] is True
+    assert {dep["dependency_role"] for dep in found["dependencies"]} == {"numerator", "denominator"}
+
+
+def test_lookup_binding_unavailable_returns_binding_errors(db_session, valid_datasource, valid_user):
+    _ensure_lookup_extension_tables(db_session)
+    lookup_tenant = uuid.uuid4()
+    metric = _publish_test_metric(
+        db_session,
+        lookup_tenant,
+        name=f"profit_margin_{uuid.uuid4().hex[:8]}",
+        name_zh="利润率",
+        metric_type="ratio",
+        formula="SUM(profit) / SUM(sales)",
+        aggregation_type="SUM",
+        result_type="percentage",
+    )
+    _insert_alias(db_session, lookup_tenant, metric.id, "profit margin", locale="en", priority=100)
+    db_session.commit()
+
+    result = registry.lookup_metrics(
+        db_session,
+        names=["profit margin"],
+        tenant_id=lookup_tenant,
+        tableau_connection_id=999,
+        tableau_datasource_luid="missing-datasource-luid",
+    )
+
+    assert result["not_found"] == []
+    assert len(result["metrics"]) == 1
+    assert result["binding_errors"] == [
+        {
+            "requested_name": "profit margin",
+            "metric_name": metric.name,
+            "metric_code": metric.metric_code,
+            "metric_id": str(metric.id),
+            "error_code": "MC_BINDING_UNAVAILABLE",
+            "message": "指标口径未绑定当前执行数据源",
+        }
+    ]
+    assert result["metrics"][0]["binding_errors"] == result["binding_errors"]
 
 
 # ---------------------------------------------------------------------------
@@ -381,12 +704,119 @@ def test_metric_type_accepts_atomic(db_session, valid_datasource, valid_user):
 
 
 def test_metric_type_accepts_derived(db_session, valid_datasource, valid_user):
-    data = _make_create_data(name=f"derived_{uuid.uuid4().hex[:6]}", metric_type="derived")
+    base = _publish_test_metric(
+        db_session,
+        TENANT_ID,
+        name=f"base_{uuid.uuid4().hex[:6]}",
+        name_zh="基础指标",
+    )
+    data = _make_create_data(
+        name=f"derived_{uuid.uuid4().hex[:6]}",
+        name_zh="派生指标",
+        metric_type="derived",
+        dependency_metric_ids=[base.id],
+        formula_expression={"op": "identity", "metric_code": base.metric_code},
+    )
     metric = registry.create_metric(db_session, data, user_id=USER_A, tenant_id=TENANT_ID)
     assert metric.metric_type == "derived"
 
 
 def test_metric_type_accepts_ratio(db_session, valid_datasource, valid_user):
-    data = _make_create_data(name=f"ratio_{uuid.uuid4().hex[:6]}", metric_type="ratio")
+    numerator = _publish_test_metric(
+        db_session,
+        TENANT_ID,
+        name=f"num_{uuid.uuid4().hex[:6]}",
+        name_zh="分子",
+    )
+    denominator = _publish_test_metric(
+        db_session,
+        TENANT_ID,
+        name=f"den_{uuid.uuid4().hex[:6]}",
+        name_zh="分母",
+    )
+    data = _make_create_data(
+        name=f"ratio_{uuid.uuid4().hex[:6]}",
+        name_zh="比率指标",
+        metric_type="ratio",
+        numerator_metric_id=numerator.id,
+        denominator_metric_id=denominator.id,
+        formula_expression={"op": "divide", "left": numerator.metric_code, "right": denominator.metric_code},
+    )
     metric = registry.create_metric(db_session, data, user_id=USER_A, tenant_id=TENANT_ID)
     assert metric.metric_type == "ratio"
+
+
+def test_derived_and_ratio_reject_invalid_dependencies(db_session, valid_datasource, valid_user):
+    with pytest.raises(MulanError) as derived_exc:
+        registry.create_metric(
+            db_session,
+            _make_create_data(
+                name=f"bad_derived_{uuid.uuid4().hex[:6]}",
+                name_zh="非法派生",
+                metric_type="derived",
+                dependency_metric_ids=[uuid.uuid4()],
+                formula_expression={"op": "identity"},
+            ),
+            user_id=USER_A,
+            tenant_id=TENANT_ID,
+        )
+    assert derived_exc.value.error_code == "MC_DEPENDENCY_INVALID"
+
+    base = _publish_test_metric(
+        db_session,
+        TENANT_ID,
+        name=f"ratio_base_{uuid.uuid4().hex[:6]}",
+        name_zh="比率基础",
+    )
+    with pytest.raises(MulanError) as ratio_exc:
+        registry.create_metric(
+            db_session,
+            _make_create_data(
+                name=f"bad_ratio_{uuid.uuid4().hex[:6]}",
+                name_zh="非法比率",
+                metric_type="ratio",
+                numerator_metric_id=base.id,
+                denominator_metric_id=base.id,
+                formula_expression={"op": "divide"},
+            ),
+            user_id=USER_A,
+            tenant_id=TENANT_ID,
+        )
+    assert ratio_exc.value.error_code == "MC_DEPENDENCY_INVALID"
+
+
+def test_publish_and_lookup_reject_metric_without_valid_binding(db_session, valid_datasource, valid_user):
+    metric = _publish_test_metric(
+        db_session,
+        TENANT_ID,
+        name=f"binding_metric_{uuid.uuid4().hex[:6]}",
+        name_zh="绑定失效指标",
+    )
+    db_session.execute(
+        text(
+            """
+            UPDATE bi_metric_bindings
+            SET is_active = false
+            WHERE tenant_id = :tenant_id AND metric_id = :metric_id
+            """
+        ),
+        {"tenant_id": TENANT_ID, "metric_id": metric.id},
+    )
+    metric.is_active = False
+    metric.published_at = None
+    metric.reviewed_at = registry._now()
+    metric.reviewed_by = USER_B
+    metric.lineage_status = "resolved"
+    db_session.commit()
+    db_session.refresh(metric)
+
+    with pytest.raises(MulanError) as publish_exc:
+        registry.publish_metric(db_session, metric.id, user_id=USER_B, tenant_id=TENANT_ID)
+    assert publish_exc.value.error_code == "MC_BINDING_REQUIRED"
+
+    metric.is_active = True
+    metric.published_at = registry._now()
+    db_session.commit()
+    result = registry.lookup_metrics(db_session, names=[metric.name], tenant_id=TENANT_ID)
+    assert result["metrics"][0]["queryable"] is False
+    assert result["binding_errors"][0]["error_code"] == "MC_BINDING_UNAVAILABLE"

@@ -43,8 +43,8 @@ from services.help_agent.models import (  # noqa: F401
 from services.tasks.models import BiTaskRun as BiTaskRunSpec33, BiTaskSchedule  # noqa: F401
 from services.task_runtime.models_db import BiTaskRun as BiTaskRunSpec24, BiTaskRunStep, BiTaskRunEvent  # noqa: F401
 from models.metrics import (  # noqa: F401
-    BiMetricDefinition, BiMetricLineage, BiMetricVersion,
-    BiMetricAnomaly, BiMetricConsistencyCheck,
+    BiMetricDefinition, BiMetricAlias, BiMetricBinding, BiMetricDependency,
+    BiMetricLineage, BiMetricVersion, BiMetricAnomaly, BiMetricConsistencyCheck,
 )
 
 config = context.config

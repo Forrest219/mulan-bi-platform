@@ -5,24 +5,54 @@ export type AggregationType = 'SUM' | 'AVG' | 'COUNT' | 'COUNT_DISTINCT' | 'MAX'
 export type ResultType = 'float' | 'integer' | 'percentage' | 'currency';
 export type SensitivityLevel = 'public' | 'internal' | 'confidential' | 'restricted';
 export type LineageStatus = 'unknown' | 'resolved' | 'manual';
+export type DependencyRole = 'base' | 'numerator' | 'denominator';
+
+export interface MetricDependency {
+  id?: string;
+  metric_id?: string;
+  depends_on_metric_id: string;
+  dependency_role: DependencyRole;
+  expression_order?: number;
+  weight?: number | null;
+  name?: string | null;
+  name_zh?: string | null;
+  metric_code?: string | null;
+}
+
+export interface MetricBindingError {
+  code?: string;
+  message?: string;
+  field?: string;
+  [key: string]: unknown;
+}
 
 export interface MetricItem {
   id: string;
-  name: string;
+  metric_code?: string | null;
+  name?: string | null;
   name_zh: string;
   metric_type: MetricType;
-  business_domain: string;
+  business_domain?: string | null;
   is_active: boolean;
   lineage_status: LineageStatus;
   sensitivity_level: SensitivityLevel;
-  datasource_id: number;
-  table_name: string;
-  column_name: string;
-  formula: string;
-  aggregation_type: AggregationType;
-  result_type: ResultType;
-  unit: string;
+  datasource_id?: number | null;
+  table_name?: string | null;
+  column_name?: string | null;
+  formula?: string | null;
+  aggregation_type?: AggregationType | null;
+  result_type?: ResultType | null;
+  unit?: string | null;
   precision: number;
+  dependencies?: MetricDependency[];
+  tableau_connection_id?: number | null;
+  tableau_asset_id?: number | null;
+  tableau_datasource_luid?: string | null;
+  field_mappings?: Record<string, string> | null;
+  required_base_metrics?: string[];
+  formula_expression?: unknown;
+  queryable?: boolean;
+  binding_errors?: MetricBindingError[];
   created_at: string;
   updated_at: string;
 }
@@ -36,20 +66,30 @@ export interface MetricsListResponse {
 }
 
 export interface CreateMetricInput {
-  name: string;
-  name_zh?: string;
+  name?: string;
+  name_zh: string;
   metric_type: MetricType;
   business_domain?: string;
   description?: string;
   formula?: string;
+  formula_template?: string;
   aggregation_type?: AggregationType;
   result_type?: ResultType;
   unit?: string;
   precision?: number;
-  datasource_id: number;
-  table_name: string;
-  column_name: string;
+  datasource_id?: number | null;
+  table_name?: string | null;
+  column_name?: string | null;
+  filters?: Record<string, unknown> | null;
   sensitivity_level?: SensitivityLevel;
+  dependencies?: MetricDependency[];
+  tableau_connection_id?: number | null;
+  tableau_asset_id?: number | null;
+  tableau_datasource_luid?: string | null;
+  field_caption?: string | null;
+  field_mappings?: Record<string, string> | null;
+  required_base_metrics?: string[];
+  formula_expression?: unknown;
 }
 
 export type UpdateMetricInput = Partial<CreateMetricInput>;
@@ -57,7 +97,7 @@ export type UpdateMetricInput = Partial<CreateMetricInput>;
 function buildQuery(params: Record<string, string | number | boolean | undefined>): string {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined) q.set(k, String(v));
+    if (v !== undefined && v !== '') q.set(k, String(v));
   }
   return q.toString();
 }
@@ -173,8 +213,9 @@ export async function publishMetric(id: string): Promise<{ published_at: string 
 export interface MetricDetail {
   id: string;
   tenant_id: string;
-  name: string;
-  name_zh: string | null;
+  metric_code?: string | null;
+  name?: string | null;
+  name_zh: string;
   metric_type: MetricType;
   business_domain: string | null;
   description: string | null;
@@ -184,10 +225,19 @@ export interface MetricDetail {
   result_type: ResultType | null;
   unit: string | null;
   precision: number;
-  datasource_id: number;
-  table_name: string;
-  column_name: string;
+  datasource_id: number | null;
+  table_name: string | null;
+  column_name: string | null;
   filters: Record<string, unknown> | null;
+  dependencies?: MetricDependency[];
+  tableau_connection_id?: number | null;
+  tableau_asset_id?: number | null;
+  tableau_datasource_luid?: string | null;
+  field_mappings?: Record<string, string> | null;
+  required_base_metrics?: string[];
+  formula_expression?: unknown;
+  queryable?: boolean;
+  binding_errors?: MetricBindingError[];
   is_active: boolean;
   lineage_status: LineageStatus;
   sensitivity_level: SensitivityLevel;

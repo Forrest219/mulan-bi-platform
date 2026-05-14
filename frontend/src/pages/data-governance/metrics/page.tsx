@@ -1,11 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  listMetrics, createMetric, updateMetric, deleteMetric,
+  listMetrics, createMetric, updateMetric, deleteMetric, getMetricDetail,
   submitReviewMetric, approveMetric, publishMetric,
-  MetricItem, MetricsListResponse,
+  MetricItem, MetricsListResponse, MetricDetail, MetricDependency,
 } from '../../../api/metrics';
-import { listDataSources, DataSource } from '../../../api/datasources';
+import {
+  listConnections, listAssets, getDatasourceMetadata,
+  TableauAsset, TableauAssetField, TableauConnection,
+} from '../../../api/tableau';
 import { ConfirmModal } from '../../../components/ConfirmModal';
 import { useAuth } from '../../../context/AuthContext';
 
@@ -81,42 +84,79 @@ function formatDate(iso: string): string {
 
 const NAME_REGEX = /^[a-z][a-z0-9_]{1,127}$/;
 
+function metricDisplayName(metric: Pick<MetricItem, 'metric_code' | 'name' | 'name_zh'>): string {
+  return metric.name_zh || metric.name || metric.metric_code || '未命名指标';
+}
+
+function fieldCaption(field: TableauAssetField): string {
+  return field.caption || field.name || field.field || field.fullyQualifiedName || field.fully_qualified_name || '';
+}
+
+function stringifyExpression(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  return JSON.stringify(value, null, 2);
+}
+
+function parseExpression(value: string): unknown {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return { expression: trimmed };
+  }
+}
+
 interface FormData {
+  metric_code: string;
   name: string;
   name_zh: string;
   metric_type: string;
   business_domain: string;
-  datasource_id: string;
-  table_name: string;
-  column_name: string;
   formula: string;
+  formula_expression: string;
   aggregation_type: string;
   result_type: string;
   unit: string;
   precision: string;
   sensitivity_level: string;
   description: string;
+  tableau_connection_id: string;
+  tableau_asset_id: string;
+  tableau_datasource_luid: string;
+  field_caption: string;
+  dependency_metric_ids: string[];
+  numerator_metric_id: string;
+  denominator_metric_id: string;
 }
 
 const blankForm = (): FormData => ({
+  metric_code: '',
   name: '',
   name_zh: '',
   metric_type: 'atomic',
   business_domain: '',
-  datasource_id: '',
-  table_name: '',
-  column_name: '',
   formula: '',
+  formula_expression: '',
   aggregation_type: 'SUM',
   result_type: 'float',
   unit: '',
   precision: '2',
   sensitivity_level: 'public',
   description: '',
+  tableau_connection_id: '',
+  tableau_asset_id: '',
+  tableau_datasource_luid: '',
+  field_caption: '',
+  dependency_metric_ids: [],
+  numerator_metric_id: '',
+  denominator_metric_id: '',
 });
 
 export default function MetricsPage() {
-  const { isDataAdmin } = useAuth();
+  const { isAdmin, isDataAdmin } = useAuth();
+  const canManageMetrics = isAdmin || isDataAdmin;
 
   // ── list state ──
   const [items, setItems] = useState<MetricItem[]>([]);
@@ -129,13 +169,18 @@ export default function MetricsPage() {
   const [filterType, setFilterType] = useState('');
   const [filterActive, setFilterActive] = useState<string>('');
 
-  // ── modal state ──
-  const [showModal, setShowModal] = useState(false);
+  // ── inline form state ──
+  const [showForm, setShowForm] = useState(false);
   const [editingItem, setEditingItem] = useState<MetricItem | null>(null);
   const [formData, setFormData] = useState<FormData>(blankForm());
   const [formError, setFormError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
-  const [dataSources, setDataSources] = useState<DataSource[]>([]);
+  const [tableauConnections, setTableauConnections] = useState<TableauConnection[]>([]);
+  const [tableauAssets, setTableauAssets] = useState<TableauAsset[]>([]);
+  const [tableauFields, setTableauFields] = useState<TableauAssetField[]>([]);
+  const [dependencyOptions, setDependencyOptions] = useState<MetricItem[]>([]);
+  const [tableauLoading, setTableauLoading] = useState(false);
+  const formRef = useRef<HTMLDivElement | null>(null);
 
   // ── confirm delete ──
   const [confirmModal, setConfirmModal] = useState<{
@@ -145,16 +190,25 @@ export default function MetricsPage() {
   // ── publish flow ──
   const [publishingId, setPublishingId] = useState<string | null>(null);
 
-  const fetchList = useCallback(async () => {
+  const fetchList = useCallback(async (overrides?: {
+    page?: number;
+    search?: string;
+    filterType?: string;
+    filterActive?: string;
+  }) => {
     setLoading(true);
     setLoadError('');
     try {
-      const is_active = filterActive === 'published' ? true : filterActive === 'draft' ? false : undefined;
+      const nextPage = overrides?.page ?? page;
+      const nextSearch = overrides?.search ?? search;
+      const nextFilterType = overrides?.filterType ?? filterType;
+      const nextFilterActive = overrides?.filterActive ?? filterActive;
+      const is_active = nextFilterActive === 'published' ? true : nextFilterActive === 'draft' ? false : undefined;
       const data: MetricsListResponse = await listMetrics({
-        page,
+        page: nextPage,
         page_size: pageSize,
-        search,
-        metric_type: filterType,
+        search: nextSearch,
+        metric_type: nextFilterType,
         is_active,
       });
       setItems(data.items);
@@ -168,10 +222,18 @@ export default function MetricsPage() {
 
   useEffect(() => { fetchList(); }, [fetchList]);
 
-  const fetchDataSourcesForModal = async () => {
+  const fetchModalResources = async (excludeMetricId?: string) => {
     try {
-      const ds = await listDataSources();
-      setDataSources(ds.datasources);
+      const [connections, metrics] = await Promise.all([
+        listConnections(false),
+        listMetrics({ page: 1, page_size: 200 }),
+      ]);
+      setTableauConnections(connections.connections.filter((conn) => conn.is_active));
+      setDependencyOptions(
+        metrics.items.filter((metric) => (
+          metric.id !== excludeMetricId && (metric.metric_type === 'atomic' || metric.metric_type === 'derived')
+        )),
+      );
     } catch {
       // non-critical
     }
@@ -180,32 +242,54 @@ export default function MetricsPage() {
   const openCreate = async () => {
     setEditingItem(null);
     setFormData(blankForm());
+    setTableauAssets([]);
+    setTableauFields([]);
     setFormError('');
-    await fetchDataSourcesForModal();
-    setShowModal(true);
+    await fetchModalResources();
+    setShowForm(true);
   };
 
   const openEdit = async (item: MetricItem) => {
     setEditingItem(item);
+    let detail: MetricDetail | MetricItem = item;
+    try {
+      detail = await getMetricDetail(item.id);
+    } catch {
+      // Fall back to list payload when detail is temporarily unavailable.
+    }
+    const dependencies = detail.dependencies || [];
+    const numerator = dependencies.find((dep) => dep.dependency_role === 'numerator')?.depends_on_metric_id || '';
+    const denominator = dependencies.find((dep) => dep.dependency_role === 'denominator')?.depends_on_metric_id || '';
     setFormData({
-      name: item.name,
-      name_zh: item.name_zh,
-      metric_type: item.metric_type,
-      business_domain: item.business_domain,
-      datasource_id: String(item.datasource_id),
-      table_name: item.table_name,
-      column_name: item.column_name,
-      formula: item.formula,
-      aggregation_type: item.aggregation_type,
-      result_type: item.result_type,
-      unit: item.unit,
-      precision: String(item.precision),
-      sensitivity_level: item.sensitivity_level,
-      description: '',
+      metric_code: detail.metric_code || '',
+      name: detail.name || '',
+      name_zh: detail.name_zh || '',
+      metric_type: detail.metric_type,
+      business_domain: detail.business_domain || '',
+      formula: detail.formula || '',
+      formula_expression: stringifyExpression(detail.formula_expression),
+      aggregation_type: detail.aggregation_type || 'SUM',
+      result_type: detail.result_type || (detail.metric_type === 'ratio' ? 'percentage' : 'float'),
+      unit: detail.unit || (detail.metric_type === 'ratio' ? '%' : ''),
+      precision: String(detail.precision ?? 2),
+      sensitivity_level: detail.sensitivity_level,
+      description: 'description' in detail ? detail.description || '' : '',
+      tableau_connection_id: detail.tableau_connection_id ? String(detail.tableau_connection_id) : '',
+      tableau_asset_id: detail.tableau_asset_id ? String(detail.tableau_asset_id) : '',
+      tableau_datasource_luid: detail.tableau_datasource_luid || '',
+      field_caption: detail.field_mappings ? Object.values(detail.field_mappings)[0] || '' : '',
+      dependency_metric_ids: dependencies
+        .filter((dep) => dep.dependency_role === 'base')
+        .sort((a, b) => (a.expression_order ?? 0) - (b.expression_order ?? 0))
+        .map((dep) => dep.depends_on_metric_id),
+      numerator_metric_id: numerator,
+      denominator_metric_id: denominator,
     });
+    setTableauAssets([]);
+    setTableauFields([]);
     setFormError('');
-    await fetchDataSourcesForModal();
-    setShowModal(true);
+    await fetchModalResources(item.id);
+    setShowForm(true);
   };
 
   const _resetForm = () => {
@@ -213,60 +297,202 @@ export default function MetricsPage() {
     setFormError('');
   };
 
+  useEffect(() => {
+    if (showForm) {
+      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [showForm, editingItem?.id]);
+
+  useEffect(() => {
+    if (!showForm || !formData.tableau_connection_id) {
+      setTableauAssets([]);
+      return;
+    }
+    let ignore = false;
+    setTableauLoading(true);
+    listAssets({
+      connection_id: Number(formData.tableau_connection_id),
+      asset_type: 'datasource',
+      page: 1,
+      page_size: 100,
+    })
+      .then((res) => {
+        if (!ignore) setTableauAssets(res.assets);
+      })
+      .catch(() => {
+        if (!ignore) setTableauAssets([]);
+      })
+      .finally(() => {
+        if (!ignore) setTableauLoading(false);
+      });
+    return () => { ignore = true; };
+  }, [formData.tableau_connection_id, showForm]);
+
+  useEffect(() => {
+    if (!showForm || !formData.tableau_asset_id) {
+      setTableauFields([]);
+      return;
+    }
+    let ignore = false;
+    setTableauLoading(true);
+    getDatasourceMetadata(Number(formData.tableau_asset_id))
+      .then((res) => {
+        if (!ignore) {
+          setTableauFields(res.fields || []);
+          setFormData((prev) => ({
+            ...prev,
+            tableau_datasource_luid: res.datasource_luid || prev.tableau_datasource_luid,
+          }));
+        }
+      })
+      .catch(() => {
+        if (!ignore) setTableauFields([]);
+      })
+      .finally(() => {
+        if (!ignore) setTableauLoading(false);
+      });
+    return () => { ignore = true; };
+  }, [formData.tableau_asset_id, showForm]);
+
   const handleSave = async () => {
     setFormError('');
     // 校验必填
-    if (!formData.name.trim()) {
-      setFormError('指标英文名不能为空');
+    if (formData.name.trim() && !NAME_REGEX.test(formData.name.trim())) {
+      setFormError('只允许小写字母、数字、下划线，以字母开头，最长 128 字符');
       return;
     }
-    if (!NAME_REGEX.test(formData.name)) {
-      setFormError('只允许小写字母、数字、下划线，以字母开头，最长 128 字符');
+    if (!formData.name_zh.trim()) {
+      setFormError('指标中文名不能为空');
       return;
     }
     if (!formData.metric_type) {
       setFormError('请选择指标类型');
       return;
     }
-    if (!formData.datasource_id) {
-      setFormError('请选择数据源');
-      return;
+    if (formData.metric_type === 'atomic') {
+      if (!formData.tableau_connection_id) {
+        setFormError('请选择 Tableau 连接');
+        return;
+      }
+      if (!formData.tableau_asset_id) {
+        setFormError('请选择 Tableau Published Datasource');
+        return;
+      }
+      if (!formData.field_caption) {
+        setFormError('请选择 Tableau 字段');
+        return;
+      }
+      if (!formData.aggregation_type) {
+        setFormError('请选择聚合方式');
+        return;
+      }
     }
-    if (!formData.table_name.trim()) {
-      setFormError('数据表名不能为空');
-      return;
+    if (formData.metric_type === 'derived') {
+      if (formData.dependency_metric_ids.length === 0) {
+        setFormError('请选择至少一个依赖指标');
+        return;
+      }
+      if (!formData.formula_expression.trim()) {
+        setFormError('请填写或生成结构化公式表达');
+        return;
+      }
     }
-    if (!formData.column_name.trim()) {
-      setFormError('字段名不能为空');
-      return;
+    if (formData.metric_type === 'ratio') {
+      if (!formData.numerator_metric_id || !formData.denominator_metric_id) {
+        setFormError('请选择分子指标和分母指标');
+        return;
+      }
+      if (formData.numerator_metric_id === formData.denominator_metric_id) {
+        setFormError('分子指标和分母指标不能相同');
+        return;
+      }
     }
 
     setFormLoading(true);
     try {
+      const metricType = formData.metric_type as MetricItem['metric_type'];
+      const selectedAsset = tableauAssets.find((asset) => String(asset.id) === formData.tableau_asset_id);
+      const selectedDependencies = dependencyOptions.filter((metric) => (
+        formData.dependency_metric_ids.includes(metric.id)
+      ));
+      const numeratorMetric = dependencyOptions.find((metric) => metric.id === formData.numerator_metric_id);
+      const denominatorMetric = dependencyOptions.find((metric) => metric.id === formData.denominator_metric_id);
+      const dependencies: MetricDependency[] = [];
+
+      if (metricType === 'derived') {
+        formData.dependency_metric_ids.forEach((metricId, index) => {
+          dependencies.push({
+            depends_on_metric_id: metricId,
+            dependency_role: 'base',
+            expression_order: index,
+          });
+        });
+      }
+      if (metricType === 'ratio') {
+        dependencies.push(
+          { depends_on_metric_id: formData.numerator_metric_id, dependency_role: 'numerator', expression_order: 0 },
+          { depends_on_metric_id: formData.denominator_metric_id, dependency_role: 'denominator', expression_order: 1 },
+        );
+      }
+
+      const expression = metricType === 'atomic'
+        ? {
+            type: 'tableau_field',
+            field_caption: formData.field_caption,
+            aggregation_type: formData.aggregation_type,
+          }
+        : metricType === 'ratio'
+          ? {
+              type: 'ratio',
+              numerator_metric_id: formData.numerator_metric_id,
+              denominator_metric_id: formData.denominator_metric_id,
+              operator: 'divide',
+            }
+          : parseExpression(formData.formula_expression);
+
       const payload = {
-        name: formData.name.trim(),
-        name_zh: formData.name_zh.trim() || undefined,
-        metric_type: formData.metric_type as MetricItem['metric_type'],
+        name: formData.name.trim() || undefined,
+        name_zh: formData.name_zh.trim(),
+        metric_type: metricType,
         business_domain: formData.business_domain.trim() || undefined,
         description: formData.description.trim() || undefined,
-        formula: formData.formula.trim() || undefined,
-        aggregation_type: formData.aggregation_type as MetricItem['aggregation_type'],
-        result_type: formData.result_type as MetricItem['result_type'],
-        unit: formData.unit.trim() || undefined,
+        formula: metricType === 'atomic'
+          ? `${formData.aggregation_type}([${formData.field_caption}])`
+          : formData.formula.trim() || undefined,
+        aggregation_type: metricType === 'ratio'
+          ? 'none' as const
+          : formData.aggregation_type as MetricItem['aggregation_type'],
+        result_type: (metricType === 'ratio' ? 'percentage' : formData.result_type) as MetricItem['result_type'],
+        unit: metricType === 'ratio' ? '%' : formData.unit.trim() || undefined,
         precision: formData.precision ? Number(formData.precision) : 2,
-        datasource_id: Number(formData.datasource_id),
-        table_name: formData.table_name.trim(),
-        column_name: formData.column_name.trim(),
         sensitivity_level: formData.sensitivity_level as MetricItem['sensitivity_level'],
+        dependencies: dependencies.length ? dependencies : undefined,
+        tableau_connection_id: formData.tableau_connection_id ? Number(formData.tableau_connection_id) : undefined,
+        tableau_asset_id: formData.tableau_asset_id ? Number(formData.tableau_asset_id) : undefined,
+        tableau_datasource_luid: formData.tableau_datasource_luid || selectedAsset?.tableau_id || undefined,
+        field_caption: metricType === 'atomic' ? formData.field_caption : undefined,
+        field_mappings: metricType === 'atomic' ? { value: formData.field_caption } : undefined,
+        required_base_metrics: metricType === 'derived'
+          ? selectedDependencies.map(metricDisplayName)
+          : metricType === 'ratio'
+            ? [numeratorMetric, denominatorMetric].filter(Boolean).map((metric) => metricDisplayName(metric!))
+            : undefined,
+        formula_expression: expression,
       };
 
       if (editingItem) {
         await updateMetric(editingItem.id, payload);
+        await fetchList();
       } else {
         await createMetric(payload as Parameters<typeof createMetric>[0]);
+        setSearch('');
+        setFilterType('');
+        setFilterActive('');
+        setPage(1);
+        await fetchList({ page: 1, search: '', filterType: '', filterActive: '' });
       }
-      setShowModal(false);
-      fetchList();
+      setShowForm(false);
+      setEditingItem(null);
     } catch (e) {
       setFormError(getErrorMessage(e));
     } finally {
@@ -319,7 +545,7 @@ export default function MetricsPage() {
             </div>
             <p className="text-[13px] text-slate-400 ml-7">管理指标定义、口径与发布状态</p>
           </div>
-          {isDataAdmin && (
+          {canManageMetrics && (
             <button
               onClick={openCreate}
               className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 text-white text-[12px] font-medium rounded-lg hover:bg-blue-500 transition-colors cursor-pointer"
@@ -384,8 +610,8 @@ export default function MetricsPage() {
           </div>
         </div>
 
-        {/* Table */}
-        {loading ? (
+        {/* Table / empty state */}
+        {showForm ? null : loading ? (
           <div className="text-center py-20 text-slate-400">加载中...</div>
         ) : items.length === 0 ? (
           <div className="text-center py-20">
@@ -393,7 +619,7 @@ export default function MetricsPage() {
               <i className="ri-bar-chart-grouped-line text-2xl text-slate-400" />
             </div>
             <p className="text-slate-500 mb-4">暂无指标</p>
-            {isDataAdmin && (
+            {canManageMetrics && (
               <button onClick={openCreate} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-500 cursor-pointer">
                 新建指标
               </button>
@@ -417,9 +643,11 @@ export default function MetricsPage() {
                     {/* 指标名 */}
                     <td className="px-4 py-3">
                       <Link to={`/governance/metrics/${item.id}`} className="font-semibold text-blue-600 hover:text-blue-800 text-[13px] hover:underline">
-                        {item.name}
+                        {metricDisplayName(item)}
                       </Link>
-                      {item.name_zh && <div className="text-[11px] text-slate-500">{item.name_zh}</div>}
+                      <div className="text-[11px] text-slate-500">
+                        {item.metric_code || '未编号'}{item.name ? ` · ${item.name}` : ''}
+                      </div>
                     </td>
                     {/* 类型 */}
                     <td className="px-4 py-3" style={{ width: 80 }}>
@@ -433,7 +661,11 @@ export default function MetricsPage() {
                     </td>
                     {/* 数据源 */}
                     <td className="px-4 py-3 text-[12px] text-slate-600 font-mono" style={{ width: 80 }}>
-                      DS-{item.datasource_id}
+                      {item.tableau_datasource_luid
+                        ? `Tableau ${item.tableau_datasource_luid.slice(0, 8)}`
+                        : item.datasource_id
+                          ? `DS-${item.datasource_id}`
+                          : '—'}
                     </td>
                     {/* 状态 */}
                     <td className="px-4 py-3" style={{ width: 80 }}>
@@ -460,9 +692,9 @@ export default function MetricsPage() {
                       <div className="flex items-center gap-2 flex-wrap">
                         <button
                           onClick={() => openEdit(item)}
-                          disabled={!isDataAdmin}
+                          disabled={!canManageMetrics}
                           className={`text-[11px] px-2 py-1 border rounded transition-colors cursor-pointer ${
-                            isDataAdmin
+                            canManageMetrics
                               ? 'border-slate-200 text-slate-500 hover:text-slate-800 hover:border-slate-300'
                               : 'border-slate-100 text-slate-300 cursor-not-allowed'
                           }`}
@@ -483,10 +715,10 @@ export default function MetricsPage() {
                             onClick={() => setConfirmModal({
                               open: true,
                               title: '下线指标',
-                              message: `确定下线指标「${item.name}」？下线后可在列表中查看但不可用。`,
+                              message: `确定下线指标「${metricDisplayName(item)}」？下线后可在列表中查看但不可用。`,
                               onConfirm: () => handleDelete(item.id),
                             })}
-                            disabled={!isDataAdmin}
+                            disabled={!canManageMetrics}
                             className="text-[11px] px-2 py-1 text-red-400 hover:text-red-600 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             下线
@@ -502,7 +734,7 @@ export default function MetricsPage() {
         )}
 
         {/* Pagination */}
-        {!loading && items.length > 0 && (
+        {!showForm && !loading && items.length > 0 && (
           <div className="mt-4 flex items-center justify-between text-[13px] text-slate-500">
             <span>第 {page} 页，共 {pages} 页，共 {total} 条</span>
             <div className="flex items-center gap-1">
@@ -526,15 +758,21 @@ export default function MetricsPage() {
       </div>
       </div>
 
-      {/* Create / Edit Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
-            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white">
+      {/* Inline Create / Edit Form */}
+      {showForm && (
+        <div ref={formRef} className="px-8 pb-7">
+          <div className="max-w-6xl mx-auto bg-white border border-slate-200 rounded-xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-white">
               <h2 className="text-[15px] font-semibold text-slate-800">
-                {editingItem ? `编辑指标: ${editingItem.name}` : '新建指标'}
+                {editingItem ? `编辑指标: ${metricDisplayName(editingItem)}` : '新建指标'}
               </h2>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+              <button
+                onClick={() => {
+                  setShowForm(false);
+                  setEditingItem(null);
+                }}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
                 <i className="ri-close-line text-lg" />
               </button>
             </div>
@@ -543,24 +781,29 @@ export default function MetricsPage() {
                 <div className="mb-4 px-3 py-2 bg-red-50 text-red-600 text-xs rounded border border-red-200">{formError}</div>
               )}
               <div className="grid grid-cols-2 gap-4">
-                {/* 左列 */}
                 <div>
-                  <label className="block text-[11px] font-medium text-slate-500 mb-1">
-                    指标英文名 <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value.toLowerCase() })}
-                    placeholder="如 gmv"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400"
-                  />
+                  <label className="block text-[11px] font-medium text-slate-500 mb-1">指标编号</label>
+                  <div className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-slate-50 text-slate-500 font-mono">
+                    {formData.metric_code || '保存后自动生成'}
+                  </div>
                 </div>
                 <div>
-                  <label className="block text-[11px] font-medium text-slate-500 mb-1">指标中文名</label>
+                  <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                    指标中文名 <span className="text-red-500">*</span>
+                  </label>
                   <input
                     value={formData.name_zh}
                     onChange={(e) => setFormData({ ...formData, name_zh: e.target.value })}
                     placeholder="如 商品交易总额"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-500 mb-1">指标英文名</label>
+                  <input
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value.toLowerCase() })}
+                    placeholder="可选，如 gmv"
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400"
                   />
                 </div>
@@ -570,7 +813,16 @@ export default function MetricsPage() {
                   </label>
                   <select
                     value={formData.metric_type}
-                    onChange={(e) => setFormData({ ...formData, metric_type: e.target.value })}
+                    onChange={(e) => {
+                      const nextType = e.target.value;
+                      setFormData({
+                        ...formData,
+                        metric_type: nextType,
+                        aggregation_type: nextType === 'ratio' ? 'none' : formData.aggregation_type,
+                        result_type: nextType === 'ratio' ? 'percentage' : formData.result_type,
+                        unit: nextType === 'ratio' ? '%' : formData.unit,
+                      });
+                    }}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 bg-white"
                   >
                     <option value="atomic">原子</option>
@@ -587,23 +839,28 @@ export default function MetricsPage() {
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400"
                   />
                 </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-500 mb-1">聚合方式</label>
-                  <select
-                    value={formData.aggregation_type}
-                    onChange={(e) => setFormData({ ...formData, aggregation_type: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 bg-white"
-                  >
-                    {AGGREGATION_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>{o.label}</option>
-                    ))}
-                  </select>
-                </div>
+                {formData.metric_type !== 'ratio' && (
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                      聚合方式 {formData.metric_type === 'atomic' && <span className="text-red-500">*</span>}
+                    </label>
+                    <select
+                      value={formData.aggregation_type}
+                      onChange={(e) => setFormData({ ...formData, aggregation_type: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 bg-white"
+                    >
+                      {AGGREGATION_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <div>
                   <label className="block text-[11px] font-medium text-slate-500 mb-1">结果类型</label>
                   <select
                     value={formData.result_type}
                     onChange={(e) => setFormData({ ...formData, result_type: e.target.value })}
+                    disabled={formData.metric_type === 'ratio'}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 bg-white"
                   >
                     {RESULT_TYPE_OPTIONS.map((o) => (
@@ -612,32 +869,11 @@ export default function MetricsPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[11px] font-medium text-slate-500 mb-1">
-                    数据表名 <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    value={formData.table_name}
-                    onChange={(e) => setFormData({ ...formData, table_name: e.target.value })}
-                    placeholder="如 orders"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-500 mb-1">
-                    字段名 <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    value={formData.column_name}
-                    onChange={(e) => setFormData({ ...formData, column_name: e.target.value })}
-                    placeholder="如 order_amount"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400"
-                  />
-                </div>
-                <div>
                   <label className="block text-[11px] font-medium text-slate-500 mb-1">单位</label>
                   <input
                     value={formData.unit}
                     onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
+                    disabled={formData.metric_type === 'ratio'}
                     placeholder="如 元、%"
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400"
                   />
@@ -652,22 +888,189 @@ export default function MetricsPage() {
                   />
                 </div>
 
-                {/* 全宽：数据源 */}
-                <div className="col-span-2">
-                  <label className="block text-[11px] font-medium text-slate-500 mb-1">
-                    数据源 <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={formData.datasource_id}
-                    onChange={(e) => setFormData({ ...formData, datasource_id: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 bg-white"
-                  >
-                    <option value="">请选择数据源</option>
-                    {dataSources.map((ds) => (
-                      <option key={ds.id} value={ds.id}>{ds.name}</option>
-                    ))}
-                  </select>
-                </div>
+                {formData.metric_type === 'atomic' && (
+                  <>
+                    <div className="col-span-2 border-t border-slate-100 pt-4">
+                      <div className="text-[12px] font-semibold text-slate-700 mb-3">Tableau Binding</div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                            Tableau 连接 <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            value={formData.tableau_connection_id}
+                            onChange={(e) => setFormData({
+                              ...formData,
+                              tableau_connection_id: e.target.value,
+                              tableau_asset_id: '',
+                              tableau_datasource_luid: '',
+                              field_caption: '',
+                            })}
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 bg-white"
+                          >
+                            <option value="">请选择 Tableau 连接</option>
+                            {tableauConnections.map((conn) => (
+                              <option key={conn.id} value={conn.id}>{conn.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                            Published Datasource <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            value={formData.tableau_asset_id}
+                            onChange={(e) => {
+                              const asset = tableauAssets.find((a) => String(a.id) === e.target.value);
+                              setFormData({
+                                ...formData,
+                                tableau_asset_id: e.target.value,
+                                tableau_datasource_luid: asset?.tableau_id || '',
+                                field_caption: '',
+                              });
+                            }}
+                            disabled={!formData.tableau_connection_id}
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 bg-white"
+                          >
+                            <option value="">{tableauLoading ? '加载中...' : '请选择数据源资产'}</option>
+                            {tableauAssets.map((asset) => (
+                              <option key={asset.id} value={asset.id}>{asset.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                        字段 Caption <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={formData.field_caption}
+                        onChange={(e) => setFormData({ ...formData, field_caption: e.target.value })}
+                        disabled={!formData.tableau_asset_id}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 bg-white"
+                      >
+                        <option value="">{tableauLoading ? '加载中...' : '请选择字段'}</option>
+                        {tableauFields.map((field) => {
+                          const caption = fieldCaption(field);
+                          return caption ? (
+                            <option key={`${caption}-${field.fullyQualifiedName || field.fully_qualified_name || field.name || field.field}`} value={caption}>
+                              {caption}
+                            </option>
+                          ) : null;
+                        })}
+                      </select>
+                    </div>
+                  </>
+                )}
+
+                {formData.metric_type === 'derived' && (
+                  <>
+                    <div className="col-span-2 border-t border-slate-100 pt-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="block text-[11px] font-medium text-slate-500">
+                          依赖指标 <span className="text-red-500">*</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setFormData({
+                            ...formData,
+                            formula_expression: JSON.stringify({
+                              type: 'derived',
+                              expression: formData.dependency_metric_ids.map((id) => `metric("${id}")`).join(' + '),
+                              dependencies: formData.dependency_metric_ids,
+                            }, null, 2),
+                          })}
+                          className="text-[11px] text-blue-600 hover:text-blue-700 cursor-pointer"
+                        >
+                          生成表达式
+                        </button>
+                      </div>
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          if (!e.target.value || formData.dependency_metric_ids.includes(e.target.value)) return;
+                          setFormData({ ...formData, dependency_metric_ids: [...formData.dependency_metric_ids, e.target.value] });
+                        }}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 bg-white"
+                      >
+                        <option value="">添加依赖指标</option>
+                        {dependencyOptions.map((metric) => (
+                          <option key={metric.id} value={metric.id}>{metricDisplayName(metric)}</option>
+                        ))}
+                      </select>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {formData.dependency_metric_ids.map((metricId) => {
+                          const metric = dependencyOptions.find((m) => m.id === metricId);
+                          return (
+                            <span key={metricId} className="inline-flex items-center gap-1 px-2 py-1 bg-slate-100 text-slate-600 rounded text-[12px]">
+                              {metric ? metricDisplayName(metric) : metricId}
+                              <button
+                                type="button"
+                                onClick={() => setFormData({
+                                  ...formData,
+                                  dependency_metric_ids: formData.dependency_metric_ids.filter((id) => id !== metricId),
+                                })}
+                                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                              >
+                                <i className="ri-close-line" />
+                              </button>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                        结构化公式表达 <span className="text-red-500">*</span>
+                      </label>
+                      <textarea
+                        value={formData.formula_expression}
+                        onChange={(e) => setFormData({ ...formData, formula_expression: e.target.value })}
+                        rows={5}
+                        placeholder='如 {"type":"derived","expression":"metric(\"...\") + metric(\"...\")"}'
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 resize-none font-mono"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {formData.metric_type === 'ratio' && (
+                  <div className="col-span-2 border-t border-slate-100 pt-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                          分子指标 <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          value={formData.numerator_metric_id}
+                          onChange={(e) => setFormData({ ...formData, numerator_metric_id: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 bg-white"
+                        >
+                          <option value="">请选择分子</option>
+                          {dependencyOptions.map((metric) => (
+                            <option key={metric.id} value={metric.id}>{metricDisplayName(metric)}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                          分母指标 <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          value={formData.denominator_metric_id}
+                          onChange={(e) => setFormData({ ...formData, denominator_metric_id: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 bg-white"
+                        >
+                          <option value="">请选择分母</option>
+                          {dependencyOptions.map((metric) => (
+                            <option key={metric.id} value={metric.id}>{metricDisplayName(metric)}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* 全宽：敏感级别 */}
                 <div className="col-span-2">
@@ -695,22 +1098,26 @@ export default function MetricsPage() {
                   />
                 </div>
 
-                {/* 全宽：公式 */}
-                <div className="col-span-2">
+                {formData.metric_type !== 'atomic' && (
+                  <div className="col-span-2">
                   <label className="block text-[11px] font-medium text-slate-500 mb-1">公式</label>
                   <textarea
                     value={formData.formula}
                     onChange={(e) => setFormData({ ...formData, formula: e.target.value })}
                     rows={2}
-                    placeholder="如 SUM(order_amount)"
+                    placeholder={formData.metric_type === 'ratio' ? '默认按分子 / 分母生成，可选填写展示公式' : '可选，填写业务展示公式'}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 resize-none font-mono"
                   />
-                </div>
+                  </div>
+                )}
               </div>
             </div>
             <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3">
               <button
-                onClick={() => setShowModal(false)}
+                onClick={() => {
+                  setShowForm(false);
+                  setEditingItem(null);
+                }}
                 className="px-4 py-2 text-[13px] text-slate-600 hover:text-slate-800 cursor-pointer"
               >
                 取消

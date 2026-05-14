@@ -58,12 +58,12 @@ class LineageStatus(str, Enum):
 class MetricCreate(BaseModel):
     """POST /api/metrics 请求体"""
 
-    name: str = Field(
-        ...,
+    name: Optional[str] = Field(
+        None,
         pattern=r"^[a-z][a-z0-9_]{1,127}$",
-        description="指标英文名，小写字母开头，仅含小写字母/数字/下划线，2-128 字符",
+        description="可选技术别名，小写字母开头，仅含小写字母/数字/下划线，2-128 字符",
     )
-    name_zh: Optional[str] = Field(None, max_length=256, description="指标中文名")
+    name_zh: str = Field(..., min_length=1, max_length=256, description="指标中文名")
     metric_type: MetricType = Field(..., description="指标类型：atomic / derived / ratio")
     business_domain: Optional[str] = Field(None, max_length=64, description="业务域")
     description: Optional[str] = Field(None, description="指标描述")
@@ -86,13 +86,21 @@ class MetricCreate(BaseModel):
         le=10,
         description="小数精度，与Python内置precision无关",
     )
-    datasource_id: int = Field(..., description="关联数据源 ID")
-    table_name: str = Field(..., max_length=128, description="来源表名")
-    column_name: str = Field(..., max_length=128, description="来源列名")
+    datasource_id: Optional[int] = Field(None, description="兼容数据库数据源 ID")
+    table_name: Optional[str] = Field(None, max_length=128, description="来源表名")
+    column_name: Optional[str] = Field(None, max_length=128, description="来源列名")
     filters: Optional[Any] = Field(None, description="过滤条件，JSONB 格式")
     sensitivity_level: SensitivityLevel = Field(
         default=SensitivityLevel.public, description="数据敏感级别"
     )
+    tableau_connection_id: Optional[int] = Field(None, description="Tableau connection id")
+    tableau_asset_id: Optional[int] = Field(None, description="本地 Tableau asset id")
+    tableau_datasource_luid: Optional[str] = Field(None, max_length=128, description="Tableau datasource LUID")
+    field_mappings: Optional[Any] = Field(None, description="Tableau fieldCaption 映射")
+    dependency_metric_ids: list[uuid.UUID] = Field(default_factory=list, description="derived 基础指标 ID")
+    numerator_metric_id: Optional[uuid.UUID] = Field(None, description="ratio 分子指标 ID")
+    denominator_metric_id: Optional[uuid.UUID] = Field(None, description="ratio 分母指标 ID")
+    formula_expression: Optional[Any] = Field(None, description="结构化公式表达式")
 
 
 class MetricUpdate(BaseModel):
@@ -131,6 +139,14 @@ class MetricUpdate(BaseModel):
     column_name: Optional[str] = Field(None, max_length=128)
     filters: Optional[Any] = None
     sensitivity_level: Optional[SensitivityLevel] = None
+    tableau_connection_id: Optional[int] = None
+    tableau_asset_id: Optional[int] = None
+    tableau_datasource_luid: Optional[str] = Field(None, max_length=128)
+    field_mappings: Optional[Any] = None
+    dependency_metric_ids: Optional[list[uuid.UUID]] = None
+    numerator_metric_id: Optional[uuid.UUID] = None
+    denominator_metric_id: Optional[uuid.UUID] = None
+    formula_expression: Optional[Any] = None
 
 
 # =============================================================================
@@ -144,13 +160,14 @@ class MetricBase(BaseModel):
 
     id: uuid.UUID
     tenant_id: uuid.UUID
-    name: str
-    name_zh: Optional[str]
+    metric_code: str
+    name: Optional[str]
+    name_zh: str
     metric_type: str
     business_domain: Optional[str]
     aggregation_type: Optional[str]
     result_type: Optional[str]
-    datasource_id: int
+    datasource_id: Optional[int]
     is_active: bool
     sensitivity_level: str
     lineage_status: str
@@ -165,8 +182,9 @@ class MetricDetail(BaseModel):
 
     id: uuid.UUID
     tenant_id: uuid.UUID
-    name: str
-    name_zh: Optional[str]
+    metric_code: str
+    name: Optional[str]
+    name_zh: str
     metric_type: str
     business_domain: Optional[str]
     description: Optional[str]
@@ -176,9 +194,9 @@ class MetricDetail(BaseModel):
     result_type: Optional[str]
     unit: Optional[str]
     precision: int
-    datasource_id: int
-    table_name: str
-    column_name: str
+    datasource_id: Optional[int]
+    table_name: Optional[str]
+    column_name: Optional[str]
     filters: Optional[Any]
     is_active: bool
     lineage_status: str
@@ -208,9 +226,11 @@ class MetricCreatedResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    name: str
+    metric_code: str
+    name: Optional[str]
+    name_zh: str
     metric_type: str
-    datasource_id: int
+    datasource_id: Optional[int]
     created_at: datetime
 
 
@@ -230,7 +250,8 @@ class PublishResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    name: str
+    metric_code: str
+    name: Optional[str]
     is_active: bool
     published_at: Optional[datetime]
 
@@ -244,17 +265,32 @@ class MetricLookupItem(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    name: str
-    name_zh: Optional[str]
+    metric_code: str
+    name: Optional[str]
+    name_zh: str
+    aliases: list[str] = Field(default_factory=list)
     metric_type: str
     formula: Optional[str]
+    formula_template: Optional[str] = None
     aggregation_type: Optional[str]
     result_type: Optional[str]
-    datasource_id: int
-    table_name: str
-    column_name: str
+    unit: Optional[str] = None
+    precision: int = 2
+    datasource_id: Optional[int]
+    tableau_connection_id: Optional[int] = None
+    tableau_datasource_luid: Optional[str] = None
+    table_name: Optional[str]
+    column_name: Optional[str]
+    field_mappings: Optional[Any] = None
+    required_base_metrics: list[str] = Field(default_factory=list)
+    formula_expression: Optional[Any] = None
     filters: Optional[Any]
     sensitivity_level: str
+    lineage_status: Optional[str] = None
+    description: Optional[str] = None
+    dependencies: list[dict[str, Any]] = Field(default_factory=list)
+    queryable: bool = False
+    binding_errors: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class MetricLookupResponse(BaseModel):
@@ -262,6 +298,10 @@ class MetricLookupResponse(BaseModel):
 
     metrics: list[MetricLookupItem]
     not_found: list[str] = Field(default_factory=list, description="未找到的指标名列表")
+    binding_errors: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="指标命中但当前执行数据源绑定不可用的错误列表",
+    )
 
 
 # =============================================================================
