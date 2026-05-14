@@ -4,13 +4,14 @@ import {
   getAssetChildren,
   getAssetParent,
   getAssetFields,
+  getDatasourceMetadata,
   explainAsset,
   getAssetHealth,
   TableauAsset,
   AssetHealth,
 } from '../../../api/tableau';
 import { getAssetSummary, getLLMConfig } from '../../../api/llm';
-import type { FieldSemantic } from '../types';
+import type { FieldMetadataStatus, FieldSemantic } from '../types';
 
 type ActiveTab = 'info' | 'datasources' | 'ai' | 'children' | 'fields' | 'health' | 'impact';
 
@@ -19,6 +20,31 @@ interface ConfirmModalState {
   title: string;
   message: string;
   onConfirm: () => void;
+}
+
+function getHealthLevel(score: number): AssetHealth['level'] {
+  if (score >= 80) return 'excellent';
+  if (score >= 60) return 'good';
+  if (score >= 40) return 'warning';
+  return 'poor';
+}
+
+function normalizeHealthDetails(asset: TableauAsset): AssetHealth | null {
+  if (asset.health_details && typeof asset.health_details.score === 'number') {
+    return {
+      score: asset.health_details.score,
+      level: asset.health_details.level || getHealthLevel(asset.health_details.score),
+      checks: Array.isArray(asset.health_details.checks) ? asset.health_details.checks : [],
+    };
+  }
+  if (asset.health_score != null) {
+    return {
+      score: asset.health_score,
+      level: getHealthLevel(asset.health_score),
+      checks: [],
+    };
+  }
+  return null;
 }
 
 export interface UseAssetDetailResult {
@@ -44,6 +70,7 @@ export interface UseAssetDetailResult {
   loadHealth: () => void;
 
   fieldSemantics: FieldSemantic[];
+  fieldMetadata: FieldMetadataStatus | null;
   fieldsLoading: boolean;
 
   activeTab: ActiveTab;
@@ -69,6 +96,7 @@ export function useAssetDetail(id: string | undefined, defaultTab?: string): Use
   const [aiCached, setAiCached] = useState(false);
   const [llmConfigured, setLlmConfigured] = useState(true);
   const [fieldSemantics, setFieldSemantics] = useState<FieldSemantic[]>([]);
+  const [fieldMetadata, setFieldMetadata] = useState<FieldMetadataStatus | null>(null);
   const [fieldsLoading, setFieldsLoading] = useState(false);
 
   // Health state
@@ -92,10 +120,15 @@ export function useAssetDetail(id: string | undefined, defaultTab?: string): Use
     setAiExplain(null);
     setAiSummary(null);
     setAiError(null);
+    setHealthData(null);
+    setHealthError(null);
+    setFieldSemantics([]);
+    setFieldMetadata(null);
 
     getAsset(Number(id))
       .then(a => {
         setAsset(a);
+        setHealthData(normalizeHealthDetails(a));
         // Load parent for views/dashboards
         if (a.asset_type === 'view' || a.asset_type === 'dashboard') {
           getAssetParent(a.id).then(d => setParent(d.parent)).catch(() => {});
@@ -110,8 +143,20 @@ export function useAssetDetail(id: string | undefined, defaultTab?: string): Use
         }
         // 独立加载字段元数据
         setFieldsLoading(true);
-        getAssetFields(a.id)
-          .then(d => setFieldSemantics(d.fields))
+        const fieldsRequest = a.asset_type === 'datasource'
+          ? getDatasourceMetadata(a.id).catch(() => getAssetFields(a.id))
+          : getAssetFields(a.id);
+        fieldsRequest
+          .then(d => {
+            setFieldSemantics(d.fields);
+            setFieldMetadata({
+              field_count: d.field_count,
+              local_field_count: d.local_field_count,
+              cache_status: d.cache_status,
+              cached_at: d.cached_at,
+              updated_at: d.updated_at,
+            });
+          })
           .catch(() => {})
           .finally(() => setFieldsLoading(false));
       })
@@ -133,7 +178,10 @@ export function useAssetDetail(id: string | undefined, defaultTab?: string): Use
       setAiExplain(result.explain);
       setAiCached(result.cached);
       setAiError(result.error || null);
-      if (result.field_semantics) setFieldSemantics(result.field_semantics);
+      if (result.field_semantics) {
+        setFieldSemantics(result.field_semantics);
+        setFieldMetadata(prev => prev || { field_count: result.field_semantics?.length });
+      }
     } catch {
       // Fallback to basic summary if explain fails
       try {
@@ -197,6 +245,7 @@ export function useAssetDetail(id: string | undefined, defaultTab?: string): Use
     healthError,
     loadHealth,
     fieldSemantics,
+    fieldMetadata,
     fieldsLoading,
     activeTab,
     setActiveTab,

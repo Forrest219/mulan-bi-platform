@@ -1,5 +1,5 @@
 import { useNavigate, Link } from 'react-router-dom';
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useMemo } from 'react';
 import { useAssetDetail } from './hooks/useAssetDetail';
 import { InfoTab } from './tabs/InfoTab';
 import { DatasourcesTab } from './tabs/DatasourcesTab';
@@ -9,6 +9,7 @@ import { HealthTab } from './tabs/HealthTab';
 import { AiExplainTab } from './tabs/AiExplainTab';
 import { ConfirmModal } from '../../components/ConfirmModal';
 import { ASSET_TYPE_LABELS } from '../../config';
+import { useHelpAgentSelection } from '../../pages/agents/help-agent/helpAgentContext';
 
 // SPEC 40: ImpactTab 懒加载（仅 datasource 类型显示）
 const ImpactTab = lazy(() =>
@@ -31,6 +32,19 @@ export interface AssetInspectorProps {
 
 export function AssetInspector({ assetId, layout = 'page', defaultTab, onClose }: AssetInspectorProps) {
   const navigate = useNavigate();
+  const helpAgentSelection = useMemo(
+    () => ({
+      primary_entity: {
+        type: 'tableau_asset',
+        id: String(assetId),
+        source: 'route' as const,
+      },
+    }),
+    [assetId]
+  );
+
+  useHelpAgentSelection(helpAgentSelection);
+
   const {
     asset,
     loading,
@@ -48,6 +62,7 @@ export function AssetInspector({ assetId, layout = 'page', defaultTab, onClose }
     healthError,
     loadHealth,
     fieldSemantics,
+    fieldMetadata,
     fieldsLoading,
     activeTab,
     setActiveTab,
@@ -199,7 +214,7 @@ export function AssetInspector({ assetId, layout = 'page', defaultTab, onClose }
 
             {/* Tab: Datasources */}
             {activeTab === 'datasources' && (
-              <DatasourcesTab datasources={asset.datasources} />
+              <DatasourcesTab asset={asset} datasources={asset.datasources} />
             )}
 
             {/* Tab: Children (workbooks only) */}
@@ -209,7 +224,7 @@ export function AssetInspector({ assetId, layout = 'page', defaultTab, onClose }
 
             {/* Tab: Field Metadata */}
             {activeTab === 'fields' && (
-              <FieldsTab fieldSemantics={fieldSemantics} fieldsLoading={fieldsLoading} />
+              <FieldsTab fieldSemantics={fieldSemantics} fieldMetadata={fieldMetadata} fieldsLoading={fieldsLoading} />
             )}
 
             {/* Tab: Health */}

@@ -98,6 +98,13 @@ class TestHasDatasourceLink:
         checks = {c["key"]: c for c in result["checks"]}
         assert checks["has_datasource_link"]["passed"] is False
 
+    def test_datasource_asset_passes_as_self(self):
+        asset = {"name": "test", "asset_type": "datasource"}
+        result = compute_asset_health(asset, [], [])
+        checks = {c["key"]: c for c in result["checks"]}
+        assert checks["has_datasource_link"]["passed"] is True
+        assert checks["has_datasource_link"]["detail"] == "当前资产即 Tableau 数据源"
+
 
 class TestFieldsHaveCaptions:
     """fields_have_captions 检查项"""

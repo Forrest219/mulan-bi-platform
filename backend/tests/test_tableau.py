@@ -155,6 +155,133 @@ def test_v2_metadata_first_fetch(admin_client, db_session):
     mock_upsert.assert_called_once()
 
 
+def test_v2_metadata_refresh_parses_mcp_field_groups(admin_client, db_session):
+    mock_client = MagicMock()
+    mock_client.get_datasource_metadata.return_value = {
+        "fieldGroups": [
+            {
+                "fields": [
+                    {
+                        "name": "销售额",
+                        "dataType": "REAL",
+                        "role": "MEASURE",
+                        "columnClass": "COLUMN",
+                        "logicalTableId": "订单_E1D13D6162604AA48D04C27BA1FECAAB",
+                        "defaultAggregation": "SUM",
+                        "dataCategory": "QUANTITATIVE",
+                    },
+                    {
+                        "name": "发货日期",
+                        "dataType": "DATE",
+                        "role": "DIMENSION",
+                        "columnClass": "COLUMN",
+                    },
+                ]
+            }
+        ]
+    }
+
+    with patch("app.api.tableau.verify_connection_access"), \
+         patch("app.api.tableau.get_tableau_mcp_client", return_value=mock_client), \
+         patch("services.tableau.models.TableauDatabase.get_asset") as mock_get_asset, \
+         patch("services.tableau.models.TableauDatabase.get_connection") as mock_get_conn, \
+         patch("services.tableau.models.TableauDatabase.get_datasource_fields") as mock_get_fields, \
+         patch("services.tableau.models.TableauDatabase.upsert_datasource_fields") as mock_upsert:
+
+        mock_get_conn.return_value = _make_mock_conn(conn_id=1)
+        mock_get_asset.return_value = _make_mock_asset()
+
+        sales_field = MagicMock()
+        sales_field.field_name = "销售额"
+        sales_field.field_caption = ""
+        sales_field.data_type = "REAL"
+        sales_field.role = "measure"
+        sales_field.description = ""
+        sales_field.aggregation = "SUM"
+        sales_field.formula = None
+        sales_field.is_calculated = False
+        sales_field.metadata_json = {
+            "name": "销售额",
+            "dataType": "REAL",
+            "role": "MEASURE",
+            "columnClass": "COLUMN",
+            "logicalTableId": "订单_E1D13D6162604AA48D04C27BA1FECAAB",
+            "defaultAggregation": "SUM",
+            "dataCategory": "QUANTITATIVE",
+        }
+        sales_field.fetched_at = datetime.now(timezone.utc)
+
+        ship_date_field = MagicMock()
+        ship_date_field.field_name = "发货日期"
+        ship_date_field.field_caption = ""
+        ship_date_field.data_type = "DATE"
+        ship_date_field.role = "dimension"
+        ship_date_field.description = ""
+        ship_date_field.aggregation = None
+        ship_date_field.formula = None
+        ship_date_field.is_calculated = False
+        ship_date_field.metadata_json = {
+            "name": "发货日期",
+            "dataType": "DATE",
+            "role": "DIMENSION",
+            "columnClass": "COLUMN",
+        }
+        ship_date_field.fetched_at = datetime.now(timezone.utc)
+
+        mock_get_fields.side_effect = [[], [sales_field, ship_date_field]]
+
+        resp = admin_client.get("/api/tableau/datasources/10/metadata?refresh=true")
+
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+    data = resp.json()
+    assert data["cache_status"] == "fresh"
+    fields = {field["name"]: field for field in data["fields"]}
+    assert fields["销售额"]["data_type"] == "REAL"
+    assert fields["销售额"]["role"] == "measure"
+    assert fields["销售额"]["aggregation"] == "SUM"
+    assert fields["销售额"]["mcp"]["columnClass"] == "COLUMN"
+    assert fields["销售额"]["mcp"]["logicalTableId"] == "订单_E1D13D6162604AA48D04C27BA1FECAAB"
+    assert fields["发货日期"]["data_type"] == "DATE"
+    assert fields["发货日期"]["role"] == "dimension"
+    upserted = mock_upsert.call_args.args[2]
+    assert [field["field_name"] for field in upserted] == ["销售额", "发货日期"]
+
+
+def test_v2_metadata_refresh_empty_mcp_fields_returns_stale_cache(admin_client, db_session):
+    mock_client = MagicMock()
+    mock_client.get_datasource_metadata.return_value = {"fieldGroups": []}
+
+    with patch("app.api.tableau.verify_connection_access"), \
+         patch("app.api.tableau.get_tableau_mcp_client", return_value=mock_client), \
+         patch("services.tableau.models.TableauDatabase.get_asset") as mock_get_asset, \
+         patch("services.tableau.models.TableauDatabase.get_connection") as mock_get_conn, \
+         patch("services.tableau.models.TableauDatabase.get_datasource_fields") as mock_get_fields, \
+         patch("services.tableau.models.TableauDatabase.upsert_datasource_fields") as mock_upsert:
+
+        mock_get_conn.return_value = _make_mock_conn(conn_id=1)
+        mock_get_asset.return_value = _make_mock_asset()
+
+        stale_field = MagicMock()
+        stale_field.field_name = "Sales"
+        stale_field.field_caption = "Sales"
+        stale_field.data_type = "REAL"
+        stale_field.role = "measure"
+        stale_field.description = "Total sales"
+        stale_field.aggregation = "SUM"
+        stale_field.formula = None
+        stale_field.is_calculated = False
+        stale_field.metadata_json = {}
+        stale_field.fetched_at = datetime.now(timezone.utc) - timedelta(hours=48)
+        mock_get_fields.return_value = [stale_field]
+
+        resp = admin_client.get("/api/tableau/datasources/10/metadata?refresh=true")
+
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+    data = resp.json()
+    assert data["cache_status"] == "stale"
+    mock_upsert.assert_not_called()
+
+
 # T3: GET .../metadata 缓存命中（1 小时前），cache_status=cached
 def test_v2_metadata_cache_hit(admin_client, db_session):
     with patch("app.api.tableau.verify_connection_access"), \

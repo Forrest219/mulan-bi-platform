@@ -19,6 +19,9 @@ export function HealthTab({
   assetName,
   assetId,
 }: HealthTabProps) {
+  const checks = Array.isArray(healthData?.checks) ? healthData.checks : [];
+  const hasChecks = checks.length > 0;
+
   return (
     <div className="space-y-4">
       <div className="bg-white border border-slate-200 rounded-xl p-5">
@@ -82,50 +85,58 @@ export function HealthTab({
                         : '较差'}
                 </div>
                 <div className="text-xs text-slate-400">
-                  满分 100 · 基于 {healthData.checks.length} 项检查
+                  {hasChecks ? `满分 100 · 基于 ${checks.length} 项检查` : '满分 100 · 来自资产详情缓存'}
                 </div>
               </div>
             </div>
 
             {/* 7 Factor Breakdown */}
-            <FactorBreakdown checks={healthData.checks} />
+            {hasChecks ? (
+              <FactorBreakdown checks={checks} />
+            ) : (
+              <div className="mt-4 p-4 bg-slate-50 rounded-xl text-xs text-slate-500">
+                已展示当前资产已有健康分；暂无健康详情时可点击&quot;重新评估&quot;刷新检查项。
+              </div>
+            )}
 
             {/* Ask About This */}
-            {assetName && assetId && (
+            {assetName && assetId && hasChecks && (
               <AskAboutThis
                 assetName={assetName}
                 assetId={assetId}
                 healthScore={healthData.score}
-                checks={healthData.checks}
+                checks={checks}
               />
             )}
 
             {/* Check items */}
-            <div className="space-y-2 mt-4">
-              {healthData.checks.map((check) => (
-                <div
-                  key={check.key}
-                  className={`flex items-center justify-between p-3 rounded-lg border ${
-                    check.passed ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <i
-                      className={
-                        check.passed
-                          ? 'ri-checkbox-circle-fill text-emerald-500'
-                          : 'ri-close-circle-fill text-red-500'
-                      }
-                    />
-                    <div>
-                      <div className="text-xs font-medium text-slate-700">{check.label}</div>
-                      <div className="text-[11px] text-slate-500">{check.detail}</div>
+            {hasChecks && (
+              <div className="space-y-2 mt-4">
+                {checks.map((check) => (
+                  <div
+                    key={check.key}
+                    className={`flex items-center justify-between p-3 rounded-lg border ${
+                      check.passed ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <i
+                        className={
+                          check.passed
+                            ? 'ri-checkbox-circle-fill text-emerald-500'
+                            : 'ri-close-circle-fill text-red-500'
+                        }
+                      />
+                      <div>
+                        <div className="text-xs font-medium text-slate-700">{check.label}</div>
+                        <div className="text-[11px] text-slate-500">{check.detail}</div>
+                      </div>
                     </div>
+                    <span className="text-[10px] text-slate-400 font-medium">{check.weight}%</span>
                   </div>
-                  <span className="text-[10px] text-slate-400 font-medium">{check.weight}%</span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </>
         )}
       </div>

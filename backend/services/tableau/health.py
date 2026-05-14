@@ -70,13 +70,19 @@ def compute_asset_health(
         total_score += 15
 
     # 3. has_datasource_link
-    has_ds = len(datasources) > 0
+    # Datasource assets are themselves the Tableau datasource, so requiring an
+    # additional related datasource would make the detail page contradict itself.
+    is_datasource_asset = asset.get("asset_type") == "datasource"
+    has_ds = is_datasource_asset or len(datasources) > 0
+    ds_detail = "当前资产即 Tableau 数据源" if is_datasource_asset else (
+        f"关联 {len(datasources)} 个数据源" if has_ds else "未关联数据源"
+    )
     checks.append({
         "key": "has_datasource_link",
         "label": "有关联数据源",
         "weight": 15,
         "passed": has_ds,
-        "detail": f"关联 {len(datasources)} 个数据源" if has_ds else "未关联数据源",
+        "detail": ds_detail,
     })
     if has_ds:
         total_score += 15

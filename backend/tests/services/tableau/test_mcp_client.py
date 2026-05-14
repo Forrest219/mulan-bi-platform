@@ -27,10 +27,12 @@ import services.tableau.mcp_client as mcp_mod
 from services.tableau.mcp_client import (
     TableauMCPClient,
     TableauMCPError,
+    extract_datasource_metadata_fields,
     _extract_text,
     _map_mcp_error,
     _normalize_query_datasource_result,
     _parse_sse,
+    normalize_datasource_metadata_field,
 )
 
 # ─── Fixtures ──────────────────────────────────────────────────────────────────
@@ -240,6 +242,164 @@ class Test5xxRetry:
         assert exc_info.value.code == "NLQ_006"
         # _post_mcp internally loops twice on 5xx (retry on attempt 0, raise after attempt 1)
         assert post_count[0] == 2
+
+
+class TestQueryDatasourceRetryPolicy:
+    def _patch_active_connection(self):
+        conn = mock.Mock()
+        conn.is_active = True
+        conn.last_test_success = True
+        conn.mcp_direct_enabled = True
+        return mock.patch.object(TableauMCPClient, "_get_connection_by_luid", return_value=conn)
+
+    def test_query_datasource_retries_econnreset_tool_error_then_succeeds(self, monkeypatch):
+        monkeypatch.setattr(mcp_mod.time, "sleep", lambda _seconds: None)
+        calls = []
+
+        def mock_send(self, payload, timeout, **kwargs):
+            calls.append(timeout)
+            if len(calls) == 1:
+                return {
+                    "result": {
+                        "content": [{"type": "text", "text": "requestId: 460, error: read ECONNRESET"}],
+                        "isError": True,
+                    }
+                }
+            return {
+                "result": {
+                    "content": [{"type": "text", "text": json.dumps({"fields": ["x"], "rows": [[1]]})}],
+                    "isError": False,
+                }
+            }
+
+        with self._patch_active_connection():
+            with mock.patch.object(TableauMCPClient, "_send_jsonrpc", mock_send):
+                client = TableauMCPClient(connection_id=1)
+                result = client.query_datasource("ds-1", {}, 10, 30, 1)
+
+        assert result == {"fields": ["x"], "rows": [[1]]}
+        assert len(calls) == 2
+
+
+class TestDatasourceMetadataFieldNormalization:
+    def _patch_active_connection(self):
+        conn = mock.Mock()
+        conn.is_active = True
+        conn.last_test_success = True
+        conn.mcp_direct_enabled = True
+        return mock.patch.object(TableauMCPClient, "_get_connection_by_luid", return_value=conn)
+
+    def test_extracts_field_groups_from_mcp_raw_shape(self):
+        raw = {
+            "fieldGroups": [
+                {
+                    "name": "订单",
+                    "fields": [
+                        {
+                            "name": "销售额",
+                            "dataType": "REAL",
+                            "role": "MEASURE",
+                            "columnClass": "COLUMN",
+                            "logicalTableId": "订单_E1D13D6162604AA48D04C27BA1FECAAB",
+                            "defaultAggregation": "SUM",
+                            "dataCategory": "QUANTITATIVE",
+                            "defaultFormat": "n#,##0;-#,##0",
+                        },
+                        {
+                            "name": "发货日期",
+                            "dataType": "DATE",
+                            "role": "DIMENSION",
+                            "columnClass": "COLUMN",
+                        },
+                    ],
+                }
+            ]
+        }
+
+        fields = extract_datasource_metadata_fields(raw)
+        normalized = [normalize_datasource_metadata_field(field) for field in fields]
+
+        assert [field["field_name"] for field in normalized] == ["销售额", "发货日期"]
+        assert normalized[0]["data_type"] == "REAL"
+        assert normalized[0]["role"] == "measure"
+        assert normalized[0]["aggregation"] == "SUM"
+        assert normalized[0]["metadata_json"]["logicalTableId"] == "订单_E1D13D6162604AA48D04C27BA1FECAAB"
+        assert normalized[1]["data_type"] == "DATE"
+        assert normalized[1]["role"] == "dimension"
+
+    def test_extracts_nested_raw_fields_and_dedupes(self):
+        raw = {
+            "fields": [{"name": "销售额", "logicalTableId": "orders"}],
+            "raw": {
+                "fieldGroups": [
+                    {"fields": [{"name": "销售额", "logicalTableId": "orders"}, {"name": "利润"}]}
+                ]
+            },
+        }
+
+        fields = extract_datasource_metadata_fields(raw)
+
+        assert [field["name"] for field in fields] == ["销售额", "利润"]
+
+    def test_query_datasource_retries_read_timeout_once(self, monkeypatch):
+        monkeypatch.setattr(mcp_mod.time, "sleep", lambda _seconds: None)
+        calls = []
+
+        def mock_send(self, payload, timeout, **kwargs):
+            calls.append(timeout)
+            raise TableauMCPError("NLQ_007", "MCP 查询超时（10s）", {"retry_kind": "read_timeout"})
+
+        with self._patch_active_connection():
+            with mock.patch.object(TableauMCPClient, "_send_jsonrpc", mock_send):
+                client = TableauMCPClient(connection_id=1)
+                with pytest.raises(TableauMCPError) as exc_info:
+                    client.query_datasource("ds-1", {}, 10, 30, 1)
+
+        assert exc_info.value.code == "NLQ_007"
+        assert len(calls) == 2
+
+    def test_query_datasource_does_not_retry_invalid_arguments(self):
+        calls = []
+
+        def mock_send(self, payload, timeout, **kwargs):
+            calls.append(timeout)
+            return {
+                "result": {
+                    "content": [{"type": "text", "text": "Input validation error: Invalid arguments for tool query-datasource"}],
+                    "isError": True,
+                }
+            }
+
+        with self._patch_active_connection():
+            with mock.patch.object(TableauMCPClient, "_send_jsonrpc", mock_send):
+                client = TableauMCPClient(connection_id=1)
+                with pytest.raises(TableauMCPError) as exc_info:
+                    client.query_datasource("ds-1", {}, 10, 30, 1)
+
+        assert exc_info.value.code == "NLQ_006"
+        assert len(calls) == 1
+
+    def test_query_datasource_does_not_retry_when_budget_is_insufficient(self, monkeypatch):
+        monkeypatch.setattr(mcp_mod, "_MIN_RETRY_REMAINING_SECONDS", 999.0)
+        calls = []
+
+        def mock_send(self, payload, timeout, **kwargs):
+            calls.append(timeout)
+            return {
+                "result": {
+                    "content": [{"type": "text", "text": "requestId: 460, error: read ECONNRESET"}],
+                    "isError": True,
+                }
+            }
+
+        with self._patch_active_connection():
+            with mock.patch.object(TableauMCPClient, "_send_jsonrpc", mock_send):
+                client = TableauMCPClient(connection_id=1)
+                with pytest.raises(TableauMCPError) as exc_info:
+                    client.query_datasource("ds-1", {}, 10, 30, 1)
+
+        assert exc_info.value.details["retry_budget_exhausted"] is True
+        assert len(calls) == 1
 
 
 class Test4xxNoRetry:
