@@ -1,0 +1,38 @@
+project: mulan-bi-platform
+description: 数据建模与治理平台 — 面向 BI 运维团队的数据质量、DDL 规范、Tableau 资产治理、语义维护工具
+
+stack:
+  frontend: React 19 + TypeScript + Vite + Tailwind CSS + React Router v7
+  backend: Python ≥ 3.10 + FastAPI + SQLAlchemy 2.x
+  database: PostgreSQL 16 (JSONB, connection pool, Alembic migrations)
+  auth: Session/Cookie (HTTP Only) + PBKDF2-SHA256
+  testing: pytest + Vitest + Playwright
+
+api:
+  base_prefix: /api
+  response_format: JSON
+  auth_cookie: session
+  roles: [admin, data_admin, analyst, user]
+
+naming:
+  table_prefixes:
+    auth_: user authentication
+    bi_: core business
+    ai_: LLM/AI config
+    agent_: data agent conversations
+    tableau_: tableau assets and connections
+    dw_asset_: data warehouse assets
+    mcp_: MCP server config
+  spec_format: "<number>-<name>.md"  # non-standard sequential numbering, known deviation
+
+dirs:
+  specs: openspec/specs/
+  changes: openspec/changes/
+  archive: openspec/changes/archive/
+
+pipeline:
+  roles_dir: agents/
+  pipeline_spec: AGENT_PIPELINE.md
+  known_deviations:
+    - "specs/ uses sequential number prefix (01-, 02-...) not OpenSpec date-slug format"
+    - "changes/ uses name-slug not date-slug (project-cleanup vs 2026-05-14-project-cleanup)"
