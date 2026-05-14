@@ -83,6 +83,13 @@ export const menuConfig: MenuDomain[] = [
     permission: { requiredRole: 'analyst' },
     items: [
       {
+        key: 'data-explorer',
+        label: 'Data Explorer',
+        icon: 'ri-node-tree',
+        path: '/assets/explorer',
+        permission: { requiredRole: 'analyst' },
+      },
+      {
         key: 'dw-assets',
         label: '数仓资产',
         icon: 'ri-database-2-line',
@@ -186,7 +193,7 @@ export const menuConfig: MenuDomain[] = [
         key: 'agent-monitor',
         label: 'Agent 监控',
         icon: 'ri-eye-line',
-        path: '/agents/agent-monitor',
+        path: '/agents/agent-monitor?tab=overview&view=runs',
       },
       {
         key: 'skills',

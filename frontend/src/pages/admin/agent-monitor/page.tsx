@@ -10,6 +10,7 @@
  *   GET /api/admin/agent/runs/{run_id}/steps
  */
 import { Fragment, useState, useEffect, useCallback, type MouseEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   agentAdminApi,
   type AgentStats,
@@ -54,6 +55,27 @@ const INTENT_OPTIONS = [
   { value: 'text', label: '文本回答' },
   { value: 'clarification', label: '澄清追问' },
 ];
+
+function parseActiveTab(value: string | null): ActiveTab {
+  if (value === 'tools' || value === 'sessions') return value;
+  return 'overview';
+}
+
+function parseOverviewTable(value: string | null, tab?: string | null): OverviewTable {
+  if (tab === 'queries') return 'nlq';
+  if (value === 'nlq') return 'nlq';
+  return 'runs';
+}
+
+function parseStatusFilter(value: string | null): StatusFilter {
+  if (value === 'running' || value === 'completed' || value === 'failed') return value;
+  return 'all';
+}
+
+function parsePage(value: string | null): number {
+  const page = Number(value);
+  return Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -219,15 +241,16 @@ function stepTypeBadge(stepType: string) {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function AgentMonitorPage() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
-  const [overviewTable, setOverviewTable] = useState<OverviewTable>('runs');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = parseActiveTab(searchParams.get('tab'));
+  const overviewTable = parseOverviewTable(searchParams.get('view'), searchParams.get('tab'));
+  const statusFilter = parseStatusFilter(searchParams.get('status'));
+  const page = parsePage(searchParams.get('page'));
+  const expandedRunId = searchParams.get('run_id') || null;
   const [stats, setStats] = useState<AgentStats | null>(null);
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [runsTotal, setRunsTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [offset, setOffset] = useState(0);
-  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [diagnosticRunId, setDiagnosticRunId] = useState<string | null>(null);
   const [steps, setSteps] = useState<AgentStep[]>([]);
   const [stepsLoading, setStepsLoading] = useState(false);
@@ -239,7 +262,6 @@ export default function AgentMonitorPage() {
   // Sessions state
   const [sessions, setSessions] = useState<AgentSessionItem[]>([]);
   const [sessionsTotal, setSessionsTotal] = useState(0);
-  const [sessionsOffset, setSessionsOffset] = useState(0);
   const [sessionsLoading, setSessionsLoading] = useState(false);
 
   // Query logs state
@@ -252,10 +274,23 @@ export default function AgentMonitorPage() {
   const { start: defaultStart, end: defaultEnd } = defaultRange();
   const [queryStartTime, setQueryStartTime] = useState(defaultStart);
   const [queryEndTime, setQueryEndTime] = useState(defaultEnd);
-  const [queryPage, setQueryPage] = useState(1);
   const queryPageSize = 20;
 
   const LIMIT = 20;
+  const offset = (page - 1) * LIMIT;
+  const sessionsOffset = (page - 1) * LIMIT;
+  const queryPage = page;
+
+  const updateUrlState = useCallback((patch: Record<string, string | null>) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      Object.entries(patch).forEach(([key, value]) => {
+        if (value === null || value === '') next.delete(key);
+        else next.set(key, value);
+      });
+      return next;
+    });
+  }, [setSearchParams]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -270,15 +305,16 @@ export default function AgentMonitorPage() {
     try {
       const data = await agentAdminApi.getRuns({
         limit: LIMIT,
-        offset,
-        status: statusFilter !== 'all' ? statusFilter : undefined,
+        offset: expandedRunId ? 0 : offset,
+        status: expandedRunId ? undefined : statusFilter !== 'all' ? statusFilter : undefined,
+        run_id: expandedRunId || undefined,
       });
       setRuns(data.items);
       setRunsTotal(data.total);
     } catch (err) {
       console.error('获取 Agent 运行列表失败', err);
     }
-  }, [offset, statusFilter]);
+  }, [expandedRunId, offset, statusFilter]);
 
   const fetchSteps = useCallback(async (runId: string) => {
     setStepsLoading(true);
@@ -378,32 +414,84 @@ export default function AgentMonitorPage() {
 
   // 筛选变化时重置页码
   useEffect(() => {
-    setQueryPage(1);
-  }, [queryStatus, queryIntent, queryStartTime, queryEndTime]);
+    if (activeTab === 'overview' && overviewTable === 'nlq' && page !== 1) {
+      updateUrlState({ page: null });
+    }
+  }, [activeTab, overviewTable, page, queryStatus, queryIntent, queryStartTime, queryEndTime, updateUrlState]);
+
+  useEffect(() => {
+    if (activeTab === 'overview' && overviewTable === 'runs' && expandedRunId) {
+      fetchSteps(expandedRunId);
+    } else {
+      setSteps([]);
+    }
+  }, [activeTab, overviewTable, expandedRunId, fetchSteps]);
+
+  useEffect(() => {
+    if (diagnosticRunId && diagnosticRunId !== expandedRunId) {
+      setDiagnosticRunId(null);
+    }
+  }, [diagnosticRunId, expandedRunId]);
 
   // 点击行展开/折叠步骤
   const toggleExpand = (runId: string) => {
     if (expandedRunId === runId) {
-      setExpandedRunId(null);
+      updateUrlState({ run_id: null });
       setDiagnosticRunId(null);
-      setSteps([]);
     } else {
-      setExpandedRunId(runId);
-      fetchSteps(runId);
+      updateUrlState({ tab: 'overview', view: 'runs', run_id: runId });
     }
   };
 
   // 筛选切换时重置 offset
   const handleStatusChange = (s: StatusFilter) => {
-    setStatusFilter(s);
-    setOffset(0);
-    setExpandedRunId(null);
+    updateUrlState({
+      tab: 'overview',
+      view: 'runs',
+      status: s === 'all' ? null : s,
+      page: null,
+      run_id: null,
+    });
     setDiagnosticRunId(null);
-    setSteps([]);
   };
 
   const totalPages = Math.ceil(runsTotal / LIMIT);
-  const currentPage = Math.floor(offset / LIMIT) + 1;
+  const currentPage = page;
+
+  const handleTopTabChange = (next: { tab: ActiveTab; view?: OverviewTable }) => {
+    if (next.tab === 'overview') {
+      updateUrlState({
+        tab: 'overview',
+        view: next.view === 'nlq' ? 'nlq' : 'runs',
+        page: null,
+        run_id: null,
+      });
+    } else {
+      updateUrlState({
+        tab: next.tab,
+        view: null,
+        status: null,
+        page: null,
+        run_id: null,
+      });
+    }
+    setDiagnosticRunId(null);
+  };
+
+  const setPage = (nextPage: number) => {
+    updateUrlState({ page: nextPage <= 1 ? null : String(nextPage), run_id: null });
+  };
+
+  const openRun = (runId: string) => {
+    updateUrlState({
+      tab: 'overview',
+      view: 'runs',
+      status: null,
+      page: null,
+      run_id: runId,
+    });
+    setDiagnosticRunId(null);
+  };
 
   if (loading) {
     return (
@@ -413,10 +501,11 @@ export default function AgentMonitorPage() {
     );
   }
 
-  const TABS_CONFIG: [ActiveTab, string][] = [
-    ['overview', '总览'],
-    ['tools', '工具列表'],
-    ['sessions', '会话管理'],
+  const TABS_CONFIG: Array<{ key: string; tab: ActiveTab; view?: OverviewTable; label: string }> = [
+    { key: 'overview-runs', tab: 'overview', view: 'runs', label: '总览' },
+    { key: 'overview-nlq', tab: 'overview', view: 'nlq', label: '查询日志' },
+    { key: 'sessions', tab: 'sessions', label: '会话管理' },
+    { key: 'tools', tab: 'tools', label: '工具列表' },
   ];
 
   return (
@@ -438,19 +527,24 @@ export default function AgentMonitorPage() {
       <div className="bg-white border-b border-slate-100 px-8">
         <div className="max-w-6xl mx-auto">
           <div className="flex gap-1 py-2">
-            {TABS_CONFIG.map(([value, label]) => (
+            {TABS_CONFIG.map((tab) => {
+              const isActive = tab.tab === 'overview'
+                ? activeTab === 'overview' && overviewTable === tab.view
+                : activeTab === tab.tab;
+              return (
               <button
-                key={value}
-                onClick={() => setActiveTab(value)}
+                key={tab.key}
+                onClick={() => handleTopTabChange(tab)}
                 className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
-                  activeTab === value
+                  isActive
                     ? 'bg-slate-800 text-white'
                     : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
                 }`}
               >
-                {label}
+                {tab.label}
               </button>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
@@ -462,7 +556,7 @@ export default function AgentMonitorPage() {
       {activeTab === 'overview' && (
         <>
       {/* 统计卡片 */}
-      {stats && (
+      {overviewTable === 'runs' && stats && (
         <div className="grid grid-cols-5 gap-4 mb-6">
           {/* 总调用量 */}
           <div className="bg-white rounded-xl border border-slate-200 p-4">
@@ -538,7 +632,7 @@ export default function AgentMonitorPage() {
       )}
 
       {/* 反馈 + 热门工具 */}
-      {stats && (
+      {overviewTable === 'runs' && stats && (
         <div className="grid grid-cols-3 gap-4 mb-6">
           {/* 反馈汇总 */}
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -617,23 +711,13 @@ export default function AgentMonitorPage() {
 
       {/* 运行记录 / 查询日志 */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        {/* 标题栏：视图切换 + 条件筛选 */}
+        {/* 标题栏：当前视图 + 条件筛选 */}
         <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-3 flex-wrap">
-          {/* 视图切换 */}
-          <div className="flex gap-1">
-            {([['runs', '运行记录'], ['nlq', '查询日志']] as [OverviewTable, string][]).map(([v, label]) => (
-              <button
-                key={v}
-                onClick={() => setOverviewTable(v)}
-                className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors ${
-                  overviewTable === v
-                    ? 'bg-slate-800 text-white'
-                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            <i className={overviewTable === 'runs' ? 'ri-history-line text-slate-400' : 'ri-file-list-3-line text-slate-400'} />
+            <h3 className="text-sm font-semibold text-slate-700">
+              {overviewTable === 'runs' ? '运行记录' : '查询日志'}
+            </h3>
           </div>
 
           {/* runs 视图：状态筛选 */}
@@ -887,14 +971,14 @@ export default function AgentMonitorPage() {
                 <div className="flex items-center gap-2">
                   <button
                     disabled={offset === 0}
-                    onClick={() => setOffset(Math.max(0, offset - LIMIT))}
+                    onClick={() => setPage(Math.max(1, currentPage - 1))}
                     className="px-3 py-1.5 text-xs rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     上一页
                   </button>
                   <button
                     disabled={offset + LIMIT >= runsTotal}
-                    onClick={() => setOffset(offset + LIMIT)}
+                    onClick={() => setPage(currentPage + 1)}
                     className="px-3 py-1.5 text-xs rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     下一页
@@ -981,14 +1065,14 @@ export default function AgentMonitorPage() {
                 </span>
                 <div className="flex items-center gap-1">
                   <button
-                    onClick={() => setQueryPage((p) => Math.max(1, p - 1))}
+                    onClick={() => setPage(Math.max(1, queryPage - 1))}
                     disabled={queryPage === 1}
                     className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-slate-50 transition-colors"
                   >
                     上一页
                   </button>
                   <button
-                    onClick={() => setQueryPage((p) => Math.min(Math.ceil(queryTotal / queryPageSize), p + 1))}
+                    onClick={() => setPage(Math.min(Math.ceil(queryTotal / queryPageSize), queryPage + 1))}
                     disabled={queryPage === Math.ceil(queryTotal / queryPageSize)}
                     className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-slate-50 transition-colors"
                   >
@@ -1087,6 +1171,7 @@ export default function AgentMonitorPage() {
                       <th className="text-left px-4 py-2.5 font-medium">状态</th>
                       <th className="text-left px-4 py-2.5 font-medium">消息数</th>
                       <th className="text-left px-4 py-2.5 font-medium">数据源</th>
+                      <th className="text-left px-4 py-2.5 font-medium">最近 Run</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -1096,7 +1181,8 @@ export default function AgentMonitorPage() {
                           {formatDate(s.updated_at)}
                         </td>
                         <td className="px-4 py-3 text-slate-700 whitespace-nowrap">
-                          #{s.user_id}
+                          <div className="font-medium">{s.username ?? `用户 #${s.user_id}`}</div>
+                          {s.username && <div className="text-[11px] text-slate-400">#{s.user_id}</div>}
                         </td>
                         <td className="px-4 py-3 text-slate-700 max-w-xs truncate" title={s.title ?? ''}>
                           {s.title || <span className="text-slate-400">无标题</span>}
@@ -1104,7 +1190,32 @@ export default function AgentMonitorPage() {
                         <td className="px-4 py-3">{statusBadge(s.status)}</td>
                         <td className="px-4 py-3 text-slate-600">{s.message_count}</td>
                         <td className="px-4 py-3 text-slate-500">
-                          {s.connection_id ? `#${s.connection_id}` : '-'}
+                          {s.connection_id ? (
+                            <div>
+                              <div className="text-slate-700">{s.connection_name ?? `连接 #${s.connection_id}`}</div>
+                              {s.connection_name && <div className="text-[11px] text-slate-400">#{s.connection_id}</div>}
+                            </div>
+                          ) : '-'}
+                        </td>
+                        <td className="px-4 py-3 text-slate-500">
+                          {s.latest_run_id ? (
+                            <div className="flex flex-col items-start gap-1">
+                              <button
+                                type="button"
+                                onClick={() => openRun(s.latest_run_id!)}
+                                className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                                title={`查看最近 run：${s.latest_run_id}`}
+                              >
+                                <span>{shortRunId(s.latest_run_id)}</span>
+                                {s.runs_count > 1 && <span className="text-slate-400">+{s.runs_count - 1}</span>}
+                              </button>
+                              <span className="text-[11px] text-slate-400">
+                                {s.latest_run_status ?? '-'} · {formatDate(s.latest_run_created_at)}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-300">无 run</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -1120,14 +1231,14 @@ export default function AgentMonitorPage() {
                   <div className="flex items-center gap-2">
                     <button
                       disabled={sessionsOffset === 0}
-                      onClick={() => setSessionsOffset(Math.max(0, sessionsOffset - LIMIT))}
+                      onClick={() => setPage(Math.max(1, page - 1))}
                       className="px-3 py-1.5 text-xs rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       上一页
                     </button>
                     <button
                       disabled={sessionsOffset + LIMIT >= sessionsTotal}
-                      onClick={() => setSessionsOffset(sessionsOffset + LIMIT)}
+                      onClick={() => setPage(page + 1)}
                       className="px-3 py-1.5 text-xs rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       下一页

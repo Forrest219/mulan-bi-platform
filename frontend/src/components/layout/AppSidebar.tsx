@@ -114,6 +114,7 @@ function DomainGroup({
   domain,
   expanded,
   onToggle,
+  onCollapsedDomainClick,
   collapsed,
   userRole,
   hasPermission,
@@ -121,6 +122,7 @@ function DomainGroup({
   domain: MenuDomain;
   expanded: boolean;
   onToggle: () => void;
+  onCollapsedDomainClick: () => void;
   collapsed: boolean;
   userRole: string;
   hasPermission: (perm: string) => boolean;
@@ -143,7 +145,7 @@ function DomainGroup({
     return (
       <div className="relative group" title={`${domain.label}：${domain.description}`}>
         <button
-          onClick={onToggle}
+          onClick={onCollapsedDomainClick}
         className={`
           w-full flex flex-col items-center justify-center py-3 rounded-lg mb-1 transition-colors
           ${isAnyActive ? 'bg-cyan-50 text-cyan-600' : 'text-slate-400 hover:bg-slate-50'}
@@ -232,6 +234,10 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
     setDomainOpenMap((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
+  const openDomain = (key: string) => {
+    setDomainOpenMap((prev) => (prev[key] ? prev : { ...prev, [key]: true }));
+  };
+
   // 路由变化时，自动展开当前所属域
   useEffect(() => {
     for (const domain of menuConfig) {
@@ -318,6 +324,10 @@ export default function AppSidebar({ collapsed, onToggleCollapse }: AppSidebarPr
               domain={domain}
               expanded={resolvedOpen}
               onToggle={() => toggleDomain(domain.key)}
+              onCollapsedDomainClick={() => {
+                openDomain(domain.key);
+                onToggleCollapse();
+              }}
               collapsed={collapsed}
               userRole={userRole}
               hasPermission={hasPermission}

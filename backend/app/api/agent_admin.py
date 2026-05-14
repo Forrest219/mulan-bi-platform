@@ -11,6 +11,7 @@ Endpoints:
 权限：仅 admin / data_admin 角色可访问。
 """
 import logging
+import uuid
 from typing import Optional, List, Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -23,6 +24,7 @@ from app.core.dependencies import require_roles
 from services.data_agent.models import BiAgentRun, BiAgentStep, BiAgentFeedback
 from services.data_agent.models import AgentConversation, AgentConversationMessage
 from services.auth.models import User
+from services.tableau.models import TableauConnection
 
 logger = logging.getLogger(__name__)
 
@@ -242,6 +244,7 @@ def list_agent_runs(
         None,
         description="状态筛选: running / completed / failed（兼容历史值 error）",
     ),
+    run_id: Optional[str] = Query(None, description="指定 run_id 时只返回该运行记录"),
 ):
     """
     GET /api/admin/agent/runs
@@ -250,6 +253,13 @@ def list_agent_runs(
     question 截断为 100 字符。
     """
     q = db.query(BiAgentRun)
+
+    if run_id:
+        try:
+            run_uuid = uuid.UUID(run_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="无效的 run_id")
+        q = q.filter(BiAgentRun.id == run_uuid)
 
     if status is not None:
         q = q.filter(BiAgentRun.status == status)
@@ -366,10 +376,16 @@ def get_run_steps(
 class SessionItem(BaseModel):
     id: str
     user_id: int
+    username: Optional[str] = None
     title: Optional[str] = None
     connection_id: Optional[int] = None
+    connection_name: Optional[str] = None
     status: str
     message_count: int = 0
+    runs_count: int = 0
+    latest_run_id: Optional[str] = None
+    latest_run_status: Optional[str] = None
+    latest_run_created_at: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -384,8 +400,10 @@ class SessionsResponse(BaseModel):
 class SessionDetailResponse(BaseModel):
     id: str
     user_id: int
+    username: Optional[str] = None
     title: Optional[str] = None
     connection_id: Optional[int] = None
+    connection_name: Optional[str] = None
     status: str
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -420,21 +438,64 @@ def list_agent_sessions(
         .all()
     )
 
+    user_ids = list({s.user_id for s in sessions})
+    username_map: dict[int, str] = {}
+    if user_ids:
+        for u in db.query(User.id, User.username).filter(User.id.in_(user_ids)).all():
+            username_map[u.id] = u.username
+
+    connection_ids = list({s.connection_id for s in sessions if s.connection_id is not None})
+    connection_name_map: dict[int, str] = {}
+    if connection_ids:
+        for c in db.query(TableauConnection.id, TableauConnection.name).filter(TableauConnection.id.in_(connection_ids)).all():
+            connection_name_map[c.id] = c.name
+
+    conversation_ids = [s.id for s in sessions]
+    message_count_map: dict[Any, int] = {}
+    run_count_map: dict[Any, int] = {}
+    latest_run_map: dict[Any, BiAgentRun] = {}
+    if conversation_ids:
+        for conversation_id, count in (
+            db.query(AgentConversationMessage.conversation_id, func.count(AgentConversationMessage.id))
+            .filter(AgentConversationMessage.conversation_id.in_(conversation_ids))
+            .group_by(AgentConversationMessage.conversation_id)
+            .all()
+        ):
+            message_count_map[conversation_id] = int(count or 0)
+
+        for conversation_id, count in (
+            db.query(BiAgentRun.conversation_id, func.count(BiAgentRun.id))
+            .filter(BiAgentRun.conversation_id.in_(conversation_ids))
+            .group_by(BiAgentRun.conversation_id)
+            .all()
+        ):
+            run_count_map[conversation_id] = int(count or 0)
+
+        recent_runs = (
+            db.query(BiAgentRun)
+            .filter(BiAgentRun.conversation_id.in_(conversation_ids))
+            .order_by(BiAgentRun.conversation_id.asc(), BiAgentRun.created_at.desc())
+            .all()
+        )
+        for run in recent_runs:
+            latest_run_map.setdefault(run.conversation_id, run)
+
     items = []
     for s in sessions:
-        msg_count = (
-            db.query(func.count(AgentConversationMessage.id))
-            .filter(AgentConversationMessage.conversation_id == s.id)
-            .scalar()
-            or 0
-        )
+        latest_run = latest_run_map.get(s.id)
         items.append(SessionItem(
             id=str(s.id),
             user_id=s.user_id,
+            username=username_map.get(s.user_id),
             title=s.title,
             connection_id=s.connection_id,
+            connection_name=connection_name_map.get(s.connection_id) if s.connection_id is not None else None,
             status=s.status,
-            message_count=msg_count,
+            message_count=message_count_map.get(s.id, 0),
+            runs_count=run_count_map.get(s.id, 0),
+            latest_run_id=str(latest_run.id) if latest_run else None,
+            latest_run_status=latest_run.status if latest_run else None,
+            latest_run_created_at=latest_run.created_at.isoformat() if latest_run and latest_run.created_at else None,
             created_at=s.created_at.isoformat() if s.created_at else None,
             updated_at=s.updated_at.isoformat() if s.updated_at else None,
         ))
@@ -463,6 +524,19 @@ def get_session_detail(
     ).first()
     if session is None:
         raise HTTPException(status_code=404, detail="会话不存在")
+
+    username = None
+    user = db.query(User.id, User.username).filter(User.id == session.user_id).first()
+    if user:
+        username = user.username
+
+    connection_name = None
+    if session.connection_id is not None:
+        connection = db.query(TableauConnection.id, TableauConnection.name).filter(
+            TableauConnection.id == session.connection_id
+        ).first()
+        if connection:
+            connection_name = connection.name
 
     # 获取消息
     messages = (
@@ -513,8 +587,10 @@ def get_session_detail(
     return SessionDetailResponse(
         id=str(session.id),
         user_id=session.user_id,
+        username=username,
         title=session.title,
         connection_id=session.connection_id,
+        connection_name=connection_name,
         status=session.status,
         created_at=session.created_at.isoformat() if session.created_at else None,
         updated_at=session.updated_at.isoformat() if session.updated_at else None,
