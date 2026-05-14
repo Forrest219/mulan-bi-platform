@@ -283,6 +283,14 @@ sequenceDiagram
     API-->>User: {score, issues[], recommendations[]}
 ```
 
+### 5.5 NL-to-Query 完整流水线
+
+> 完整图见 [diagrams/mulan-requirement-flow.mmd](diagrams/mulan-requirement-flow.mmd)（含 4 阶段、意图分类、路由评分、重试逻辑）
+
+### 5.6 端到端数据血缘
+
+> 完整图见 [diagrams/mulan-data-lineage.mmd](diagrams/mulan-data-lineage.mmd)（Embedding → SemanticStore → Retrieval → LLM → Tableau 全链路）
+
 ---
 
 ## §6 语义层 ↔ LLM 交互标准
