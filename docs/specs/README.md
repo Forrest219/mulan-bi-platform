@@ -1,6 +1,6 @@
 # Mulan BI Platform — 技术规格书索引
 
-> 最后更新：2026-05-13
+> 最后更新：2026-05-15（docs/ 目录重组后更新，补录 spec 51-55，修正编号歧义）
 
 ## 状态说明
 
@@ -55,7 +55,7 @@
 | 19 | [发布日志](19-semantic-publish-logs-spec.md) | 回写审计日志 UI | :white_check_mark: |
 | 20 | [运维工作台](spec-20-ops-workbench.md) | Split-Pane 问数+资产+健康统一入口 | :construction: |
 | 26 | [Agentic Tableau MCP / Tableau Agent](26-agentic-tableau-mcp-spec.md) | 从"查数"到"控场"：字段匹配 + 视图控制 + 语义写回 | :pause_button: Deferred |
-| 26A | [Viz Agent](26-viz-agent-addendum.md) | 图表推荐 + Tableau 输出引导（Spec 26 附录） | :pause_button: Deferred |
+| 26A | [Viz Agent](26A-viz-agent-addendum.md) | 图表推荐 + Tableau 输出引导（Spec 26 附录） | :pause_button: Deferred |
 | 28 | [Data Agent](28-data-agent-spec.md) | 归因分析 + 自动报告生成 + 主动洞察（ReAct 框架） | :next_track_button: Next（第 2 批） |
 | 29 | [SQL Agent](29-sql-agent-spec.md) | 多方言 SQL 执行 + 安全校验 + 查询日志 | :white_check_mark: |
 | 30 | [Metrics Agent](30-metrics-agent-spec.md) | 指标注册 + 血缘追踪 + 一致性校验 + 异常检测 | :next_track_button: Next（第 1 批） |
@@ -81,6 +81,39 @@
 | [反馈 API](feedback-api-spec.md) | Ask Data 反馈接口 | :white_check_mark: |
 | [KB HNSW 维护](knowledge_base_hnsw_maintenance.md) | 知识库向量索引维护 | :white_check_mark: |
 
+## 附录 — 最新规划（Spec 51-55）
+
+| # | 文档 | 说明 | 状态 |
+|---|------|------|------|
+| 51 | [Vanna AI 集成](51-vanna-integration-spec.md) | Vanna 训练 + NL-to-SQL 替代方案 | :clipboard: |
+| 52 | [Docker 一键部署](52-docker-one-click-deployment-spec.md) | 生产环境一键部署方案 | :clipboard: |
+| 53 | [首页查询结果 CSV 下载](53-home-query-result-csv-download-plan.md) | 查询结果导出功能 | :clipboard: |
+| 54 | [Data Agent 透明 MCP 代理](54-data-agent-transparent-mcp-proxy-plan.md) | MCP 代理透明化改造 | :clipboard: |
+| 55 | [Help Agent 页面上下文注册](55-help-agent-page-context-registry-plan.md) | 页面级上下文注入方案 | :clipboard: |
+
+## 附录 — 测试用例文件
+
+> 测试用例文件已移至 `testcases/` 子目录，不属于规格书本体。
+
+| 文件 | 关联 Spec |
+|------|-----------|
+| [testcases/31-governance-dqc-pipeline-test-cases.md](testcases/31-governance-dqc-pipeline-test-cases.md) | Spec 31 DQC Pipeline |
+| [testcases/36-data-agent-architecture-test-cases.md](testcases/36-data-agent-architecture-test-cases.md) | Spec 36 Data Agent 架构 |
+| [testcases/qa-llm-config-test-cases.md](testcases/qa-llm-config-test-cases.md) | LLM 配置 QA |
+
+## 附录 — 编号歧义说明
+
+> 以下编号因历史原因存在分支，此处说明消除歧义。
+
+| 编号 | 文件 | 说明 |
+|------|------|------|
+| 26 | [26-agentic-tableau-mcp-spec.md](26-agentic-tableau-mcp-spec.md) | 主 Spec |
+| 26A | [26A-viz-agent-addendum.md](26A-viz-agent-addendum.md) | Spec 26 附录（原名 `26-viz-agent-addendum`，重命名消歧义） |
+| 27 | [27-infra-accounts-and-settings.md](27-infra-accounts-and-settings.md) | 基础设施账户与设置（主 Spec） |
+| 27B | [27B-rollout-plan.md](27B-rollout-plan.md) | Spec 24 发布计划（原名 `27-rollout-plan`，重命名消歧义） |
+| 30 | [30-metrics-agent-spec.md](30-metrics-agent-spec.md) | Metrics Agent 规格书（主 Spec，状态正常） |
+| 30-handover | ~~30-metrics-agent-handover.md~~ | 交接文件，已归档至 `docs/archive/`（handover ≠ spec） |
+
 ---
 
 ## 依赖关系
@@ -101,6 +134,8 @@ Tier 3: 14 (依赖 12[Token预算] + 13[MCP]) | 15 (依赖 06) | 16 (全局) | 1
 
 - 所有技术规格书统一存放于 `docs/specs/`
 - 文件名格式：`{序号}-{模块名}-spec.md`
-- PRD 保留在 `docs/prd-*.md`
-- 技术方案保留在 `docs/tech-*.md`
+- 测试用例统一存放于 `docs/specs/testcases/`（不属于规格书本体）
+- PRD 统一存放于 `docs/prd/`
+- 技术方案统一存放于 `docs/tech/`
+- 运营文档（事故报告、MVP 指引）存放于 `docs/ops/`
 - Spec 是 PRD 和技术方案的精确实现合约
