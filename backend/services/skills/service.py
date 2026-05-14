@@ -72,10 +72,15 @@ def _emit_skill_event(
     Spec §9.3: 版本发布和回滚操作写入 bi_events（Append-Only）。
     静默失败不影响主流程。
     """
+    del db  # audit events use an isolated session and must not poison caller transaction
+    audit_db = None
     try:
+        from app.core.database import SessionLocal
         from services.events.event_service import emit_event
+
+        audit_db = SessionLocal()
         emit_event(
-            db=db,
+            db=audit_db,
             event_type="skill_version_activated",
             source_module="skills",
             payload={
@@ -87,7 +92,12 @@ def _emit_skill_event(
             actor_id=actor_id,
         )
     except Exception as exc:
+        if audit_db is not None:
+            audit_db.rollback()
         logger.warning("skill 审计事件写入失败: %s", exc)
+    finally:
+        if audit_db is not None:
+            audit_db.close()
 
 
 def _log_skill_operation(

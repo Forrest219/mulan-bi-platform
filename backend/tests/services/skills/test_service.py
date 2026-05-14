@@ -299,3 +299,53 @@ def test_skill_mutations_write_operation_logs(db_session, clean_skills, admin_us
     assert by_type["skill_version_rollback"].target == "skill:schema:version:v1"
     assert by_type["skill_version_publish"].details["to_version"] == published["version_number"]
     assert all(log.operator_id == admin_user.id for log in by_type.values())
+
+
+def test_emit_skill_event_failure_does_not_touch_caller_session(monkeypatch):
+    class CallerSession:
+        rollback_called = False
+        close_called = False
+
+        def rollback(self):
+            self.rollback_called = True
+
+        def close(self):
+            self.close_called = True
+
+    class AuditSession:
+        rollback_called = False
+        close_called = False
+
+        def rollback(self):
+            self.rollback_called = True
+
+        def close(self):
+            self.close_called = True
+
+    caller_session = CallerSession()
+    audit_session = AuditSession()
+
+    from app.core import database as core_database
+    from services.events import event_service
+
+    monkeypatch.setattr(core_database, "SessionLocal", lambda: audit_session)
+
+    def fail_emit_event(**kwargs):
+        assert kwargs["db"] is audit_session
+        raise RuntimeError("bi_events.extra_data missing")
+
+    monkeypatch.setattr(event_service, "emit_event", fail_emit_event)
+
+    skill_svc._emit_skill_event(
+        caller_session,
+        skill_key="schema",
+        from_version="v1",
+        to_version="v2",
+        action="publish",
+        actor_id=1,
+    )
+
+    assert caller_session.rollback_called is False
+    assert caller_session.close_called is False
+    assert audit_session.rollback_called is True
+    assert audit_session.close_called is True
