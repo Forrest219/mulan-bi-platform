@@ -1,7 +1,7 @@
 # Agent 执行流水线 v5
 
 > 目标：角色驱动分工协作，链路可审计，边界清晰。
-> 角色详情：[`docs/roles/`](docs/roles/)
+> 角色详情：[`agents/`](agents/)
 
 ---
 
@@ -9,14 +9,14 @@
 
 | 短名 | 职责（一句话） | 详情 |
 |------|--------------|------|
-| **pm** | 需求 → PRD | [docs/roles/pm.md](docs/roles/pm.md) |
-| **designer** | 交互 + 视觉方向 | [docs/roles/designer.md](docs/roles/designer.md) |
-| **architect** | Context_Summary + SPEC | [docs/roles/architect.md](docs/roles/architect.md) |
-| **coder** | 按 SPEC 填空式开发 | [docs/roles/coder.md](docs/roles/coder.md) |
-| **tester** | 阶段二产出验收 | [docs/roles/tester.md](docs/roles/tester.md) |
-| **fixer** | 补测试 / 修 bug / 覆盖率达标 | [docs/roles/fixer.md](docs/roles/fixer.md) |
-| **reviewer** | 两维独立复核 | [docs/roles/reviewer.md](docs/roles/reviewer.md) |
-| **shipper** | 审计脚本 + 发布 checklist | [docs/roles/shipper.md](docs/roles/shipper.md) |
+| **pm** | 需求 → PRD | [agents/pm.md](agents/pm.md) |
+| **designer** | 交互 + 视觉方向 | [agents/designer.md](agents/designer.md) |
+| **architect** | Context_Summary + SPEC | [agents/architect.md](agents/architect.md) |
+| **coder** | 按 SPEC 填空式开发（含 terminal 执行权限，内部自愈 ≤ 3 次） | [agents/coder.md](agents/coder.md) |
+| **tester** | 阶段二产出验收 | [agents/tester.md](agents/tester.md) |
+| **fixer** | 补测试 / 修 bug / 覆盖率达标 | [agents/fixer.md](agents/fixer.md) |
+| **reviewer** | 两维独立复核 | [agents/reviewer.md](agents/reviewer.md) |
+| **shipper** | 审计脚本 + 发布 checklist | [agents/shipper.md](agents/shipper.md) |
 | **Human** | 业务确认 / 最终验收 | — |
 
 ---
@@ -34,7 +34,11 @@ Human 提需求
     ↓
 [阶段一] architect + coder 澄清对齐
     ↓
-[阶段二] coder → 实现 + IMPLEMENTATION_NOTES.md
+[阶段一后] tester → 测试骨架（SPEC.md 第 6 节存在时，Coder 开工前完成）
+    ↓
+[阶段二] coder → 实现（目标：让测试骨架跑通）→ Pre-handoff Checklist 全绿
+    ↓
+[阶段二] coder → 产出 IMPLEMENTATION_NOTES.md → 移交 Tester
     ↓
 [阶段二] tester → TESTER_PASS.md / TESTER_FAIL.md（失败 → 回阶段二）
     ↓
@@ -60,6 +64,7 @@ Human 最终 review + 合并
 | 0 | designer | 交互说明 | 涉及 UI |
 | 0/一 | architect | `Context_Summary.md` | ✅ |
 | 0/一 | architect | `SPEC.md` | ✅ |
+| 一后 | tester | 测试骨架文件（`tests/` 下，命名与功能对应） | SPEC 第 6 节存在时 |
 | 一 | coder | `Clarification_Questions.md` | 如有 |
 | 二 | coder | `IMPLEMENTATION_NOTES.md` | ✅ |
 | 二 | coder | `SPEC_GAP_REPORT.md` | 如有 |

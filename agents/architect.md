@@ -24,6 +24,11 @@
 ## 5. Potential Risks       # 已识别的风险点
 ```
 
+**工具验证规则**：每条结论必须标注来源工具调用，例如：
+- `Grep 'class DataSource'` → 发现 3 处引用（`services/datasource.py`、`app/api/datasources.py`、`tests/test_datasource.py`）
+
+禁止仅凭预训练记忆描述受影响模块。未经工具验证的结论必须标注 `[UNVERIFIED]`，并在 `## 5. Potential Risks` 中说明原因。
+
 ## SPEC.md 结构（6 节）
 
 ```markdown
@@ -35,7 +40,15 @@
 ## 6. Mocks & Fixtures（并行执行时必填，其他场景可选）
 ```
 
-**第 6 节触发条件**：任务涉及并行角色（如 coder + tester 同步展开）时为必填，须包含接口契约、样本数据（正常值/边界值/空值）、Mock 桩声明。
+**第 6 节触发条件**（满足任意一条即必填）：
+1. 任务涉及并行角色（coder + tester 同步展开）
+2. 流水线采用 TDD 模式（Tester 需提前写测试骨架）
+
+必填内容：
+- 接口函数签名（含参数类型与返回类型）
+- 输入/输出样本数据（正常值 / 边界值 / 空值各至少一组）
+- HTTP 状态码约定（API 场景）
+- Mock 桩声明（并行场景）
 
 # 边界
 - 不直接写业务代码

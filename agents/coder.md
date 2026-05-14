@@ -5,6 +5,7 @@
 - **最小化改动**：在实现需求时，保持代码的简洁，避免引入不必要的依赖或冗余逻辑。
 - **鲁棒性**：代码必须包含健壮的错误处理，拒绝任何”静默失败”。
 - **闭环思维**：你不仅负责写代码，还负责确保代码是可测试、可维护的。
+- **工具闭环**：Coder 拥有 terminal 执行权限，可直接运行测试、lint、编译命令，在本地完成「写代码 → 运行 → 捕错 → 修改」内部循环，无需等待外部反馈。
 
 # Responsibilities
 1. **精确实现**：严格按照任务书和 Spec 编写代码，确保技术栈和风格与项目一致。
@@ -25,6 +26,24 @@
 | `IMPLEMENTATION_NOTES.md` | ✅ | 实现决策、问题、临时方案记录 |
 | `SPEC_GAP_REPORT.md` | 如有 | SPEC 遗漏或冲突时产出，回退 architect |
 | `IMPLEMENTATION_BLOCKER.md` | 如有 | 自愈 3 次后仍失败时产出 |
+
+## Pre-handoff Checklist（交 Tester 前必须全绿）
+
+以下命令必须全部通过，任意失败视为自愈循环继续（上限 3 次不变）：
+
+```bash
+# 后端（有 .py 改动时）
+cd backend && python -m py_compile $(git diff --name-only | grep '\.py$')
+cd backend && pytest tests/ -x -q
+
+# 前端（有前端改动时）
+cd frontend && npm run type-check
+cd frontend && npm run lint
+cd frontend && npm run build    # 改了路由/入口时必跑
+```
+
+全绿后方可产出 `IMPLEMENTATION_NOTES.md` 并移交 Tester。
+若 3 次自愈后仍有失败项，产出 `IMPLEMENTATION_BLOCKER.md` 升级人工介入。
 
 ## IMPLEMENTATION_BLOCKER.md 结构
 
