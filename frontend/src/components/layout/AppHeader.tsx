@@ -41,7 +41,11 @@ function getNotifIconStyle(title: string, level: string) {
   return { icon: 'ri-notification-3-line', bg: 'bg-slate-100', color: 'text-slate-400' };
 }
 
-export default function AppHeader() {
+interface AppHeaderProps {
+  onOpenHelpAgent?: () => void;
+}
+
+export default function AppHeader({ onOpenHelpAgent }: AppHeaderProps) {
   const { user, logout, hasPermission } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -152,6 +156,12 @@ export default function AppHeader() {
     await markAllNotificationsRead();
     setNotifications(prev => prev.map(x => ({ ...x, is_read: true })));
     setUnreadCount(0);
+  };
+
+  const handleOpenHelpAgent = () => {
+    setNotifOpen(false);
+    setMenuOpen(false);
+    onOpenHelpAgent?.();
   };
 
   const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount);
@@ -290,6 +300,19 @@ export default function AppHeader() {
 
       {/* 右半部分：用户状态组 */}
       <div className="flex items-center gap-2">
+        {/* Help Agent */}
+        {onOpenHelpAgent && (
+          <button
+            type="button"
+            onClick={handleOpenHelpAgent}
+            className="relative w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 transition-colors text-slate-500 hover:text-blue-600"
+            title="打开 Help Agent"
+            aria-label="打开 Help Agent"
+          >
+            <i className="ri-robot-2-line text-[18px]" />
+          </button>
+        )}
+
         {/* 通知铃铛 */}
         <div className="relative">
           <button

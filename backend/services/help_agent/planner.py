@@ -27,6 +27,7 @@ _TOOL_LABELS = {
     "diagnose_task_run": "检查任务运行",
     "diagnose_connection": "检查连接状态",
     "diagnose_skill": "检查技能状态",
+    "list_enabled_skills": "读取已启用技能",
 }
 
 
@@ -46,6 +47,13 @@ class HelpPlanner:
         explicit = self._explicit_plan(question)
         if explicit:
             return PlannerDecision(intent=self._intent_for_tool(explicit.tool_name), tool_calls=[explicit], page_context_hint=page_hint)
+
+        if self._is_skill_inventory(question):
+            return PlannerDecision(
+                intent="skill_inventory",
+                tool_calls=[self._plan("list_enabled_skills", {"limit": 100}, "skill_inventory", "enabled", "用户询问当前已启用 skill")],
+                page_context_hint=page_hint,
+            )
 
         if self._is_page_help(question):
             return PlannerDecision(
@@ -131,6 +139,24 @@ class HelpPlanner:
             return self._plan("diagnose_connection", {"connection_id": int(connection_id)}, "connection", str(connection_id), "入口 selection.connection_id")
         if selection.skill_key:
             return self._plan("diagnose_skill", {"skill_key": selection.skill_key}, "skill", selection.skill_key, "入口 selection.skill_key")
+        if selection.query_refs:
+            if run_id := selection.query_refs.get("run_id"):
+                return self._plan("diagnose_agent_run", {"run_id": run_id}, "agent_run", str(run_id), "入口 selection.query_refs.run_id")
+            if task_run_id := selection.query_refs.get("task_run_id"):
+                return self._plan("diagnose_task_run", {"task_run_id": int(task_run_id)}, "task_run", str(task_run_id), "入口 selection.query_refs.task_run_id")
+            if connection_id := selection.query_refs.get("connection_id"):
+                return self._plan("diagnose_connection", {"connection_id": int(connection_id)}, "connection", str(connection_id), "入口 selection.query_refs.connection_id")
+            if skill_key := selection.query_refs.get("skill_key"):
+                return self._plan("diagnose_skill", {"skill_key": skill_key}, "skill", skill_key, "入口 selection.query_refs.skill_key")
+        if selection.primary_entity:
+            plan = self._plan_from_related_entity(selection.primary_entity, 0)
+            if plan:
+                return plan
+        if selection.entities:
+            for entity in selection.entities:
+                plan = self._plan_from_related_entity(entity, 0)
+                if plan:
+                    return plan
         return None
 
     def _plan_from_related_entity(self, entity: dict[str, Any], depth: int) -> ToolCallPlan | None:
@@ -182,8 +208,25 @@ class HelpPlanner:
     def _is_recent_failure(self, question: str) -> bool:
         return bool(question) and ("刚才" in question or "最近" in question) and ("失败" in question or "报错" in question)
 
+    def _is_skill_inventory(self, question: str) -> bool:
+        if not question:
+            return False
+        lowered = question.lower()
+        has_skill_term = "skill" in lowered or "技能" in question
+        has_inventory_term = any(term in question for term in ("哪些", "列表", "当前", "启用", "已启用", "生效", "可用"))
+        return has_skill_term and has_inventory_term
+
     def _has_selection(self, selection: PageSelection) -> bool:
-        return any([selection.run_id, selection.task_run_id, selection.connection_id, selection.tableau_connection_id, selection.skill_key])
+        return any([
+            selection.run_id,
+            selection.task_run_id,
+            selection.connection_id,
+            selection.tableau_connection_id,
+            selection.skill_key,
+            selection.primary_entity,
+            selection.entities,
+            selection.query_refs,
+        ])
 
     def _selection_hint(self, selection: PageSelection | None) -> str | None:
         if selection is None or not self._has_selection(selection):
@@ -208,4 +251,5 @@ class HelpPlanner:
             "diagnose_task_run": "task_diagnosis",
             "diagnose_connection": "connection_diagnosis",
             "diagnose_skill": "skill_diagnosis",
+            "list_enabled_skills": "skill_inventory",
         }.get(tool_name, "general_help")

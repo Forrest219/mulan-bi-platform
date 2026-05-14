@@ -58,6 +58,8 @@ class FallbackHelpToolRegistry:
             return {"type": "connection", "id": str(params.get("connection_id"))}
         if tool_name == "diagnose_skill":
             return {"type": "skill", "id": str(params.get("skill_key"))}
+        if tool_name == "list_enabled_skills":
+            return {"type": "skill_inventory", "id": "enabled"}
         return {"type": tool_name, "id": "current_user"}
 
 

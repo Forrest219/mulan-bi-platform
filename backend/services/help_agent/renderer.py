@@ -45,6 +45,24 @@ def render_fallback_answer(
             base += f" {user_message_hint}"
         return base
 
+    skill_inventory = next((item for item in diagnostics if item.get("tool") == "list_enabled_skills"), None)
+    if skill_inventory:
+        facts = skill_inventory.get("facts") or {}
+        skills = facts.get("skills") or []
+        if not skills:
+            return f"截至 {snapshot_at} 的诊断结果显示：当前没有已启用的 skill。"
+
+        lines = [f"截至 {snapshot_at} 的诊断结果显示：当前已启用 {len(skills)} 个 skill："]
+        for item in skills[:30]:
+            version = item.get("active_version") or {}
+            version_number = version.get("version_number") or "无 active version"
+            category = item.get("category") or "未分类"
+            name = item.get("name") or item.get("skill_key")
+            lines.append(f"- {category}: {name} `{item.get('skill_key')}`（{version_number}）")
+        if len(skills) > 30:
+            lines.append(f"另有 {len(skills) - 30} 个已启用 skill 未展开。")
+        return "\n".join(lines)
+
     lines = [f"截至 {snapshot_at} 的诊断结果显示：已读取 {len(diagnostics)} 个诊断快照。"]
     if findings:
         messages = [str(item.get("message") or item.get("code") or item) for item in findings[:3]]

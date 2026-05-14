@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from services.help_agent.tools.agent_run import diagnose_agent_run
 from services.help_agent.tools.connection import diagnose_connection
 from services.help_agent.tools.page_context import get_page_context_hint
-from services.help_agent.tools.skill import diagnose_skill
+from services.help_agent.tools.skill import diagnose_skill, list_enabled_skills
 from services.help_agent.tools.task import diagnose_task_run
 from services.data_agent.models import BiAgentRun, BiAgentStep
 from services.skills.models import AgentSkill, AgentSkillVersion
@@ -204,6 +204,52 @@ def test_diagnose_skill_requires_data_admin_and_reports_active_version():
     assert denied["findings"][0]["code"] == "HLP_003"
     assert allowed["facts"]["active_version"]["version_number"] == "v1"
     assert allowed["snapshot_at"]
+
+
+def test_list_enabled_skills_reports_active_versions():
+    schema_id = uuid.uuid4()
+    query_id = uuid.uuid4()
+    skills = [
+        SimpleNamespace(
+            id=schema_id,
+            skill_key="schema",
+            name="Schema",
+            description="Schema inventory",
+            category="data",
+            is_enabled=True,
+            updated_at=None,
+        ),
+        SimpleNamespace(
+            id=query_id,
+            skill_key="query",
+            name="Query",
+            description="Query executor",
+            category="query",
+            is_enabled=True,
+            updated_at=None,
+        ),
+    ]
+    versions = [
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            skill_id=schema_id,
+            version_number="v2",
+            endpoint_type="static",
+            code_ref="SchemaTool",
+            is_active=True,
+            created_at=None,
+        )
+    ]
+
+    result = list_enabled_skills(
+        DBMock({AgentSkill: skills, AgentSkillVersion: versions}),
+        {"id": 1, "role": "data_admin"},
+    )
+
+    assert result["tool"] == "list_enabled_skills"
+    assert result["facts"]["total"] == 2
+    assert result["facts"]["skills"][0]["skill_key"] == "schema"
+    assert result["facts"]["skills"][0]["active_version"]["version_number"] == "v2"
 
 
 def test_get_page_context_hint_returns_weak_or_strong_candidates():

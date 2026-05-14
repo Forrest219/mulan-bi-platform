@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   streamHelpAgent,
   type HelpAgentEntryPoint,
   type HelpAgentStreamEvent,
   type HelpDiagnosticProgressEvent,
 } from '../../../api/helpAgent';
+import { useHelpAgentContext } from './helpAgentContext';
 import { buildHelpPageContext } from './pageContext';
 
 interface HelpAgentDrawerProps {
@@ -28,31 +30,9 @@ interface ToolEvent {
   detail: string;
 }
 
-function formatTime(value?: string | null): string {
-  if (!value) return '-';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
-}
-
 function formatMs(ms?: number | null): string {
   if (ms === null || ms === undefined) return '';
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
-}
-
-function pageLabel(path: string): string {
-  if (path.includes('/agents/agent-monitor')) return 'Agent 监控';
-  if (path.includes('/agents/help')) return 'Help Agent';
-  if (path.includes('/agents/skills')) return '技能中心';
-  if (path.includes('/system/tasks')) return '任务管理';
-  if (path.includes('/system/data-connections')) return '数据连接';
-  return document.title || path || '当前页面';
 }
 
 function statusClass(status: HelpDiagnosticProgressEvent['status']): string {
@@ -79,6 +59,7 @@ export default function HelpAgentDrawer({
   embedded = false,
   initialQuestion = '',
 }: HelpAgentDrawerProps) {
+  const location = useLocation();
   const [input, setInput] = useState(initialQuestion);
   const [messages, setMessages] = useState<Message[]>([]);
   const [thinking, setThinking] = useState('');
@@ -89,7 +70,17 @@ export default function HelpAgentDrawer({
   const [conversationId, setConversationId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
-  const context = useMemo(() => buildHelpPageContext({ entryPoint }), [entryPoint, open]);
+  const helpContext = useHelpAgentContext();
+  const context = useMemo(
+    () => buildHelpPageContext({
+      entryPoint,
+      helpContext,
+      pathname: location.pathname,
+      search: location.search,
+    }),
+    [entryPoint, helpContext, location.pathname, location.search]
+  );
+  const samples = helpContext.profile.default_questions;
 
   useEffect(() => {
     if (open) setInput((prev) => prev || initialQuestion);
@@ -178,7 +169,12 @@ export default function HelpAgentDrawer({
         question,
         conversation_id: conversationId,
         entry_point: entryPoint,
-        page_context: buildHelpPageContext({ entryPoint }),
+        page_context: buildHelpPageContext({
+          entryPoint,
+          helpContext,
+          pathname: location.pathname,
+          search: location.search,
+        }),
       },
       controller.signal
     );
@@ -203,7 +199,7 @@ export default function HelpAgentDrawer({
         </div>
         <div className="min-w-0">
           <div className="text-sm font-semibold text-slate-800">Help Agent</div>
-          <div className="text-xs text-slate-400 truncate">当前页面：{pageLabel(context.path)}</div>
+          <div className="text-xs text-slate-400 truncate">当前页面：{context.page_title || context.title}</div>
         </div>
         {!embedded && (
           <button
@@ -222,7 +218,7 @@ export default function HelpAgentDrawer({
           <div className="rounded-lg border border-slate-200 bg-white p-4">
             <div className="text-sm font-medium text-slate-800 mb-2">可以直接描述你遇到的问题</div>
             <div className="grid gap-2">
-              {['为什么刚才问答失败？', '这个页面该怎么排查问题？', '最近有没有失败的 Agent run？'].map((sample) => (
+              {samples.map((sample) => (
                 <button
                   key={sample}
                   type="button"

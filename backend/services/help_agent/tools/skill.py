@@ -87,3 +87,61 @@ def diagnose_skill(db: Any, current_user: Any, skill_key: str) -> dict[str, Any]
         recommendations=recommendations,
     )
 
+
+def list_enabled_skills(db: Any, current_user: Any, limit: int = 100) -> dict[str, Any]:
+    target = {"type": "skill_inventory", "id": "enabled"}
+    try:
+        require_admin(current_user)
+    except PermissionError as exc:
+        return permission_denied_result("list_enabled_skills", target, str(exc))
+
+    safe_limit = max(1, min(int(limit or 100), 100))
+    skills = (
+        db.query(AgentSkill)
+        .filter(AgentSkill.is_enabled.is_(True))
+        .order_by(AgentSkill.category.asc(), AgentSkill.skill_key.asc())
+        .limit(safe_limit)
+        .all()
+    )
+
+    items: list[dict[str, Any]] = []
+    for skill in skills:
+        active_version = (
+            db.query(AgentSkillVersion)
+            .filter(AgentSkillVersion.skill_id == getattr(skill, "id"), AgentSkillVersion.is_active.is_(True))
+            .first()
+        )
+        items.append(
+            {
+                "id": str(getattr(skill, "id")),
+                "skill_key": getattr(skill, "skill_key", None),
+                "name": getattr(skill, "name", None),
+                "description": getattr(skill, "description", None),
+                "category": getattr(skill, "category", None),
+                "is_enabled": getattr(skill, "is_enabled", None),
+                "active_version": {
+                    "id": str(getattr(active_version, "id")),
+                    "version_number": getattr(active_version, "version_number", None),
+                    "endpoint_type": getattr(active_version, "endpoint_type", None),
+                    "code_ref": getattr(active_version, "code_ref", None),
+                    "created_at": isoformat(getattr(active_version, "created_at", None)),
+                }
+                if active_version
+                else None,
+                "updated_at": isoformat(getattr(skill, "updated_at", None)),
+            }
+        )
+
+    findings = []
+    recommendations = []
+    if not items:
+        findings.append(finding("warning", "NO_ENABLED_SKILLS", "当前没有已启用的 skill。"))
+        recommendations.append(recommendation("P1", "请到技能中心启用至少一个 skill，并确保存在 active version。"))
+
+    return tool_result(
+        tool="list_enabled_skills",
+        target=target,
+        facts={"skills": items, "total": len(items), "limit": safe_limit, "enabled_only": True},
+        findings=findings,
+        recommendations=recommendations,
+    )

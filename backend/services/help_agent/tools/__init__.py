@@ -9,7 +9,7 @@ from app.core.database import SessionLocal
 from .agent_run import diagnose_agent_run, diagnose_recent_agent_failure
 from .connection import diagnose_connection
 from .page_context import get_page_context_hint
-from .skill import diagnose_skill
+from .skill import diagnose_skill, list_enabled_skills
 from .task import diagnose_task_run
 
 
@@ -37,6 +37,8 @@ class HelpToolRegistry:
                 return diagnose_connection(session, current_user, connection_id=int(conn_id))
             if tool_name == "diagnose_skill":
                 return diagnose_skill(session, current_user, str(params.get("skill_key") or context.get("target_id")))
+            if tool_name == "list_enabled_skills":
+                return list_enabled_skills(session, current_user, limit=int(params.get("limit") or 100))
             raise ValueError(f"unknown help diagnostic tool: {tool_name}")
         finally:
             session.close()
@@ -49,5 +51,6 @@ __all__ = [
     "diagnose_task_run",
     "diagnose_connection",
     "diagnose_skill",
+    "list_enabled_skills",
     "get_page_context_hint",
 ]

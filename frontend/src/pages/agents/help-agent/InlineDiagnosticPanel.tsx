@@ -125,7 +125,7 @@ export default function InlineDiagnosticPanel({
         entry_point: 'inline_panel',
         page_context: buildHelpPageContext({
           entryPoint: 'inline_panel',
-          selection: { run_id: runId },
+          selection: { query_refs: { run_id: runId } },
           visibleState: { ...visibleState, expanded: true },
         }),
       },

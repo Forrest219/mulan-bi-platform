@@ -20,6 +20,15 @@ import ProtectedRoute from '../components/auth/ProtectedRoute';
 import AppShellLayout from '../components/layout/AppShellLayout';
 import { ConversationProvider } from '../store/conversationStore';
 import { useAuth } from '../context/AuthContext';
+import type { HelpPageProfile } from '../pages/agents/help-agent/helpAgentContext';
+
+interface HelpRouteHandle {
+  helpProfile?: HelpPageProfile;
+}
+
+const helpProfile = (profile: HelpPageProfile): HelpRouteHandle => ({
+  helpProfile: profile,
+});
 
 // ──────────────────────────────────────────────────────────────
 // 代码分割：每个域独立 chunk（Spec 18 §4.3）
@@ -91,6 +100,7 @@ const SkillDetailPage = lazy(() => import('../pages/agents/skills/detail'));
 const TableauHealthPage = lazy(() => import('../pages/tableau/health/page'));
 
 // 资产模块
+const DataExplorerPage = lazy(() => import('../pages/assets/data-explorer/page'));
 const DwAssetsPage = lazy(() => import('../pages/assets/dw/page'));
 const DwAssetDetailPage = lazy(() => import('../pages/assets/dw/detail'));
 const DwTaxonomyPage = lazy(() => import('../pages/assets/dw/taxonomy/page'));
@@ -200,6 +210,16 @@ const routes: RouteObject[] = [
         children: [
           {
             path: 'dw-audit',
+            handle: helpProfile({
+              page_key: 'dw-audit',
+              page_title: '数仓巡检',
+              page_domain: 'governance',
+              default_questions: [
+                '最近有哪些数仓巡检失败？',
+                '哪些巡检规则风险最高？',
+                '这些风险项应该怎么处理？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="database_monitor">
                 <DwAuditPage />
@@ -208,6 +228,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'tableau-audit',
+            handle: helpProfile({
+              page_key: 'tableau-audit',
+              page_title: 'Tableau 巡检',
+              page_domain: 'governance',
+              default_questions: [
+                'Tableau 连接现在是否正常？',
+                '哪些 Tableau 资产健康度异常？',
+                'MCP 状态异常应该怎么排查？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="tableau">
                 <TableauHealthPage />
@@ -220,10 +250,30 @@ const routes: RouteObject[] = [
           },
           {
             path: 'semantic',
+            handle: helpProfile({
+              page_key: 'semantic',
+              page_title: '语义治理',
+              page_domain: 'governance',
+              default_questions: [
+                '字段语义有哪些待维护项？',
+                '指标定义是否存在冲突？',
+                '语义发布失败应该怎么排查？',
+              ],
+            }),
             element: <Navigate to="/governance/semantic/datasources" replace />,
           },
           {
             path: 'semantic/datasources',
+            handle: helpProfile({
+              page_key: 'semantic',
+              page_title: '语义治理',
+              page_domain: 'governance',
+              default_questions: [
+                '字段语义有哪些待维护项？',
+                '指标定义是否存在冲突？',
+                '语义发布失败应该怎么排查？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="tableau">
                 <SemanticDatasourceListPage />
@@ -248,6 +298,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'semantic/fields',
+            handle: helpProfile({
+              page_key: 'semantic',
+              page_title: '语义治理',
+              page_domain: 'governance',
+              default_questions: [
+                '字段语义有哪些待维护项？',
+                '指标定义是否存在冲突？',
+                '语义发布失败应该怎么排查？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="tableau">
                 <SemanticFieldListPage />
@@ -256,6 +316,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'semantic/publish-logs',
+            handle: helpProfile({
+              page_key: 'semantic',
+              page_title: '语义治理',
+              page_domain: 'governance',
+              default_questions: [
+                '字段语义有哪些待维护项？',
+                '指标定义是否存在冲突？',
+                '语义发布失败应该怎么排查？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="tableau">
                 <SemanticPublishLogsPage />
@@ -264,6 +334,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'metrics',
+            handle: helpProfile({
+              page_key: 'metrics',
+              page_title: '指标治理',
+              page_domain: 'governance',
+              default_questions: [
+                '这些指标口径是否一致？',
+                '指标依赖关系有哪些风险？',
+                '指标发布状态异常怎么处理？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="ddl_check">
                 <MetricsPage />
@@ -272,6 +352,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'metrics/:id',
+            handle: helpProfile({
+              page_key: 'metric-detail',
+              page_title: '指标详情',
+              page_domain: 'governance',
+              default_questions: [
+                '这个指标的口径和依赖是否一致？',
+                '这个指标关联了哪些字段和上游表？',
+                '这个指标发布失败应该怎么排查？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="ddl_check">
                 <MetricDetailPage />
@@ -289,6 +379,16 @@ const routes: RouteObject[] = [
           // DQC 子路由（Spec 31）
           {
             path: 'dqc',
+            handle: helpProfile({
+              page_key: 'dqc',
+              page_title: '数据质量监控',
+              page_domain: 'governance',
+              default_questions: [
+                '最近哪些质量规则失败？',
+                '哪些执行任务有告警？',
+                '数据质量异常应该怎么排查？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="rule_config">
                 <DqcOverviewPage />
@@ -375,7 +475,35 @@ const routes: RouteObject[] = [
         path: '/assets',
         children: [
           {
+            path: 'explorer',
+            handle: helpProfile({
+              page_key: 'data-explorer',
+              page_title: 'Data Explorer',
+              page_domain: 'assets',
+              default_questions: [
+                '这个连接的 Schema 如何查看？',
+                '为什么表预览加载失败？',
+                '当前数据权限应该怎么确认？',
+              ],
+            }),
+            element: (
+              <ProtectedRoute>
+                <DataExplorerPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
             path: 'dw',
+            handle: helpProfile({
+              page_key: 'dw-assets',
+              page_title: '数仓资产',
+              page_domain: 'assets',
+              default_questions: [
+                '这张表的字段含义是什么？',
+                '如何查看表血缘和影响范围？',
+                '资产同步或预览失败怎么排查？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="database_monitor">
                 <DwAssetsPage />
@@ -400,6 +528,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'tableau',
+            handle: helpProfile({
+              page_key: 'tableau-assets',
+              page_title: 'Tableau 资产',
+              page_domain: 'assets',
+              default_questions: [
+                '这个 Tableau 数据源关联哪些字段？',
+                '哪些 Tableau 资产健康度异常？',
+                'Tableau 同步失败应该怎么排查？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="tableau">
                 <TableauAssetBrowserPage />
@@ -408,6 +546,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'tableau/:id',
+            handle: helpProfile({
+              page_key: 'tableau-asset-detail',
+              page_title: 'Tableau 资产详情',
+              page_domain: 'assets',
+              default_questions: [
+                '这个资产的字段元数据是否完整？',
+                '这个资产的 MCP 调用是否正常？',
+                '这个资产健康度异常怎么排查？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="tableau">
                 <TableauAssetDetailPage />
@@ -452,6 +600,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'knowledge',
+            handle: helpProfile({
+              page_key: 'knowledge',
+              page_title: '知识库',
+              page_domain: 'assets',
+              default_questions: [
+                '如何搜索相关术语和文档？',
+                '这个术语关联了哪些指标？',
+                '为什么知识库结果不准确？',
+              ],
+            }),
             element: (
               <ProtectedRoute>
                 <KnowledgePage />
@@ -489,6 +647,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'profile',
+            handle: helpProfile({
+              page_key: 'account-profile',
+              page_title: '个人中心',
+              page_domain: 'account',
+              default_questions: [
+                '如何修改头像和个人信息？',
+                '修改密码失败应该怎么处理？',
+                '账号安全设置在哪里查看？',
+              ],
+            }),
             element: <AccountProfileForm />,
           },
           {
@@ -505,6 +673,16 @@ const routes: RouteObject[] = [
       // ── 消息中心 ──
       {
         path: '/notifications',
+        handle: helpProfile({
+          page_key: 'notifications',
+          page_title: '消息通知',
+          page_domain: 'admin',
+          default_questions: [
+            '有哪些未读告警需要处理？',
+            '这些通知来自哪些任务或资产？',
+            '为什么没有收到预期通知？',
+          ],
+        }),
         element: (
           <ProtectedRoute>
             <NotificationsPage />
@@ -518,6 +696,16 @@ const routes: RouteObject[] = [
         children: [
           {
             path: 'data',
+            handle: helpProfile({
+              page_key: 'data-agent',
+              page_title: 'Data Agent',
+              page_domain: 'agents',
+              default_questions: [
+                '为什么这次问答失败？',
+                '当前问题使用了哪些数据源？',
+                '工具链调用异常怎么排查？',
+              ],
+            }),
             element: (
               <ProtectedRoute>
                 <DataWorkbenchPage />
@@ -526,6 +714,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'data/history',
+            handle: helpProfile({
+              page_key: 'data-agent',
+              page_title: 'Data Agent',
+              page_domain: 'agents',
+              default_questions: [
+                '为什么这次问答失败？',
+                '当前问题使用了哪些数据源？',
+                '工具链调用异常怎么排查？',
+              ],
+            }),
             element: (
               <ProtectedRoute>
                 <DataWorkbenchHistoryPage />
@@ -534,6 +732,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'sql',
+            handle: helpProfile({
+              page_key: 'sql-agent',
+              page_title: 'SQL Agent',
+              page_domain: 'agents',
+              default_questions: [
+                '这段 SQL 为什么生成失败？',
+                'SQL 执行权限不足怎么处理？',
+                '执行错误应该先看哪些信息？',
+              ],
+            }),
             element: (
               <ProtectedRoute>
                 <SqlAgentPage />
@@ -542,6 +750,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'metrics',
+            handle: helpProfile({
+              page_key: 'metrics-agent',
+              page_title: 'Metrics Agent',
+              page_domain: 'agents',
+              default_questions: [
+                '指标生成失败应该怎么排查？',
+                '如何确认指标口径是否正确？',
+                '生成结果依赖了哪些字段？',
+              ],
+            }),
             element: (
               <ProtectedRoute>
                 <MetricsAgentPage />
@@ -550,6 +768,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'help',
+            handle: helpProfile({
+              page_key: 'help-agent',
+              page_title: 'Help Agent',
+              page_domain: 'agents',
+              default_questions: [
+                'Help Agent 可以帮我诊断什么？',
+                '如何让回答带上当前页面上下文？',
+                '诊断结果不准确应该怎么反馈？',
+              ],
+            }),
             element: (
               <ProtectedRoute>
                 <HelpAgentPage />
@@ -558,6 +786,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'agent-monitor',
+            handle: helpProfile({
+              page_key: 'agent-monitor',
+              page_title: 'Agent 监控',
+              page_domain: 'agents',
+              default_questions: [
+                '最近有哪些失败的 Agent run？',
+                '哪个 step 耗时最长？',
+                '失败原因应该怎么定位？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="user_management">
                 <AgentMonitorPage />
@@ -566,6 +804,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'skills',
+            handle: helpProfile({
+              page_key: 'skills',
+              page_title: '技能中心',
+              page_domain: 'agents',
+              default_questions: [
+                '哪些 skill 当前已启用？',
+                'skill 版本变更如何生效？',
+                'schema 校验失败应该怎么修？',
+              ],
+            }),
             element: (
               <SkillsRouteGuard>
                 <SkillsPage />
@@ -582,6 +830,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'skills/:skillId',
+            handle: helpProfile({
+              page_key: 'skill-detail',
+              page_title: '技能详情',
+              page_domain: 'agents',
+              default_questions: [
+                '当前技能版本是否已生效？',
+                '这个技能的 schema 是否正确？',
+                '技能启用失败应该怎么排查？',
+              ],
+            }),
             element: (
               <SkillsRouteGuard>
                 <SkillDetailPage />
@@ -604,6 +862,16 @@ const routes: RouteObject[] = [
           { index: true, element: <Navigate to="/system/users" replace /> },
           {
             path: 'users',
+            handle: helpProfile({
+              page_key: 'users',
+              page_title: '用户管理',
+              page_domain: 'admin',
+              default_questions: [
+                '如何排查用户登录问题？',
+                '用户角色应该如何分配？',
+                '账号状态异常怎么处理？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="user_management">
                 <UsersAdminPage />
@@ -620,6 +888,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'permissions',
+            handle: helpProfile({
+              page_key: 'permissions',
+              page_title: '权限配置',
+              page_domain: 'admin',
+              default_questions: [
+                '如何检查资源权限配置？',
+                '角色策略冲突怎么处理？',
+                '用户为什么看不到某个功能？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="user_management">
                 <PermissionsAdminPage />
@@ -640,6 +918,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'usage-stats/tokens',
+            handle: helpProfile({
+              page_key: 'token-stats',
+              page_title: 'Token 统计',
+              page_domain: 'admin',
+              default_questions: [
+                '最近 token 消耗为什么升高？',
+                '哪些模型调用成本最高？',
+                '如何定位异常 token 使用？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="user_management">
                 <TokenStatsPage />
@@ -656,6 +944,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'tasks',
+            handle: helpProfile({
+              page_key: 'tasks',
+              page_title: '任务管理',
+              page_domain: 'config',
+              default_questions: [
+                '最近哪些调度任务失败？',
+                '任务没有按时运行怎么排查？',
+                '如何查看任务最近运行记录？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="user_management">
                 <AdminTasksPage />
@@ -664,6 +962,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'activity',
+            handle: helpProfile({
+              page_key: 'activity',
+              page_title: '操作日志',
+              page_domain: 'admin',
+              default_questions: [
+                '如何追踪某个用户的操作？',
+                '哪些操作可能存在异常？',
+                '日志筛选结果应该怎么解读？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="user_management">
                 <ActivityAdminPage />
@@ -684,6 +992,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'data-connections',
+            handle: helpProfile({
+              page_key: 'data-connections',
+              page_title: '数据连接',
+              page_domain: 'config',
+              default_questions: [
+                '连接测试失败应该怎么排查？',
+                '凭据配置是否需要更新？',
+                '数据连接同步异常怎么处理？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="database_monitor">
                 <DataConnectionsPage />
@@ -692,6 +1010,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'service-configs',
+            handle: helpProfile({
+              page_key: 'service-configs',
+              page_title: '服务配置',
+              page_domain: 'config',
+              default_questions: [
+                'LLM 配置是否可用？',
+                'MCP 配置异常怎么排查？',
+                '密钥状态应该如何检查？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="user_management">
                 <ServiceConfigsPage />
@@ -700,6 +1028,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'mcp-debugger',
+            handle: helpProfile({
+              page_key: 'mcp-debugger',
+              page_title: 'MCP 调试器',
+              page_domain: 'config',
+              default_questions: [
+                '这个 MCP 工具调用为什么失败？',
+                '工具参数应该如何填写？',
+                '错误日志里应该重点看什么？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="user_management">
                 <McpDebuggerPage />
@@ -712,6 +1050,16 @@ const routes: RouteObject[] = [
           },
           {
             path: 'platform-settings',
+            handle: helpProfile({
+              page_key: 'platform-settings',
+              page_title: '平台设置',
+              page_domain: 'admin',
+              default_questions: [
+                '如何修改平台 Logo 和首页配置？',
+                '系统配置保存失败怎么排查？',
+                '哪些设置会影响所有用户？',
+              ],
+            }),
             element: (
               <ProtectedRoute requiredPermission="user_management">
                 <PlatformSettingsPage />

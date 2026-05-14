@@ -38,6 +38,10 @@ class DiagnosticStatus(str, Enum):
 class PageSelection(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    primary_entity: Optional[dict[str, Any]] = None
+    entities: Optional[list[dict[str, Any]]] = None
+    query_refs: Optional[dict[str, str]] = None
+
     run_id: Optional[str] = None
     task_run_id: Optional[Union[int, str]] = None
     connection_id: Optional[Union[int, str]] = None

@@ -100,6 +100,38 @@ class TimeoutRegistry:
         raise AssertionError(tool_name)
 
 
+class SkillInventoryRegistry:
+    async def execute(self, tool_name, params, context):
+        del params, context
+        if tool_name == "list_enabled_skills":
+            return {
+                "tool": tool_name,
+                "snapshot_at": "2026-05-14T19:36:37+08:00",
+                "target": {"type": "skill_inventory", "id": "enabled"},
+                "facts": {
+                    "total": 2,
+                    "skills": [
+                        {
+                            "skill_key": "schema",
+                            "name": "Schema",
+                            "category": "data",
+                            "active_version": {"version_number": "v2"},
+                        },
+                        {
+                            "skill_key": "query",
+                            "name": "Query",
+                            "category": "query",
+                            "active_version": {"version_number": "v1"},
+                        },
+                    ],
+                },
+                "findings": [],
+                "recommendations": [],
+                "related_entities": [],
+            }
+        raise AssertionError(tool_name)
+
+
 async def _collect(service, request):
     return [event async for event in service.stream(request, current_user={"id": 1, "role": "admin"})]
 
@@ -146,6 +178,24 @@ async def test_stream_does_not_route_global_unrelated_selection():
     assert not [event for event in events if event["type"] == "tool_call"]
     done = next(event for event in events if event["type"] == "done")
     assert "缺少可读取的诊断对象" in done["answer"]
+
+
+async def test_stream_lists_enabled_skills_for_skill_inventory_question():
+    service = HelpAgentService(tool_registry=SkillInventoryRegistry())
+    events = await _collect(
+        service,
+        {
+            "question": "哪些 skill 当前已启用？",
+            "entry_point": "global_drawer",
+            "page_context": {"path": "/agents/skills"},
+        },
+    )
+
+    assert any(event["type"] == "tool_call" and event["tool_name"] == "list_enabled_skills" for event in events)
+    done = next(event for event in events if event["type"] == "done")
+    assert "当前已启用 2 个 skill" in done["answer"]
+    assert "`schema`" in done["answer"]
+    assert done["response_data"]["trace"]["intent"] == "skill_inventory"
 
 
 async def test_parallel_tool_timeout_preserves_completed_results():

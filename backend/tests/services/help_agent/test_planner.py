@@ -77,6 +77,23 @@ def test_inline_panel_unrelated_question_does_not_force_selection():
     assert "当前选中" in decision.user_message_hint
 
 
+def test_skill_inventory_question_routes_to_enabled_skill_list():
+    planner = HelpPlanner()
+    request = HelpAgentRequest.model_validate(
+        {
+            "question": "哪些 skill 当前已启用？",
+            "entry_point": "global_drawer",
+            "page_context": {"path": "/agents/skills"},
+        }
+    )
+
+    decision = planner.plan_initial(request)
+
+    assert decision.intent == "skill_inventory"
+    assert decision.tool_calls[0].tool_name == "list_enabled_skills"
+    assert decision.tool_calls[0].params["limit"] == 100
+
+
 def test_related_entities_are_deduped_and_limited():
     planner = HelpPlanner(max_tool_calls=4)
     seen = {"diagnose_agent_run:agent_run:run-1"}

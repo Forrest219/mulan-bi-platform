@@ -1,8 +1,9 @@
 # Help Agent 技术规格书
 
-> 版本：v0.3 | 状态：Ready for Implementation | 日期：2026-05-13 | 关联模块：Agent / 运维诊断 / 用户支持
+> 版本：v0.4 | 状态：Ready for Implementation | 日期：2026-05-14 | 关联模块：Agent / 运维诊断 / 用户支持
 >
 > **变更记录**
+> - v0.4（2026-05-14）— 修正全局 Help Agent 入口设计：取消右下角悬浮按钮作为 P0 推荐入口，统一改为 AppHeader 顶栏机器人 icon，放在消息通知左侧，避免与首页 AskBar、聊天输入区和移动端底部按钮冲突；补充入口布局约束、前端测试项，并将实施章节拆分为 Plan 与 Task。
 > - v0.3（2026-05-13）— 补充工程落地约束：引入 `entry_point` 入口语义，区分 Global Drawer 弱上下文与 Inline Panel 强上下文；新增诊断进度 SSE 事件与步骤树 UI；独立表继续保留但要求 ORM 共用 observability mixin 与 schema parity 测试，防止结构漂移；错误结构化左移到 Runner 的 `StructuredBIError` / `structured_error`，Help Agent 仅对 legacy string 做 best-effort fallback；Planner 支持同层 related entities 并行 tool calling，P99 目标小于 5 秒。
 > - v0.2（2026-05-13）— 修正 v0.1 的关键设计风险：取消 `agent_kind` 混表，改为独立 Help Agent 表；`page_context` 从强制路由开关降级为弱上下文；P0 增加 Inline Diagnostic Panel；静态页面帮助降级为前端 hint / LLM context，不作为核心工具；新增 bounded multi-step diagnosis；新增 structured error chain extraction；所有诊断结果必须带 `snapshot_at`。
 > - v0.1（2026-05-12）— 初版草稿。
@@ -54,7 +55,7 @@ Help Agent 的目标是把这些分散的可观测信息变成可对话的诊断
 **P0 包含：**
 
 - 新增 Help Agent 后端服务与 SSE API。
-- 新增全局 Help Agent 前端入口，支持当前页面上下文。
+- 新增全局 Help Agent 前端入口：AppHeader 顶栏机器人 icon，支持当前页面上下文。
 - 在关键失败节点提供 Inline Diagnostic Panel。
 - 支持只读诊断工具：
   - Agent run / steps 诊断。
@@ -127,7 +128,7 @@ Help Agent 的目标是把这些分散的可观测信息变成可对话的诊断
 | `frontend/src/pages/admin/agent-monitor/page.tsx` | run 展开、steps、耗时展示 | 可从 run 页面一键带入 run_id 问 Help Agent |
 | `frontend/src/api/tasks.ts` | Task API client | 页面上下文可带 task_run_id / schedule_id |
 | `frontend/src/api/skills.ts` | Skill API client | 页面上下文可带 skill_id |
-| `frontend/src/config/menu.ts` | 智能体菜单结构 | P0 可增加 Help Agent 菜单项或全局悬浮入口 |
+| `frontend/src/config/menu.ts` | 智能体菜单结构 | P0 可增加 Help Agent 菜单项；全局入口放在 AppHeader 顶栏 |
 | `frontend/src/router/config.tsx` | 路由注册 | P0 新增 `/agents/help` 页面 |
 
 ### 2.3 当前缺口
@@ -147,6 +148,7 @@ Help Agent 的目标是把这些分散的可观测信息变成可对话的诊断
 | 诊断期间状态会变化 | 用户看到的状态与回答不一致 | 每个工具结果和最终回答必须带 `snapshot_at` |
 | 独立表结构漂移 | Help Agent 与 Data Agent 观测字段未来不一致 | 共享 ORM mixin + schema parity test |
 | 字符串堆栈难解析 | Help Agent 用正则清洗烂日志不稳定 | Runner 左移写入 `structured_error` JSON |
+| 全局悬浮按钮与 AskBar 冲突 | 首页/聊天页底部输入区被遮挡，移动端更明显 | P0 全局入口改为顶栏机器人 icon，位于消息通知左侧 |
 
 ---
 
@@ -1160,7 +1162,7 @@ P0 必须实现两类入口：
 
 | 入口 | 说明 |
 |------|------|
-| 全局 Help 按钮 | 固定在 App 布局右下角或顶栏，点击打开 Help Agent Drawer，适合通用问题 |
+| 顶栏 Help Agent 机器人按钮 | 固定在 AppHeader 右侧工具区，位于消息通知左侧，点击打开 Help Agent Drawer，适合通用问题 |
 | Inline Diagnostic Panel | 嵌入 run/task/connection/skill 详情区域，适合强上下文排障 |
 
 推荐同时增加菜单项：
@@ -1169,6 +1171,33 @@ P0 必须实现两类入口：
 /agents/help
 智能体 → Help Agent
 ```
+
+### 8.1.1 顶栏全局入口布局
+
+P0 全局入口必须使用顶栏 icon button，不再使用右下角 fixed floating button 作为默认入口。
+
+布局位置：
+
+```text
+AppHeader 右侧工具区：
+Help Agent 机器人 icon → 消息通知 → 用户头像
+```
+
+UI 约束：
+
+- 按钮只展示 icon，不展示文字，避免挤压顶栏搜索区域。
+- icon 优先使用 `ri-robot-2-line`；若当前 icon 集不可用，使用 `ri-customer-service-2-line`。
+- `title` 必须为 `Help Agent` 或 `打开 Help Agent`。
+- `aria-label` 必须为 `打开 Help Agent`。
+- 点击 Help Agent 时必须关闭通知下拉和用户菜单，避免多浮层叠加。
+- 顶栏 Help Agent 打开 Drawer 时，`entry_point` 使用 `global_drawer`。
+- P0 禁止保留右下角 Help Agent fixed button，避免与首页 AskBar、聊天输入区、移动端菜单按钮冲突。
+
+移动端约束：
+
+- 顶栏 icon 应保持可点击。
+- Drawer 移动端全屏。
+- 不通过 bottom/right offset 规避 AskBar 冲突。
 
 ### 8.2 Help Agent Drawer
 
@@ -1182,6 +1211,7 @@ UI 要求：
 - 展示工具调用摘要，但默认折叠技术细节。
 - 错误时展示 `message` + `user_hint`。
 - Drawer 不得遮挡 Inline Diagnostic Panel 的主要使用路径；在具体 run/task 诊断场景中，优先使用 inline 形态。
+- Drawer 的全局触发入口来自 AppHeader 顶栏 Help Agent icon。
 
 ### 8.2.1 Inline Diagnostic Panel
 
@@ -1419,7 +1449,9 @@ P0 架构要求：
 | 7 | diagnostic_progress | Inline panel 更新步骤树状态和耗时 | P0 |
 | 8 | 并行工具 | 同层步骤并排或同层级展示 | P0 |
 | 9 | 等待超过 2 秒 | UI 仍显示具体 running step，不是静态 thinking | P0 |
-| 10 | 移动端 | Drawer 全屏且输入框可用 | P1 |
+| 10 | 顶栏全局入口 | Help Agent icon 位于消息通知左侧，点击打开 Drawer，并关闭通知/用户菜单 | P0 |
+| 11 | 首页 AskBar 页面 | 不存在右下角 Help Agent 悬浮按钮遮挡 AskBar | P0 |
+| 12 | 移动端 | Drawer 全屏且输入框可用 | P1 |
 
 ### 11.4 Mock 与测试约束
 
@@ -1439,9 +1471,28 @@ P0 架构要求：
 
 ---
 
-## 12. Coder 任务拆分
+## 12. 实施计划与任务拆分
 
-### 12.1 后端任务
+### 12.1 Plan
+
+P0 实施按以下顺序推进：
+
+| 阶段 | 目标 | 说明 | 验收 |
+|---|---|---|---|
+| Plan-1 | 后端数据与 API 基座 | 建表、ORM、SSE API、只读诊断工具、落库 | API 单测和 SSE 集成测试通过 |
+| Plan-2 | 前端入口与 Drawer | 顶栏机器人 icon、Drawer、`/agents/help` 页面、page_context | 从 AppHeader 可打开 Drawer，且不遮挡 AskBar |
+| Plan-3 | Inline 诊断体验 | Agent Monitor run 下方 Inline Diagnostic Panel、进度树、耗时 | 在 run 展开区域内完成诊断，不遮挡原始错误 |
+| Plan-4 | 多步诊断与可观测 | related_entities 下钻、同层并行、snapshot、structured_error | 最多 4 步、同层并行、每步有快照和耗时 |
+| Plan-5 | 测试与安全收口 | 权限、脱敏、schema parity、前端 type-check | 验收清单全部通过 |
+
+P0 UX 决策：
+
+- 全局 Help Agent 入口固定为 AppHeader 顶栏机器人 icon。
+- 不使用右下角 fixed floating button。
+- 具体对象诊断优先使用 Inline Diagnostic Panel。
+- `/agents/help` 页面保留为完整页入口和路由兜底。
+
+### 12.2 Backend Tasks
 
 1. Alembic 迁移：
    - 新增 `help_agent_conversations`
@@ -1504,21 +1555,25 @@ P0 架构要求：
     - Task runner / signal handler 写 `bi_task_runs.structured_error`。
     - Help Agent 只对 legacy string 做 fallback parser。
 
-### 12.2 前端任务
+### 12.3 Frontend Tasks
 
 1. 新增 `frontend/src/api/helpAgent.ts`。
 2. 新增 Help Agent Drawer。
 3. 新增 `/agents/help` 页面。
-4. 在全局布局增加 Help 入口。
-5. 新增 `InlineDiagnosticPanel.tsx`。
-6. 在 Agent Monitor run 展开区域增加“诊断”按钮，打开 inline panel。
-7. 实现 `buildHelpPageContext()`。
-8. 更新菜单与路由。
-9. 补充前端类型与错误态。
-10. 支持 `diagnostic_progress` SSE 事件。
-11. Inline panel 渲染步骤树、并行层级和每步耗时。
+4. 在 AppHeader 顶栏消息通知左侧增加 Help Agent 机器人 icon button。
+5. 从 AppShellLayout 删除右下角 fixed Help Agent floating button。
+6. AppHeader 增加 `onOpenHelpAgent?: () => void` prop；点击 Help icon 时调用并关闭通知/用户菜单。
+7. AppShellLayout 保留 `HelpAgentDrawer` 和 `helpOpen` 状态，通过 prop 传给 AppHeader。
+8. 新增 `InlineDiagnosticPanel.tsx`。
+9. 在 Agent Monitor run 展开区域增加“诊断”按钮，打开 inline panel。
+10. 实现 `buildHelpPageContext()`。
+11. 更新菜单与路由。
+12. 补充前端类型与错误态。
+13. 支持 `diagnostic_progress` SSE 事件。
+14. Inline panel 渲染步骤树、并行层级和每步耗时。
+15. 增加前端测试或 smoke 检查，覆盖 Help icon 不遮挡首页 AskBar。
 
-### 12.3 Tester 任务
+### 12.4 Tester Tasks
 
 1. 后端跑迁移 upgrade/downgrade/upgrade。
 2. 跑 Help Agent 单元测试。
@@ -1531,12 +1586,16 @@ P0 架构要求：
    - Help Agent 能展示快照时间。
    - 普通用户无法诊断其他用户 run。
    - secret 不泄露。
+   - 首页 AskBar 不被 Help Agent 悬浮按钮遮挡。
+   - 顶栏 Help icon 位于消息通知左侧，点击后打开 Drawer。
 
 ---
 
 ## 13. 验收标准
 
-- [ ] 用户可以从全局 Help 入口打开 Help Agent。
+- [ ] 用户可以从 AppHeader 顶栏 Help Agent 机器人 icon 打开 Help Agent。
+- [ ] 顶栏 Help Agent icon 位于消息通知左侧。
+- [ ] P0 不存在右下角 Help Agent fixed floating button 遮挡 AskBar。
 - [ ] 用户可以在 Agent Monitor 对某个 run 一键打开 Inline Diagnostic Panel。
 - [ ] Help Agent 能返回 run 总耗时、最慢步骤、慢原因、下一步建议。
 - [ ] Help Agent 对 run 失败可沿 `related_entities` 下钻到 connection / skill，最多 4 步。
@@ -1564,7 +1623,7 @@ P0 架构要求：
 
 | # | 问题 | 建议 | 状态 |
 |---|------|------|------|
-| 1 | Help Agent 是否默认出现在菜单 | P0 同时提供全局入口和 `/agents/help` 页面 | 待 UI 确认 |
+| 1 | Help Agent 是否默认出现在菜单 | P0 提供 AppHeader 顶栏全局入口和 `/agents/help` 页面；菜单项可保留在智能体域 | 已确认 |
 | 2 | 是否把 Help Agent 记录纳入 Agent Monitor 默认列表 | 不混入默认 Data Agent 列表；P1 可做独立 Help Agent 监控页或切换 Tab | 待实现 |
 | 3 | P1 是否允许自动修复 | 只允许 admin/data_admin，经二次确认 | Deferred |
 | 4 | 是否接入知识库 RAG | P1 接入，P0 使用轻量 page context hint | Deferred |
@@ -1584,6 +1643,7 @@ P0 架构要求：
 - Help Agent 自身数据必须写入独立 `help_agent_*` 表，禁止写入 Data Agent 的 `bi_agent_*` 和 `agent_conversation*` 表。
 - Data Agent / Help Agent 公共观测字段必须使用共享 ORM mixin，禁止复制粘贴两套独立字段定义。
 - `entry_point` 必须参与 Planner；Global Drawer 弱上下文，Inline Panel 强上下文。
+- 全局 Help Agent P0 入口必须在 AppHeader 顶栏，位于消息通知左侧；禁止使用右下角 fixed floating button 作为默认入口。
 - Planner 最多执行 4 个 tool_call，禁止无限 ReAct loop。
 - 同层 related entities 必须并行读取。
 - 必须输出 `diagnostic_progress` SSE 事件。
@@ -1621,3 +1681,4 @@ python3 -m pytest tests/services/help_agent -q
 - 禁止只保留 stack trace 首行后交给 LLM。
 - 禁止在 Inline Panel 入口忽略 selection，让用户重复说明诊断对象。
 - 禁止同层 related entities 串行调用导致线性耗时增长。
+- 禁止在 P0 保留会遮挡首页 AskBar 或聊天输入区的右下角 Help Agent 悬浮按钮。

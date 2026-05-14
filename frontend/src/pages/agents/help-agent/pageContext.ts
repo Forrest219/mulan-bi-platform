@@ -1,12 +1,18 @@
 import type { HelpAgentEntryPoint, HelpPageContext } from '../../../api/helpAgent';
+import type {
+  HelpAgentContextSnapshot,
+  HelpPageSelection,
+} from './helpAgentContext';
 
-type HelpSelection = NonNullable<HelpPageContext['selection']>;
 type HelpVisibleState = NonNullable<HelpPageContext['visible_state']>;
 
 interface BuildHelpPageContextOptions {
   entryPoint?: HelpAgentEntryPoint;
-  selection?: HelpSelection;
+  helpContext?: HelpAgentContextSnapshot;
+  selection?: HelpPageSelection;
   visibleState?: HelpVisibleState;
+  pathname?: string;
+  search?: string;
 }
 
 function parseQuery(search: string): Record<string, string> {
@@ -20,38 +26,56 @@ function parseQuery(search: string): Record<string, string> {
   return query;
 }
 
-function numberFromQuery(query: Record<string, string>, key: string): number | undefined {
-  const value = query[key];
-  if (!value) return undefined;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
+function buildQueryRefs(query: Record<string, string>): Record<string, string> | undefined {
+  const refs: Record<string, string> = {};
+  for (const key of ['run_id', 'task_run_id', 'connection_id', 'skill_key', 'asset_id']) {
+    const value = query[key];
+    if (value) refs[key] = value;
+  }
+  return Object.keys(refs).length > 0 ? refs : undefined;
 }
 
-function buildSelectionFromQuery(query: Record<string, string>): HelpSelection {
-  const selection: HelpSelection = {};
-  if (query.run_id) selection.run_id = query.run_id;
-  const taskRunId = numberFromQuery(query, 'task_run_id');
-  if (taskRunId !== undefined) selection.task_run_id = taskRunId;
-  const connectionId = numberFromQuery(query, 'connection_id');
-  if (connectionId !== undefined) selection.connection_id = connectionId;
-  const assetId = numberFromQuery(query, 'asset_id');
-  if (assetId !== undefined) selection.asset_id = assetId;
-  if (query.skill_key) selection.skill_key = query.skill_key;
-  return selection;
-}
+function mergeSelection(
+  queryRefs: Record<string, string> | undefined,
+  contextSelection?: HelpPageSelection,
+  optionSelection?: HelpPageSelection
+): HelpPageSelection | undefined {
+  const merged: HelpPageSelection = {
+    ...contextSelection,
+    ...optionSelection,
+    query_refs: {
+      ...queryRefs,
+      ...contextSelection?.query_refs,
+      ...optionSelection?.query_refs,
+    },
+  };
 
-function compactSelection(selection: HelpSelection): HelpSelection | undefined {
-  return Object.values(selection).some((value) => value !== undefined && value !== '') ? selection : undefined;
+  if (!merged.query_refs || Object.keys(merged.query_refs).length === 0) {
+    delete merged.query_refs;
+  }
+
+  return merged.primary_entity || merged.entities?.length || merged.query_refs
+    ? merged
+    : undefined;
 }
 
 export function buildHelpPageContext(options: BuildHelpPageContextOptions = {}): HelpPageContext {
-  const query = parseQuery(window.location.search);
-  const querySelection = buildSelectionFromQuery(query);
-  const selection = compactSelection({ ...querySelection, ...options.selection });
+  const pathname = options.pathname ?? window.location.pathname;
+  const query = parseQuery(options.search ?? window.location.search);
+  const profile = options.helpContext?.profile;
+  const selection = mergeSelection(
+    buildQueryRefs(query),
+    options.helpContext?.selection,
+    options.selection
+  );
 
   return {
     entry_point: options.entryPoint,
-    path: window.location.pathname,
+    path: pathname,
+    title: document.title || pathname || '当前页面',
+    page_key: profile?.page_key,
+    page_title: profile?.page_title ?? document.title ?? pathname,
+    page_domain: profile?.page_domain,
     query,
     selection,
     visible_state: options.visibleState,

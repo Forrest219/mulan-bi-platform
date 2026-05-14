@@ -1,18 +1,20 @@
 import { API_BASE } from '../config';
+import type {
+  HelpPageDomain,
+  HelpPageSelection,
+} from '../pages/agents/help-agent/helpAgentContext';
 
 export type HelpAgentEntryPoint = 'global_drawer' | 'inline_panel' | 'route_page';
 
 export interface HelpPageContext {
   entry_point?: HelpAgentEntryPoint;
   path: string;
+  title?: string;
+  page_key?: string;
+  page_title?: string;
+  page_domain?: HelpPageDomain;
   query: Record<string, string>;
-  selection?: {
-    run_id?: string;
-    task_run_id?: number;
-    connection_id?: number;
-    skill_key?: string;
-    asset_id?: number;
-  };
+  selection?: HelpPageSelection;
   visible_state?: {
     status?: string;
     error_code?: string;
