@@ -10,11 +10,35 @@
  */
 import { useState, useRef, useCallback } from 'react';
 import { streamAgent } from '../api/agent';
+import type {
+  AgentExplainability,
+  AgentMode,
+  ExplainabilityPhase,
+  ExplainabilityStatus,
+  FallbackExplain,
+} from '../api/agent';
 
 export interface TableData {
   fields: string[];
   rows: (string | number | null)[][];
   col_types: ('numeric' | 'string')[];
+  table_display?: TableDisplay;
+}
+
+export type TableDisplayAlign = 'left' | 'right' | 'center';
+export type TableDisplayFormat = 'plain' | 'number' | 'integer' | 'percent' | 'date';
+
+export interface TableDisplayColumn {
+  key?: string;
+  label?: string;
+  semantic_type?: 'dimension' | 'metric' | 'derived_metric' | 'rank' | 'period' | 'flag' | 'text' | string;
+  value_type?: 'string' | 'number' | 'percent' | 'date' | 'boolean' | string;
+  align?: TableDisplayAlign;
+  format?: TableDisplayFormat;
+}
+
+export interface TableDisplay {
+  columns?: TableDisplayColumn[];
 }
 
 export interface ChartData {
@@ -54,6 +78,137 @@ export interface StreamingMessage {
   errorCode?: string;
   /** user-readable error hint from backend — shown as secondary text */
   errorHint?: string;
+  /** Structured user-visible analysis process for P0 Explainability UI */
+  explainability?: AgentExplainability;
+  explainabilityEvents?: Array<{
+    phase: ExplainabilityPhase;
+    status: ExplainabilityStatus;
+    payload: unknown;
+    receivedAt: string;
+  }>;
+  fallback?: FallbackExplain;
+}
+
+function ensureExplainability(current?: AgentExplainability, meta?: { runId?: string; traceId?: string; mode?: AgentMode }): AgentExplainability {
+  return {
+    schema_version: current?.schema_version ?? 'p0.1',
+    run_id: current?.run_id ?? meta?.runId,
+    trace_id: current?.trace_id ?? meta?.traceId,
+    mode: current?.mode ?? meta?.mode,
+    phases: { ...(current?.phases ?? {}) },
+  };
+}
+
+function mergeExplainabilityPhase(
+  current: AgentExplainability | undefined,
+  phase: ExplainabilityPhase,
+  payload: unknown,
+): AgentExplainability {
+  const base = ensureExplainability(current);
+  return {
+    ...base,
+    phases: {
+      ...base.phases,
+      [phase]: payload as AgentExplainability['phases'][ExplainabilityPhase],
+    },
+  };
+}
+
+function appendToolCallStep(current: AgentExplainability | undefined, tool: string, params: Record<string, unknown>): AgentExplainability {
+  const base = ensureExplainability(current);
+  const steps = base.phases.execution?.steps ?? [];
+  return {
+    ...base,
+    phases: {
+      ...base.phases,
+      execution: {
+        status: 'running',
+        steps: [
+          ...steps,
+          {
+            step_id: `tool-call-${steps.length + 1}`,
+            step_number: steps.length + 1,
+            phase: 'execution',
+            status: 'running',
+            title: `执行 ${tool}`,
+            tool_name: tool,
+            params_preview: params,
+          },
+        ],
+      },
+    },
+  };
+}
+
+function appendToolResultStep(current: AgentExplainability | undefined, tool: string, summary: string): AgentExplainability {
+  const base = ensureExplainability(current);
+  const steps = base.phases.execution?.steps ?? [];
+  const lastPendingIndex = [...steps].reverse().findIndex((step) => step.tool_name === tool && step.status === 'running');
+  if (lastPendingIndex >= 0) {
+    const index = steps.length - 1 - lastPendingIndex;
+    const nextSteps = steps.map((step, idx) => idx === index ? { ...step, status: 'success' as const, result_preview: summary } : step);
+    return { ...base, phases: { ...base.phases, execution: { status: 'completed', steps: nextSteps } } };
+  }
+  return {
+    ...base,
+    phases: {
+      ...base.phases,
+      execution: {
+        status: 'completed',
+        steps: [
+          ...steps,
+          {
+            step_id: `tool-result-${steps.length + 1}`,
+            step_number: steps.length + 1,
+            phase: 'execution',
+            status: 'success',
+            title: `${tool} 返回结果`,
+            tool_name: tool,
+            result_preview: summary,
+          },
+        ],
+      },
+    },
+  };
+}
+
+function tableDataFromResponse(responseType: string | undefined, responseData: unknown): TableData | undefined {
+  if (responseType !== 'table' || !responseData || typeof responseData !== 'object') return undefined;
+  const data = responseData as { fields?: unknown; rows?: unknown; table_display?: unknown };
+  if (!Array.isArray(data.fields) || !Array.isArray(data.rows) || data.fields.length === 0 || data.rows.length === 0) {
+    return undefined;
+  }
+  const fields = data.fields.map((field) => String(field));
+  const rows = data.rows.filter(Array.isArray) as (string | number | null)[][];
+  if (rows.length === 0) return undefined;
+  const col_types = fields.map((_, i) => {
+    const sample = rows.slice(0, 5).map((row) => row[i]).filter((value) => value != null && value !== '');
+    return sample.length > 0 && sample.every((value) => typeof value === 'number') ? 'numeric' : 'string';
+  }) as ('numeric' | 'string')[];
+  const table_display = parseTableDisplay(data.table_display);
+  return { fields, rows, col_types, ...(table_display ? { table_display } : {}) };
+}
+
+function parseTableDisplay(value: unknown): TableDisplay | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const columns = (value as { columns?: unknown }).columns;
+  if (!Array.isArray(columns)) return undefined;
+  return {
+    columns: columns
+      .filter((column): column is Record<string, unknown> => !!column && typeof column === 'object')
+      .map((column) => ({
+        key: typeof column.key === 'string' ? column.key : undefined,
+        label: typeof column.label === 'string' ? column.label : undefined,
+        semantic_type: typeof column.semantic_type === 'string' ? column.semantic_type : undefined,
+        value_type: typeof column.value_type === 'string' ? column.value_type : undefined,
+        align: column.align === 'left' || column.align === 'right' || column.align === 'center'
+          ? column.align
+          : undefined,
+        format: column.format === 'plain' || column.format === 'number' || column.format === 'integer' || column.format === 'percent' || column.format === 'date'
+          ? column.format
+          : undefined,
+      })),
+  };
 }
 
 export interface UseStreamingChatReturn {
@@ -149,7 +304,16 @@ export function useStreamingChat(): UseStreamingChatReturn {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === id
-                    ? { ...m, conversationId: event.conversation_id, traceId: event.run_id }
+                    ? {
+                        ...m,
+                        conversationId: event.conversation_id,
+                        traceId: event.run_id,
+                        explainability: ensureExplainability(m.explainability, {
+                          runId: event.run_id,
+                          traceId: event.trace_id,
+                          mode: event.mode,
+                        }),
+                      }
                     : m,
                 ),
               );
@@ -174,6 +338,7 @@ export function useStreamingChat(): UseStreamingChatReturn {
                         ...m,
                         toolCalls: [...(m.toolCalls ?? []), { tool: event.tool, params: event.params }],
                         toolsUsed: [...(m.toolsUsed ?? []), event.tool],
+                        explainability: appendToolCallStep(m.explainability, event.tool, event.params),
                       }
                     : m,
                 ),
@@ -185,18 +350,55 @@ export function useStreamingChat(): UseStreamingChatReturn {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === id
-                    ? { ...m, toolResults: [...(m.toolResults ?? []), { tool: event.tool, summary: event.summary }] }
+                    ? {
+                        ...m,
+                        toolResults: [...(m.toolResults ?? []), { tool: event.tool, summary: event.summary }],
+                        explainability: appendToolResultStep(m.explainability, event.tool, event.summary),
+                      }
+                    : m,
+                ),
+              );
+            }
+          } else if (event.type === 'explainability') {
+            const id = streamingIdRef.current;
+            if (id) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === id
+                    ? {
+                        ...m,
+                        explainability: event.explainability ?? mergeExplainabilityPhase(m.explainability, event.phase, event.payload),
+                        explainabilityEvents: [
+                          ...(m.explainabilityEvents ?? []),
+                          {
+                            phase: event.phase,
+                            status: event.status,
+                            payload: event.payload,
+                            receivedAt: new Date().toISOString(),
+                          },
+                        ],
+                        fallback: event.phase === 'fallback' ? event.payload as FallbackExplain : m.fallback,
+                      }
                     : m,
                 ),
               );
             }
           } else if (event.type === 'table_data') {
             const id = streamingIdRef.current;
+            const table_display = parseTableDisplay((event as { table_display?: unknown }).table_display);
             if (id) {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === id
-                    ? { ...m, tableData: { fields: event.fields, rows: event.rows, col_types: event.col_types } }
+                    ? {
+                        ...m,
+                        tableData: {
+                          fields: event.fields,
+                          rows: event.rows,
+                          col_types: event.col_types,
+                          ...(table_display ? { table_display } : {}),
+                        },
+                      }
                     : m,
                 ),
               );
@@ -216,6 +418,7 @@ export function useStreamingChat(): UseStreamingChatReturn {
             bufferRef.current += event.content;
           } else if (event.type === 'done') {
             const id = streamingIdRef.current;
+            const tableData = tableDataFromResponse(event.response_type, event.response_data);
             if (id) {
               setMessages((prev) =>
                 prev.map((m) =>
@@ -225,8 +428,11 @@ export function useStreamingChat(): UseStreamingChatReturn {
                         traceId: event.run_id,
                         executionTimeMs: event.execution_time_ms,
                         responseType: event.response_type,
+                        tableData: tableData ?? m.tableData,
                         stepsCount: event.steps_count,
                         metadata: { sources_count: event.sources_count, top_sources: event.top_sources },
+                        explainability: event.explainability ?? m.explainability,
+                        fallback: event.fallback ?? event.explainability?.phases.fallback ?? m.fallback,
                       }
                     : m,
                 ),
@@ -239,7 +445,14 @@ export function useStreamingChat(): UseStreamingChatReturn {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === id
-                    ? { ...m, isError: true, errorCode: event.error_code, errorHint: event.user_hint }
+                    ? {
+                        ...m,
+                        isError: true,
+                        errorCode: event.error_code,
+                        errorHint: event.user_hint,
+                        explainability: event.explainability ?? m.explainability,
+                        fallback: event.fallback ?? event.explainability?.phases.fallback ?? m.fallback,
+                      }
                     : m,
                 ),
               );

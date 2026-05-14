@@ -1,0 +1,23 @@
+{
+  "snapshot_id": "superstore_2026_05_13",
+  "recorded_at": "2026-05-13T00:00:00Z",
+  "datasource_luid": "replace-with-staging-superstore-luid",
+  "connection_id": 1,
+  "note": "Draft fixture shape. Replace rows with reviewed MCP output when recording live baseline.",
+  "cases": {
+    "batch2.q6_top10_customers": {
+      "fields": ["客户名称", "销售额"],
+      "rows": [
+        ["示例客户A", 1000.0],
+        ["示例客户B", 900.0]
+      ],
+      "result_shape": {
+        "required_fields": ["客户名称", "销售额"],
+        "max_rows": 10
+      },
+      "tolerances": {
+        "numeric_rel": 0.001
+      }
+    }
+  }
+}

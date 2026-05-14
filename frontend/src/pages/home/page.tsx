@@ -23,6 +23,7 @@ import { ScopeProvider, useScope } from '../../features/ops-workbench/ScopeConte
 import { OpsWorkbench } from '../../features/ops-workbench/OpsWorkbench';
 import { useHomeUrlState } from './hooks/useHomeUrlState';
 import { agentConversationsApi } from '../../api/agent';
+import type { AgentExplainability } from '../../api/agent';
 // Gap-05: SSE streaming hook — state 与 AskBar 完全隔离（§11 陷阱6）
 import { useStreamingChat } from '../../hooks/useStreamingChat';
 import MessageList from './components/MessageList';
@@ -62,6 +63,8 @@ function HomePageInner() {
     created_at?: string;
     response_type?: string | null;
     response_data?: unknown;
+    run_id?: string | null;
+    explainability?: AgentExplainability | null;
     trace_id?: string | null;
     sources_count?: number | null;
     top_sources?: string[] | null;
@@ -100,6 +103,8 @@ function HomePageInner() {
         created_at: m.created_at,
         response_type: m.response_type,
         response_data: m.response_data,
+        run_id: m.run_id,
+        explainability: m.explainability,
         trace_id: m.trace_id,
         sources_count: m.sources_count,
         top_sources: m.top_sources,
@@ -292,8 +297,8 @@ function HomePageInner() {
     void handleResult(r, lastQuestion);
   };
 
-  const handleRegenerate = () => {
-    let question = lastQuestionRef.current;
+  const handleRegenerate = (sourceQuestion: string) => {
+    let question = sourceQuestion.trim();
     if (!question && historyMessages?.length > 0) {
       const lastUserMsg = [...historyMessages].reverse().find(msg => msg.role === 'user');
       if (lastUserMsg) {

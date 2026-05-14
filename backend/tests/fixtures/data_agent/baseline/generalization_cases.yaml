@@ -1,0 +1,179 @@
+- id: generalization.profit_rate_yearly_change
+  group: generalization
+  question: "利润率按年份有什么变化？"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: reset_plan
+    contains:
+      metrics: ["利润率"]
+      time:
+        grain: year
+  baseline:
+    mode: plan_only
+    result_shape:
+      required_fields: ["订单日期", "利润率"]
+      max_rows: 20
+  expected_gate: pass
+
+- id: generalization.customer_count_trend
+  group: generalization
+  question: "客户数最近几年是上升还是下降？"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: reset_plan
+    contains:
+      metrics: ["客户数"]
+      operator: trend_condition
+      time:
+        grain: year
+  baseline:
+    mode: plan_only
+    result_shape:
+      required_fields: ["订单日期", "客户数"]
+      max_rows: 20
+  expected_gate: pass
+
+- id: generalization.sales_profit_by_province
+  group: generalization
+  question: "各省份销售额和利润分别是多少？"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: reset_plan
+    contains:
+      metrics: ["销售额", "利润"]
+      dimensions: ["省份"]
+  baseline:
+    mode: plan_only
+    result_shape:
+      required_fields: ["省份", "销售额", "利润"]
+      max_rows: 100
+  expected_gate: pass
+
+- id: generalization.followup_split_category
+  group: generalization
+  question: "再按类别拆一下。"
+  connection_fixture: superstore_tableau
+  previous_context:
+    fixture: sales_profit_by_province
+  expected_patch:
+    patch_type: add_dimension
+    contains:
+      dimensions: ["类别"]
+  baseline:
+    mode: plan_only
+    result_shape:
+      required_fields: ["省份", "类别", "销售额", "利润"]
+      max_rows: 100
+  expected_gate: pass
+
+- id: generalization.provinces_without_2024_sales
+  group: generalization
+  question: "2024 年没有贡献销售额的省份有哪些？"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: reset_plan
+    contains:
+      operator: set_difference
+      dimensions: ["省份"]
+      filters:
+        - field_caption: "订单日期"
+          operator: "between"
+          value: ["2024-01-01", "2024-12-31"]
+  baseline:
+    mode: plan_only
+    result_shape:
+      required_fields: ["省份"]
+      max_rows: 100
+  expected_gate: pass
+
+- id: generalization.top5_customers_by_sales
+  group: generalization
+  question: "销售额最高的 5 个客户是谁？"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: reset_plan
+    contains:
+      metrics: ["销售额"]
+      dimensions: ["客户名称"]
+      limit: 5
+  baseline:
+    mode: plan_only
+    result_shape:
+      required_fields: ["客户名称", "销售额"]
+      max_rows: 5
+  expected_gate: pass
+
+- id: generalization.bottom10_subcategories_by_profit
+  group: generalization
+  question: "利润最低的 10 个子类别是什么？"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: reset_plan
+    contains:
+      metrics: ["利润"]
+      dimensions: ["子类别"]
+      limit: 10
+      order_by:
+        - metric: "利润"
+          direction: "asc"
+  baseline:
+    mode: plan_only
+    result_shape:
+      required_fields: ["子类别", "利润"]
+      max_rows: 10
+  expected_gate: pass
+
+- id: generalization.province_sales_continuous_growth
+  group: generalization
+  question: "哪些省份销售额连续增长？"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: reset_plan
+    contains:
+      operator: trend_condition
+      metrics: ["销售额"]
+      dimensions: ["省份"]
+  baseline:
+    mode: plan_only
+    result_shape:
+      required_fields: ["省份", "订单日期", "销售额", "is_increasing"]
+      max_rows: 100
+  expected_gate: pass
+
+- id: generalization.subcategories_always_profitable
+  group: generalization
+  question: "哪些子类别每年都赚钱？"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: reset_plan
+    contains:
+      operator: all_period_condition
+      metrics: ["利润"]
+      dimensions: ["子类别"]
+  baseline:
+    mode: plan_only
+    result_shape:
+      required_fields: ["子类别", "利润", "all_periods_match"]
+      max_rows: 100
+  expected_gate: pass
+
+- id: generalization.chongqing_2024_loss_root_cause
+  group: generalization
+  question: "2024 年重庆亏损主要由哪些客户造成？"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: reset_plan
+    contains:
+      operator: root_cause
+      metrics: ["利润"]
+      dimensions: ["客户名称"]
+      filters:
+        - field_caption: "省份"
+          operator: "="
+          value: "重庆"
+  baseline:
+    mode: plan_only
+    result_shape:
+      required_fields: ["客户名称", "利润", "贡献率"]
+      max_rows: 100
+  expected_gate: pass

@@ -1,0 +1,183 @@
+- id: batch2.q2_followup_metric_trend
+  group: batch2
+  question: "这个指标过去几年的趋势是什么样子"
+  connection_fixture: superstore_tableau
+  previous_context:
+    fixture: q1_sales_by_category_2024
+  expected_patch:
+    patch_type: clarify_reference
+    contains:
+      resolved_refs:
+        - type: metric
+          name: "销售额"
+      nested_patch_types: ["set_time_range", "set_time_grain"]
+  baseline:
+    mode: mcp_snapshot
+    expected_plan:
+      metrics: ["销售额"]
+    result_shape:
+      required_fields: ["订单日期", "销售额"]
+      max_rows: 10
+    tolerances:
+      numeric_rel: 0.001
+      row_set: exact
+  expected_gate: pass
+
+- id: batch2.q4_continue_split_each_year
+  group: batch2
+  question: "继续拆分到每个年份"
+  connection_fixture: superstore_tableau
+  previous_context:
+    fixture: q3_sales_by_subcategory
+  expected_patch:
+    patch_type: clarify_reference
+    contains:
+      dimensions: ["子类别"]
+      time:
+        grain: year
+  baseline:
+    mode: mcp_snapshot
+    expected_plan:
+      metrics: ["销售额"]
+      dimensions: ["子类别"]
+    result_shape:
+      required_fields: ["子类别", "订单日期", "销售额"]
+      max_rows: 100
+    tolerances:
+      numeric_rel: 0.001
+  expected_gate: pass
+
+- id: batch2.q5_subcategories_without_sales_2025
+  group: batch2
+  question: "2025 年没有销售记录的子类别有哪些？"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: reset_plan
+    contains:
+      operator: set_difference
+      dimensions: ["子类别"]
+      filters:
+        - field_caption: "订单日期"
+          operator: "between"
+          value: ["2025-01-01", "2025-12-31"]
+  baseline:
+    mode: mcp_snapshot
+    result_shape:
+      required_fields: ["子类别"]
+      max_rows: 100
+    tolerances:
+      row_set: exact
+  expected_gate: pass
+
+- id: batch2.q6_top10_customers
+  group: batch2
+  question: "Top 10 大客户是谁？"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: reset_plan
+    contains:
+      metrics: ["销售额"]
+      dimensions: ["客户名称"]
+      limit: 10
+      order_by:
+        - metric: "销售额"
+          direction: "desc"
+  baseline:
+    mode: mcp_snapshot
+    result_shape:
+      required_fields: ["客户名称", "销售额"]
+      max_rows: 10
+    tolerances:
+      numeric_rel: 0.001
+  expected_gate: pass
+
+- id: batch2.q7_customer_dengbao_history
+  group: batch2
+  question: "邓保客户合作记录"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: reset_plan
+    contains:
+      metrics: ["销售额"]
+      dimensions: ["客户名称", "订单日期"]
+      filters:
+        - field_caption: "客户名称"
+          operator: "contains"
+          value: "邓保"
+  baseline:
+    mode: mcp_snapshot
+    result_shape:
+      required_fields: ["客户名称", "订单日期", "销售额"]
+      max_rows: 100
+    tolerances:
+      numeric_rel: 0.001
+  expected_gate: pass
+
+- id: batch2.q8_subcategory_profit_continuous_growth
+  group: batch2
+  question: "哪个子类别利润每年持续增长"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: reset_plan
+    contains:
+      operator: trend_condition
+      metrics: ["利润"]
+      dimensions: ["子类别"]
+      time:
+        grain: year
+  baseline:
+    mode: mcp_snapshot
+    result_shape:
+      required_fields: ["子类别", "订单日期", "利润", "is_increasing"]
+      max_rows: 100
+    tolerances:
+      row_set: exact
+  expected_gate: pass
+
+- id: batch2.q9_provinces_always_loss
+  group: batch2
+  question: "哪些省份一直亏损"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: reset_plan
+    contains:
+      operator: all_period_condition
+      metrics: ["利润"]
+      dimensions: ["省份"]
+      condition:
+        operator: "<"
+        value: 0
+  baseline:
+    mode: mcp_snapshot
+    result_shape:
+      required_fields: ["省份", "利润", "all_periods_match"]
+      max_rows: 100
+    tolerances:
+      row_set: exact
+  expected_gate: pass
+
+- id: batch2.q10_loss_root_cause_liaoning_fujian_2024
+  group: batch2
+  question: "辽宁、福建 2024 巨亏原因"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: reset_plan
+    contains:
+      operator: root_cause
+      metrics: ["利润"]
+      dimensions: ["省份"]
+      filters:
+        - field_caption: "省份"
+          operator: "in"
+          value: ["辽宁", "福建"]
+        - field_caption: "订单日期"
+          operator: "between"
+          value: ["2024-01-01", "2024-12-31"]
+  baseline:
+    mode: mcp_snapshot
+    result_shape:
+      required_fields: ["省份", "贡献维度", "利润", "贡献率"]
+      max_rows: 100
+    tolerances:
+      numeric_rel: 0.001
+  expected_gate: pass

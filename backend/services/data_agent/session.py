@@ -142,7 +142,7 @@ class SessionManager:
             status=conversation.status,
         )
 
-    def update_title(self, conversation_id: uuid.UUID, title: str, user_id: int) -> None:
+    def update_title(self, conversation_id: uuid.UUID, title: str, user_id: int) -> Optional[AgentConversation]:
         """Update conversation title (ownership-enforced)"""
         conversation = self.db.query(AgentConversation).filter(
             AgentConversation.id == conversation_id,
@@ -150,7 +150,10 @@ class SessionManager:
         ).first()
         if conversation:
             conversation.title = title
+            conversation.updated_at = sa_func.now()
             self.db.commit()
+            self.db.refresh(conversation)
+        return conversation
 
     def archive_session(self, conversation_id: uuid.UUID, user_id: int) -> None:
         """Archive a session (soft delete, ownership-enforced)"""

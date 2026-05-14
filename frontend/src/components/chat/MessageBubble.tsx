@@ -18,9 +18,11 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import type { Components } from 'react-markdown';
 import ThinkingBlock from '../../pages/home/components/ThinkingBlock';
+import AnalysisProcessBlock from '../../pages/home/components/AnalysisProcessBlock';
 import QueryResultTable from './QueryResultTable';
 import QueryResultChart from './QueryResultChart';
 import type { TableData, ChartData } from '../../hooks/useStreamingChat';
+import type { AgentExplainability } from '../../api/agent';
 import { searchAssets } from '../../api/tableau';
 
 
@@ -291,6 +293,8 @@ export interface MessageBubbleProps {
   errorHint?: string;
   /** ReAct reasoning text from SSE thinking event (Spec 29/30) */
   thinking?: string;
+  /** Structured, sanitized analysis process. This is the primary P0 explainability UI. */
+  explainability?: AgentExplainability;
   /** trace_id for feedback/rating (Spec 36 §5) */
   traceId?: string;
   /** Structured table data from table_data SSE event */
@@ -312,6 +316,7 @@ export default function MessageBubble({
   errorCode,
   errorHint,
   thinking,
+  explainability,
   tableData,
   chartData,
   sourcesCount,
@@ -362,19 +367,23 @@ export default function MessageBubble({
         {isUser ? (
           <p className="whitespace-pre-wrap break-words">{content}</p>
         ) : isError ? (
-          <div className="flex flex-col gap-1 text-sm text-red-500 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
-            <div className="flex items-center gap-2">
-              <i className={`${errorIcon(errorCode)} flex-shrink-0`} />
-              <span>{errorLabel(errorCode)}</span>
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1 text-sm text-red-500 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+              <div className="flex items-center gap-2">
+                <i className={`${errorIcon(errorCode)} flex-shrink-0`} />
+                <span>{errorLabel(errorCode)}</span>
+              </div>
+              {errorHint && (
+                <p className="text-xs text-red-400 ml-6 leading-relaxed">{errorHint}</p>
+              )}
             </div>
-            {errorHint && (
-              <p className="text-xs text-red-400 ml-6 leading-relaxed">{errorHint}</p>
-            )}
+            <AnalysisProcessBlock explainability={explainability} />
           </div>
         ) : isStreaming ? (
           <div className="prose prose-sm max-w-none prose-slate">
             <p className="whitespace-pre-wrap break-words leading-relaxed m-0">{content}</p>
             <span className="inline-block w-2 h-4 bg-slate-400 animate-pulse ml-0.5 align-middle rounded-sm" />
+            <AnalysisProcessBlock explainability={explainability} isStreaming />
           </div>
         ) : (
           <div className="prose prose-sm max-w-none prose-slate">
@@ -389,6 +398,7 @@ export default function MessageBubble({
                   </ReactMarkdown>
                   {tableData && <QueryResultTable data={tableData} />}
                   {chartData && <QueryResultChart data={chartData} />}
+                  <AnalysisProcessBlock explainability={explainability} />
                   {hasSourceFootnote && (
                     <SourceFootnote sourcesCount={sourcesCount!} topSources={topSources!} onSourceClick={onSourceClick} />
                   )}

@@ -142,14 +142,10 @@ def render_schema_inventory_markdown(payload: dict[str, Any]) -> str:
                 f"### {group['asset_type']} ({group['shown_count']}/{group['total_count']})",
             ]
         )
-        for item in group["items"]:
-            project = item["project"]
-            name = item["name"]
-            url = item.get("web_url")
-            if url:
-                lines.append(f"- [{project}] {name} - {url}")
-            else:
-                lines.append(f"- [{project}] {name}")
+        for project, items in _project_groups(group["items"]):
+            lines.extend(["", f"#### {project}（{len(items)}）"])
+            for item in items:
+                lines.append(f"- {_markdown_asset_link(item)}")
         if group["omitted_count"]:
             lines.append(f"- 省略 {group['omitted_count']} 个 {group['asset_type']} 资产")
     return "\n".join(lines)
@@ -185,6 +181,30 @@ def validate_schema_inventory_payload(payload: dict[str, Any]) -> None:
         raise ValueError("assets must be a list")
     if assets != flattened_assets:
         raise ValueError("assets must match grouped rendered items")
+
+
+def _project_groups(items: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:
+    by_project: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        project = str(item.get("project") or DEFAULT_PROJECT)
+        by_project.setdefault(project, []).append(item)
+    return [(project, by_project[project]) for project in sorted(by_project, key=lambda value: value.casefold())]
+
+
+def _markdown_asset_link(item: dict[str, Any]) -> str:
+    name = _escape_markdown_text(str(item.get("name") or "未命名资产"))
+    url = item.get("web_url")
+    if isinstance(url, str) and _is_safe_link_url(url):
+        return f"[{name}]({url})"
+    return name
+
+
+def _is_safe_link_url(url: str) -> bool:
+    return url.startswith("https://") or url.startswith("http://")
+
+
+def _escape_markdown_text(value: str) -> str:
+    return re.sub(r"([\\[\\]()`*_{}])", r"\\\1", value)
 
 
 def _extract_assets(tool_data: dict[str, Any]) -> list[Any]:
@@ -318,10 +338,6 @@ def _render_schema_fields_markdown(payload: dict[str, Any]) -> str:
         )
         lines.append(f"| {index} | {name} | {data_type} | {role} | {is_calculated} |")
 
-    web_url = matched_asset.get("web_url")
-    if web_url:
-        lines.extend(["", f"资产链接：{web_url}"])
-
     warning = payload.get("warning")
     if warning:
         lines.extend(["", f"注意：{warning}"])
@@ -437,6 +453,8 @@ def _summarize_payload(payload: dict[str, Any]) -> str:
 
 def _classify_schema_request(question: str) -> dict[str, Any]:
     normalized = _normalize_text(question)
+    if "介绍数据源" in normalized or "介绍 数据源" in normalized:
+        return {"mode": "fields", "table_name": _extract_table_name(question)}
     if _is_field_question(normalized):
         return {"mode": "fields", "table_name": _extract_table_name(question)}
     if _asks_for_assets(normalized):
@@ -464,7 +482,7 @@ def _extract_table_name(question: str) -> str | None:
         " ",
         text,
     )
-    text = re.sub(r"(请|帮我|查看|查询|看一下|一下|当前连接|数据资产|数据源|表结构|数据结构|字段列表)", " ", text)
+    text = re.sub(r"(请|帮我|查看|查询|看一下|一下|当前连接|数据资产|数据源|介绍|表结构|数据结构|字段列表)", " ", text)
     text = re.sub(r"(有哪些字段|字段有哪些|有哪些列|列有哪些|字段是什么|的字段是什么|有什么字段|包含哪些字段)", " ", text)
     text = re.sub(r"[？?。！!,，：:；;]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()

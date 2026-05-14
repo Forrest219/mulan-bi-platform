@@ -289,8 +289,12 @@ function ConversationItem({ conv, isActive, onSelect, onDelete, onRename }: Conv
 
   const handleRenameBlur = async () => {
     const trimmed = renameValue.trim();
-    if (trimmed && trimmed !== conv.title) {
-      await onRename(conv.id, trimmed);
+    try {
+      if (trimmed && trimmed !== conv.title) {
+        await onRename(conv.id, trimmed);
+      }
+    } catch {
+      setRenameValue(conv.title);
     }
     setRenaming(false);
   };

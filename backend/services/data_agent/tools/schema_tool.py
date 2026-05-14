@@ -6,11 +6,12 @@ Spec: docs/specs/36-data-agent-architecture-spec.md §3.1 ToolRegistry + §9.2 d
 
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from app.core.crypto import get_tableau_crypto
 from app.core.database import SessionLocal
 from services.data_agent.tool_base import BaseTool, ToolContext, ToolMetadata, ToolResult
+from services.data_agent.tools.query_tool import _get_mcp_queryable_field_candidates
 from services.tableau.models import TableauAsset, TableauConnection, TableauDatabase, TableauDatasourceField
 from services.tableau.sync_service import TableauRestSyncService
 
@@ -209,23 +210,30 @@ class SchemaTool(BaseTool):
                         field_records = db.query(TableauDatasourceField).filter(
                             TableauDatasourceField.asset_id == target_asset.id,
                         ).all()
-                fields[target_asset.name] = [
-                    {
-                        "name": field.field_name,
-                        "caption": field.field_caption,
-                        "data_type": field.data_type,
-                        "role": field.role,
-                        "is_calculated": field.is_calculated,
-                    }
-                    for field in field_records
-                ]
+                metadata_field_rows = self._serialize_tableau_fields(field_records)
+                queryable_field_names = self._get_queryable_field_names(
+                    target_asset.tableau_id,
+                    tc.id,
+                )
+                queryable_field_rows = self._build_queryable_field_rows(
+                    queryable_field_names,
+                    metadata_field_rows,
+                )
+
+                fields[target_asset.name] = queryable_field_rows
                 field_count = len(fields[target_asset.name])
-                if field_count == 0:
+                metadata_field_count = len(metadata_field_rows)
+                if field_count == 0 and metadata_field_count == 0:
                     sync_error = sync_result.get("error") if "sync_result" in locals() else None
                     warning = (
                         f"已匹配到 Tableau 资产，但自动同步字段元数据未返回字段：{sync_error}"
                         if sync_error
                         else "已匹配到 Tableau 资产，但 Tableau 未返回字段元数据"
+                    )
+                elif field_count == 0:
+                    warning = (
+                        "已匹配到 Tableau 资产，但 Tableau MCP 未返回当前可查询字段；"
+                        "为避免把资产元数据字段误认为可查询字段，本次不展示 API 同步字段。"
                     )
 
         result: Dict[str, Any] = {
@@ -240,7 +248,15 @@ class SchemaTool(BaseTool):
                 "requested_table_name": table_name,
                 "matched_asset": matched_asset,
                 "field_count": field_count,
+                "queryable_field_count": field_count,
+                "metadata_field_count": metadata_field_count if "metadata_field_count" in locals() else 0,
+                "field_source": "mcp_queryable_fields",
                 "fields": fields,
+                "metadata_fields": (
+                    {target_asset.name: metadata_field_rows}
+                    if "target_asset" in locals() and target_asset and "metadata_field_rows" in locals()
+                    else {}
+                ),
                 "tables": [matched_table] if matched_table else [],
             })
             if warning:
@@ -256,6 +272,65 @@ class SchemaTool(BaseTool):
             })
 
         return result
+
+    def _get_queryable_field_names(self, datasource_luid: str, connection_id: int) -> List[str]:
+        """Return fields Tableau MCP says are currently queryable for a datasource."""
+        return _get_mcp_queryable_field_candidates(datasource_luid, connection_id)
+
+    def _serialize_tableau_fields(self, field_records: List["TableauDatasourceField"]) -> List[Dict[str, Any]]:
+        return [
+            {
+                "name": field.field_name,
+                "caption": field.field_caption,
+                "data_type": field.data_type,
+                "role": field.role,
+                "is_calculated": field.is_calculated,
+            }
+            for field in field_records
+        ]
+
+    def _build_queryable_field_rows(
+        self,
+        queryable_field_names: List[str],
+        metadata_field_rows: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Map MCP queryable names onto metadata rows when possible for type/role hints."""
+        metadata_by_key: Dict[str, Dict[str, Any]] = {}
+        for field in metadata_field_rows:
+            for value in (field.get("caption"), field.get("name")):
+                key = self._compact_field_name(value)
+                if key and key not in metadata_by_key:
+                    metadata_by_key[key] = field
+
+        rows: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for field_name in queryable_field_names:
+            display_name = str(field_name or "").strip()
+            key = self._compact_field_name(display_name)
+            if not display_name or key in seen:
+                continue
+            seen.add(key)
+            metadata = metadata_by_key.get(key)
+            if metadata:
+                row = dict(metadata)
+                row["name"] = display_name
+                if not row.get("caption"):
+                    row["caption"] = display_name
+            else:
+                row = {
+                    "name": display_name,
+                    "caption": display_name,
+                    "data_type": "",
+                    "role": "",
+                    "is_calculated": False,
+                }
+            row["mcp_queryable"] = True
+            rows.append(row)
+        return rows
+
+    @staticmethod
+    def _compact_field_name(value: Any) -> str:
+        return str(value or "").strip().lower().replace(" ", "").replace(" ", "")
 
     def _sync_missing_tableau_fields(
         self,

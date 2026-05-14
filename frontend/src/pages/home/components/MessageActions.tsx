@@ -6,7 +6,7 @@ interface MessageActionsProps {
   messageIndex: number;
   question: string;
   traceId?: string;
-  onRegenerate?: () => void;
+  onRegenerate?: (question: string) => void;
   /** Callback when user clicks edit */
   onEdit?: (content: string) => void;
   /** Callback when user clicks delete */
@@ -94,7 +94,7 @@ export function MessageActions({ content, conversationId, messageIndex, question
       </button>
       {onRegenerate && (
         <button
-          onClick={onRegenerate}
+          onClick={() => onRegenerate(question)}
           className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
           title="重新生成"
         >

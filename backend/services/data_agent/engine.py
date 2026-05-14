@@ -4,6 +4,7 @@ Spec: docs/specs/36-data-agent-architecture-spec.md §3.3
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import time
@@ -18,6 +19,25 @@ except ImportError:
 from .tool_base import ToolContext, ToolRegistry, ToolResult
 from .response import AgentEvent
 from .prompts import build_react_system_prompt
+from .fallback import fallback_from_tool_result, make_router_blocked_fallback
+from .router_guardrail import RouteDecision, filter_tool_descriptions, validate_tool_allowed
+
+
+def _call_tool_execute(tool, tool_params: Dict[str, Any], context: ToolContext):
+    """Call tool.execute with compatibility for test doubles assigned as class functions."""
+    execute = tool.execute
+    try:
+        signature = inspect.signature(execute)
+        positional_params = [
+            param
+            for param in signature.parameters.values()
+            if param.kind in (param.POSITIONAL_ONLY, param.POSITIONAL_OR_KEYWORD)
+        ]
+        if len(positional_params) <= 1:
+            return type(tool).execute(tool_params, context)
+    except (TypeError, ValueError):
+        pass
+    return execute(tool_params, context)
 
 
 def _extract_user_hint(exc: Exception) -> Optional[str]:
@@ -139,6 +159,7 @@ class ReActEngine:
         session: Optional[Any] = None,
         force_first_tool: Optional[str] = None,
         force_first_params: Optional[Dict[str, Any]] = None,
+        route_decision: Optional[RouteDecision] = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """执行 ReAct 循环，yield 流式事件
 
@@ -152,7 +173,10 @@ class ReActEngine:
         tools_used: List[str] = []
 
         # 构建 system prompt（尝试注入数据源字段上下文，让 LLM 直接生成 VizQL）
-        tool_descriptions = self.registry.get_tool_descriptions()
+        tool_descriptions = filter_tool_descriptions(
+            self.registry.get_tool_descriptions(),
+            route_decision,
+        )
         datasource_context = None
         if context.connection_id and not is_schema_inventory_request(query):
             try:
@@ -187,6 +211,23 @@ class ReActEngine:
             # 跳过 LLM Think，直接执行指定工具；工具结果注入 history 后
             # 进入下一步的正常 LLM Think（此时 LLM 拿到数据，通常直接 final_answer）
             if force_first_tool and step == 0:
+                allowed, reason = validate_tool_allowed(force_first_tool, route_decision)
+                if not allowed:
+                    logger.warning(
+                        "router guardrail blocked forced tool=%s reason=%s trace=%s",
+                        force_first_tool,
+                        reason,
+                        context.trace_id,
+                    )
+                    yield AgentEvent(
+                        type="error",
+                        content=make_router_blocked_fallback(
+                            tool_name=force_first_tool,
+                            trace_id=context.trace_id,
+                            route_decision=route_decision,
+                        ).to_dict(),
+                    )
+                    return
                 tool = self.registry.get(force_first_tool)
                 if tool:
                     params = force_first_params or {"question": query}
@@ -207,7 +248,17 @@ class ReActEngine:
                     yield AgentEvent(type="tool_result", content={"tool": force_first_tool, "result": result_data})
                     forced_error = _tool_failure_error_content(force_first_tool, result_data)
                     if forced_error:
-                        yield AgentEvent(type="error", content=forced_error)
+                        if route_decision and route_decision.fallback_policy == "data_only":
+                            yield AgentEvent(
+                                type="error",
+                                content=fallback_from_tool_result(
+                                    result_data,
+                                    trace_id=context.trace_id,
+                                    route_decision=route_decision,
+                                ).to_dict(),
+                            )
+                        else:
+                            yield AgentEvent(type="error", content=forced_error)
                         return
                     history_messages.append({
                         "role": "assistant",
@@ -295,6 +346,24 @@ class ReActEngine:
                 yield AgentEvent(type="error", content={"error": "LLM 未返回 tool_name"})
                 return
 
+            allowed, reason = validate_tool_allowed(tool_name, route_decision)
+            if not allowed:
+                logger.warning(
+                    "router guardrail blocked tool=%s reason=%s trace=%s",
+                    tool_name,
+                    reason,
+                    context.trace_id,
+                )
+                yield AgentEvent(
+                    type="error",
+                    content=make_router_blocked_fallback(
+                        tool_name=tool_name,
+                        trace_id=context.trace_id,
+                        route_decision=route_decision,
+                    ).to_dict(),
+                )
+                return
+
             # 检查工具是否存在
             if tool_name not in self.registry:
                 yield self._make_error_event(
@@ -340,8 +409,19 @@ class ReActEngine:
                     result_data["error"] = result.error
             elif isinstance(result, dict) and result.get("error_code"):
                 # 是错误响应
-                yield AgentEvent(type="error", content=result)
+                if route_decision and route_decision.fallback_policy == "data_only":
+                    yield AgentEvent(
+                        type="error",
+                        content=fallback_from_tool_result(
+                            result,
+                            trace_id=context.trace_id,
+                            route_decision=route_decision,
+                        ).to_dict(),
+                    )
+                else:
+                    yield AgentEvent(type="error", content=result)
                 result_data = {"success": False, "error": result.get("message", "")}
+                return
             else:
                 result_data = result if isinstance(result, dict) else {"data": result}
 
@@ -349,6 +429,22 @@ class ReActEngine:
                 type="tool_result",
                 content={"tool": tool_name, "result": result_data},
             )
+
+            if (
+                route_decision
+                and route_decision.fallback_policy == "data_only"
+                and tool_name == "query"
+                and _tool_failure_error_content(tool_name, result_data)
+            ):
+                yield AgentEvent(
+                    type="error",
+                    content=fallback_from_tool_result(
+                        result_data,
+                        trace_id=context.trace_id,
+                        route_decision=route_decision,
+                    ).to_dict(),
+                )
+                return
 
             # 更新历史
             history_messages.append({
@@ -370,7 +466,12 @@ class ReActEngine:
             if tool_name not in tools_used:
                 tools_used.append(tool_name)
 
-            schema_answer = _format_schema_tool_answer(result_data) if tool_name == "schema" else None
+            schema_answer = (
+                _format_schema_tool_answer(result_data)
+                if tool_name == "schema"
+                and (route_decision is None or route_decision.fallback_policy == "schema_only")
+                else None
+            )
             if schema_answer:
                 yield AgentEvent(type="answer", content=schema_answer)
                 return
@@ -598,7 +699,7 @@ class ReActEngine:
             try:
                 # 使用 asyncio.wait_for 实现超时
                 result = await asyncio.wait_for(
-                    tool.execute(tool_params, context),
+                    _call_tool_execute(tool, tool_params, context),
                     timeout=self.step_timeout,
                 )
                 return result
@@ -779,6 +880,13 @@ def _tool_failure_error_content(tool_name: str, result_data: dict) -> Optional[D
 
     error_message = ""
     error_code = result_data.get("error_code")
+    data = result_data.get("data")
+    if isinstance(data, dict) and data.get("type") == "fallback" and data.get("fallback_type"):
+        return {
+            "error_code": str(data.get("error_code") or "AGENT_003"),
+            "message": str(data.get("message") or f"工具执行失败: {tool_name}"),
+            "detail": {"tool": tool_name},
+        }
     if result_data.get("success") is False:
         error_message = str(result_data.get("error") or result_data.get("message") or "")
     elif error_code:
@@ -820,8 +928,13 @@ def _format_schema_fields_answer(data: dict, fields_by_asset: dict) -> str:
     if not field_rows:
         return f"未找到 **{display_name}** 的字段信息。"
 
+    if data.get("field_source") == "mcp_queryable_fields":
+        title = f"数据源 **{display_name}** 当前 MCP/VizQL 可查询字段 **{field_count} 个**："
+    else:
+        title = f"数据资产 **{display_name}** 返回了 **{field_count} 个字段**："
+
     lines = [
-        f"数据资产 **{display_name}** 返回了 **{field_count} 个字段**：",
+        title,
         "",
         "| 序号 | 字段名称 | 类型 | 角色 | 计算字段 |",
         "|---:|---|---|---|---|",
@@ -846,9 +959,16 @@ def _format_schema_fields_answer(data: dict, fields_by_asset: dict) -> str:
             f"{is_calculated or '-'} |"
         )
 
-    web_url = matched_asset.get("web_url")
-    if web_url:
-        lines.extend(["", f"资产链接：{web_url}"])
+    metadata_field_count = data.get("metadata_field_count")
+    if (
+        data.get("field_source") == "mcp_queryable_fields"
+        and isinstance(metadata_field_count, int)
+        and metadata_field_count > field_count
+    ):
+        lines.extend([
+            "",
+            "说明：以上仅展示当前 MCP/VizQL 可查询字段；资产治理页可能包含更多 API 同步元数据字段，但不会作为首页问答的可查询字段展示。",
+        ])
 
     warning = data.get("warning")
     if warning:

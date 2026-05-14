@@ -45,6 +45,9 @@ from services.data_agent.runner import resolve_recent_schema_asset_name, run_age
 from services.data_agent.session import SessionManager, AgentSession
 from services.data_agent.tool_base import ToolContext, ToolRegistry
 from services.data_agent.context import build_session_context
+from services.data_agent.fallback import StandardFallback, make_clarification_fallback
+from services.data_agent.intent_classifier import classify_intent
+from services.data_agent.router_guardrail import classify_homepage_question
 from services.llm.models import log_nlq_query
 from services.llm.service import llm_user_id_var
 from services.tableau.models import TableauConnection
@@ -102,6 +105,10 @@ class ConversationItem(BaseModel):
     message_count: int = 0
     created_at: str
     updated_at: str
+
+
+class ConversationUpdateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=256, description="会话标题")
 
 
 def _resolve_conversation_title(stored_title: Optional[str], first_user_message: Optional[str]) -> Optional[str]:
@@ -194,6 +201,72 @@ _FAST_RECOVERABLE_ERRORS = frozenset([
 
 def _sse_data(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _intent_explainability_payload(route_decision) -> dict:
+    intent = "ambiguous"
+    guardrail_decision = "fallback"
+    if route_decision.is_asset_question:
+        intent = "schema_inventory"
+        guardrail_decision = "allow"
+    elif route_decision.is_data_question:
+        intent = "query"
+        guardrail_decision = "allow"
+    return {
+        "intent": intent,
+        "confidence": route_decision.confidence,
+        "strategy": "router_guardrail",
+        "guardrail": {
+            "decision": guardrail_decision,
+            "reason_code": route_decision.reason,
+            "message": route_decision.reason,
+        },
+    }
+
+
+def _fallback_explainability_payload(fallback: StandardFallback, *, final_source: str = "fallback") -> dict:
+    return {
+        "occurred": True,
+        "chain": [
+            {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": fallback.fallback_type,
+                "message": fallback.message,
+            }
+        ],
+        "final_source": final_source,
+        "user_visible_message": fallback.answer,
+    }
+
+
+def _explainability_snapshot(
+    *,
+    trace_id: str,
+    route_decision,
+    run_id: Optional[str] = None,
+    response_type: Optional[str] = None,
+    row_count: Optional[int] = None,
+    fallback: Optional[StandardFallback] = None,
+) -> dict:
+    phases: Dict[str, Any] = {
+        "intent": _intent_explainability_payload(route_decision),
+    }
+    if response_type:
+        phases["postprocess"] = {
+            "response_type": response_type,
+            "row_count": row_count,
+            "displayed_row_count": row_count,
+            "formatting": ["markdown_summary"],
+        }
+    if fallback:
+        phases["fallback"] = _fallback_explainability_payload(fallback)
+    return {
+        "schema_version": "p0.1",
+        "run_id": run_id or "",
+        "trace_id": trace_id,
+        "phases": phases,
+    }
 
 
 def _uuid_or_none(value: Any) -> Optional[uuid_lib.UUID]:
@@ -326,6 +399,58 @@ def _write_schema_inventory_error_run(
         )
     )
     db.commit()
+
+
+def _write_standard_fallback_run(
+    *,
+    db: Session,
+    run_id: uuid_lib.UUID,
+    session: AgentSession,
+    session_mgr: SessionManager,
+    current_user: dict,
+    question: str,
+    connection_id: Optional[int],
+    fallback: StandardFallback,
+    execution_time_ms: int,
+) -> None:
+    payload = fallback.to_dict()
+    run = BiAgentRun(
+        id=run_id,
+        conversation_id=session.conversation_id,
+        user_id=current_user["id"],
+        connection_id=connection_id,
+        question=question,
+        status="completed",
+        error_code=fallback.error_code,
+        steps_count=1,
+        tools_used=fallback.tools_used,
+        response_type="fallback",
+        execution_time_ms=execution_time_ms,
+        completed_at=func.now(),
+    )
+    db.add(run)
+    db.flush()
+    db.add(
+        BiAgentStep(
+            run_id=run_id,
+            step_number=1,
+            step_type="answer",
+            content=fallback.answer[:500],
+            execution_time_ms=execution_time_ms,
+        )
+    )
+    db.commit()
+    session_mgr.persist_message(
+        session=session,
+        role="assistant",
+        content=fallback.answer,
+        trace_id=fallback.trace_id,
+        response_type="fallback",
+        response_data=payload,
+        tools_used=fallback.tools_used,
+        steps_count=1,
+        execution_time_ms=execution_time_ms,
+    )
 
 
 async def try_fast_mcp_stream(
@@ -461,6 +586,8 @@ async def try_fast_mcp_stream(
             if field_substitutions:
                 response_data["field_substitutions"] = field_substitutions
             response_data.update({k: v for k, v in processed.items() if k not in {"fields", "rows"}})
+        response_data["datasource_name"] = datasource_name
+        response_data["datasource_luid"] = datasource_luid
     except (TableauMCPError, QueryExecutorError, NLQError) as e:
         code = getattr(e, "code", None) or (getattr(e, "error_code", None) if hasattr(e, "error_code") else None)
         if code in _FAST_RECOVERABLE_ERRORS:
@@ -561,6 +688,13 @@ async def try_fast_mcp_stream(
             yield f"data: {json.dumps({'type': 'token', 'content': char}, ensure_ascii=False)}\n\n"
             await asyncio.sleep(0.01)
         # done（L1 修复：直接使用外层 run_id 变量，不再用 dir() 检测）
+        explainability = _explainability_snapshot(
+            trace_id=context.trace_id,
+            run_id=str(run_id) if run_id else "",
+            route_decision=classify_homepage_question(question),
+            response_type="table",
+            row_count=len(rows),
+        )
         done_payload = json.dumps({
             'type': 'done',
             'answer': answer_text,
@@ -573,6 +707,7 @@ async def try_fast_mcp_stream(
             'execution_time_ms': int((time.monotonic() - t0) * 1000),
             'sources_count': 0,
             'top_sources': [],
+            'explainability': explainability,
         }, ensure_ascii=False)
         yield f"data: {done_payload}\n\n"
         # 可观测性日志（log_nlq_query）
@@ -910,16 +1045,81 @@ async def agent_stream(
 
     async def event_generator() -> AsyncGenerator[str, None]:
         _t0 = time.monotonic()
+        intent_result = classify_intent(req.question, connection_type=context.connection_type)
+        route_decision = classify_homepage_question(req.question)
+        yield _sse_data({"type": "intent_classifier", **intent_result.to_dict()})
+        yield _sse_data({"type": "route_decision", **route_decision.to_dict()})
+        yield _sse_data({
+            "type": "explainability",
+            "phase": "intent",
+            "status": "completed",
+            "payload": {
+                **_intent_explainability_payload(route_decision),
+                "intent_classifier": intent_result.to_dict(),
+            },
+        })
+
+        if (
+            route_decision.needs_clarification
+            and not intent_result.is_data_intent
+            and not intent_result.is_asset_inventory
+        ):
+            run_id = uuid_lib.uuid4()
+            fallback = make_clarification_fallback(trace_id=trace_id, route_decision=route_decision)
+            explainability = _explainability_snapshot(
+                trace_id=trace_id,
+                run_id=str(run_id),
+                route_decision=route_decision,
+                response_type="fallback",
+                fallback=fallback,
+            )
+            execution_time_ms = int((time.monotonic() - _t0) * 1000)
+            try:
+                _write_standard_fallback_run(
+                    db=db,
+                    run_id=run_id,
+                    session=session,
+                    session_mgr=session_mgr,
+                    current_user=current_user,
+                    question=req.question,
+                    connection_id=effective_connection_id,
+                    fallback=fallback,
+                    execution_time_ms=execution_time_ms,
+                )
+            except Exception as e:
+                logger.warning("[ROUTER] failed to write clarification fallback run: %s", e)
+            yield _sse_data({
+                "type": "done",
+                "answer": fallback.answer,
+                "trace_id": trace_id,
+                "run_id": str(run_id),
+                "tools_used": [],
+                "response_type": "fallback",
+                "response_data": fallback.to_dict(),
+                "steps_count": 1,
+                "execution_time_ms": execution_time_ms,
+                "sources_count": 0,
+                "top_sources": [],
+                "fallback": explainability["phases"]["fallback"],
+                "explainability": explainability,
+            })
+            return
 
         # ── Deterministic route：稳定回答连接 schema / 数据源清单问题 ────────────
         deterministic_route = detect_deterministic_route(req.question, context.connection_type)
-        if deterministic_route == "schema_inventory":
+        if (
+            intent_result.is_asset_inventory
+            or route_decision.is_asset_question
+            or deterministic_route == "schema_inventory"
+        ):
             run_id = uuid_lib.uuid4()
             active_skill_version = get_active_skill_version(db, "schema")
             yield _sse_data({
                 "type": "metadata",
                 "conversation_id": conversation_id_str,
                 "run_id": str(run_id),
+                "trace_id": trace_id,
+                "contract_version": "p0.1",
             })
 
             if (
@@ -1029,6 +1229,17 @@ async def agent_stream(
             })
             token_text = result.answer
             yield _sse_data({"type": "token", "content": token_text})
+            explainability = _explainability_snapshot(
+                trace_id=trace_id,
+                run_id=str(run_id),
+                route_decision=route_decision,
+                response_type=result.response_type,
+                row_count=(
+                    len(result.response_data.get("tables", []))
+                    if isinstance(result.response_data, dict)
+                    else None
+                ),
+            )
             done_payload = {
                 "type": "done",
                 "answer": token_text,
@@ -1041,6 +1252,7 @@ async def agent_stream(
                 "execution_time_ms": execution_time_ms,
                 "sources_count": 0,
                 "top_sources": [],
+                "explainability": explainability,
             }
             yield _sse_data(done_payload)
             log_nlq_query(
@@ -1062,7 +1274,7 @@ async def agent_stream(
             session,
             current_user["id"],
         )
-        if is_direct_query(req.question):
+        if route_decision.is_data_question and not intent_result.is_data_intent:
             logger.info("[FAST_ATTEMPTED] question=%s, trace=%s", req.question[:80], trace_id)
             run_id: Optional[uuid_lib.UUID] = None
             try:
@@ -1079,7 +1291,7 @@ async def agent_stream(
                 if fast_result is not None:
                     run_id, fast_gen = fast_result
                     # 先发 metadata（含 conversation_id），run_id 等 BiAgentRun commit 后再补
-                    yield f"data: {json.dumps({'type': 'metadata', 'conversation_id': conversation_id_str, 'run_id': str(run_id) if run_id else ''}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'metadata', 'conversation_id': conversation_id_str, 'run_id': str(run_id) if run_id else '', 'trace_id': trace_id, 'contract_version': 'p0.1'}, ensure_ascii=False)}\n\n"
                     async for chunk in fast_gen:
                         yield chunk
                     return
@@ -1100,9 +1312,12 @@ async def agent_stream(
             current_user=current_user,
             db=db,
             connection_id=effective_connection_id,
+            route_decision=route_decision,
+            intent_result=intent_result,
+            enforce_controlled_data_path=True,
         ):
             if event.type == "metadata":
-                yield f"data: {json.dumps({'type': 'metadata', 'conversation_id': event.content['conversation_id'], 'run_id': event.content['run_id']}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'metadata', 'conversation_id': event.content['conversation_id'], 'run_id': event.content['run_id'], 'trace_id': trace_id, 'contract_version': 'p0.1'}, ensure_ascii=False)}\n\n"
 
             elif event.type == "thinking":
                 yield f"data: {json.dumps({'type': 'thinking', 'content': event.content}, ensure_ascii=False)}\n\n"
@@ -1128,7 +1343,21 @@ async def agent_stream(
                 for char in answer_text:
                     yield f"data: {json.dumps({'type': 'token', 'content': char}, ensure_ascii=False)}\n\n"
                     await asyncio.sleep(0.01)
-                yield f"data: {json.dumps({'type': 'done', 'answer': answer_text, 'trace_id': event.content.get('trace_id', ''), 'run_id': event.content.get('run_id', ''), 'tools_used': event.content.get('tools_used', []), 'response_type': event.content.get('response_type', 'text'), 'response_data': event.content.get('response_data'), 'steps_count': event.content.get('steps_count', 0), 'execution_time_ms': event.content.get('execution_time_ms', 0), 'sources_count': event.content.get('sources_count', 0), 'top_sources': event.content.get('top_sources', [])}, ensure_ascii=False)}\n\n"
+                response_type = event.content.get('response_type', 'text')
+                response_data = event.content.get('response_data')
+                row_count = (
+                    len(response_data.get("rows", []))
+                    if isinstance(response_data, dict) and isinstance(response_data.get("rows"), list)
+                    else None
+                )
+                explainability = _explainability_snapshot(
+                    trace_id=event.content.get('trace_id', trace_id),
+                    run_id=event.content.get('run_id', ''),
+                    route_decision=route_decision,
+                    response_type=response_type,
+                    row_count=row_count,
+                )
+                yield f"data: {json.dumps({'type': 'done', 'answer': answer_text, 'trace_id': event.content.get('trace_id', ''), 'run_id': event.content.get('run_id', ''), 'tools_used': event.content.get('tools_used', []), 'response_type': response_type, 'response_data': response_data, 'steps_count': event.content.get('steps_count', 0), 'execution_time_ms': event.content.get('execution_time_ms', 0), 'sources_count': event.content.get('sources_count', 0), 'top_sources': event.content.get('top_sources', []), 'explainability': explainability}, ensure_ascii=False)}\n\n"
                 log_nlq_query(
                     user_id=current_user.get("id"),
                     question=req.question,
@@ -1149,8 +1378,40 @@ async def agent_stream(
                     "error_code": err_code,
                     "message": error_content.get("message", "未知错误"),
                 }
+                for key in (
+                    "fallback_type",
+                    "trace_id",
+                    "retryable",
+                    "suggested_actions",
+                    "tools_used",
+                    "route_decision",
+                    "intent_classifier",
+                    "controlled_chain",
+                ):
+                    if key in error_content:
+                        payload[key] = error_content[key]
                 if error_content.get("user_hint"):
                     payload["user_hint"] = error_content["user_hint"]
+                if error_content.get("fallback_type"):
+                    fallback = StandardFallback(
+                        fallback_type=str(error_content.get("fallback_type")),
+                        error_code=str(error_content.get("error_code") or err_code),
+                        message=str(error_content.get("message") or "工具执行失败"),
+                        user_hint=str(error_content.get("user_hint") or ""),
+                        trace_id=str(error_content.get("trace_id") or trace_id),
+                        retryable=bool(error_content.get("retryable", True)),
+                        suggested_actions=list(error_content.get("suggested_actions") or []),
+                        route_decision=error_content.get("route_decision"),
+                        tools_used=list(error_content.get("tools_used") or []),
+                    )
+                    explainability = _explainability_snapshot(
+                        trace_id=trace_id,
+                        route_decision=route_decision,
+                        response_type="fallback",
+                        fallback=fallback,
+                    )
+                    payload["fallback"] = explainability["phases"]["fallback"]
+                    payload["explainability"] = explainability
                 yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                 log_nlq_query(
                     user_id=current_user.get("id"),
@@ -1227,6 +1488,47 @@ def list_conversations(
         )
         for c in convs
     ]
+
+
+@router.patch("/conversations/{conversation_id}", response_model=ConversationItem)
+def update_conversation(
+    conversation_id: str,
+    body: ConversationUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """更新 Data Agent 会话标题（校验归属）"""
+    _require_agent_role(current_user.get("role", "user"))
+
+    try:
+        conv_uuid = uuid_lib.UUID(conversation_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail={"error_code": "AGENT_007", "message": "无效的会话 ID"})
+
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail={"error_code": "AGENT_007", "message": "标题不能为空"})
+
+    session_mgr = SessionManager(db)
+    conv = session_mgr.update_title(conv_uuid, title, current_user["id"])
+    if not conv:
+        raise HTTPException(status_code=404, detail={"error_code": "AGENT_004", "message": "会话不存在"})
+
+    message_count = (
+        db.query(func.count(AgentConversationMessage.id))
+        .filter(AgentConversationMessage.conversation_id == conv_uuid)
+        .scalar()
+        or 0
+    )
+    return ConversationItem(
+        id=str(conv.id),
+        title=conv.title or "",
+        connection_id=conv.connection_id,
+        status=conv.status,
+        message_count=int(message_count),
+        created_at=conv.created_at.isoformat() if conv.created_at else "",
+        updated_at=conv.updated_at.isoformat() if conv.updated_at else "",
+    )
 
 
 @router.get("/conversations/{conversation_id}")

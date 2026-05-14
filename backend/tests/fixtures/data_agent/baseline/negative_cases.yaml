@@ -1,0 +1,104 @@
+- id: negative.vague_analyze_source
+  group: negative
+  question: "随便分析一下这个数据源"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: fallback_required
+    contains:
+      reason_code: clarification_required
+  baseline:
+    mode: guardrail_only
+  expected_gate: block
+
+- id: negative.unknown_field
+  group: negative
+  question: "按不存在字段 X 看销售额"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: fallback_required
+    contains:
+      reason_code: field_unavailable
+  baseline:
+    mode: guardrail_only
+  expected_gate: block
+
+- id: negative.ambiguous_followup_reference
+  group: negative
+  question: "继续看这个"
+  connection_fixture: superstore_tableau
+  previous_context:
+    fixture: two_metrics_two_dimensions
+  expected_patch:
+    patch_type: fallback_required
+    contains:
+      reason_code: clarification_required
+  baseline:
+    mode: guardrail_only
+  expected_gate: block
+
+- id: negative.no_connection
+  group: negative
+  question: "2024 年销售额"
+  connection_fixture: null_connection
+  expected_patch:
+    patch_type: fallback_required
+    contains:
+      reason_code: connection_required
+  baseline:
+    mode: guardrail_only
+  expected_gate: block
+
+- id: negative.yoy_without_time_field
+  group: negative
+  question: "去年同比"
+  connection_fixture: no_time_field_tableau
+  expected_patch:
+    patch_type: fallback_required
+    contains:
+      reason_code: time_field_required
+  baseline:
+    mode: guardrail_only
+  expected_gate: block
+
+- id: negative.sum_ratio_metric
+  group: negative
+  question: "利润率求和"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: fallback_required
+    contains:
+      reason_code: invalid_aggregation
+  baseline:
+    mode: guardrail_only
+  expected_gate: block
+
+- id: negative.top10_share_missing_denominator
+  group: negative
+  question: "Top10 客户及占比"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: reset_plan
+    contains:
+      metrics: ["销售额"]
+      dimensions: ["客户名称"]
+      limit: 10
+  baseline:
+    mode: mcp_snapshot
+    result_shape:
+      required_fields: ["客户名称", "销售额", "占比"]
+      max_rows: 10
+    tolerances:
+      numeric_rel: 0.001
+  expected_gate: block
+
+- id: negative.inventory_mixed_with_analysis
+  group: negative
+  question: "有哪些数据源包含销售额并按年份看利润？"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: fallback_required
+    contains:
+      reason_code: ambiguous_route
+  baseline:
+    mode: guardrail_only
+  expected_gate: block

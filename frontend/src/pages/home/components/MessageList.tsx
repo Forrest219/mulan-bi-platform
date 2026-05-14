@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import MessageBubble from '../../../components/chat/MessageBubble';
 import { MessageActions } from './MessageActions';
 import type { StreamingMessage, TableData } from '../../../hooks/useStreamingChat';
+import type { AgentExplainability, McpProxyExplain, McpProxyRepairExplain } from '../../../api/agent';
 
 interface HistoryMessage {
   role: 'user' | 'assistant';
@@ -9,6 +10,9 @@ interface HistoryMessage {
   created_at?: string;
   response_type?: string | null;
   response_data?: unknown;
+  error_detail?: unknown;
+  run_id?: string | null;
+  explainability?: AgentExplainability | null;
   trace_id?: string | null;
   sources_count?: number | null;
   top_sources?: string[] | null;
@@ -19,7 +23,7 @@ interface MessageListProps {
   mockContent?: string;
   isMockStreaming?: boolean;
   lastQuestion?: string;
-  onRegenerate?: () => void;
+  onRegenerate?: (question: string) => void;
   historyMessages?: HistoryMessage[];
   /** conversation_id for history messages — enables feedback via conversation_id alone */
   historyConversationId?: string | null;
@@ -35,6 +39,9 @@ interface RenderItemOpts {
   errorCode?: string;
   errorHint?: string;
   thinking?: string;
+  explainability?: AgentExplainability | null;
+  responseData?: unknown;
+  errorDetail?: unknown;
   traceId?: string | null;
   tableData?: TableData;
   chartData?: StreamingMessage['chartData'];
@@ -45,16 +52,21 @@ interface RenderItemOpts {
   messageIndex?: number;
   question?: string;
   isLastAssistant?: boolean;
-  onRegenerate?: () => void;
+  onRegenerate?: (question: string) => void;
   onSourceClick?: (sourceName: string) => void;
 }
 
 function renderMessageItem(opts: RenderItemOpts) {
   const {
     key, role, content, isStreaming, isError, errorCode, errorHint, thinking,
-    traceId, tableData, chartData, sourcesCount, topSources,
+    explainability, traceId, tableData, chartData, sourcesCount, topSources,
     timestamp, conversationId, messageIndex, question, isLastAssistant, onRegenerate, onSourceClick,
   } = opts;
+  const mergedExplainability = mergeMcpProxyExplainability(
+    explainability ?? undefined,
+    opts.responseData,
+    opts.errorDetail,
+  );
   const timeStr = timestamp
     ? new Date(timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
     : null;
@@ -69,6 +81,7 @@ function renderMessageItem(opts: RenderItemOpts) {
         errorCode={errorCode}
         errorHint={errorHint}
         thinking={thinking}
+        explainability={mergedExplainability}
         traceId={traceId ?? undefined}
         tableData={tableData}
         chartData={chartData}
@@ -103,14 +116,115 @@ function renderMessageItem(opts: RenderItemOpts) {
 
 function histTableData(msg: HistoryMessage): TableData | undefined {
   if (msg.response_type !== 'table' || !msg.response_data || typeof msg.response_data !== 'object') return undefined;
-  const rd = msg.response_data as { fields?: string[]; rows?: (string | number | null)[][] };
+  const rd = msg.response_data as { fields?: string[]; rows?: (string | number | null)[][]; table_display?: unknown };
   const { fields, rows } = rd;
   if (!fields?.length || !rows?.length) return undefined;
   const col_types = fields.map((_, i) => {
     const sample = rows!.slice(0, 5).map((r) => r[i]).filter((v) => v != null && v !== '');
     return sample.length > 0 && sample.every((v) => typeof v === 'number') ? 'numeric' : 'string';
   }) as ('numeric' | 'string')[];
-  return { fields, rows: rows!, col_types };
+  const table_display = histTableDisplay(rd.table_display);
+  return { fields, rows: rows!, col_types, ...(table_display ? { table_display } : {}) };
+}
+
+function histTableDisplay(value: unknown): TableData['table_display'] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const columns = (value as { columns?: unknown }).columns;
+  if (!Array.isArray(columns)) return undefined;
+  return {
+    columns: columns
+      .filter((column): column is Record<string, unknown> => !!column && typeof column === 'object')
+      .map((column) => ({
+        key: typeof column.key === 'string' ? column.key : undefined,
+        label: typeof column.label === 'string' ? column.label : undefined,
+        semantic_type: typeof column.semantic_type === 'string' ? column.semantic_type : undefined,
+        value_type: typeof column.value_type === 'string' ? column.value_type : undefined,
+        align: column.align === 'left' || column.align === 'right' || column.align === 'center'
+          ? column.align
+          : undefined,
+        format: column.format === 'plain' || column.format === 'number' || column.format === 'integer' || column.format === 'percent' || column.format === 'date'
+          ? column.format
+          : undefined,
+      })),
+  };
+}
+
+function asObject(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function parseObject(value: unknown): Record<string, unknown> | undefined {
+  const direct = asObject(value);
+  if (direct) return direct;
+  if (typeof value !== 'string') return undefined;
+  try {
+    return asObject(JSON.parse(value));
+  } catch {
+    return undefined;
+  }
+}
+
+function parseRepairs(value: unknown): McpProxyRepairExplain[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(asObject(item)))
+    .map((item) => ({
+      type: typeof item.type === 'string' ? item.type : undefined,
+      path: typeof item.path === 'string' ? item.path : undefined,
+      before: item.before,
+      after: item.after,
+      reason: typeof item.reason === 'string' ? item.reason : undefined,
+    }));
+}
+
+function mcpProxyFromPayload(value: unknown): McpProxyExplain | undefined {
+  const payload = parseObject(value);
+  if (!payload) return undefined;
+  const detail = asObject(asObject(payload.controlled_chain)?.detail);
+  const source = detail?.chain_mode === 'mcp_proxy' ? detail : payload;
+  if (source.chain_mode !== 'mcp_proxy') return undefined;
+  const decision = typeof source.guardrail_decision === 'string' ? source.guardrail_decision : undefined;
+  const rejectCode = typeof source.reject_code === 'string'
+    ? source.reject_code
+    : typeof payload.error_code === 'string'
+      ? payload.error_code
+      : null;
+  return {
+    chain_mode: 'mcp_proxy',
+    guardrail_decision: decision,
+    guardrail_repairs: parseRepairs(source.guardrail_repairs),
+    reject_code: rejectCode,
+    message: typeof payload.message === 'string' ? payload.message : null,
+    user_hint: typeof payload.user_hint === 'string' ? payload.user_hint : null,
+  };
+}
+
+function mergeMcpProxyExplainability(
+  explainability: AgentExplainability | undefined,
+  ...payloads: unknown[]
+): AgentExplainability | undefined {
+  const existing = explainability?.mcp_proxy;
+  const next = payloads.map(mcpProxyFromPayload).find(Boolean) ?? existing;
+  if (!next) return explainability;
+  return {
+    schema_version: explainability?.schema_version ?? 'p0.1',
+    run_id: explainability?.run_id,
+    trace_id: explainability?.trace_id,
+    mode: explainability?.mode,
+    phases: { ...(explainability?.phases ?? {}) },
+    mcp_proxy: next,
+  };
+}
+
+function histExplainability(msg: HistoryMessage): AgentExplainability | undefined {
+  const base = msg.explainability ?? undefined;
+  const merged = mergeMcpProxyExplainability(base, msg.response_data, msg.error_detail);
+  if (merged) return merged;
+  if (!msg.response_data || typeof msg.response_data !== 'object') return undefined;
+  const embedded = (msg.response_data as { _explainability?: unknown })._explainability;
+  if (!embedded || typeof embedded !== 'object') return undefined;
+  return mergeMcpProxyExplainability(embedded as AgentExplainability, msg.response_data, msg.error_detail);
 }
 
 function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onRegenerate, historyMessages, historyConversationId, onSourceClick }: MessageListProps) {
@@ -154,6 +268,10 @@ function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onR
               content: msg.content,
               isStreaming: false,
               tableData: histTableData(msg),
+              explainability: histExplainability(msg),
+              responseData: msg.response_data,
+              errorDetail: msg.error_detail,
+              traceId: msg.run_id ?? msg.trace_id,
               conversationId: historyConversationId ?? null,
               sourcesCount: msg.sources_count,
               topSources: msg.top_sources,
@@ -177,6 +295,7 @@ function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onR
           return messages.map((msg, msgIndex) => {
             if (msg.role === 'user') lastUserQuestion = msg.content;
             const questionForAction = lastUserQuestion;
+            const structuredMsg = msg as StreamingMessage & { responseData?: unknown; errorDetail?: unknown };
             return renderMessageItem({
               key: msg.id,
               role: msg.role,
@@ -186,6 +305,9 @@ function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onR
               errorCode: msg.errorCode,
               errorHint: msg.errorHint,
               thinking: msg.thinking,
+              explainability: msg.explainability,
+              responseData: structuredMsg.responseData,
+              errorDetail: structuredMsg.errorDetail,
               traceId: msg.traceId,
               tableData: msg.tableData,
               chartData: msg.chartData,

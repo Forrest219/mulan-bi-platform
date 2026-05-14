@@ -72,20 +72,23 @@ class _CapturingEngine:
 
 
 class _FakeMessage:
-    role = "assistant"
-    tools_used = ["schema"]
-    content = "数据资产 **orders-订单明细表** 返回了 **16 个字段**："
+    def __init__(self, role="assistant", tools_used=None, content="", response_data=None):
+        self.role = role
+        self.tools_used = tools_used or ["schema"]
+        self.content = content or "数据资产 **orders-订单明细表** 返回了 **16 个字段**："
+        self.response_data = response_data
 
 
 class _FakeSessionManager:
-    def __init__(self):
+    def __init__(self, messages=None):
         self.messages = []
+        self._stored_messages = messages or [_FakeMessage()]
 
     def persist_message(self, **kwargs):
         self.messages.append(kwargs)
 
     def get_conversation_messages(self, **kwargs):
-        return [_FakeMessage()]
+        return self._stored_messages
 
 
 @pytest.mark.asyncio
@@ -167,4 +170,50 @@ async def test_direct_query_followup_uses_recent_schema_asset_as_datasource(monk
     assert engine.kwargs["force_first_params"] == {
         "question": "过去四年的销售额、利润趋势如何？",
         "datasource_name": "orders-订单明细表",
+    }
+
+
+@pytest.mark.asyncio
+async def test_direct_query_followup_uses_recent_query_datasource_and_metrics(monkeypatch):
+    """含“这个指标”的追问应继承上一轮 query 的数据源和指标上下文。"""
+    monkeypatch.setattr("services.data_agent.runner.is_direct_query", lambda question: True)
+
+    previous_query_message = _FakeMessage(
+        tools_used=["query"],
+        response_data={
+            "datasource_name": "订单+ (示例 - 超市)",
+            "fields": ["SUM(销售额)", "SUM(利润)", "COUNTD(客户名称)"],
+        },
+    )
+    db = _FakeDb()
+    session_mgr = _FakeSessionManager(messages=[previous_query_message])
+    session = AgentSession(conversation_id=uuid.uuid4(), user_id=7)
+    context = ToolContext(
+        session_id=str(session.conversation_id),
+        user_id=7,
+        connection_id=2,
+        trace_id="t-runner",
+    )
+    engine = _CapturingEngine()
+
+    events = [
+        event
+        async for event in run_agent(
+            engine=engine,
+            context=context,
+            session_mgr=session_mgr,
+            session=session,
+            question="这个指标过去几年的趋势是什么样子",
+            trace_id="t-runner",
+            current_user={"id": 7},
+            db=db,
+            connection_id=2,
+        )
+    ]
+
+    assert [event.type for event in events] == ["metadata", "done"]
+    assert engine.kwargs["force_first_tool"] == "query"
+    assert engine.kwargs["force_first_params"] == {
+        "question": "销售额、利润、客户名称 这个指标过去几年的趋势是什么样子",
+        "datasource_name": "订单+ (示例 - 超市)",
     }

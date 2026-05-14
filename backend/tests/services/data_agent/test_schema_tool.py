@@ -191,6 +191,7 @@ class TestSchemaTool:
             "_sync_missing_tableau_fields",
             lambda db, tc, asset: {"synced": 0, "error": "Tableau 未返回字段列表"},
         )
+        monkeypatch.setattr(tool, "_get_queryable_field_names", lambda datasource_luid, connection_id: [])
 
         data = tool._query_tableau_schema(
             mock_db,
@@ -223,6 +224,7 @@ class TestSchemaTool:
             return {"synced": 1}
 
         monkeypatch.setattr(tool, "_sync_missing_tableau_fields", fake_sync)
+        monkeypatch.setattr(tool, "_get_queryable_field_names", lambda datasource_luid, connection_id: ["销售额"])
 
         data = tool._query_tableau_schema(
             mock_db,
@@ -233,9 +235,12 @@ class TestSchemaTool:
 
         assert data["fields"]["orders-订单明细表"][0]["caption"] == "销售额"
         assert data["field_count"] == 1
+        assert data["queryable_field_count"] == 1
+        assert data["metadata_field_count"] == 1
+        assert data["field_source"] == "mcp_queryable_fields"
         assert "warning" not in data
 
-    def test_tableau_exact_match_returns_fields(self, tool):
+    def test_tableau_exact_match_returns_queryable_fields(self, tool, monkeypatch):
         asset = _tableau_asset()
         field = TableauDatasourceField(
             asset_id=asset.id,
@@ -247,6 +252,7 @@ class TestSchemaTool:
             is_calculated=False,
         )
         mock_db = _mock_tableau_schema_db(assets=[asset], fields=[field])
+        monkeypatch.setattr(tool, "_get_queryable_field_names", lambda datasource_luid, connection_id: ["订单 ID"])
 
         data = tool._query_tableau_schema(
             mock_db,
@@ -257,4 +263,61 @@ class TestSchemaTool:
 
         assert data["fields"]["orders-订单明细表"][0]["caption"] == "订单 ID"
         assert data["field_count"] == 1
+        assert data["queryable_field_count"] == 1
+        assert data["metadata_field_count"] == 1
         assert "warning" not in data
+
+    def test_tableau_schema_hides_metadata_only_fields_from_homepage_fields(self, tool, monkeypatch):
+        asset = _tableau_asset(name="订单+ (示例 - 超市)")
+        metadata_fields = [
+            TableauDatasourceField(
+                asset_id=asset.id,
+                datasource_luid=asset.tableau_id,
+                field_name="[国家/地区]",
+                field_caption="国家/地区",
+                data_type="string",
+                role="dimension",
+                is_calculated=False,
+            ),
+            TableauDatasourceField(
+                asset_id=asset.id,
+                datasource_luid=asset.tableau_id,
+                field_name="[省/自治区]",
+                field_caption="省/自治区",
+                data_type="string",
+                role="dimension",
+                is_calculated=False,
+            ),
+            TableauDatasourceField(
+                asset_id=asset.id,
+                datasource_luid=asset.tableau_id,
+                field_name="[销售额]",
+                field_caption="销售额",
+                data_type="real",
+                role="measure",
+                is_calculated=False,
+            ),
+        ]
+        mock_db = _mock_tableau_schema_db(assets=[asset], fields=metadata_fields)
+        monkeypatch.setattr(
+            tool,
+            "_get_queryable_field_names",
+            lambda datasource_luid, connection_id: ["省/自治区", "销售额"],
+        )
+
+        data = tool._query_tableau_schema(
+            mock_db,
+            _tableau_connection(),
+            table_name="订单+ (示例 - 超市)",
+            limit=100,
+        )
+
+        visible_names = [field["name"] for field in data["fields"]["订单+ (示例 - 超市)"]]
+        metadata_names = [field["caption"] for field in data["metadata_fields"]["订单+ (示例 - 超市)"]]
+
+        assert visible_names == ["省/自治区", "销售额"]
+        assert "国家/地区" not in visible_names
+        assert "国家/地区" in metadata_names
+        assert data["field_count"] == 2
+        assert data["queryable_field_count"] == 2
+        assert data["metadata_field_count"] == 3

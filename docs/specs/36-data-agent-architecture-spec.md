@@ -1,8 +1,12 @@
 # Data Agent 架构技术规格书
 
-> 版本：v0.3 | 状态：Engineering Spec — minimax 可开发（首页 Agent 灰度迁移已设计于 §15） | 日期：2026-05-12 | 关联 PRD：批次 0 T0.3 待 PM 决策（不阻塞 T2.3 启动）
+> 版本：v0.8 | 状态：Engineering Spec — minimax 可开发（首页 Agent 灰度迁移已设计于 §15） | 日期：2026-05-14 | 关联 PRD：批次 0 T0.3 待 PM 决策（不阻塞 T2.3 启动）
 >
 > **变更记录**
+> - v0.8（2026-05-14）— 按 Spec 54 补充 Transparent MCP Proxy + Guardrail 新定位：QuerySpec 降级为 legacy adapter / observability snapshot，`mcp_first_main.py` 标记为 legacy queryspec chain；明确 P0 feature flags 默认值与回滚策略。
+> - v0.7（2026-05-14）— 新增 Data Agent 表格展示契约：后端为所有 Data Agent table response 生成 `table_display.columns`，前端优先按该契约渲染并保留 `fields + rows` 历史 fallback。
+> - v0.6（2026-05-14）— 新增 Metrics Registry / MetricResolver 接入方向；收窄普通 aggregate 的 deterministic preflight，禁止因业务名词正则跳过 planning skill；新增派生指标 QuerySpec 契约与语义覆盖 Validator 要求。
+> - v0.5（2026-05-13）— 新增首页数据问答 MCP-first 受控架构：生产数据问答禁止依赖开放式 ReAct 自由选工具；改为意图分类 → Planning Skill Markdown 动态 prompt → LLM 生成结构化 QuerySpec → Python Validator → Tableau MCP 执行 → Rendering Skill Markdown 动态 prompt → LLM 受控渲染。明确 skill md 两个接入点、QuerySpec 校验门禁、Semantic Operators 解耦、Explainability UI 与 fallback 话术要求。
 > - v0.4（2026-05-12）— 新增首页问答生产上线刚性条件：首页 Agent 答案准确性不得低于 Tableau MCP / 底层工具参照链路；任何“有回复但口径偏离、字段缺失、维度缺失、混入非目标资产、错误成功”的样本均视为验收失败，禁止进入正式上线。
 > - v0.3（2026-05-12）— 首页问答临时收敛为 Tableau-only：`/api/agent/stream`、QueryTool、SchemaTool 禁止 fallback 到普通 `bi_data_sources`；历史会话中的停用 Tableau 连接必须解析到 active Tableau 或明确报错；Agent Monitor 必须保留工具失败摘要。
 > - v0.2（2026-04-28）— 0.5d.1 补丁：§15 首页 Agent 灰度迁移与回滚（4 态 feature flag / 双写规约 / 自动回滚阈值 / 3 意图策略决策树 / `bi_agent_dual_write_audit` + `bi_agent_intent_log` 两张新表 / 5 P0 + 2 P1 测试 / 红线 + 强制清单 + grep + 正错示范）
@@ -897,6 +901,8 @@ context_aware → keyword_match → llm_classify → fallback("chat")
 6. 首页 Agent 链路禁止引用普通 `bi_data_sources` 作为问答目标；`DataSource` 同 ID 记录不得接管 Tableau connection_id
 7. 首页 Agent 的生产验收禁止以“有回复”为成功标准；必须以 Tableau MCP / 底层工具参照链路为准确性基线。任何让首页答案弱于参照链路的改动（口径漂移、字段/维度丢失、错误成功、自由发挥补全）均视为 P0 回归，PR 必须拒绝或回滚。
 8. 首页 Agent、QueryTool、LLM 查询 prompt 和 direct VizQL 只能信任 MCP/VizQL 当前可查询字段 `queryable_fields`。资产同步/API 导入得到的 `metadata_fields` 只是元数据层字段全集/字段快照，用于治理、盘点、血缘和语义维护；不得把 `metadata_fields` 当作可查询字段生成查询。若字段仅存在于 `metadata_fields`，必须解释“元数据存在但当前 published datasource 不支持 MCP 查询”，并基于 `queryable_fields` 给出替代字段建议，不得报成工具执行失败。
+9. 首页生产数据问答不得以开放式 ReAct 自由选工具作为主路径。凡 intent 属于 data_query / ranking / trend_condition / all_period_condition / set_difference / customer_record / root_cause 等问数类，必须进入 §16 MCP-first 受控链路；ReAct 只能作为非生产实验路径、诊断路径或明确灰度路径。
+10. 问数类请求一旦进入 §16 受控链路，禁止 fallback 到 SchemaTool / Schema Inventory 用资产列表、字段枚举或数据源介绍冒充业务答案。QuerySpec 校验失败时必须返回标准 fallback，而不是改走资产问答。
 
 #### 强制检查清单
 
@@ -907,6 +913,9 @@ context_aware → keyword_match → llm_classify → fallback("chat")
 - [ ] `platform_settings.homepage_agent_mode` 写操作有 admin 角色校验
 - [ ] 首页问答上线前必须提交“Tableau MCP 参照链路 vs 首页链路”对照报告；报告至少覆盖数据源清单、字段清单、简单聚合、趋势、多轮追问、TopN/占比等场景，并明确逐题判定首页是否不劣于参照链路。
 - [ ] 字段可查询性回归用例必须覆盖：字段在 `metadata_fields` 存在但不在 `queryable_fields` 时，首页返回业务解释和替代字段建议，而不是 MCP/工具失败。
+- [ ] 问数类 intent 必须覆盖 §16 的 7 节点链路测试：intent 分类、planning skill 加载、QuerySpec JSON 生成、Python Validator 拒绝非法计划、MCP 执行、rendering skill 加载、最终回答不新增事实。
+- [ ] Q5/Q7/Q8/Q9/Q10 这类复杂问题必须进入 Semantic Operators，不得靠 direct VizQL 后处理或 LLM 自由总结碰运气。
+- [ ] Explainability UI 必须展示用户可理解的“识别意图 / 选择数据源 / 生成查询计划 / 执行 MCP / 整理回答”过程；禁止展示内部 prompt、skill 文件名、数据库密钥或完整原始结果。
 
 #### 验证命令
 
@@ -933,3 +942,433 @@ test "$(grep -rl 'def result_hash' backend/services backend/app | wc -l | tr -d 
 | HA-B | divergence > 30% 时是否阻塞 `agent_only` 切换 | P1 | 倾向阻塞，但需要 admin 一键 override |
 | HA-C | 多用户并发 override 与全局开关冲突解决 | P2 | 当前规则：用户 override > 全局；冲突仅在 admin 误操作时出现 |
 | HA-D | 意图识别 LLM 调用成本归因 | P2 | 依赖 Spec 20 OI-D（capability wrapper 计费维度） |
+
+---
+
+## 16. 首页数据问答 MCP-first 受控架构（v0.5-v0.8）
+
+### 16.1 背景与决策
+
+2026-05-13 batch2 A/B 测试显示：Tableau MCP 参照链路在准确性上显著优于首页开放式 ReAct 链路。失败样本集中在以下类型：
+
+| 问题类型 | ReAct / direct VizQL 失败形态 | MCP 参照链路正确形态 |
+|----------|-------------------------------|----------------------|
+| 客户合作记录 | Q7 将“邓保合作记录”查成 `客户名称` 全量枚举 | `客户名称 = 邓保` + `YEAR(发货日期)` + `SUM(销售额)` + `SUM(利润)` |
+| 连续增长 | Q8 同时带 `类别` / `子类别`，按错误维度判断持续增长 | 按完整年度 `2021-2024`、维度 `子类别`、指标 `SUM(利润)` 判断严格递增 |
+| 差集 | Q5 将“没有销售记录”查成“有销售记录” | universe set - occurred set |
+| 持续亏损 | Q9 返回年度省份明细，未筛选“每年均亏损” | 按省份聚合年度利润，过滤所有完整年度均 `< 0` |
+| 亏损归因 | Q10 拉 1000 条明细，没有形成贡献排序 | 按省份、产品线、客户维度执行聚合、升序排序和 TopN 归因 |
+
+因此，首页生产数据问答从 v0.5 起采用 **MCP-first controlled QA**：
+
+- LLM 不再负责开放式 ReAct 自由选择工具。
+- LLM 只承担两个窄任务：自然语言填充结构化 `QuerySpec`，以及基于 MCP JSON 做受控中文表达。
+- Tableau MCP / VizQL 是数据事实与聚合计算的唯一执行层。
+- Python Validator 是硬门禁；校验不通过不得执行 MCP，也不得 fallback 到 SchemaTool 冒充业务答案。
+
+> **v0.8 定位修订（2026-05-14）**：Spec 54 将后续 P0 目标调整为 **Transparent MCP Proxy + Guardrail**。§16.2-§16.10 记录的 QuerySpec controlled QA 是 legacy queryspec chain 的历史主链路与回滚路径；新 P0 主方向不再强制 LLM 先生成 Mulan 自定义 QuerySpec，而是让 LLM 基于 MCP Tool Description / Schema 直接生成 MCP args，Mulan 只在发往底层 MCP 前执行 Guardrail 底线检查。该修订不删除 QuerySpec 相关代码，也不扩大 P0 目标。
+
+### 16.2 目标链路
+
+```
+[用户提问] 例如：“为什么福建 2024 年巨亏？”
+       │
+       ▼
+【Node 1: Intent Classifier（Python + 小模型/规则）】
+       │
+       ├─ 输出：intent = "root_cause"
+       │
+       ▼
+【Node 2: Planning Prompt 动态组装】
+       │
+       ├─ 读取 planning skill md，例如 skill_root_cause.md
+       ├─ 注入 queryable_fields、当前 datasource、用户问题、历史 AnalysisContext
+       └─ 组装 prompt：系统约束 + JSON Schema + Few-shot + 用户问题
+       │
+       ▼
+【Node 3: LLM QuerySpec 填空】
+       │
+       └─ 只允许输出结构化 QuerySpec JSON，禁止自然语言回答
+       │
+       ▼
+【Node 4: Python Validator】
+       │
+       ├─ 校验 JSON Schema
+       ├─ 校验字段必须属于 queryable_fields
+       ├─ 校验禁止 detail scan / raw rows 心算
+       ├─ 校验 limit、filters、sort、operator 必填项
+       └─ 失败时返回标准 fallback，不执行 MCP
+       │
+       ▼
+【Node 5: Tableau MCP】
+       │
+       └─ 执行聚合、过滤、排序、TopN、下钻，返回真实数据 JSON
+       │
+       ▼
+【Node 6: Rendering Prompt 动态组装】
+       │
+       ├─ 读取 skill_answer_renderer.md
+       ├─ 注入 MCP JSON、QuerySpec、执行口径、fallback 状态
+       └─ 组装 prompt：话术纪律 + 数据事实 + 输出格式
+       │
+       ▼
+【Node 7: LLM Answer Renderer】
+       │
+       └─ 输出最终标准回答；只做表达整理，不得新增事实
+```
+
+### 16.3 Skill Markdown 的两个接入点
+
+`skill md` 在 §16 中不是 ReAct Tool description，也不是可执行代码，而是受控 prompt contract。
+
+| 接入点 | 节点 | 文件类型 | 职责 | 禁止事项 |
+|--------|------|----------|------|----------|
+| Planning Skill | Node 2 | `skills/planning/*.md` | 约束 LLM 如何把自然语言填成 `QuerySpec` / `OperatorSpec` | 禁止生成最终答案；禁止绕过 JSON Schema；禁止引用 `metadata_fields` |
+| Rendering Skill | Node 6 | `skills/rendering/*.md` | 约束 LLM 如何基于 MCP JSON 生成短回答 | 禁止新增数值；禁止重新计算；禁止推测 MCP JSON 中不存在的原因 |
+
+建议文件命名：
+
+```text
+skills/planning/root_cause.md
+skills/planning/customer_record.md
+skills/planning/trend_condition.md
+skills/planning/all_period_condition.md
+skills/planning/set_difference.md
+skills/planning/ranking.md
+skills/rendering/answer_renderer.md
+```
+
+> 与 `docs/specs/agents_skills.md` 的关系：Skills Center 当前管理的是 ReAct Tool 的 `description / input_schema`。§16 的 planning/rendering skill md 是 **prompt contract**，可先以代码仓库文件形式实现；若后续进入 Skills Center，必须新增 `skill_type = planning_prompt | rendering_prompt` 或等价字段，禁止与 ReAct Tool Skill 混用同一概念。
+
+### 16.4 QuerySpec 契约
+
+Node 3 输出必须是 JSON，最小结构如下：
+
+```json
+{
+  "intent": "root_cause",
+  "datasource": {
+    "name": "订单+ (示例 - 超市)",
+    "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+  },
+  "operator": "root_cause",
+  "time": {
+    "field": "发货日期",
+    "grain": "YEAR",
+    "range": {"type": "year", "value": 2024}
+  },
+  "metrics": [
+    {"field": "利润", "aggregation": "SUM"}
+  ],
+  "derived_metrics": [
+    {
+      "name": "利润率",
+      "formula": "SUM(利润) / SUM(销售额)",
+      "result_type": "percentage",
+      "required_base_metrics": ["利润", "销售额"]
+    }
+  ],
+  "dimensions": ["省/自治区", "类别", "子类别", "客户名称"],
+  "filters": [
+    {"field": "省/自治区", "op": "IN", "values": ["福建"]}
+  ],
+  "sort": [{"field": "SUM(利润)", "direction": "ASC"}],
+  "limit": 10,
+  "answer_contract": {
+    "max_chars": 80,
+    "must_include": ["省份利润", "主要亏损产品线", "主要亏损客户"],
+    "forbid": ["猜测原因", "引用未返回字段", "输出明细列表"]
+  }
+}
+```
+
+短期兼容：若当前 Pydantic `QuerySpec` 尚未新增 `derived_metrics` 一等字段，可先写入 `params.derived_metrics`，但 Validator 与 Renderer 必须按同等语义处理。长期必须把 `derived_metrics` 提升为 QuerySpec 正式字段。
+
+Python Validator 至少校验：
+
+1. `intent` / `operator` 必须在白名单内。
+2. `datasource.luid` 必须属于当前用户可访问的 Tableau connection。
+3. 所有字段必须属于 MCP/VizQL `queryable_fields`，不得使用 `metadata_fields`。
+4. 问数类 intent 必须包含至少一个聚合 metric 或明确 semantic operator。
+5. `detail_table` / 无聚合 raw rows 默认禁止；除非用户明确要求“列出明细”，且 `limit <= 100`。
+6. `root_cause` 必须有 metric、filter 或 focus dimension、breakdown dimensions、sort ASC、limit。
+7. `trend_condition` 必须有 time field、dimension、metric、完整年度范围和 direction。
+8. `set_difference` 必须包含 universe query 与 occurred query 的目标维度。
+9. Validator 失败必须生成结构化 fallback，写入 `bi_agent_steps.structured_error`。
+10. 用户明确提到的指标必须被 `metrics` 或 `derived_metrics` 覆盖；若缺失，必须拒绝或触发重新规划。
+11. QuerySpec 不得引入用户未问且上下文未继承的指标；系统默认指标只能用于“整体情况/概览/经营概况”等宽泛问题。
+
+### 16.4.1 Deterministic Preflight 策略（v0.6 修订）
+
+deterministic QuerySpec fallback 是安全兜底，不是业务语义规划器。它不得仅因问题中包含常见业务词就抢跑 planning skill。
+
+规则：
+
+1. **保留 deterministic preflight 的场景**：
+   - `set_difference`、`trend_condition`、`all_period_condition`、`root_cause`、`customer_record`、`ranking` 等 semantic operators。
+   - 多轮追问且需要继承上一轮 `metric_names` / `dimension_names` / time context。
+   - LLM QuerySpec 解析失败、请求 raw rows、路由到 asset inventory、字段幻觉、operator 与 intent 明显不匹配。
+
+2. **禁止 deterministic preflight 抢跑的场景**：
+   - 普通 aggregate 问题不得因为包含 `销售额`、`利润`、`利润率`、`客户数`、`客单价`、`子类别` 等业务名词而直接跳过 planning skill。
+   - 派生指标问题不得由 fallback 默认三件套 `销售额 + 利润 + 客户数` 代替用户显式指标。
+
+3. **普通 aggregate 正常链路**：
+
+```text
+question
+-> planning skill aggregate.md
+-> LLM QuerySpec
+-> semantic coverage validator
+-> Tableau MCP
+-> renderer
+```
+
+4. **Metrics Registry 接入后的目标链路**：
+
+```text
+question
+-> MetricResolver
+   -> registry hit: deterministic QuerySpec from metric definitions
+   -> registry miss: planning skill + LLM QuerySpec
+-> Validator
+-> Tableau MCP
+-> derived metric renderer
+```
+
+5. **过渡期要求**：
+   - 在 `/governance/metrics` 与 Tableau published datasource 绑定验收前，普通 aggregate 优先走 planning skill。
+   - Validator 必须保留 raw rows、asset_inventory、字段合法性、operator mismatch、指标覆盖率等硬门禁。
+   - 禁止为了修复单一问题写死某个数据源、字段、题号或样例。
+
+### 16.4.2 Table Display Contract（v0.7）
+
+所有 Data Agent table response 必须保留兼容数据层：
+
+```json
+{
+  "fields": ["客户名称", "SUM(销售额)", "销售额占比"],
+  "rows": [["李丽丽", 181562.11, "1.08%"]]
+}
+```
+
+后端同时生成可选但正式的展示契约 `table_display.columns`：
+
+```json
+{
+  "table_display": {
+    "columns": [
+      {
+        "key": "SUM(销售额)",
+        "label": "销售额",
+        "semantic_type": "metric",
+        "value_type": "number",
+        "align": "right",
+        "format": "number"
+      }
+    ]
+  }
+}
+```
+
+契约规则：
+
+1. 后端是 `table_display.columns` 的唯一生成方，普通 aggregate MCP 数据路径与 semantic operators 均需生成该契约。
+2. `table_display.columns[i]` 必须与 `fields[i]` 一一对应；`fields` / `rows` 的含义不得改变。
+3. 前端渲染表格时必须优先使用 `table_display.columns`；历史消息或旧接口缺少 `table_display` 时，必须 fallback 到 `fields + rows` 的既有推断逻辑。
+4. 本契约适用于所有 Data Agent table responses，不限于 ranking、占比或单个问题。
+5. `label` 是用户可读列名，例如 `SUM(销售额)` 应展示为 `销售额`；安全可识别的 `COUNTD(客户名称)` 可展示为 `客户数`。
+
+字段枚举：
+
+| 字段 | 可选值 | 含义 |
+|------|--------|------|
+| `semantic_type` | `dimension` / `metric` / `derived_metric` / `rank` / `period` / `flag` / `text` | 列的业务语义 |
+| `value_type` | `string` / `number` / `percent` / `date` / `boolean` | 单元格值类型 |
+| `align` | `left` / `right` / `center` | 表头与单元格对齐方式 |
+| `format` | `plain` / `number` / `integer` / `percent` / `date` | 前端展示格式 |
+
+默认展示规则：
+
+- `semantic_type=metric | derived_metric | rank | period` 默认右对齐。
+- `semantic_type=dimension | text | flag` 默认左对齐，除非后端显式覆盖。
+- `value_type=percent` 默认 `format=percent` 且右对齐；字符串百分比（如 `"1.08%"`）按原值展示，数值百分比（如 `0.0108`）由前端格式化为 `1.08%`。
+
+### 16.5 Semantic Operators 解耦
+
+复杂分析不得散落在 QueryTool 的 if/else 或 LLM prompt 里。每类业务逻辑必须落为独立 semantic operator：
+
+| Operator | 典型问题 | 输入 | MCP 执行 | 输出 |
+|----------|----------|------|----------|------|
+| `customer_record` | “邓保这个客户最近还有合作吗” | entity field/value、time field、metrics | 按客户过滤，按年聚合销售额/利润 | 最后合作年份、年度记录 |
+| `trend_condition` | “哪个子类别利润每年持续增长” | dimension、metric、time range、direction | 年份 x 维度聚合 | 满足条件的维度及序列 |
+| `all_period_condition` | “哪些省份一直亏损” | dimension、metric、condition、periods | 年份 x 维度聚合 | 每期均满足条件的维度 |
+| `set_difference` | “2025 年没有销售记录的子类别” | target dimension、exclude filters | universe set 与 occurred set | 差集 |
+| `root_cause` | “福建 2024 为什么巨亏” | metric、filters、breakdown dimensions | 多维度聚合排序 | 主要贡献维度和值 |
+| `ranking` | “Top 10 大客户及占比” | dimension、metric、topN、share | 聚合排序 + 总量 | TopN 与占比 |
+
+每个 operator 必须具备：
+
+- 独立 planning skill md。
+- 独立 Python validator。
+- 独立 unit test。
+- 至少 1 条 Tableau MCP live 参照样本或固定 fixture。
+- Answer renderer snapshot，用于验证最终回答没有新增事实。
+
+### 16.6 Explainability UI 契约
+
+首页必须透传用户可理解的思考过程，但不得暴露内部 prompt 或敏感数据。
+
+允许展示：
+
+```text
+1. 已识别为：亏损归因分析
+2. 使用数据源：订单+ (示例 - 超市)
+3. 查询口径：2024 年，省/自治区=福建，指标=利润
+4. 执行方式：按产品线、子类别、客户聚合排序
+5. 已基于 Tableau MCP 返回结果生成回答
+```
+
+禁止展示：
+
+- planning skill md 文件名或完整内容。
+- LLM 原始 prompt。
+- Tableau PAT、数据库连接串、内部异常堆栈。
+- 大量 raw rows 明细。
+
+### 16.7 标准 Fallback 话术
+
+受控链路不得“硬答”。以下场景必须返回标准 fallback：
+
+| 场景 | fallback |
+|------|----------|
+| intent 低置信度 | “我还不能可靠判断你要分析的对象。请补充指标、时间范围或维度。” |
+| QuerySpec JSON 解析失败 | “我没有生成可安全执行的查询计划，请换一种更明确的问法。” |
+| 字段不在 `queryable_fields` | “当前 published datasource 不支持直接查询该字段。可用字段包括：...” |
+| Validator 拒绝 raw detail scan | “这个问题需要先做聚合或筛选后才能可靠回答，请补充 TopN、时间范围或维度。” |
+| MCP 执行失败 | “Tableau MCP 查询失败，本次不输出结论。trace_id=...” |
+| MCP 数据不足以支撑结论 | “现有数据不足以支持该结论，本次不做推断。” |
+
+### 16.8 可观测性
+
+每次 §16 链路必须写入 `bi_agent_steps`：
+
+| step_type | tool_name | 必填内容 |
+|-----------|-----------|----------|
+| `thinking` | `intent_classifier` | intent、confidence、route reason |
+| `thinking` | `planning_skill_loader` | skill key / version / checksum，不写完整 prompt |
+| `tool_call` | `llm_queryspec` | prompt template id、model、temperature、input field summary |
+| `tool_result` | `llm_queryspec` | QuerySpec JSON 摘要、parse status |
+| `tool_call` | `queryspec_validator` | validator version、queryable field count |
+| `tool_result` | `queryspec_validator` | pass/fail、rejection code |
+| `tool_call` | `tableau_mcp` | datasource_luid、fields、filters、limit |
+| `tool_result` | `tableau_mcp` | row_count、field_count、duration_ms |
+| `thinking` | `rendering_skill_loader` | renderer skill key / version / checksum |
+| `answer` | `answer_renderer` | final answer、quality flags |
+
+`bi_agent_runs.tools_used` 应包含 `intent_classifier`、`llm_queryspec`、`queryspec_validator`、`tableau_mcp`、`answer_renderer`，不得只写 `query`。
+
+### 16.9 MVP 开发任务拆分
+
+| Task | 范围 | 产出 |
+|------|------|------|
+| T16-1 Intent Classifier | Python 规则优先，必要时小模型兜底 | intent enum、confidence、route reason、单测 |
+| T16-2 Skill MD Loader | 读取 planning/rendering markdown，支持 checksum/version | loader、缓存、缺失 fallback、单测 |
+| T16-3 QuerySpec Schema | 定义 JSON Schema 与 Pydantic model | `QuerySpec`、`OperatorSpec`、schema fixtures |
+| T16-4 QuerySpec Prompt Builder | Node 2 prompt 动态组装 | prompt template、queryable_fields 注入、few-shot |
+| T16-5 QuerySpec LLM Client | Node 3 只输出 JSON | JSON parse、retry 1 次、失败 fallback |
+| T16-6 Python Validator | Node 4 硬门禁 | 字段合法性、聚合/limit/detail scan 校验、结构化错误 |
+| T16-7 MCP Executor | Node 5 | QuerySpec → VizQL/MCP 调用，统一结果 JSON |
+| T16-8 Semantic Operators | customer_record / trend_condition / all_period_condition / set_difference / root_cause / ranking | 各 operator 独立模块和测试 |
+| T16-9 Answer Renderer | Node 6/7 | rendering skill、事实约束 prompt、短回答输出 |
+| T16-10 Explainability UI | 首页 thinking 过程透传 | 前端 timeline、SSE event contract |
+| T16-11 AB Regression | MCP 基线对比 | batch2 全量回归，要求质量不劣于 MCP |
+| T16-12 Aggregate Preflight 收窄 | 普通 aggregate 不再被业务名词正则 deterministic 抢跑；复杂 semantic operators 保留 preflight | `_should_prefer_deterministic_queryspec` 单测、利润率/客单价/客户数覆盖率用例 |
+| T16-13 Semantic Coverage Validator | 校验用户显式指标是否被 QuerySpec 覆盖，校验未请求指标是否被错误加入 | `利润率` 不得丢失、未问 `客户数` 不得加入、失败时结构化 fallback |
+| T16-14 Metrics Registry Bridge | 接入 Spec 30 MetricResolver；支持 registry hit 生成 deterministic QuerySpec | `销售额/利润/利润率/客单价` 从 `/governance/metrics` 定义驱动 |
+
+### 16.10 验收标准
+
+P0 验收必须覆盖 batch2 中至少以下用例：
+
+| 用例 | 验收标准 |
+|------|----------|
+| Q7 客户合作记录 | 必须包含客户实体过滤 `客户名称=邓保`，按年份返回销售额/利润，并判断最后合作年份 |
+| Q8 子类别利润持续增长 | 必须按 `子类别`、完整年度 `2021-2024`、`SUM(利润)` 判断，结果不得少于 MCP 基线命中的维度 |
+| Q9 省份一直亏损 | 必须过滤所有完整年度利润均 `< 0` 的省份，不得仅返回年度明细 |
+| Q10 亏损归因 | 必须返回省份利润、主要亏损产品线/子类别、主要亏损客户，不得拉 1000 条明细冒充归因 |
+
+上线条件：
+
+- batch2 MCP vs Mulan 对比中，Mulan 准确性不得低于 MCP。
+- legacy queryspec chain 中，所有问数类成功回答必须可追溯到 QuerySpec、Validator pass 和 MCP result；mcp_proxy chain 中，所有成功回答必须可追溯到 MCP args、Guardrail decision 和 MCP result。
+- 任何“错误成功”按 P0 失败处理。
+- 所有 fallback 必须可解释、可追踪、不可伪装为成功答案。
+
+### 16.11 Transparent MCP Proxy + Guardrail（v0.8）
+
+#### 16.11.1 新架构定位
+
+后续 P0 目标链路：
+
+```text
+User Question
+-> LLM reads MCP Tool Description / Schema
+-> LLM emits Tableau MCP args
+-> MCP Args Guardrail checks schema / fields / permissions / safety / scale
+-> Tableau MCP executes
+-> Result Renderer packages table / chart / text / download
+```
+
+Mulan 在新链路中的职责是透明防火墙，而不是业务规划器：
+
+- 保留：权限检查、字段存在性检查、参数 schema 检查、查询规模控制、明细扫描防护、危险操作阻断、MCP 超时/连续失败熔断、结果包装和可解释展示。
+- 不再主动：教 LLM 选业务指标、自动补销售额/利润/客户数、自动拆利润率、自动改业务 operator、自动重写用户问题、自动把失败计划替换成 deterministic QuerySpec。
+
+#### 16.11.2 QuerySpec Legacy Policy
+
+| 文件 | P0 定位 | 约束 |
+|------|---------|------|
+| `backend/services/data_agent/queryspec.py` | legacy adapter contract / observability snapshot | 保留用于旧链路、对照日志与回滚；新 `mcp_proxy` 链路不得新增对 QuerySpec 作为主计划 contract 的依赖。 |
+| `backend/services/data_agent/queryspec_prompt_builder.py` | legacy only | 仅服务 legacy queryspec chain；新 MCP args 生成应基于 MCP Tool Description / Schema。 |
+| `backend/services/data_agent/queryspec_validator.py` | legacy only | 仅校验 legacy QuerySpec；新链路安全、权限、字段、规模规则迁入 `mcp_args_guardrail.py`。 |
+| `backend/services/data_agent/queryspec_fallback.py` | deprecated，默认关闭 | `DATA_AGENT_QUERYSPEC_FALLBACK_ENABLED=false` 时不得自动造 QuerySpec、不得替换 operator、不得补老三样指标；打开仅作为回滚旧行为。 |
+| `backend/services/data_agent/mcp_first_main.py` | legacy queryspec chain | 作为 `DATA_AGENT_CHAIN_MODE=legacy_queryspec` 的实现与回滚路径保留。 |
+
+#### 16.11.3 Feature Flags 默认值
+
+P0 默认值必须保持旧线上行为不变：
+
+```text
+DATA_AGENT_CHAIN_MODE=legacy_queryspec
+DATA_AGENT_MCP_PROXY_ENABLED=false
+DATA_AGENT_QUERYSPEC_FALLBACK_ENABLED=false
+```
+
+链路选择规则：
+
+| 条件 | 行为 |
+|------|------|
+| `DATA_AGENT_CHAIN_MODE=legacy_queryspec` | 走 `mcp_first_main.py` legacy queryspec chain。 |
+| `DATA_AGENT_CHAIN_MODE=mcp_proxy` 且 `DATA_AGENT_MCP_PROXY_ENABLED=true` | 走 Transparent MCP Proxy + Guardrail。 |
+| `DATA_AGENT_CHAIN_MODE=mcp_proxy` 但 `DATA_AGENT_MCP_PROXY_ENABLED=false` | 不静默裸跑新链路；必须回到 legacy queryspec chain 或返回清晰配置错误，具体由 chain selector 明确记录。 |
+| `DATA_AGENT_QUERYSPEC_FALLBACK_ENABLED=false` | QuerySpec invalid / validator failed / operator mismatch 不得自动调用 `queryspec_fallback.py` 替换业务计划；返回结构化 `query_plan_rejected`。 |
+| `DATA_AGENT_QUERYSPEC_FALLBACK_ENABLED=true` | 仅作为回滚开关恢复旧 fallback 行为，并记录 fallback reason。 |
+
+#### 16.11.4 回滚策略
+
+回滚必须优先通过 feature flags 完成，不删除文件、不回滚无关实现：
+
+1. 新链路异常或回归：设置 `DATA_AGENT_CHAIN_MODE=legacy_queryspec`。
+2. 需要完全关闭 MCP proxy：设置 `DATA_AGENT_MCP_PROXY_ENABLED=false`。
+3. 需要临时恢复旧 QuerySpec fallback 自动替换：设置 `DATA_AGENT_QUERYSPEC_FALLBACK_ENABLED=true`，同时保留 trace 中的 fallback reason，便于事后清理。
+4. 回滚后仍必须满足 §15 的首页准确性红线：不能以 SchemaTool / asset inventory / 字段枚举冒充业务答案，不能返回错误成功。
+
+#### 16.11.5 P0 非目标
+
+- 不删除 `queryspec.py`、`queryspec_validator.py`、`queryspec_prompt_builder.py`。
+- 不强制所有请求走 `mcp_proxy`。
+- 不自动修复业务语义。
+- 不自动补指标。
+- 不自动重写用户问题。
+- 不把“没有销售”改成“有销售”。

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
+import { useHelpAgentSelection } from '../help-agent/helpAgentContext';
 import {
   getSkill, patchSkill, publishVersion, rollbackVersion, getVersionDiff,
   type SkillDetail, type SkillVersion, type SchemaDiff, type PublishVersionPayload,
@@ -626,6 +627,18 @@ export default function SkillDetailPage() {
   const { skillId } = useParams<{ skillId: string }>();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const helpAgentSelection = useMemo(
+    () => ({
+      primary_entity: {
+        type: 'skill',
+        id: String(skillId),
+        source: 'route' as const,
+      },
+    }),
+    [skillId]
+  );
+
+  useHelpAgentSelection(helpAgentSelection);
 
   const [skill, setSkill] = useState<SkillDetail | null>(null);
   const [loading, setLoading] = useState(true);

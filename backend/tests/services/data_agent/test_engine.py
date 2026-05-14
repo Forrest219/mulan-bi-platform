@@ -495,7 +495,77 @@ async def test_schema_tool_result_is_rendered_without_second_llm_or_invented_mea
     assert "统计月份" in answer
     assert "销售总额" not in answer
     assert "时间维度" not in answer
-    assert "资产链接：https://example.test/datasource" in answer
+    assert "https://example.test/datasource" not in answer
+    assert "资产链接" not in answer
+
+
+@pytest.mark.asyncio
+async def test_schema_tool_answer_uses_queryable_fields_not_metadata_fields(
+    mock_llm,
+    tool_context,
+):
+    """首页 schema 回答只能展示 MCP queryable fields，不能泄露 metadata-only 字段。"""
+
+    class MockSchemaTool(BaseTool):
+        name = "schema"
+        description = "查询字段"
+        parameters_schema = {"type": "object"}
+
+        async def execute(self, params, context):
+            return ToolResult(
+                success=True,
+                data={
+                    "requested_table_name": "订单+ (示例 - 超市)",
+                    "matched_asset": {
+                        "name": "订单+ (示例 - 超市)",
+                        "type": "datasource",
+                        "web_url": "https://example.test/datasource",
+                    },
+                    "field_count": 2,
+                    "queryable_field_count": 2,
+                    "metadata_field_count": 3,
+                    "field_source": "mcp_queryable_fields",
+                    "fields": {
+                        "订单+ (示例 - 超市)": [
+                            {"name": "省/自治区", "caption": "省/自治区", "data_type": "string", "role": "dimension", "is_calculated": False},
+                            {"name": "销售额", "caption": "销售额", "data_type": "real", "role": "measure", "is_calculated": False},
+                        ]
+                    },
+                    "metadata_fields": {
+                        "订单+ (示例 - 超市)": [
+                            {"name": "国家/地区", "caption": "国家/地区", "data_type": "string", "role": "dimension", "is_calculated": False},
+                            {"name": "省/自治区", "caption": "省/自治区", "data_type": "string", "role": "dimension", "is_calculated": False},
+                            {"name": "销售额", "caption": "销售额", "data_type": "real", "role": "measure", "is_calculated": False},
+                        ]
+                    },
+                },
+            )
+
+    reg = ToolRegistry()
+    reg.register(MockSchemaTool())
+    engine = ReActEngine(registry=reg, llm_service=mock_llm, max_steps=10)
+    mock_llm.complete = AsyncMock(return_value={
+        "action": "tool_call",
+        "tool_name": "schema",
+        "tool_params": {"table_name": "订单+ (示例 - 超市)"},
+        "reasoning": "用户询问数据源介绍，应查询 schema",
+    })
+
+    events = [
+        e
+        async for e in engine.run(
+            "针对 订单+ (示例 - 超市) 数据源，介绍一下这个数据源",
+            tool_context,
+        )
+    ]
+    answer = next(e.content for e in events if e.type == "answer")
+
+    assert "当前 MCP/VizQL 可查询字段 **2 个**" in answer
+    assert "省/自治区" in answer
+    assert "销售额" in answer
+    assert "国家/地区" not in answer
+    assert "资产治理页可能包含更多 API 同步元数据字段" in answer
+    assert "共有 3 个" not in answer
 
 
 @pytest.mark.asyncio

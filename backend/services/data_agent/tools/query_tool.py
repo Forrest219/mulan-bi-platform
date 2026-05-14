@@ -14,6 +14,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from services.data_agent.tool_base import BaseTool, ToolResult, ToolContext, ToolMetadata
+from services.data_agent.fallback import fallback_type_from_error, query_tool_error_payload
 from services.llm.nlq_service import one_pass_llm, execute_query, route_datasource, get_datasource_fields_cached, NLQError
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ _MEASURE_KEYWORDS = frozenset(['利润', '销售', '收入', '数量', '金额',
 
 # Fields containing these substrings → date dimension (used for time filter)
 _DATE_KEYWORDS = frozenset(['日期', '时间'])
-_PREFERRED_DATE_KEYWORDS = ('订单日期', '日期', '时间')
+_PREFERRED_DATE_KEYWORDS = ('发货日期', '订单日期', '日期', '时间')
 _TREND_KEYWORDS = ('趋势', '走势', '变化')
 _FIELD_SYNONYMS: Dict[str, Tuple[str, ...]] = {
     '渠道': ('渠道名称', '渠道', '销售渠道'),
@@ -37,6 +38,11 @@ _FIELD_SYNONYMS: Dict[str, Tuple[str, ...]] = {
     '销售额': ('销售额', '净额', '毛额', '成交金额', '订单金额', '收入'),
     '销售': ('销售额', '净额', '毛额', '成交金额', '订单金额', '收入'),
     '利润': ('利润', '利润金额'),
+    '区域': ('省/自治区', '省份', '省', '地区', '区域'),
+    '省份': ('省/自治区', '省份', '省'),
+    '省': ('省/自治区', '省份', '省'),
+    '产品线': ('类别', '产品线', '产品类别'),
+    '大类': ('类别', '产品类别'),
 }
 
 
@@ -97,6 +103,9 @@ _YEAR_BUCKET_PATTERNS = [
     r'按\s*年',
     r'分\s*年',
     r'年度',
+    r'年份',
+    r'一直',
+    r'一致',
     r'年维度',
     r'用.*日期.*统计',
     r'按.*日期.*统计',
@@ -134,6 +143,12 @@ def _build_direct_vizql(question: str, field_captions: List[str]) -> Optional[Di
             matched = _first_existing_caption(field_captions, candidates)
             if matched and matched not in mentioned:
                 mentioned.append(matched)
+        elif term in q_compact:
+            matched = _first_existing_caption(field_captions, candidates)
+            if matched:
+                for index, mentioned_caption in enumerate(list(mentioned)):
+                    if _compact(mentioned_caption) == _compact(term) and _compact(matched) != _compact(mentioned_caption):
+                        mentioned[index] = matched
 
     date_mentioned = [c for c in mentioned if any(kw in c for kw in _DATE_KEYWORDS)]
     other_fields = [c for c in mentioned if c not in date_mentioned]
@@ -273,6 +288,101 @@ def _calculate_customer_churn(
     }
 
 
+def _calculate_set_difference(
+    *,
+    target_dimension: str,
+    universe_fields: List[Any],
+    universe_rows: List[List[Any]],
+    occurred_fields: List[Any],
+    occurred_rows: List[List[Any]],
+) -> Dict[str, Any]:
+    """Return universe - occurred for a single target dimension."""
+    universe_idx = _find_field_index(universe_fields, target_dimension)
+    occurred_idx = _find_field_index(occurred_fields, target_dimension)
+    occurred_values = _value_set_at(occurred_rows, occurred_idx)
+
+    missing_rows: List[List[Any]] = []
+    seen: set[Any] = set()
+    for row in universe_rows:
+        if len(row) <= universe_idx:
+            continue
+        value = row[universe_idx]
+        if value is None or str(value) == "" or value in seen:
+            continue
+        seen.add(value)
+        if value not in occurred_values:
+            missing_rows.append([value])
+
+    return {
+        "fields": [target_dimension],
+        "rows": missing_rows,
+        "set_difference": {
+            "target_dimension": target_dimension,
+            "universe_count": len(seen),
+            "occurred_count": len(occurred_values),
+            "missing_count": len(missing_rows),
+            "definition": "全集集合 - 已发生集合 = 未发生集合",
+        },
+    }
+
+
+def _calculate_root_cause_breakdown(
+    *,
+    dimension: str,
+    target_metric: Dict[str, Any],
+    fields: List[Any],
+    rows: List[List[Any]],
+    sort_direction: str,
+    limit: int,
+) -> Dict[str, Any]:
+    """Sort one breakdown by metric contribution and return the top rows."""
+    dimension_idx = _find_field_index(fields, dimension)
+    metric_idx = _find_metric_index(fields, target_metric, dimension_idx)
+    sortable_rows = [list(row) for row in rows if len(row) > max(dimension_idx, metric_idx)]
+    descending = sort_direction.upper() == "DESC"
+
+    def contribution_key(row: List[Any]) -> Tuple[int, float]:
+        value = _numeric_value(row[metric_idx])
+        if value is None:
+            return (1, 0)
+        return (0, -value if descending else value)
+
+    sortable_rows.sort(key=contribution_key)
+    top_rows = sortable_rows[:limit]
+    metric_label = _metric_label(target_metric)
+    return {
+        "dimension": dimension,
+        "fields": fields,
+        "rows": top_rows,
+        "metric_index": metric_idx,
+        "dimension_index": dimension_idx,
+        "flattened_rows": [
+            [dimension, row[dimension_idx], row[metric_idx]]
+            for row in top_rows
+        ],
+        "flat_fields": ["breakdown_dimension", "dimension_value", metric_label],
+    }
+
+
+def _find_metric_index(fields: List[Any], target_metric: Dict[str, Any], dimension_idx: int) -> int:
+    metric_names = {
+        _compact(_metric_label(target_metric)),
+        _compact(str(target_metric.get("fieldCaption") or "")),
+    }
+    for index, field in enumerate(fields):
+        if index == dimension_idx:
+            continue
+        name = _compact(_field_name(field))
+        if name and any(metric_name and metric_name in name for metric_name in metric_names):
+            return index
+    for index, field in enumerate(fields):
+        if index == dimension_idx:
+            continue
+        if any(keyword in _field_name(field) for keyword in _MEASURE_KEYWORDS):
+            return index
+    return len(fields) - 1 if fields else 0
+
+
 def _find_field_index(fields: List[Any], expected: str) -> int:
     compact_expected = _compact(expected)
     for index, field in enumerate(fields):
@@ -366,7 +476,11 @@ def _is_date_caption(caption: str) -> bool:
 
 
 def _extract_missing_field_name(message: str) -> Optional[str]:
-    for pattern in (r"Field\s+'([^']+)'\s+was not found", r'字段[「"\']?([^」"\']+)[」"\']?不存在'):
+    for pattern in (
+        r"Field\s+'([^']+)'\s+was not found",
+        r"Unknown Field:\s*([^.。\n]+)",
+        r'字段[「"\']?([^」"\']+)[」"\']?不存在',
+    ):
         match = re.search(pattern, message or "", re.IGNORECASE)
         if match:
             return match.group(1).strip()
@@ -728,6 +842,90 @@ def _lookup_datasource_by_name(datasource_name: str, connection_id: Optional[int
         session.close()
 
 
+def _build_set_difference_vizqls(
+    *,
+    target_dimension: str,
+    base_filters: Optional[List[Dict[str, Any]]] = None,
+    exclude_filters: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Build the two deterministic VizQL queries for universe and occurred sets."""
+    base = list(base_filters or [])
+    exclude = list(exclude_filters or [])
+    dimension_field = {"fieldCaption": target_dimension}
+    return {
+        "universe_vizql": {
+            "fields": [dimension_field],
+            "filters": base,
+        },
+        "occurred_vizql": {
+            "fields": [dimension_field],
+            "filters": base + exclude,
+        },
+    }
+
+
+def _build_root_cause_vizqls(
+    *,
+    target_metric: Dict[str, Any],
+    breakdown_dimensions: List[str],
+    filters: Optional[List[Dict[str, Any]]] = None,
+    sort_direction: str = "ASC",
+    limit: int = 10,
+) -> List[Dict[str, Any]]:
+    """Build deterministic contribution-ranking VizQL queries for candidate dimensions."""
+    clean_dimensions = [str(dimension).strip() for dimension in breakdown_dimensions if str(dimension).strip()]
+    clean_dimensions = clean_dimensions[:3]
+    metric_field = {
+        "fieldCaption": str(target_metric.get("fieldCaption") or "").strip(),
+        "function": str(target_metric.get("function") or "SUM").strip().upper(),
+        "sortDirection": sort_direction.upper(),
+        "sortPriority": 1,
+    }
+    alias = str(target_metric.get("fieldAlias") or "").strip()
+    if alias:
+        metric_field["fieldAlias"] = alias
+    clean_filters = list(filters or [])
+    clean_limit = _clamp_root_cause_limit(limit)
+    return [
+        {
+            "dimension": dimension,
+            "limit": clean_limit,
+            "vizql": {
+                "fields": [{"fieldCaption": dimension}, metric_field],
+                "filters": clean_filters,
+            },
+        }
+        for dimension in clean_dimensions
+    ]
+
+
+def _metric_label(target_metric: Dict[str, Any]) -> str:
+    alias = str(target_metric.get("fieldAlias") or "").strip()
+    if alias:
+        return alias
+    function = str(target_metric.get("function") or "SUM").strip().upper()
+    caption = str(target_metric.get("fieldCaption") or "").strip()
+    return f"{function}({caption})" if caption else function
+
+
+def _clamp_root_cause_limit(value: Any) -> int:
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        limit = 10
+    return max(1, min(limit, 20))
+
+
+def _normalize_sort_direction(value: Any, question: str = "") -> str:
+    direction = str(value or "").strip().upper()
+    if direction in {"ASC", "DESC"}:
+        return direction
+    compact_question = _compact(question)
+    if any(keyword in compact_question for keyword in ("亏", "下降", "减少", "降低", "下滑", "变差")):
+        return "ASC"
+    return "DESC"
+
+
 class QueryTool(BaseTool):
     """
     Phase 1 Data Agent Tool: Natural Language Query Tool.
@@ -771,6 +969,48 @@ class QueryTool(BaseTool):
                 "type": "string",
                 "description": "数据源名称（与 vizql_json 配合使用，用于结果展示）",
             },
+            "analysis_intent": {
+                "type": "string",
+                "enum": ["set_difference", "root_cause"],
+                "description": "特殊分析意图。set_difference 表示未发生/差集分析；root_cause 表示按候选维度做贡献排序的归因下钻分析。",
+            },
+            "target_dimension": {
+                "type": "string",
+                "description": "差集分析的目标维度，例如 子类别、客户名称、省/自治区。",
+            },
+            "target_metric": {
+                "type": "object",
+                "description": "归因下钻的目标指标，例如 {'fieldCaption': '利润', 'function': 'SUM'}。",
+            },
+            "breakdown_dimensions": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "归因下钻候选维度，最多执行前 3 个，例如 类别、子类别、客户名称。",
+            },
+            "filters": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "归因下钻的问题范围过滤条件，例如省份、年份。",
+            },
+            "sort_direction": {
+                "type": "string",
+                "enum": ["ASC", "DESC"],
+                "description": "归因排序方向。亏损/下降通常用 ASC，增长/贡献通常用 DESC。",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "每个下钻维度返回的行数，默认 10，最大 20。",
+            },
+            "base_filters": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "限定全集范围的过滤条件。",
+            },
+            "exclude_filters": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "定义已发生集合的过滤条件，最终结果会从全集中排除这些条件命中的维度值。",
+            },
         },
         "required": ["question"],
     }
@@ -803,7 +1043,12 @@ class QueryTool(BaseTool):
         if not question:
             return ToolResult(
                 success=False,
-                data=None,
+                data=query_tool_error_payload(
+                    "query_plan_unavailable",
+                    trace_id=context.trace_id,
+                    message="问题不能为空。",
+                    user_hint="请明确要查询的指标、维度和时间范围。",
+                ),
                 error="question cannot be empty",
                 execution_time_ms=int((time.time() - start_time) * 1000),
             )
@@ -820,17 +1065,43 @@ class QueryTool(BaseTool):
             ds_info = _lookup_datasource_by_name(
                 params.get("datasource_name", ""),
                 connection_id=connection_id,
-            ) or route_datasource(question, connection_id=connection_id)
+            )
+            if not ds_info and params.get("datasource_luid"):
+                ds_info = {
+                    "luid": params["datasource_luid"],
+                    "name": params.get("datasource_name") or params["datasource_luid"],
+                    "asset_id": params.get("asset_id"),
+                }
+            ds_info = ds_info or route_datasource(question, connection_id=connection_id)
             if not ds_info:
                 return ToolResult(
                     success=False,
-                    data=None,
+                    data=query_tool_error_payload("datasource_not_matched", trace_id=context.trace_id),
                     error="无法找到匹配的数据源，请明确指定数据源或使用正确的术语",
                     execution_time_ms=int((time.time() - start_time) * 1000),
                 )
 
             datasource_luid = ds_info["luid"]
             datasource_name = ds_info["name"]
+
+            if params.get("analysis_intent") == "set_difference":
+                return await self._execute_set_difference(
+                    params=params,
+                    datasource_luid=datasource_luid,
+                    datasource_name=datasource_name,
+                    connection_id=connection_id,
+                    start_time=start_time,
+                    question=question,
+                )
+            if params.get("analysis_intent") == "root_cause":
+                return await self._execute_root_cause(
+                    params=params,
+                    datasource_luid=datasource_luid,
+                    datasource_name=datasource_name,
+                    connection_id=connection_id,
+                    start_time=start_time,
+                    question=question,
+                )
 
             # Field captions from Redis cache (warmed by route_datasource scoring)
             asset_id = ds_info.get("asset_id")
@@ -883,7 +1154,15 @@ class QueryTool(BaseTool):
                 logger.warning("QueryTool NLQ failed: code=%s, message=%s", e.code, e.message)
                 return ToolResult(
                     success=False,
-                    data=None,
+                    data=query_tool_error_payload(
+                        fallback_type_from_error(
+                            error_code=e.code,
+                            message=e.message,
+                            default_type="query_plan_unavailable",
+                        ),
+                        trace_id=context.trace_id,
+                        error_code=e.code,
+                    ),
                     error=f"[{e.code}] {e.message}",
                     execution_time_ms=int((time.time() - start_time) * 1000),
                 )
@@ -892,7 +1171,7 @@ class QueryTool(BaseTool):
             if not vizql_json:
                 return ToolResult(
                     success=False,
-                    data=None,
+                    data=query_tool_error_payload("query_plan_unavailable", trace_id=context.trace_id),
                     error="NLQ 返回的 VizQL JSON 为空",
                     execution_time_ms=int((time.time() - start_time) * 1000),
                 )
@@ -914,7 +1193,7 @@ class QueryTool(BaseTool):
             logger.exception("QueryTool unexpected error: %s", e)
             return ToolResult(
                 success=False,
-                data=None,
+                data=query_tool_error_payload("service_unavailable", trace_id=context.trace_id),
                 error="数据查询服务暂时不可用，请稍后重试",
                 execution_time_ms=int((time.time() - start_time) * 1000),
             )
@@ -956,7 +1235,10 @@ class QueryTool(BaseTool):
             logger.warning("QueryTool customer churn failed: code=%s, message=%s", e.code, e.message)
             return ToolResult(
                 success=False,
-                data=None,
+                data=query_tool_error_payload(
+                    fallback_type_from_error(error_code=e.code, message=e.message),
+                    error_code=e.code,
+                ),
                 error=f"[{e.code}] {e.message}",
                 execution_time_ms=int((time.time() - start_time) * 1000),
             )
@@ -979,6 +1261,216 @@ class QueryTool(BaseTool):
         if substitutions:
             data["field_substitutions"] = substitutions
         return ToolResult(success=True, data=data, execution_time_ms=execution_time_ms)
+
+    async def _execute_set_difference(
+        self,
+        params: Dict[str, Any],
+        datasource_luid: str,
+        datasource_name: str,
+        connection_id: Optional[int],
+        start_time: float,
+        question: str = "",
+    ) -> ToolResult:
+        """Execute universe - occurred for “未发生/没有记录” questions."""
+        target_dimension = str(params.get("target_dimension") or "").strip()
+        if not target_dimension:
+            return ToolResult(
+                success=False,
+                data=None,
+                error="set_difference requires target_dimension",
+                execution_time_ms=int((time.time() - start_time) * 1000),
+            )
+
+        exclude_filters = params.get("exclude_filters") or []
+        if not isinstance(exclude_filters, list) or not exclude_filters:
+            return ToolResult(
+                success=False,
+                data=None,
+                error="set_difference requires non-empty exclude_filters",
+                execution_time_ms=int((time.time() - start_time) * 1000),
+            )
+
+        base_filters = params.get("base_filters") or []
+        if not isinstance(base_filters, list):
+            return ToolResult(
+                success=False,
+                data=None,
+                error="set_difference base_filters must be an array",
+                execution_time_ms=int((time.time() - start_time) * 1000),
+            )
+
+        plan = _build_set_difference_vizqls(
+            target_dimension=target_dimension,
+            base_filters=base_filters,
+            exclude_filters=exclude_filters,
+        )
+
+        try:
+            universe_result, universe_vizql, universe_substitutions = await _execute_query_with_date_fallback(
+                datasource_luid=datasource_luid,
+                connection_id=connection_id,
+                vizql_json=plan["universe_vizql"],
+                question=question,
+                limit=1000,
+            )
+            universe_fields, universe_rows = _normalize_result_table(universe_result)
+
+            occurred_result, occurred_vizql, occurred_substitutions = await _execute_query_with_date_fallback(
+                datasource_luid=datasource_luid,
+                connection_id=connection_id,
+                vizql_json=plan["occurred_vizql"],
+                question=question,
+                limit=1000,
+            )
+            occurred_fields, occurred_rows = _normalize_result_table(occurred_result)
+        except NLQError as e:
+            logger.warning("QueryTool set_difference failed: code=%s, message=%s", e.code, e.message)
+            return ToolResult(
+                success=False,
+                data=None,
+                error=f"[{e.code}] {e.message}",
+                execution_time_ms=int((time.time() - start_time) * 1000),
+            )
+
+        data = _calculate_set_difference(
+            target_dimension=target_dimension,
+            universe_fields=universe_fields,
+            universe_rows=universe_rows,
+            occurred_fields=occurred_fields,
+            occurred_rows=occurred_rows,
+        )
+        substitutions = universe_substitutions + occurred_substitutions
+        data.update({
+            "intent": "set_difference",
+            "confidence": 0.95,
+            "datasource_name": datasource_name,
+            "set_difference_plan": {
+                "base_filters": base_filters,
+                "exclude_filters": exclude_filters,
+                "universe_vizql": universe_vizql,
+                "occurred_vizql": occurred_vizql,
+            },
+        })
+        if substitutions:
+            data["field_substitutions"] = substitutions
+
+        return ToolResult(
+            success=True,
+            data=data,
+            execution_time_ms=int((time.time() - start_time) * 1000),
+        )
+
+    async def _execute_root_cause(
+        self,
+        params: Dict[str, Any],
+        datasource_luid: str,
+        datasource_name: str,
+        connection_id: Optional[int],
+        start_time: float,
+        question: str = "",
+    ) -> ToolResult:
+        """Execute bounded dimension breakdowns for root-cause style questions."""
+        target_metric = params.get("target_metric") or {}
+        if not isinstance(target_metric, dict) or not str(target_metric.get("fieldCaption") or "").strip():
+            return ToolResult(
+                success=False,
+                data=None,
+                error="root_cause requires target_metric.fieldCaption",
+                execution_time_ms=int((time.time() - start_time) * 1000),
+            )
+
+        breakdown_dimensions = params.get("breakdown_dimensions") or []
+        if not isinstance(breakdown_dimensions, list) or not breakdown_dimensions:
+            return ToolResult(
+                success=False,
+                data=None,
+                error="root_cause requires non-empty breakdown_dimensions",
+                execution_time_ms=int((time.time() - start_time) * 1000),
+            )
+
+        filters = params.get("filters") or []
+        if not isinstance(filters, list):
+            return ToolResult(
+                success=False,
+                data=None,
+                error="root_cause filters must be an array",
+                execution_time_ms=int((time.time() - start_time) * 1000),
+            )
+
+        sort_direction = _normalize_sort_direction(params.get("sort_direction"), question)
+        limit = _clamp_root_cause_limit(params.get("limit", 10))
+        plans = _build_root_cause_vizqls(
+            target_metric=target_metric,
+            breakdown_dimensions=breakdown_dimensions,
+            filters=filters,
+            sort_direction=sort_direction,
+            limit=limit,
+        )
+        if not plans:
+            return ToolResult(
+                success=False,
+                data=None,
+                error="root_cause requires at least one valid breakdown dimension",
+                execution_time_ms=int((time.time() - start_time) * 1000),
+            )
+
+        breakdowns: List[Dict[str, Any]] = []
+        flattened_rows: List[List[Any]] = []
+        substitutions: List[Dict[str, str]] = []
+        try:
+            for plan in plans:
+                result, effective_vizql, field_substitutions = await _execute_query_with_date_fallback(
+                    datasource_luid=datasource_luid,
+                    connection_id=connection_id,
+                    vizql_json=plan["vizql"],
+                    question=question,
+                    limit=limit,
+                )
+                fields, rows = _normalize_result_table(result)
+                breakdown = _calculate_root_cause_breakdown(
+                    dimension=plan["dimension"],
+                    target_metric=target_metric,
+                    fields=fields,
+                    rows=rows,
+                    sort_direction=sort_direction,
+                    limit=limit,
+                )
+                breakdown["vizql"] = effective_vizql
+                breakdowns.append(breakdown)
+                flattened_rows.extend(breakdown["flattened_rows"])
+                substitutions.extend(field_substitutions)
+        except NLQError as e:
+            logger.warning("QueryTool root_cause failed: code=%s, message=%s", e.code, e.message)
+            return ToolResult(
+                success=False,
+                data=None,
+                error=f"[{e.code}] {e.message}",
+                execution_time_ms=int((time.time() - start_time) * 1000),
+            )
+
+        data: Dict[str, Any] = {
+            "fields": ["breakdown_dimension", "dimension_value", _metric_label(target_metric)],
+            "rows": flattened_rows,
+            "intent": "root_cause",
+            "confidence": 0.95,
+            "datasource_name": datasource_name,
+            "root_cause": {
+                "target_metric": target_metric,
+                "filters": filters,
+                "sort_direction": sort_direction,
+                "limit": limit,
+                "breakdowns": breakdowns,
+                "interpretation_guard": "按候选维度做贡献排序，用于定位主要贡献项；不代表已证明真实因果关系。",
+            },
+        }
+        if substitutions:
+            data["field_substitutions"] = substitutions
+
+        return ToolResult(
+            success=True,
+            data=data,
+            execution_time_ms=int((time.time() - start_time) * 1000),
+        )
 
     async def _execute_direct(
         self,
@@ -1014,26 +1506,35 @@ class QueryTool(BaseTool):
                     suggestion,
                 )
                 return ToolResult(
-                    success=True,
-                    data={
-                        "fields": [],
-                        "rows": [],
-                        "intent": "field_unavailable",
-                        "confidence": confidence,
-                        "datasource_name": datasource_name,
-                        "field_unavailable": {
-                            "requested": missing_field,
-                            "available_fields": available_fields,
-                            "suggestion": suggestion,
-                            "reason": "requested field is not available from Tableau MCP metadata",
-                        },
-                    },
+                    success=False,
+                    data=query_tool_error_payload(
+                        "field_unavailable",
+                        trace_id=context.trace_id,
+                        message=f"当前数据源没有可查询字段「{missing_field}」。",
+                        user_hint=(
+                            f"可用的相近字段是「{suggestion}」。请改用可查询字段后重试。"
+                            if suggestion
+                            else "请改用可查询字段后重试。"
+                        ),
+                        suggested_actions=[
+                            action
+                            for action in [
+                                f"改用字段：{suggestion}" if suggestion else "",
+                                "查看数据源字段结构",
+                            ]
+                            if action
+                        ],
+                    ),
                     execution_time_ms=int((time.time() - start_time) * 1000),
                 )
             logger.warning("QueryTool execute_query failed: code=%s, message=%s", e.code, e.message)
             return ToolResult(
                 success=False,
-                data=None,
+                data=query_tool_error_payload(
+                    fallback_type_from_error(error_code=e.code, message=e.message),
+                    trace_id=context.trace_id,
+                    error_code=e.code,
+                ),
                 error=f"[{e.code}] {e.message}",
                 execution_time_ms=int((time.time() - start_time) * 1000),
             )

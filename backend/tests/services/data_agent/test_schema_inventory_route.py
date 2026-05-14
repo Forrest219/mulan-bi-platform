@@ -51,8 +51,8 @@ def sample_tool_data():
         "db_type": "tableau",
         "tables": [
             {"name": "zeta view", "type": "view", "project": "B"},
-            {"name": "Orders", "type": "datasource", "project": ""},
-            {"name": "alpha", "type": "datasource", "project": "A"},
+            {"name": "Orders", "type": "datasource", "project": "", "web_url": "https://example.test/orders"},
+            {"name": "alpha", "type": "datasource", "project": "A", "web_url": "https://example.test/alpha"},
             {"name": "Workbook A", "type": "workbook", "project": "A"},
             {"name": "Flow A", "type": "flow", "project": "A"},
             {"name": "Custom Asset", "type": "metric", "project": "A"},
@@ -152,6 +152,11 @@ def test_render_schema_inventory_markdown_is_byte_stable_and_uses_exact_counts()
     assert "约" not in first
     assert "多个" not in first
     assert "推荐" not in first
+    assert "#### A（1）" in first
+    assert "#### 未分组（1）" in first
+    assert "- [alpha](https://example.test/alpha)" in first
+    assert "- [Orders](https://example.test/orders)" in first
+    assert " - https://example.test" not in first
 
 
 def test_truncates_each_asset_type_but_keeps_true_total_count():
@@ -270,7 +275,8 @@ async def test_run_schema_inventory_route_for_field_question_uses_table_name_and
     assert "orders_5D2D0CE41EE948FBBB5EAAF793DD6314" not in result.answer
     assert "订单 ID" in result.answer
     assert "销售额" in result.answer
-    assert "资产链接：https://example.test/datasource" in result.answer
+    assert "https://example.test/datasource" not in result.answer
+    assert "资产链接" not in result.answer
 
 
 @pytest.mark.asyncio

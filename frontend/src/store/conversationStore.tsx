@@ -72,6 +72,11 @@ function nowUtc(): string {
   return new Date().toISOString();
 }
 
+function isInitialTitle(title: string | null | undefined): boolean {
+  const trimmed = (title ?? '').trim();
+  return !trimmed || trimmed === '新对话';
+}
+
 function isDisplayableConversation(conv: Conversation): boolean {
   if (typeof conv.message_count === 'number') {
     return conv.message_count > 0;
@@ -101,11 +106,11 @@ function reducer(state: Conversation[], action: Action): Conversation[] {
       return state.map((conv) => {
         if (conv.id !== conversationId) return conv;
         const updatedMessages = [...conv.messages, message];
-        // 更新 title（取首条消息前 20 字）
         const firstUserMsg = updatedMessages.find((m) => m.role === 'user');
-        const newTitle = firstUserMsg
-          ? firstUserMsg.content.slice(0, 20)
-          : conv.title;
+        const newTitle =
+          isInitialTitle(conv.title) && firstUserMsg
+            ? firstUserMsg.content.slice(0, 20)
+            : conv.title;
         return {
           ...conv,
           title: newTitle,
@@ -238,14 +243,17 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateConversationTitle = useCallback(async (id: string, title: string): Promise<void> => {
+    const previousTitle = conversations.find((conv) => conv.id === id)?.title ?? '新对话';
     // 乐观更新：先更新 UI
     dispatch({ type: 'UPDATE_TITLE', payload: { id, title } });
     try {
-      await conversationsApi.update(id, title);
-    } catch {
-      // 后端失败时保留本地更新（容忍离线场景）
+      await agentConversationsApi.updateConversationTitle(id, title);
+    } catch (error) {
+      dispatch({ type: 'UPDATE_TITLE', payload: { id, title: previousTitle } });
+      window.alert(error instanceof Error ? error.message : '重命名失败，请稍后重试');
+      throw error;
     }
-  }, []);
+  }, [conversations]);
 
   return (
     <ConversationContext.Provider

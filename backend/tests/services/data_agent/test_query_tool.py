@@ -8,7 +8,15 @@ QueryTool 集成测试
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from services.data_agent.tools.query_tool import QueryTool, _build_customer_churn_vizqls, _build_direct_vizql
+from services.data_agent.tools.query_tool import (
+    QueryTool,
+    _build_customer_churn_vizqls,
+    _build_direct_vizql,
+    _build_root_cause_vizqls,
+    _build_set_difference_vizqls,
+    _calculate_root_cause_breakdown,
+    _extract_missing_field_name,
+)
 from services.data_agent.tool_base import ToolContext, ToolResult
 from services.llm.nlq_service import NLQError
 
@@ -28,6 +36,11 @@ class TestQueryTool:
             connection_id=1,
             trace_id="t1",
         )
+
+    def test_extract_missing_field_name_supports_unknown_field_message(self):
+        message = "MCP 工具执行失败: Unknown Field: 订单日期."
+
+        assert _extract_missing_field_name(message) == "订单日期"
 
     # =============================================================================
     # TC-QUERY-001: 空问题处理
@@ -235,6 +248,91 @@ class TestQueryTool:
             },
         }
 
+    def test_set_difference_builds_universe_and_occurred_queries(self):
+        plan = _build_set_difference_vizqls(
+            target_dimension="子类别",
+            base_filters=[],
+            exclude_filters=[
+                {
+                    "field": {"fieldCaption": "发货日期"},
+                    "filterType": "QUANTITATIVE_DATE",
+                    "quantitativeFilterType": "RANGE",
+                    "minDate": "2025-01-01",
+                    "maxDate": "2025-12-31",
+                }
+            ],
+        )
+
+        assert plan == {
+            "universe_vizql": {
+                "fields": [{"fieldCaption": "子类别"}],
+                "filters": [],
+            },
+            "occurred_vizql": {
+                "fields": [{"fieldCaption": "子类别"}],
+                "filters": [
+                    {
+                        "field": {"fieldCaption": "发货日期"},
+                        "filterType": "QUANTITATIVE_DATE",
+                        "quantitativeFilterType": "RANGE",
+                        "minDate": "2025-01-01",
+                        "maxDate": "2025-12-31",
+                    }
+                ],
+            },
+        }
+
+    def test_root_cause_builds_dimension_breakdown_queries(self):
+        filters = [
+            {"field": {"fieldCaption": "省/自治区"}, "filterType": "CATEGORICAL", "values": ["福建"]},
+            {
+                "field": {"fieldCaption": "订单日期"},
+                "filterType": "QUANTITATIVE_DATE",
+                "quantitativeFilterType": "RANGE",
+                "minDate": "2024-01-01",
+                "maxDate": "2024-12-31",
+            },
+        ]
+
+        plan = _build_root_cause_vizqls(
+            target_metric={"fieldCaption": "利润", "function": "SUM"},
+            breakdown_dimensions=["类别", "子类别", "客户名称", "订单ID"],
+            filters=filters,
+            sort_direction="ASC",
+            limit=30,
+        )
+
+        assert [item["dimension"] for item in plan] == ["类别", "子类别", "客户名称"]
+        assert plan[0]["limit"] == 20
+        assert plan[0]["vizql"] == {
+            "fields": [
+                {"fieldCaption": "类别"},
+                {
+                    "fieldCaption": "利润",
+                    "function": "SUM",
+                    "sortDirection": "ASC",
+                    "sortPriority": 1,
+                },
+            ],
+            "filters": filters,
+        }
+
+    def test_root_cause_breakdown_desc_keeps_null_metric_last(self):
+        breakdown = _calculate_root_cause_breakdown(
+            dimension="类别",
+            target_metric={"fieldCaption": "销售额", "function": "SUM"},
+            fields=["类别", "SUM(销售额)"],
+            rows=[["家具", None], ["技术", 20], ["办公用品", 100]],
+            sort_direction="DESC",
+            limit=3,
+        )
+
+        assert breakdown["flattened_rows"] == [
+            ["类别", "办公用品", 100],
+            ["类别", "技术", 20],
+            ["类别", "家具", None],
+        ]
+
     @pytest.mark.asyncio
     async def test_direct_path_channel_count_does_not_call_llm(self, tool, tool_context):
         mock_ds_info = {
@@ -324,15 +422,11 @@ class TestQueryTool:
                             tool_context,
                         )
 
-        assert result.success is True
-        assert result.data["intent"] == "field_unavailable"
-        assert result.data["field_unavailable"] == {
-            "requested": "国家/地区",
-            "available_fields": ["省/自治区", "类别"],
-            "suggestion": "省/自治区",
-            "reason": "requested field is not available from Tableau MCP metadata",
-        }
-        assert result.data["rows"] == []
+        assert result.success is False
+        assert result.data["fallback_type"] == "field_unavailable"
+        assert result.data["message"] == "当前数据源没有可查询字段「国家/地区」。"
+        assert result.data["user_hint"] == "可用的相近字段是「省/自治区」。请改用可查询字段后重试。"
+        assert result.data["suggested_actions"] == ["改用字段：省/自治区", "查看数据源字段结构"]
 
     @pytest.mark.asyncio
     async def test_direct_path_top10_customers_sorts_and_calculates_share_locally(self, tool, tool_context):
@@ -389,6 +483,151 @@ class TestQueryTool:
         assert result.data["rows"] == [["C1"], ["C3"]]
         assert result.data["customer_churn"]["base_year"] == 2021
         assert result.data["customer_churn"]["churned_customer_count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_set_difference_intent_executes_two_queries_and_subtracts(self, tool, tool_context):
+        mock_ds_info = {
+            "luid": "test-luid",
+            "name": "订单+ (示例 - 超市)",
+            "asset_id": 123,
+        }
+        exclude_filter = {
+            "field": {"fieldCaption": "发货日期"},
+            "filterType": "QUANTITATIVE_DATE",
+            "quantitativeFilterType": "RANGE",
+            "minDate": "2025-01-01",
+            "maxDate": "2025-12-31",
+        }
+
+        with patch("services.data_agent.tools.query_tool.route_datasource", return_value=mock_ds_info):
+            with patch("services.data_agent.tools.query_tool.execute_query") as mock_exec:
+                mock_exec.side_effect = [
+                    {"fields": ["子类别"], "rows": [["美术"], ["书架"], ["装订机"]]},
+                    {"fields": ["子类别"], "rows": [["美术"], ["装订机"]]},
+                ]
+
+                result = await tool.execute(
+                    {
+                        "analysis_intent": "set_difference",
+                        "question": "2025 年没有销售记录的子类别有哪些？",
+                        "target_dimension": "子类别",
+                        "base_filters": [],
+                        "exclude_filters": [exclude_filter],
+                    },
+                    tool_context,
+                )
+
+        assert result.success is True
+        assert mock_exec.call_count == 2
+        assert mock_exec.call_args_list[0].kwargs["vizql_json"] == {
+            "fields": [{"fieldCaption": "子类别"}],
+            "filters": [],
+        }
+        assert mock_exec.call_args_list[1].kwargs["vizql_json"] == {
+            "fields": [{"fieldCaption": "子类别"}],
+            "filters": [exclude_filter],
+        }
+        assert result.data["intent"] == "set_difference"
+        assert result.data["fields"] == ["子类别"]
+        assert result.data["rows"] == [["书架"]]
+        assert result.data["set_difference"]["universe_count"] == 3
+        assert result.data["set_difference"]["occurred_count"] == 2
+        assert result.data["set_difference"]["missing_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_set_difference_requires_target_dimension(self, tool, tool_context):
+        with patch("services.data_agent.tools.query_tool.route_datasource", return_value={"luid": "l1", "name": "ds"}):
+            result = await tool.execute(
+                {
+                    "analysis_intent": "set_difference",
+                    "question": "2025 年没有销售记录的子类别有哪些？",
+                    "exclude_filters": [{"field": {"fieldCaption": "发货日期"}}],
+                },
+                tool_context,
+            )
+
+        assert result.success is False
+        assert "target_dimension" in result.error
+
+    @pytest.mark.asyncio
+    async def test_root_cause_intent_executes_breakdown_queries_and_sorts(self, tool, tool_context):
+        mock_ds_info = {
+            "luid": "test-luid",
+            "name": "订单+ (示例 - 超市)",
+            "asset_id": 123,
+        }
+        filters = [
+            {"field": {"fieldCaption": "省/自治区"}, "filterType": "CATEGORICAL", "values": ["福建"]},
+            {
+                "field": {"fieldCaption": "订单日期"},
+                "filterType": "QUANTITATIVE_DATE",
+                "quantitativeFilterType": "RANGE",
+                "minDate": "2024-01-01",
+                "maxDate": "2024-12-31",
+            },
+        ]
+
+        with patch("services.data_agent.tools.query_tool.route_datasource", return_value=mock_ds_info):
+            with patch("services.data_agent.tools.query_tool.execute_query") as mock_exec:
+                mock_exec.side_effect = [
+                    {"fields": ["类别", "SUM(利润)"], "rows": [["家具", -80], ["技术", 30], ["办公用品", -120]]},
+                    {"fields": ["客户名称", "SUM(利润)"], "rows": [["客户A", -50], ["客户B", -200], ["客户C", 10]]},
+                ]
+
+                result = await tool.execute(
+                    {
+                        "analysis_intent": "root_cause",
+                        "question": "为什么福建在 2024 年出现巨亏？",
+                        "target_metric": {"fieldCaption": "利润", "function": "SUM"},
+                        "breakdown_dimensions": ["类别", "客户名称"],
+                        "filters": filters,
+                        "sort_direction": "ASC",
+                        "limit": 2,
+                    },
+                    tool_context,
+                )
+
+        assert result.success is True
+        assert mock_exec.call_count == 2
+        assert mock_exec.call_args_list[0].kwargs["limit"] == 2
+        assert mock_exec.call_args_list[0].kwargs["vizql_json"] == {
+            "fields": [
+                {"fieldCaption": "类别"},
+                {
+                    "fieldCaption": "利润",
+                    "function": "SUM",
+                    "sortDirection": "ASC",
+                    "sortPriority": 1,
+                },
+            ],
+            "filters": filters,
+        }
+        assert result.data["intent"] == "root_cause"
+        assert result.data["fields"] == ["breakdown_dimension", "dimension_value", "SUM(利润)"]
+        assert result.data["rows"] == [
+            ["类别", "办公用品", -120],
+            ["类别", "家具", -80],
+            ["客户名称", "客户B", -200],
+            ["客户名称", "客户A", -50],
+        ]
+        assert len(result.data["root_cause"]["breakdowns"]) == 2
+        assert result.data["root_cause"]["sort_direction"] == "ASC"
+        assert "不代表已证明真实因果关系" in result.data["root_cause"]["interpretation_guard"]
+
+    @pytest.mark.asyncio
+    async def test_root_cause_requires_target_metric(self, tool, tool_context):
+        with patch("services.data_agent.tools.query_tool.route_datasource", return_value={"luid": "l1", "name": "ds"}):
+            result = await tool.execute(
+                {
+                    "analysis_intent": "root_cause",
+                    "question": "为什么福建在 2024 年出现巨亏？",
+                    "breakdown_dimensions": ["类别"],
+                },
+                tool_context,
+            )
+
+        assert result.success is False
+        assert "target_metric" in result.error
 
     # =============================================================================
     # TC-QUERY-004: route_datasource 失败
@@ -522,6 +761,12 @@ class TestQueryTool:
         assert schema["properties"]["question"]["type"] == "string"
         assert "connection_id" in schema["properties"]
         assert schema["properties"]["connection_id"]["type"] == "integer"
+        assert "analysis_intent" in schema["properties"]
+        assert schema["properties"]["analysis_intent"]["enum"] == ["set_difference", "root_cause"]
+        assert "target_dimension" in schema["properties"]
+        assert "exclude_filters" in schema["properties"]
+        assert "target_metric" in schema["properties"]
+        assert "breakdown_dimensions" in schema["properties"]
 
     # =============================================================================
     # TC-QUERY-010: 工具元数据

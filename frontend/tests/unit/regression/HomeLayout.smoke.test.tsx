@@ -2,7 +2,7 @@
 // 当前统一布局为 AppShellLayout；历史 HomeLayout 已由 AppShellLayout 替代。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -20,7 +20,15 @@ vi.mock('../../../src/store/conversationStore', () => ({
 }));
 
 vi.mock('../../../src/components/layout/AppHeader', () => ({
-  default: () => <div data-testid="app-header" />,
+  default: ({ onOpenHelpAgent }: { onOpenHelpAgent?: () => void }) => (
+    <header data-testid="app-header">
+      {onOpenHelpAgent && (
+        <button type="button" aria-label="打开 Help Agent" onClick={onOpenHelpAgent}>
+          Help
+        </button>
+      )}
+    </header>
+  ),
 }));
 
 vi.mock('../../../src/components/layout/AppSidebar', () => ({
@@ -74,5 +82,15 @@ describe('AppShellLayout 回归：布局快捷键不写库', () => {
     );
 
     expect(mockAddConversation).not.toHaveBeenCalled();
+  });
+
+  it('只通过顶栏传递 Help Agent 入口，不渲染旧悬浮按钮', () => {
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <AppShellLayout />
+      </MemoryRouter>
+    );
+
+    expect(screen.getAllByRole('button', { name: '打开 Help Agent' })).toHaveLength(1);
   });
 });
