@@ -1,0 +1,33 @@
+standards:
+  pipeline:
+    file: ../../AGENT_PIPELINE.md
+    description: 8-role agent pipeline (PM→Designer→Architect→Coder→Tester→Fixer→Reviewer→Shipper)
+  testing:
+    file: ../../docs/TESTING.md
+    description: Test standards, CI layers, smoke test index
+  roles:
+    dir: ../../agents/
+    files:
+      pm: pm.md
+      designer: designer.md
+      architect: architect.md
+      coder: coder.md
+      tester: tester.md
+      fixer: fixer.md
+      reviewer: reviewer.md
+      shipper: shipper.md
+  rules:
+    dir: ../../.claude/rules/
+    files:
+      product_positioning: product-positioning.md
+      project_structure: project-structure.md
+      dev_constraints: dev-constraints.md
+      alembic: alembic.md
+      gotchas: gotchas.md
+      no_shortcut: no-shortcut-principle.md
+      review_constraint: review-constraint.md
+  specs:
+    dir: ../../docs/specs/
+    index: ../../docs/specs/README.md
+    count: 50+
+  openspec_config: ../../openspec/config.yaml
