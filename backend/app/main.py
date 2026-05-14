@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.errors import MulanError
 
-from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm, health_scan, tasks, notifications, events, knowledge_base, search, conversations, chat, ask_data, query, platform_settings, help_agent
+from app.api import ddl, logs, requirements, rules, auth, users, groups, permissions, activity, datasources, tableau, llm, health_scan, tasks, notifications, events, knowledge_base, search, conversations, chat, ask_data, query, platform_settings, help_agent, data_explorer
 from app.api.agent import router as data_agent_router
 from services.data_agent.routes.causation import router as causation_router
 from services.data_agent.routes.dau_churn import router as dau_churn_router
@@ -62,6 +62,7 @@ app.include_router(groups.router, prefix="/api/groups", tags=["用户组管理"]
 app.include_router(permissions.router, prefix="/api/permissions", tags=["权限配置"])
 app.include_router(activity.router, prefix="/api/activity", tags=["访问日志"])
 app.include_router(datasources.router, prefix="/api/datasources", tags=["数据源管理"])
+app.include_router(data_explorer.router, prefix="/api/data-explorer", tags=["Data Explorer"])
 app.include_router(tableau.router, prefix="/api/tableau", tags=["Tableau 管理"])
 app.include_router(health_scan.router, prefix="/api/governance/health", tags=["数仓健康检查"])
 app.include_router(dqc.router, prefix="/api/dqc", tags=["DQC"])
