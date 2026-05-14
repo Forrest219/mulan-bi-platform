@@ -16,6 +16,22 @@
 | [`docs/specs/README.md`](docs/specs/README.md) | 技术规格书索引（34 份 spec） |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 系统架构总览 |
 
+## 多窗口 Agent 工作流
+
+`agents/` 目录包含各角色的提示词，与 `AGENT_PIPELINE.md` 配合使用：
+
+| 文件 | 角色 | 流水线阶段 |
+|------|------|-----------|
+| [`agents/pm.md`](agents/pm.md) | PM | 阶段 0 — 需求 → PRD |
+| [`agents/architect.md`](agents/architect.md) | Architect | 阶段 0/一 — PRD → Context_Summary + SPEC |
+| [`agents/coder.md`](agents/coder.md) | Coder | 阶段二 — SPEC → 实现 |
+| [`agents/tester.md`](agents/tester.md) | Tester | 阶段二 — 实现验收 |
+| [`agents/fixer.md`](agents/fixer.md) | Fixer | 阶段三 — 修复 + 覆盖率达标 |
+| [`agents/reviewer.md`](agents/reviewer.md) | Reviewer | 阶段四 — 合规 + 风险复核 |
+| [`agents/shipper.md`](agents/shipper.md) | Shipper | Audit + 阶段五 — 发布 |
+
+> 每个角色 md 仅定义角色职责；阶段门控、制品命名、铁规则的权威来源是 `AGENT_PIPELINE.md`。
+
 ---
 
 ## 技术栈
