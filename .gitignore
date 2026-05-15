@@ -49,6 +49,9 @@ cookies.txt
 backend/cookies.txt
 frontend/cookies.txt
 
+# Local editor/workspace state
+.obsidian/workspace.json
+
 # Test artifacts
 frontend/test-results/
 frontend/playwright-report/
