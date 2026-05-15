@@ -1,0 +1,34 @@
+# backend/.coveragerc
+# 覆盖率配置：coverage run 自动读取此文件
+
+[run]
+source = app,services
+branch = True
+parallel = True
+omit =
+    */tests/*
+    */test_*.py
+    */__pycache__/*
+    */alembic/*
+    */migrations/*
+    */scripts/*
+    */__init__.py
+
+[report]
+precision = 2
+skip_covered = False
+sort = Cover
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @app\.
+    @router\.
+
+[html]
+directory = coverage_html
+
+[lcov]
+output = coverage_lcov/lcov.info
