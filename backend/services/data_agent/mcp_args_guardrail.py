@@ -2,24 +2,52 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
 import jsonschema
 
+logger = logging.getLogger(__name__)
+
 GuardrailDecision = Literal["allow", "repair", "reject"]
 
 DEFAULT_LIMIT = 100
 MAX_LIMIT = 100
+DEFAULT_TIMEOUT = 30
+MAX_TIMEOUT = 60
 MAX_RESULT_FIELDS = 20
 
 FIELD_KEYS = frozenset({"fieldCaption", "fieldName", "field", "name", "caption"})
 FIELD_CONTAINER_KEYS = frozenset({"fields", "dimensions", "metrics", "filters", "order_by", "sort"})
 ENUM_KEYS = frozenset({"sortDirection", "direction", "sort_direction", "order", "operator", "filterType"})
 LIMIT_KEYS = frozenset({"limit", "max_rows", "maxRows"})
+TIMEOUT_KEYS = frozenset({"timeout", "timeout_seconds", "timeoutSeconds"})
 DATASOURCE_KEYS = frozenset({"datasource_luid", "datasourceLuid", "datasource_id", "datasourceId"})
 CONNECTION_KEYS = frozenset({"connection_id", "connectionId"})
+AGGREGATION_KEYS = frozenset({"function", "aggregation", "agg"})
+SORT_DIRECTION_KEYS = frozenset({"sortDirection", "sort_direction"})
+FILTER_TYPE_KEYS = frozenset({"filterType", "filter_type"})
+ALLOWED_AGGREGATIONS = frozenset({"SUM", "AVG", "COUNT", "COUNTD", "MIN", "MAX", "MEDIAN", "ATTR", "NONE"})
+ALLOWED_DATE_PARTS = frozenset({"YEAR", "QUARTER", "MONTH", "WEEK", "DAY"})
+ALLOWED_FILTER_TYPES = frozenset(
+    {
+        "SET",
+        "DATE",
+        "QUANTITATIVE_DATE",
+        "RANGE",
+        "RELATIVE_DATE",
+        "CATEGORICAL",
+        "NUMERIC",
+        "BOOLEAN",
+    }
+)
+ALLOWED_SORT_DIRECTIONS = frozenset({"ASC", "DESC"})
+MCP_ARGS_GUARDRAIL_PASS = "MCP_ARGS_GUARDRAIL_PASS"
+MCP_ARGS_GUARDRAIL_REJECT = "MCP_ARGS_GUARDRAIL_REJECT"
+MCP_QUERY_DATASOURCE_TOOL_NAME = "query-datasource"
 DANGEROUS_OPERATIONS = frozenset(
     {
         "delete",
@@ -103,6 +131,196 @@ class McpArgsGuardrailResult:
         }
 
 
+class McpArgsGuardrailRejected(Exception):
+    """Raised when a guarded MCP execution request must not reach Tableau MCP."""
+
+    def __init__(self, result: McpArgsGuardrailResult):
+        self.result = result
+        super().__init__(f"[{result.reject_code or 'MCP_ARGS_REJECTED'}] {result.message}")
+
+
+def query_datasource_tool_schema() -> dict[str, Any]:
+    """Return the Tableau MCP query-datasource argument schema enforced here."""
+    return {
+        "type": "object",
+        "properties": {
+            "datasourceLuid": {"type": "string", "minLength": 1},
+            "query": {
+                "type": "object",
+                "properties": {
+                    "fields": {"type": "array", "items": {"type": ["object", "string"]}},
+                    "filters": {"type": "array", "items": {"type": "object"}},
+                },
+                "additionalProperties": True,
+            },
+            "connection_id": {"type": ["integer", "null"]},
+            "limit": {"type": "integer", "minimum": 1},
+            "timeout": {"type": "integer", "minimum": 1},
+        },
+        "required": ["datasourceLuid", "query"],
+        "additionalProperties": False,
+    }
+
+
+def extract_queryable_fields_from_metadata(metadata: Any) -> list[str]:
+    """Extract a field whitelist from Tableau MCP or cached metadata payloads."""
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def add_name(value: Any) -> None:
+        name = str(value or "").strip()
+        if not name:
+            return
+        normalized = _normalize_field(name)
+        if normalized in seen:
+            return
+        seen.add(normalized)
+        candidates.append(name)
+
+    def visit(node: Any) -> None:
+        if isinstance(node, Mapping):
+            for key in ("fieldCaption", "field_caption", "caption", "name", "fieldName", "field_name"):
+                add_name(node.get(key))
+            for value in node.values():
+                if isinstance(value, (Mapping, list)):
+                    visit(value)
+        elif isinstance(node, list):
+            for item in node:
+                visit(item)
+
+    visit(metadata)
+    return candidates
+
+
+def validate_query_datasource_args(
+    *,
+    question: str,
+    datasource_luid: str,
+    query: dict[str, Any],
+    limit: int | None,
+    timeout: int | None,
+    connection_id: int | None,
+    queryable_fields: list[str],
+    current_datasource: dict[str, Any] | None = None,
+    user_context: dict[str, Any] | None = None,
+) -> McpArgsGuardrailResult:
+    """Validate official Tableau MCP query-datasource args."""
+    if not datasource_luid:
+        return _reject(
+            "MCP_ARGS_DATASOURCE_REQUIRED",
+            "MCP 查询缺少 datasource LUID。",
+            "请先选择一个可访问的数据源后再查询。",
+        )
+    if not isinstance(query, dict):
+        return _reject(
+            "MCP_ARGS_SCHEMA_INVALID",
+            "MCP query 参数必须是对象。",
+            "请重新生成结构化查询参数后再试。",
+        )
+
+    args: dict[str, Any] = {
+        "datasourceLuid": datasource_luid,
+        "query": query,
+    }
+    if limit is not None:
+        args["limit"] = limit
+    if timeout is not None:
+        args["timeout"] = timeout
+    if connection_id is not None:
+        args["connection_id"] = connection_id
+
+    datasource_context = dict(current_datasource or {})
+    datasource_context.setdefault("luid", datasource_luid)
+    if connection_id is not None:
+        datasource_context.setdefault("connection_id", connection_id)
+
+    user_ctx = dict(user_context or {})
+    if datasource_luid and "accessible_datasource_luids" not in user_ctx:
+        user_ctx["accessible_datasource_luids"] = [datasource_luid]
+    if connection_id is not None and "accessible_connection_ids" not in user_ctx:
+        user_ctx["accessible_connection_ids"] = [connection_id]
+    if connection_id is not None:
+        user_ctx.setdefault("connection_id", connection_id)
+
+    return validate_mcp_args(
+        McpArgsGuardrailInput(
+            question=question,
+            tool_name=MCP_QUERY_DATASOURCE_TOOL_NAME,
+            tool_schema=query_datasource_tool_schema(),
+            args=args,
+            queryable_fields=queryable_fields,
+            current_datasource=datasource_context,
+            user_context=user_ctx,
+        )
+    )
+
+
+def execute_query_datasource_with_guardrail(
+    *,
+    question: str,
+    datasource_luid: str,
+    query: dict[str, Any],
+    limit: int | None,
+    timeout: int | None,
+    connection_id: int | None,
+    queryable_fields: list[str],
+    execute: Callable[[dict[str, Any]], dict[str, Any]],
+    current_datasource: dict[str, Any] | None = None,
+    user_context: dict[str, Any] | None = None,
+    trace_id: str | None = None,
+    chain_mode: str | None = None,
+) -> dict[str, Any]:
+    """Validate query-datasource args, emit a diagnostic trace log, then execute."""
+    guardrail = validate_query_datasource_args(
+        question=question,
+        datasource_luid=datasource_luid,
+        query=query,
+        limit=limit,
+        timeout=timeout,
+        connection_id=connection_id,
+        queryable_fields=queryable_fields,
+        current_datasource=current_datasource,
+        user_context=user_context,
+    )
+    _log_guardrail_trace(
+        guardrail,
+        trace_id=trace_id,
+        chain_mode=chain_mode,
+        datasource_luid=datasource_luid,
+        connection_id=connection_id,
+    )
+    if guardrail.decision == "reject":
+        raise McpArgsGuardrailRejected(guardrail)
+
+    safe_args = guardrail.args or {}
+    result = execute(safe_args)
+    if isinstance(result, dict):
+        result.setdefault("mcp_args_guardrail", guardrail.to_dict())
+    return result
+
+
+def _log_guardrail_trace(
+    result: McpArgsGuardrailResult,
+    *,
+    trace_id: str | None,
+    chain_mode: str | None,
+    datasource_luid: str,
+    connection_id: int | None,
+) -> None:
+    event = MCP_ARGS_GUARDRAIL_REJECT if result.decision == "reject" else MCP_ARGS_GUARDRAIL_PASS
+    logger.info(
+        "%s decision=%s reject_code=%s trace_id=%s chain_mode=%s datasource_luid=%s connection_id=%s repairs=%d",
+        event,
+        result.decision,
+        result.reject_code,
+        trace_id or "",
+        chain_mode or "",
+        datasource_luid,
+        connection_id,
+        len(result.repairs),
+    )
+
+
 def validate_mcp_args(request: McpArgsGuardrailInput) -> McpArgsGuardrailResult:  # noqa: PLR0911
     """Validate and conservatively repair MCP args.
 
@@ -144,9 +362,21 @@ def validate_mcp_args(request: McpArgsGuardrailInput) -> McpArgsGuardrailResult:
     if limit_error:
         return _reject(*limit_error)
 
+    timeout_error = _repair_timeout(args, request.tool_schema, repairs)
+    if timeout_error:
+        return _reject(*timeout_error)
+
     enum_error = _repair_enum_case(args, request.tool_schema, repairs)
     if enum_error:
         return _reject(*enum_error)
+
+    aggregation_error = _repair_and_validate_aggregations(args, repairs)
+    if aggregation_error:
+        return _reject(*aggregation_error)
+
+    filter_sort_error = _repair_and_validate_filter_sort_enums(args, repairs)
+    if filter_sort_error:
+        return _reject(*filter_sort_error)
 
     field_error = _repair_and_validate_fields(args, request.queryable_fields, request.current_datasource, repairs)
     if field_error:
@@ -262,6 +492,44 @@ def _repair_limit(args: dict[str, Any], schema: dict[str, Any], repairs: list[Mc
     return None
 
 
+def _schema_has_timeout(schema: dict[str, Any]) -> bool:
+    return any(key in _schema_properties(schema) for key in TIMEOUT_KEYS)
+
+
+def _repair_timeout(args: dict[str, Any], schema: dict[str, Any], repairs: list[McpArgsRepair]) -> tuple[str, str, str] | None:
+    timeout_path = _find_first_key_path(args, TIMEOUT_KEYS)
+    if timeout_path is None:
+        return None
+
+    value = _get_path(args, timeout_path)
+    try:
+        timeout = int(value)
+    except (TypeError, ValueError):
+        return (
+            "MCP_ARGS_SCHEMA_INVALID",
+            "timeout 必须是整数。",
+            "请指定一个明确的整数超时时间。",
+        )
+    if timeout <= 0:
+        return (
+            "MCP_ARGS_SCHEMA_INVALID",
+            "timeout 必须大于 0。",
+            "请指定一个大于 0 的超时时间。",
+        )
+    if timeout > MAX_TIMEOUT:
+        _set_path(args, timeout_path, MAX_TIMEOUT)
+        repairs.append(
+            McpArgsRepair(
+                type="timeout_clamp",
+                path=_format_path(timeout_path),
+                before=value,
+                after=MAX_TIMEOUT,
+                reason="timeout exceeds guardrail maximum",
+            )
+        )
+    return None
+
+
 def _repair_enum_case(
     args: dict[str, Any],
     schema: dict[str, Any],
@@ -294,6 +562,117 @@ def _repair_enum_case(
                     reason="enum value differs only by case",
                 )
             )
+    return None
+
+
+def _repair_and_validate_aggregations(
+    args: dict[str, Any],
+    repairs: list[McpArgsRepair],
+) -> tuple[str, str, str] | None:
+    allowed = ALLOWED_AGGREGATIONS | ALLOWED_DATE_PARTS
+    canonical_by_normalized = {_normalize_token(value): value for value in allowed}
+    for path, key, value in _walk_key_values(args):
+        if key not in AGGREGATION_KEYS or value is None:
+            continue
+        if not isinstance(value, str):
+            return (
+                "MCP_ARGS_ILLEGAL_AGGREGATION",
+                "聚合函数必须是字符串。",
+                "请使用受支持的聚合函数重新生成查询参数。",
+            )
+        normalized = _normalize_token(value)
+        if normalized not in canonical_by_normalized:
+            return (
+                "MCP_ARGS_ILLEGAL_AGGREGATION",
+                f"不支持的聚合函数：{value}",
+                "请使用受支持的聚合函数重新生成查询参数。",
+            )
+        canonical = canonical_by_normalized[normalized]
+        if canonical != value:
+            _set_path(args, path, canonical)
+            repairs.append(
+                McpArgsRepair(
+                    type="aggregation_case",
+                    path=_format_path(path),
+                    before=value,
+                    after=canonical,
+                    reason="aggregation value differs only by case",
+                )
+            )
+    return None
+
+
+def _repair_and_validate_filter_sort_enums(
+    args: dict[str, Any],
+    repairs: list[McpArgsRepair],
+) -> tuple[str, str, str] | None:
+    for path, key, value in _walk_key_values(args):
+        if key in SORT_DIRECTION_KEYS:
+            error = _repair_or_reject_allowed_value(
+                args,
+                path,
+                value,
+                allowed=ALLOWED_SORT_DIRECTIONS,
+                code="MCP_ARGS_ILLEGAL_SORT",
+                message_prefix="不支持的排序方向",
+                repair_type="sort_direction_case",
+                repairs=repairs,
+            )
+            if error:
+                return error
+        elif key in FILTER_TYPE_KEYS:
+            error = _repair_or_reject_allowed_value(
+                args,
+                path,
+                value,
+                allowed=ALLOWED_FILTER_TYPES,
+                code="MCP_ARGS_ILLEGAL_FILTER",
+                message_prefix="不支持的过滤类型",
+                repair_type="filter_type_case",
+                repairs=repairs,
+            )
+            if error:
+                return error
+    return None
+
+
+def _repair_or_reject_allowed_value(
+    args: dict[str, Any],
+    path: tuple[Any, ...],
+    value: Any,
+    *,
+    allowed: frozenset[str],
+    code: str,
+    message_prefix: str,
+    repair_type: str,
+    repairs: list[McpArgsRepair],
+) -> tuple[str, str, str] | None:
+    if not isinstance(value, str):
+        return (
+            code,
+            f"{message_prefix}必须是字符串。",
+            "请使用受支持的枚举值重新生成查询参数。",
+        )
+    canonical_by_normalized = {_normalize_token(item): item for item in allowed}
+    normalized = _normalize_token(value)
+    if normalized not in canonical_by_normalized:
+        return (
+            code,
+            f"{message_prefix}：{value}",
+            "请使用受支持的枚举值重新生成查询参数。",
+        )
+    canonical = canonical_by_normalized[normalized]
+    if canonical != value:
+        _set_path(args, path, canonical)
+        repairs.append(
+            McpArgsRepair(
+                type=repair_type,
+                path=_format_path(path),
+                before=value,
+                after=canonical,
+                reason="enum value differs only by case",
+            )
+        )
     return None
 
 

@@ -16,9 +16,10 @@ Render validated MCP or query results into a concise, evidence-based business an
 The prompt receives:
 
 - `question`: original user question
-- `queryspec`: validated planning output
-- `mcp_data`: tool result JSON
-- `analysis_context`: optional conversation context
+- `response_data.fields`: returned columns
+- `response_data.rows`: returned rows
+- `response_data.field_types`: display metadata
+- `response_data.derived_columns`: already computed derived metrics
 
 ## Output Contract
 
@@ -34,8 +35,8 @@ Return final user-facing text only. Do not return JSON unless the user explicitl
 6. If data is empty, say no matching result was found under the current filters.
 7. If the result is truncated, explicitly state the shown count and omitted count.
 8. Do not invent causes, fields, filters, totals, or business explanations that are absent from data.
-9. If the user asks for a derived metric, such as 利润率 or 客单价, and `mcp_data` provides all required base metrics with an unambiguous formula, calculate it accurately and state the formula briefly. Format ratios as percentages when appropriate.
-10. If the derived metric formula is ambiguous or any base metric is missing, do not guess; state that the returned data is insufficient for that metric.
+9. Do not calculate business metrics, derived metrics, ratios, rankings, differences, totals, or averages. These values must already exist in `response_data.fields`, `response_data.rows`, or `response_data.derived_columns`.
+10. If a requested derived metric is absent from `response_data`, state that the returned data is insufficient for that metric.
 11. Keep normal answers under 120 Chinese characters unless the user asks for detail.
 12. For uncertainty, use "从当前返回的数据看" instead of pretending certainty.
 

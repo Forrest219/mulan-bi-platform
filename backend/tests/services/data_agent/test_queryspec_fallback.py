@@ -208,6 +208,26 @@ class _BadQuerySpecLLM:
         raise AssertionError(f"unexpected LLM purpose: {purpose}")
 
 
+class _BadQuerySpecThenMcpArgsLLM:
+    async def complete(self, *, prompt, system=None, timeout=None, purpose=None):
+        if purpose == "data_agent_queryspec":
+            return {"content": "无法生成 JSON"}
+        if purpose == "data_agent_mcp_proxy_args":
+            return {
+                "content": json.dumps(
+                    {
+                        "datasourceLuid": "ds-1",
+                        "query": {"fields": [{"fieldCaption": "销售额", "function": "SUM"}]},
+                        "limit": 100,
+                    },
+                    ensure_ascii=False,
+                )
+            }
+        if purpose == "data_agent_answer":
+            return {"content": ""}
+        raise AssertionError(f"unexpected LLM purpose: {purpose}")
+
+
 class _HallucinatedAnswerLLM:
     async def complete(self, *, prompt, system=None, timeout=None, purpose=None):
         if purpose == "data_agent_queryspec":
@@ -304,6 +324,7 @@ async def test_mcp_first_path_falls_back_when_llm_queryspec_is_invalid(monkeypat
 @pytest.mark.asyncio
 async def test_mcp_first_path_rejects_invalid_llm_queryspec_when_fallback_disabled(monkeypatch):
     monkeypatch.delenv("DATA_AGENT_QUERYSPEC_FALLBACK_ENABLED", raising=False)
+    monkeypatch.setenv("DATA_AGENT_QUERYSPEC_MCP_FALLBACK_ENABLED", "false")
     monkeypatch.setattr(
         mcp_first_main,
         "_resolve_datasource",
@@ -342,6 +363,7 @@ async def test_mcp_first_path_rejects_invalid_llm_queryspec_when_fallback_disabl
 @pytest.mark.asyncio
 async def test_mcp_first_path_rejects_semantic_metric_missing_when_fallback_disabled(monkeypatch):
     monkeypatch.delenv("DATA_AGENT_QUERYSPEC_FALLBACK_ENABLED", raising=False)
+    monkeypatch.setenv("DATA_AGENT_QUERYSPEC_MCP_FALLBACK_ENABLED", "false")
     monkeypatch.setattr(
         mcp_first_main,
         "_resolve_datasource",
@@ -382,6 +404,7 @@ async def test_mcp_first_path_rejects_semantic_metric_missing_when_fallback_disa
 @pytest.mark.asyncio
 async def test_mcp_first_path_rejects_operator_mismatch_when_fallback_disabled(monkeypatch):
     monkeypatch.delenv("DATA_AGENT_QUERYSPEC_FALLBACK_ENABLED", raising=False)
+    monkeypatch.setenv("DATA_AGENT_QUERYSPEC_MCP_FALLBACK_ENABLED", "false")
     monkeypatch.setattr(
         mcp_first_main,
         "_resolve_datasource",
@@ -417,9 +440,70 @@ async def test_mcp_first_path_rejects_operator_mismatch_when_fallback_disabled(m
     assert events[-1].type == "error"
     assert events[-1].content["fallback_type"] == "query_plan_rejected"
     assert events[-1].content["error_code"] == "QS_OPERATOR_MISMATCH"
-    assert events[-1].content["controlled_chain"]["detail"]["fallback_reason"] == (
+    assert events[-1].content["controlled_chain"]["detail"]["original_error"]["fallback_reason"] == (
         "llm_queryspec_operator_mismatch:aggregate->set_difference"
     )
+
+
+@pytest.mark.asyncio
+async def test_mcp_first_path_enters_guarded_mcp_fallback_when_queryspec_invalid(monkeypatch):
+    from services.data_agent import mcp_proxy_main
+
+    monkeypatch.delenv("DATA_AGENT_QUERYSPEC_FALLBACK_ENABLED", raising=False)
+    monkeypatch.delenv("DATA_AGENT_QUERYSPEC_MCP_FALLBACK_ENABLED", raising=False)
+    monkeypatch.setattr(
+        mcp_first_main,
+        "_resolve_datasource",
+        lambda question, context, datasource_name_hint: {"name": "测试数据源", "luid": "ds-1", "asset_id": 1},
+    )
+    monkeypatch.setattr(mcp_first_main, "_queryable_fields", lambda ds_info, connection_id=None: ["销售额"])
+
+    async def _fake_execute_query_datasource_args(args, context):
+        assert args["datasourceLuid"] == "ds-1"
+        assert args["query"]["fields"] == [{"fieldCaption": "销售额", "function": "SUM"}]
+        return {"fields": ["SUM(销售额)"], "rows": [[100]]}
+
+    monkeypatch.setattr(mcp_proxy_main, "_execute_query_datasource_args", _fake_execute_query_datasource_args)
+
+    events = [
+        event
+        async for event in mcp_first_main.run_mcp_first_main_path(
+            question="总销售额是多少？",
+            context=ToolContext(session_id="s1", user_id=1, connection_id=2, trace_id="trace-mcp-fallback"),
+            intent_result=IntentClassification(intent="aggregate", confidence=0.9, route_reason="metric_keyword"),
+            llm_service=_BadQuerySpecThenMcpArgsLLM(),
+        )
+    ]
+
+    fallback_event = next(
+        event
+        for event in events
+        if event.type == "tool_result"
+        and isinstance(event.content, dict)
+        and event.content.get("tool") == "queryspec_mcp_fallback"
+    )
+    guardrail_event = next(
+        event
+        for event in events
+        if event.type == "tool_result"
+        and isinstance(event.content, dict)
+        and event.content.get("tool") == "mcp_args_guardrail"
+    )
+    tableau_event = next(
+        event
+        for event in events
+        if event.type == "tool_result"
+        and isinstance(event.content, dict)
+        and event.content.get("tool") == "tableau_mcp"
+    )
+
+    assert fallback_event.content["result"]["event"] == "FALLBACK_TRIGGERED"
+    assert fallback_event.content["result"]["data"]["original_error"]["error"].startswith("invalid_json")
+    assert guardrail_event.content["result"]["event"] == "MCP_ARGS_GUARDRAIL_PASS"
+    assert tableau_event.content["result"]["data"]["fallback_chain_mode"] == "queryspec_mcp_fallback"
+    assert tableau_event.content["result"]["data"]["queryspec_metrics"]["queryspec_fallback_triggered"] is True
+    assert events[-1].type == "answer"
+    assert tableau_event.content["result"]["data"]["fields"] == ["SUM(销售额)"]
 
 
 @pytest.mark.asyncio

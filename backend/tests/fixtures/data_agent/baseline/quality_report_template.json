@@ -1,0 +1,129 @@
+{
+  "schema_version": "mcp_accuracy_quality_report.v1",
+  "source_plan": "inbox/20260515-15-mulan-mcp-accuracy-repair-plan.md",
+  "snapshot_id": "superstore_2026_05_13",
+  "generated_at": null,
+  "status": "pending",
+  "pending_checks": [],
+  "cases": [
+    {
+      "case_id": "batch2.q1_overall_kpis",
+      "mcp_baseline": null,
+      "mulan_response_data": null,
+      "ui_table_data": null,
+      "comparison": {
+        "status": "pending",
+        "failure_layer": null,
+        "checks": []
+      }
+    },
+    {
+      "case_id": "batch2.q2_followup_metric_trend",
+      "mcp_baseline": null,
+      "mulan_response_data": null,
+      "ui_table_data": null,
+      "comparison": {
+        "status": "pending",
+        "failure_layer": null,
+        "checks": []
+      }
+    },
+    {
+      "case_id": "batch2.q4_continue_split_each_year",
+      "mcp_baseline": null,
+      "mulan_response_data": null,
+      "ui_table_data": null,
+      "comparison": {
+        "status": "pending",
+        "failure_layer": null,
+        "checks": []
+      }
+    },
+    {
+      "case_id": "batch2.q5_subcategories_without_sales_2025",
+      "mcp_baseline": null,
+      "mulan_response_data": null,
+      "ui_table_data": null,
+      "comparison": {
+        "status": "pending",
+        "failure_layer": null,
+        "checks": []
+      }
+    },
+    {
+      "case_id": "batch2.q6_top10_customers",
+      "mcp_baseline": null,
+      "mulan_response_data": null,
+      "ui_table_data": null,
+      "comparison": {
+        "status": "pending",
+        "failure_layer": null,
+        "checks": []
+      }
+    },
+    {
+      "case_id": "batch2.q7_customer_dengbao_history",
+      "mcp_baseline": null,
+      "mulan_response_data": null,
+      "ui_table_data": null,
+      "comparison": {
+        "status": "pending",
+        "failure_layer": null,
+        "checks": []
+      }
+    },
+    {
+      "case_id": "batch2.q8_subcategory_profit_continuous_growth",
+      "mcp_baseline": null,
+      "mulan_response_data": null,
+      "ui_table_data": null,
+      "comparison": {
+        "status": "pending",
+        "failure_layer": null,
+        "checks": []
+      }
+    },
+    {
+      "case_id": "batch2.q9_provinces_always_loss",
+      "mcp_baseline": null,
+      "mulan_response_data": null,
+      "ui_table_data": null,
+      "comparison": {
+        "status": "pending",
+        "failure_layer": null,
+        "checks": []
+      }
+    },
+    {
+      "case_id": "batch2.q10_loss_root_cause_liaoning_fujian_2024",
+      "mcp_baseline": null,
+      "mulan_response_data": null,
+      "ui_table_data": null,
+      "comparison": {
+        "status": "pending",
+        "failure_layer": null,
+        "checks": []
+      }
+    }
+  ],
+  "metrics": {
+    "queryspec_main_path_success_rate": null,
+    "fallback_rate": null,
+    "queryspec_success_rate_threshold": 0.8
+  },
+  "failure_layers": [
+    "guardrail_missing",
+    "silent_fallback",
+    "response_data_empty",
+    "ui_table_mismatch",
+    "no_mcp",
+    "mcp_failure",
+    "contract_failure",
+    "field_mismatch",
+    "row_count_mismatch",
+    "order_mismatch",
+    "row_mismatch",
+    "numeric_mismatch",
+    "derived_metric_mismatch"
+  ]
+}

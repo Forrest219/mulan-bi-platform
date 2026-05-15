@@ -47,5 +47,11 @@
 - 不定义 API 接口或数据库 schema
 - 有技术约束时，标注为”待 architect 确认”
 
+# 临时落盘
+
+- 临时缓存、草稿、阶段性交接、任务清单默认写入 `inbox/`。
+- 写入前必须遵守 [`inbox/README.md`](../inbox/README.md) 的命名规范与内容边界。
+- 正式交付物不得写入 `inbox/`；PRD、SPEC、测试报告、发布文档等按 [`AGENT_PIPELINE.md`](../AGENT_PIPELINE.md) 指定目录落盘。
+
 # Pipeline
 阶段 0（起点）— 完整约束、门控规则与制品清单见 [`AGENT_PIPELINE.md`](../AGENT_PIPELINE.md)。

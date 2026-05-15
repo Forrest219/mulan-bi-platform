@@ -54,5 +54,11 @@
 - 不直接写业务代码
 - 发现实现细节问题通过 SPEC 更新传达，不越权修改代码
 
+# 临时落盘
+
+- 临时缓存、草稿、阶段性交接、任务清单默认写入 `inbox/`。
+- 写入前必须遵守 [`inbox/README.md`](../inbox/README.md) 的命名规范与内容边界。
+- 正式交付物不得写入 `inbox/`；PRD、SPEC、测试报告、发布文档等按 [`AGENT_PIPELINE.md`](../AGENT_PIPELINE.md) 指定目录落盘。
+
 # Pipeline
 阶段 0 / 阶段一（Context_Summary + SPEC）— 完整约束与交接规则见 [`AGENT_PIPELINE.md`](../AGENT_PIPELINE.md)。

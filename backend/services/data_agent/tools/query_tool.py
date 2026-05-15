@@ -428,6 +428,7 @@ async def _execute_query_with_date_fallback(
             vizql_json=vizql_json,
             limit=limit,
             connection_id=connection_id,
+            question=question,
         )
         if inspect.isawaitable(result):
             result = await result
@@ -455,6 +456,7 @@ async def _execute_query_with_date_fallback(
                 vizql_json=retry_vizql,
                 limit=limit,
                 connection_id=connection_id,
+                question=question,
             )
             if inspect.isawaitable(retry_result):
                 retry_result = await retry_result

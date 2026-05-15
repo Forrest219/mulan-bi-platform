@@ -1,3 +1,27 @@
+- id: batch2.q1_overall_kpis
+  group: batch2
+  question: "整体的销售额、利润、利润率、客户数、客单价是什么样子"
+  connection_fixture: superstore_tableau
+  expected_patch:
+    patch_type: reset_plan
+    contains:
+      metrics: ["销售额", "利润", "客户数"]
+      derived_metrics: ["利润率", "客单价"]
+  baseline:
+    mode: mcp_snapshot
+    expected_plan:
+      metrics: ["销售额", "利润", "客户数"]
+    result_shape:
+      required_fields: ["SUM(销售额)", "SUM(利润)", "COUNTD(客户名称)", "利润率", "客单价"]
+      row_count: 1
+      max_rows: 1
+    tolerances:
+      numeric_rel: 0.001
+      numeric_abs: 0.000001
+    derived_metrics:
+      required_fields: ["利润率", "客单价"]
+  expected_gate: pass
+
 - id: batch2.q2_followup_metric_trend
   group: batch2
   question: "这个指标过去几年的趋势是什么样子"
@@ -16,11 +40,14 @@
     expected_plan:
       metrics: ["销售额"]
     result_shape:
-      required_fields: ["订单日期", "销售额"]
+      required_fields: ["YEAR(发货日期)", "SUM(销售额)", "SUM(利润)", "COUNTD(客户名称)"]
+      row_count: 5
       max_rows: 10
     tolerances:
       numeric_rel: 0.001
       row_set: exact
+    identity_fields: ["YEAR(发货日期)"]
+    numeric_fields: ["SUM(销售额)", "SUM(利润)", "COUNTD(客户名称)"]
   expected_gate: pass
 
 - id: batch2.q4_continue_split_each_year
@@ -41,10 +68,14 @@
       metrics: ["销售额"]
       dimensions: ["子类别"]
     result_shape:
-      required_fields: ["子类别", "订单日期", "销售额"]
+      required_fields: ["子类别", "YEAR(发货日期)", "SUM(销售额)", "SUM(利润)"]
+      row_count: 80
       max_rows: 100
     tolerances:
       numeric_rel: 0.001
+      row_set: exact
+    identity_fields: ["子类别", "YEAR(发货日期)"]
+    numeric_fields: ["SUM(销售额)", "SUM(利润)"]
   expected_gate: pass
 
 - id: batch2.q5_subcategories_without_sales_2025
@@ -64,9 +95,11 @@
     mode: mcp_snapshot
     result_shape:
       required_fields: ["子类别"]
+      row_count: 5
       max_rows: 100
     tolerances:
       row_set: exact
+    identity_fields: ["子类别"]
   expected_gate: pass
 
 - id: batch2.q6_top10_customers
@@ -84,11 +117,25 @@
           direction: "desc"
   baseline:
     mode: mcp_snapshot
+    expected_plan:
+      metrics: ["销售额"]
+      dimensions: ["客户名称"]
     result_shape:
-      required_fields: ["客户名称", "销售额"]
+      required_fields: ["客户名称", "SUM(销售额)", "销售额占比"]
+      row_count: 10
       max_rows: 10
     tolerances:
       numeric_rel: 0.001
+      row_set: exact
+    identity_fields: ["客户名称"]
+    numeric_fields: ["SUM(销售额)", "销售额占比"]
+    order:
+      field: "SUM(销售额)"
+      direction: desc
+      top_n: 10
+      identity_fields: ["客户名称"]
+    derived_metrics:
+      required_fields: ["销售额占比"]
   expected_gate: pass
 
 - id: batch2.q7_customer_dengbao_history
@@ -107,10 +154,14 @@
   baseline:
     mode: mcp_snapshot
     result_shape:
-      required_fields: ["客户名称", "订单日期", "销售额"]
+      required_fields: ["YEAR(发货日期)", "SUM(销售额)", "SUM(利润)"]
+      row_count: 2
       max_rows: 100
     tolerances:
       numeric_rel: 0.001
+      row_set: exact
+    identity_fields: ["YEAR(发货日期)"]
+    numeric_fields: ["SUM(销售额)", "SUM(利润)"]
   expected_gate: pass
 
 - id: batch2.q8_subcategory_profit_continuous_growth
@@ -127,11 +178,25 @@
         grain: year
   baseline:
     mode: mcp_snapshot
-    result_shape:
-      required_fields: ["子类别", "订单日期", "利润", "is_increasing"]
-      max_rows: 100
-    tolerances:
-      row_set: exact
+    tables:
+      result:
+        result_shape:
+          required_fields: ["子类别", "is_increasing"]
+          row_count: 5
+          max_rows: 5
+        tolerances:
+          row_set: exact
+        identity_fields: ["子类别"]
+      source:
+        result_shape:
+          required_fields: ["子类别", "YEAR(发货日期)", "SUM(销售额)", "SUM(利润)"]
+          row_count: 80
+          max_rows: 100
+        tolerances:
+          numeric_rel: 0.001
+          row_set: exact
+        identity_fields: ["子类别", "YEAR(发货日期)"]
+        numeric_fields: ["SUM(销售额)", "SUM(利润)"]
   expected_gate: pass
 
 - id: batch2.q9_provinces_always_loss
@@ -150,10 +215,12 @@
   baseline:
     mode: mcp_snapshot
     result_shape:
-      required_fields: ["省份", "利润", "all_periods_match"]
+      required_fields: ["省/自治区", "all_periods_match"]
+      row_count: 1
       max_rows: 100
     tolerances:
       row_set: exact
+    identity_fields: ["省/自治区"]
   expected_gate: pass
 
 - id: batch2.q10_loss_root_cause_liaoning_fujian_2024
@@ -170,14 +237,43 @@
         - field_caption: "省份"
           operator: "in"
           value: ["辽宁", "福建"]
-        - field_caption: "订单日期"
+        - field_caption: "发货日期"
           operator: "between"
           value: ["2024-01-01", "2024-12-31"]
   baseline:
     mode: mcp_snapshot
-    result_shape:
-      required_fields: ["省份", "贡献维度", "利润", "贡献率"]
-      max_rows: 100
-    tolerances:
-      numeric_rel: 0.001
+    expected_plan:
+      metrics: ["利润"]
+      dimensions: ["省/自治区"]
+    tables:
+      product:
+        result_shape:
+          required_fields: ["省/自治区", "子类别", "SUM(利润)"]
+          row_count: 10
+          max_rows: 10
+        tolerances:
+          numeric_rel: 0.001
+          row_set: exact
+        identity_fields: ["省/自治区", "子类别"]
+        numeric_fields: ["SUM(利润)"]
+        order:
+          field: "SUM(利润)"
+          direction: asc
+          top_n: 10
+          identity_fields: ["省/自治区", "子类别"]
+      customer:
+        result_shape:
+          required_fields: ["省/自治区", "客户名称", "SUM(利润)"]
+          row_count: 10
+          max_rows: 10
+        tolerances:
+          numeric_rel: 0.001
+          row_set: exact
+        identity_fields: ["省/自治区", "客户名称"]
+        numeric_fields: ["SUM(利润)"]
+        order:
+          field: "SUM(利润)"
+          direction: asc
+          top_n: 10
+          identity_fields: ["省/自治区", "客户名称"]
   expected_gate: pass

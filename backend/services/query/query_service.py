@@ -30,6 +30,12 @@ from app.core.database import Base, sa_func, sa_text
 
 # 模块顶层导入（允许测试通过 patch 替换）
 # services.tableau / services.llm 均不依赖 services.query，无循环风险
+from services.data_agent.mcp_args_guardrail import (  # noqa: E402
+    DEFAULT_LIMIT as DEFAULT_GUARDRAIL_LIMIT,
+    McpArgsGuardrailRejected,
+    execute_query_datasource_with_guardrail,
+    extract_queryable_fields_from_metadata,
+)
 from services.tableau.mcp_client import TableauMCPClient, TableauMCPError  # noqa: E402
 from services.llm.service import llm_service  # noqa: E402
 from services.llm.nlq_service import get_wrapper, get_principal  # noqa: E402
@@ -292,6 +298,60 @@ def _build_data_preview(data: dict, max_rows: int = 10) -> str:
     return "\n".join(lines)
 
 
+def _load_queryable_fields_for_guardrail(
+    client: TableauMCPClient,
+    datasource_luid: str,
+    timeout: int,
+) -> list[str]:
+    try:
+        metadata = client.get_datasource_metadata(datasource_luid, timeout=min(timeout, 30))
+        return extract_queryable_fields_from_metadata(metadata)
+    except Exception as exc:
+        logger.warning("QueryService guardrail metadata lookup failed: datasource=%s error=%s", datasource_luid, exc)
+        return []
+
+
+def _query_datasource_with_guardrail(
+    *,
+    client: TableauMCPClient,
+    datasource_luid: str,
+    query: Dict[str, Any],
+    limit: int,
+    timeout: int,
+    connection_id: int,
+    jwt_token: str,
+    message: str,
+    username: str,
+    user_id: Optional[int],
+) -> Dict[str, Any]:
+    return execute_query_datasource_with_guardrail(
+        question=message,
+        datasource_luid=datasource_luid,
+        query=query or {},
+        limit=limit,
+        timeout=timeout,
+        connection_id=connection_id,
+        queryable_fields=_load_queryable_fields_for_guardrail(client, datasource_luid, timeout),
+        current_datasource={"luid": datasource_luid, "connection_id": connection_id},
+        user_context={
+            "accessible_datasource_luids": [datasource_luid],
+            "accessible_connection_ids": [connection_id],
+            "connection_id": connection_id,
+            "username": username,
+            "user_id": user_id,
+        },
+        execute=lambda safe_args: client.query_datasource(
+            datasource_luid=str(safe_args.get("datasourceLuid") or ""),
+            query=safe_args.get("query") or {},
+            limit=int(safe_args.get("limit") or DEFAULT_GUARDRAIL_LIMIT),
+            timeout=int(safe_args.get("timeout") or timeout),
+            connection_id=safe_args.get("connection_id"),
+            jwt_token=jwt_token,
+        ),
+        chain_mode="query_service",
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 核心业务服务
 # ─────────────────────────────────────────────────────────────────────────────
@@ -367,43 +427,52 @@ class QueryService:
         将 TableauMCPError 分类映射为 QueryServiceError，并写入 query_error_events。
         返回映射后的 QueryServiceError（不抛出，由调用方决定是否 raise）。
         """
-        if not isinstance(exc, TableauMCPError):
+        if isinstance(exc, McpArgsGuardrailRejected):
+            guardrail = exc.result
+            error_type = "mcp_guardrail_rejected"
+            svc_code = "Q_PERM_002" if guardrail.reject_code == "MCP_ARGS_DATASOURCE_FORBIDDEN" else "Q_INPUT_006"
+            raw_code = guardrail.reject_code or "MCP_ARGS_REJECTED"
+            raw_message = guardrail.message
+            details = guardrail.to_dict()
+        elif not isinstance(exc, TableauMCPError):
             return QueryServiceError(
                 code="Q_MCP_004",
                 message=str(exc),
                 details={"raw": str(exc)},
             )
-
-        mcp_err: TableauMCPError = exc
-
-        if mcp_err.code == "NLQ_009":
-            # 区分 identity_not_found（401 / user not found）与 perm_denied（403）
-            # 判断依据：
-            #   1. HTTP 层传入的 status_code（HTTP 401 → identity_not_found）
-            #   2. MCP 协议层错误码字符串 "unauthorized"（Tableau 401 语义）
-            #   3. message 包含 "user not found" / "not found" 等身份不存在语义
-            http_status = mcp_err.details.get("status_code")
-            msg_lower = mcp_err.message.lower()
-            is_identity_error = (
-                http_status == 401
-                or "unauthorized" in str(mcp_err.details).lower()
-                or "user not found" in msg_lower
-                or "not found" in msg_lower
-                or "identity" in msg_lower
-                or "invalid user" in msg_lower
-            )
-            if is_identity_error:
-                error_type = "identity_not_found"
-                svc_code = "Q_PERM_002"
-            else:
-                error_type = "perm_denied"
-                svc_code = "Q_PERM_002"
-        elif mcp_err.code == "NLQ_007":
-            error_type = "mcp_timeout"
-            svc_code = "Q_TIMEOUT_003"
         else:
-            error_type = "mcp_error"
-            svc_code = "Q_MCP_004"
+            mcp_err: TableauMCPError = exc
+            if mcp_err.code == "NLQ_009":
+                # 区分 identity_not_found（401 / user not found）与 perm_denied（403）
+                # 判断依据：
+                #   1. HTTP 层传入的 status_code（HTTP 401 → identity_not_found）
+                #   2. MCP 协议层错误码字符串 "unauthorized"（Tableau 401 语义）
+                #   3. message 包含 "user not found" / "not found" 等身份不存在语义
+                http_status = mcp_err.details.get("status_code")
+                msg_lower = mcp_err.message.lower()
+                is_identity_error = (
+                    http_status == 401
+                    or "unauthorized" in str(mcp_err.details).lower()
+                    or "user not found" in msg_lower
+                    or "not found" in msg_lower
+                    or "identity" in msg_lower
+                    or "invalid user" in msg_lower
+                )
+                if is_identity_error:
+                    error_type = "identity_not_found"
+                    svc_code = "Q_PERM_002"
+                else:
+                    error_type = "perm_denied"
+                    svc_code = "Q_PERM_002"
+            elif mcp_err.code == "NLQ_007":
+                error_type = "mcp_timeout"
+                svc_code = "Q_TIMEOUT_003"
+            else:
+                error_type = "mcp_error"
+                svc_code = "Q_MCP_004"
+            raw_code = mcp_err.code
+            raw_message = mcp_err.message
+            details = {**mcp_err.details, "mcp_code": mcp_err.code}
 
         # 写入告警（使用独立 DB session + 独立 commit，确保主事务 rollback 时告警仍落地）
         try:
@@ -416,7 +485,7 @@ class QueryService:
                     error_type=error_type,
                     user_id=user_id,
                     connection_id=connection_id,
-                    raw_error=f"[{mcp_err.code}] {mcp_err.message}",
+                    raw_error=f"[{raw_code}] {raw_message}",
                 )
                 _alert_db.commit()
             except Exception as e_inner:
@@ -429,8 +498,8 @@ class QueryService:
 
         return QueryServiceError(
             code=svc_code,
-            message=mcp_err.message,
-            details={**mcp_err.details, "mcp_code": mcp_err.code},
+            message=raw_message,
+            details=details,
         )
 
     # ── 公开 API ───────────────────────────────────────────────────────────
@@ -572,15 +641,19 @@ class QueryService:
 
         client = TableauMCPClient(connection_id=connection_id, username=username)
         try:
-            mcp_data = client.query_datasource(
+            mcp_data = _query_datasource_with_guardrail(
+                client=client,
                 datasource_luid=datasource_luid,
                 query=vizql_query,
                 limit=limit,
                 timeout=timeout,
                 connection_id=connection_id,
                 jwt_token=jwt_token,
+                message=message,
+                username=username,
+                user_id=user_id,
             )
-        except TableauMCPError as e:
+        except (TableauMCPError, McpArgsGuardrailRejected) as e:
             # 写入错误告警并将用户消息标记为失败（在 assistant 消息中记录错误）
             svc_err = self._classify_and_record_mcp_error(
                 exc=e,
@@ -596,7 +669,7 @@ class QueryService:
                 content=f"查询失败：[{svc_err.code}] {svc_err.message}",
                 connection_id=connection_id,
                 datasource_luid=datasource_luid,
-                query_context={"error_code": svc_err.code, "mcp_code": e.code},
+                query_context={"error_code": svc_err.code, "mcp_code": getattr(e, "code", None) or svc_err.details.get("reject_code")},
             )
             self._db.commit()
             raise svc_err from e
@@ -753,15 +826,19 @@ class QueryService:
         _vizql = vizql_query if vizql_query is not None else {}
         client = TableauMCPClient(connection_id=connection_id, username=username)
         try:
-            mcp_data = client.query_datasource(
+            mcp_data = _query_datasource_with_guardrail(
+                client=client,
                 datasource_luid=datasource_luid,
                 query=_vizql,
                 limit=limit,
                 timeout=timeout,
                 connection_id=connection_id,
                 jwt_token=jwt_token,
+                message=message,
+                username=username,
+                user_id=user_id,
             )
-        except TableauMCPError as e:
+        except (TableauMCPError, McpArgsGuardrailRejected) as e:
             svc_err = self._classify_and_record_mcp_error(
                 exc=e,
                 username=username,
@@ -777,7 +854,7 @@ class QueryService:
                     content=f"查询失败：[{svc_err.code}] {svc_err.message}",
                     connection_id=connection_id,
                     datasource_luid=datasource_luid,
-                    query_context={"error_code": svc_err.code, "mcp_code": e.code},
+                    query_context={"error_code": svc_err.code, "mcp_code": getattr(e, "code", None) or svc_err.details.get("reject_code")},
                 )
                 self._db.commit()
             except Exception as e_persist:

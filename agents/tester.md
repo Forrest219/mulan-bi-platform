@@ -34,5 +34,11 @@
 - 不补充测试用例（那是 fixer 职责）
 - 只做验证，不做修复
 
+# 临时落盘
+
+- 临时缓存、草稿、阶段性交接、任务清单默认写入 `inbox/`。
+- 写入前必须遵守 [`inbox/README.md`](../inbox/README.md) 的命名规范与内容边界。
+- 正式交付物不得写入 `inbox/`；PRD、SPEC、测试报告、发布文档等按 [`AGENT_PIPELINE.md`](../AGENT_PIPELINE.md) 指定目录落盘。
+
 # Pipeline
 阶段二（验收）— 完整验收清单与失败回退规则见 [`AGENT_PIPELINE.md`](../AGENT_PIPELINE.md) 及 [`docs/TESTING.md`](../docs/TESTING.md)。

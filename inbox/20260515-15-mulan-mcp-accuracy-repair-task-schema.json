@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mulan-mcp-accuracy-repair-task-schema.v1",
+  "title": "Mulan MCP Accuracy Repair Tasks",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_plan",
+    "status",
+    "global_constraints",
+    "tasks"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "source_plan": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft_pending_approval",
+        "approved"
+      ]
+    },
+    "global_constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "approval_required_before_code",
+        "mcp_guardrail_choke_point",
+        "fallback_trace_required",
+        "renderer_business_calculation_allowed",
+        "python_business_terms_hardcoded_allowed",
+        "commit_requires_batch2_baseline_pass"
+      ],
+      "properties": {
+        "approval_required_before_code": {
+          "type": "boolean",
+          "const": true
+        },
+        "mcp_guardrail_choke_point": {
+          "type": "boolean",
+          "const": true
+        },
+        "fallback_trace_required": {
+          "type": "boolean",
+          "const": true
+        },
+        "renderer_business_calculation_allowed": {
+          "type": "boolean",
+          "const": false
+        },
+        "python_business_terms_hardcoded_allowed": {
+          "type": "boolean",
+          "const": false
+        },
+        "commit_requires_batch2_baseline_pass": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "phase",
+          "title",
+          "owner",
+          "goal",
+          "depends_on",
+          "allowed_read_scopes",
+          "allowed_write_scopes",
+          "implementation_scope",
+          "must_not",
+          "deliverables",
+          "validation",
+          "acceptance_criteria"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^MCP-ACC-[0-9]{2}$"
+          },
+          "phase": {
+            "type": "string",
+            "pattern": "^Phase [0-9]+$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "owner": {
+            "type": "string",
+            "enum": [
+              "coder"
+            ]
+          },
+          "goal": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 220
+          },
+          "depends_on": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "pattern": "^MCP-ACC-[0-9]{2}$"
+            },
+            "uniqueItems": true
+          },
+          "allowed_read_scopes": {
+            "$ref": "#/$defs/string_list"
+          },
+          "allowed_write_scopes": {
+            "$ref": "#/$defs/string_list"
+          },
+          "implementation_scope": {
+            "$ref": "#/$defs/string_list"
+          },
+          "must_not": {
+            "$ref": "#/$defs/string_list"
+          },
+          "deliverables": {
+            "$ref": "#/$defs/string_list"
+          },
+          "validation": {
+            "$ref": "#/$defs/string_list"
+          },
+          "acceptance_criteria": {
+            "$ref": "#/$defs/string_list"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "string_list": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 260
+      },
+      "uniqueItems": true
+    }
+  }
+}

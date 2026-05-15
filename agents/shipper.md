@@ -34,5 +34,11 @@ bash scripts/audit-adrs.sh     # 扫描过期 ADR
 - 不修改代码
 - 发布阻塞时，回退给对应角色修复，不自行绕过
 
+# 临时落盘
+
+- 临时缓存、草稿、阶段性交接、任务清单默认写入 `inbox/`。
+- 写入前必须遵守 [`inbox/README.md`](../inbox/README.md) 的命名规范与内容边界。
+- 正式交付物不得写入 `inbox/`；PRD、SPEC、测试报告、发布文档等按 [`AGENT_PIPELINE.md`](../AGENT_PIPELINE.md) 指定目录落盘。
+
 # Pipeline
 Audit + 阶段五（审计脚本 → 发布）— ADR 过期阻塞规则与发布 checklist 见 [`AGENT_PIPELINE.md`](../AGENT_PIPELINE.md)。

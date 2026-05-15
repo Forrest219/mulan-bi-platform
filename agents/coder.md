@@ -69,5 +69,11 @@ cd frontend && npm run build    # 改了路由/入口时必跑
 | | 公共接口定义 |
 | | 外部契约 |
 
+# 临时落盘
+
+- 临时缓存、草稿、阶段性交接、任务清单默认写入 `inbox/`。
+- 写入前必须遵守 [`inbox/README.md`](../inbox/README.md) 的命名规范与内容边界。
+- 正式交付物不得写入 `inbox/`；PRD、SPEC、测试报告、发布文档等按 [`AGENT_PIPELINE.md`](../AGENT_PIPELINE.md) 指定目录落盘。
+
 # Pipeline
 阶段二（实现）— 完整约束、自愈上限（3 次）与制品清单见 [`AGENT_PIPELINE.md`](../AGENT_PIPELINE.md)。

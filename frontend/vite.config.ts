@@ -5,6 +5,7 @@ import AutoImport from "unplugin-auto-import/vite";
 
 const base = process.env.BASE_PATH || "/";
 const isPreview = process.env.IS_PREVIEW ? true : false;
+const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || "http://localhost:8000";
 // https://vite.dev/config/
 export default defineConfig({
   define: {
@@ -77,11 +78,11 @@ export default defineConfig({
     host: "0.0.0.0",
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: apiProxyTarget,
         changeOrigin: true,
       },
       '/tableau-mcp': {
-        target: 'http://localhost:8000',
+        target: apiProxyTarget,
         changeOrigin: true,
       },
     },

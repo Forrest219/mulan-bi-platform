@@ -172,21 +172,36 @@ function appendToolResultStep(current: AgentExplainability | undefined, tool: st
   };
 }
 
-function tableDataFromResponse(responseType: string | undefined, responseData: unknown): TableData | undefined {
-  if (responseType !== 'table' || !responseData || typeof responseData !== 'object') return undefined;
-  const data = responseData as { fields?: unknown; rows?: unknown; table_display?: unknown };
+export function tableDataFromStructuredPayload(
+  payload: unknown,
+  responseType?: string,
+): TableData | undefined {
+  if (responseType !== undefined && responseType !== 'table') return undefined;
+  if (!payload || typeof payload !== 'object') return undefined;
+  const data = payload as { fields?: unknown; rows?: unknown; col_types?: unknown; table_display?: unknown };
   if (!Array.isArray(data.fields) || !Array.isArray(data.rows) || data.fields.length === 0 || data.rows.length === 0) {
     return undefined;
   }
   const fields = data.fields.map((field) => String(field));
   const rows = data.rows.filter(Array.isArray) as (string | number | null)[][];
   if (rows.length === 0) return undefined;
-  const col_types = fields.map((_, i) => {
-    const sample = rows.slice(0, 5).map((row) => row[i]).filter((value) => value != null && value !== '');
-    return sample.length > 0 && sample.every((value) => typeof value === 'number') ? 'numeric' : 'string';
-  }) as ('numeric' | 'string')[];
+  const col_types = parseColTypes(data.col_types, fields, rows);
   const table_display = parseTableDisplay(data.table_display);
   return { fields, rows, col_types, ...(table_display ? { table_display } : {}) };
+}
+
+function parseColTypes(
+  value: unknown,
+  fields: string[],
+  rows: (string | number | null)[][],
+): ('numeric' | 'string')[] {
+  if (Array.isArray(value) && value.length === fields.length) {
+    return value.map((item) => item === 'numeric' ? 'numeric' : 'string');
+  }
+  return fields.map((_, i) => {
+    const sample = rows.slice(0, 5).map((row) => row[i]).filter((cell) => cell != null && cell !== '');
+    return sample.length > 0 && sample.every((cell) => typeof cell === 'number') ? 'numeric' : 'string';
+  });
 }
 
 function parseTableDisplay(value: unknown): TableDisplay | undefined {
@@ -385,19 +400,14 @@ export function useStreamingChat(): UseStreamingChatReturn {
             }
           } else if (event.type === 'table_data') {
             const id = streamingIdRef.current;
-            const table_display = parseTableDisplay((event as { table_display?: unknown }).table_display);
+            const tableData = tableDataFromStructuredPayload(event);
             if (id) {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === id
                     ? {
                         ...m,
-                        tableData: {
-                          fields: event.fields,
-                          rows: event.rows,
-                          col_types: event.col_types,
-                          ...(table_display ? { table_display } : {}),
-                        },
+                        tableData: tableData ?? m.tableData,
                       }
                     : m,
                 ),
@@ -418,7 +428,7 @@ export function useStreamingChat(): UseStreamingChatReturn {
             bufferRef.current += event.content;
           } else if (event.type === 'done') {
             const id = streamingIdRef.current;
-            const tableData = tableDataFromResponse(event.response_type, event.response_data);
+            const tableData = tableDataFromStructuredPayload(event.response_data, event.response_type);
             if (id) {
               setMessages((prev) =>
                 prev.map((m) =>

@@ -1,0 +1,425 @@
+{
+  "schema_version": "1.0",
+  "source_plan": "inbox/20260515-15-mulan-mcp-accuracy-repair-plan.md",
+  "status": "approved",
+  "global_constraints": {
+    "approval_required_before_code": true,
+    "mcp_guardrail_choke_point": true,
+    "fallback_trace_required": true,
+    "renderer_business_calculation_allowed": false,
+    "python_business_terms_hardcoded_allowed": false,
+    "commit_requires_batch2_baseline_pass": true
+  },
+  "tasks": [
+    {
+      "id": "MCP-ACC-01",
+      "phase": "Phase 1",
+      "title": "MCP Args Guardrail choke point",
+      "owner": "coder",
+      "goal": "Ensure every Tableau MCP query path passes one args guardrail before execution.",
+      "depends_on": [],
+      "allowed_read_scopes": [
+        "Tableau MCP call wrapper",
+        "MCP first/proxy paths",
+        "QuerySpec to MCP args path",
+        "auth and datasource metadata lookup"
+      ],
+      "allowed_write_scopes": [
+        "mcp_args_guardrail.py or existing guardrail module",
+        "MCP execution wrapper tests",
+        "trace event definitions if needed"
+      ],
+      "implementation_scope": [
+        "Validate connection and datasource authorization",
+        "Validate datasource LUID source",
+        "Validate fields against metadata whitelist",
+        "Validate aggregation, filters, sort, limit, timeout, max rows, max fields"
+      ],
+      "must_not": [
+        "Leave any問数 path able to call Tableau MCP without Guardrail",
+        "Hardcode business terms in Python",
+        "Return fake success on Guardrail reject"
+      ],
+      "deliverables": [
+        "Guardrail entrypoint",
+        "All MCP query paths routed through Guardrail",
+        "Guardrail pass/reject trace"
+      ],
+      "validation": [
+        "Unit tests for unknown field, illegal datasource, illegal aggregation, unbounded detail query",
+        "Trace check for Guardrail pass on successful query"
+      ],
+      "acceptance_criteria": [
+        "No问数 MCP execution path bypasses Guardrail",
+        "Guardrail rejects unsafe args with diagnostic error",
+        "Successful query emits Guardrail pass trace"
+      ]
+    },
+    {
+      "id": "MCP-ACC-02",
+      "phase": "Phase 0",
+      "title": "Reviewed MCP baselines and comparator seed",
+      "owner": "coder",
+      "goal": "Create reviewed baseline fixtures and a comparator foundation for Q1/Q6/Q10.",
+      "depends_on": [
+        "MCP-ACC-01"
+      ],
+      "allowed_read_scopes": [
+        "Batch 2 raw/baseline outputs",
+        "existing test fixture layout",
+        "existing comparator or quality gate utilities"
+      ],
+      "allowed_write_scopes": [
+        "formal test fixtures outside inbox",
+        "baseline comparator tests",
+        "quality report artifact template"
+      ],
+      "implementation_scope": [
+        "Create reviewed MCP snapshots for Q1, Q6, Q10",
+        "Compare fields, row count, Top N order, numeric tolerance, derived metrics",
+        "Classify failure layer"
+      ],
+      "must_not": [
+        "Treat inbox files as formal baseline fixtures",
+        "Use natural language answer as numeric source",
+        "Hardcode case-specific business labels in Python"
+      ],
+      "deliverables": [
+        "Reviewed baseline fixtures",
+        "Comparator entrypoint",
+        "Failure classification output"
+      ],
+      "validation": [
+        "Comparator passes against reviewed baseline self-check",
+        "Comparator detects field, row, order, and numeric mismatch"
+      ],
+      "acceptance_criteria": [
+        "Q1/Q6/Q10 baselines are reproducible",
+        "Comparator can run offline",
+        "Report distinguishes no MCP, MCP failure, contract failure, numeric mismatch"
+      ]
+    },
+    {
+      "id": "MCP-ACC-03",
+      "phase": "Phase 2",
+      "title": "Controlled QuerySpec fallback and trace",
+      "owner": "coder",
+      "goal": "Convert QuerySpec planning, validation, and repair failures into controlled MCP fallback triggers.",
+      "depends_on": [
+        "MCP-ACC-01"
+      ],
+      "allowed_read_scopes": [
+        "QuerySpec planning path",
+        "QuerySpec validation and repair path",
+        "MCP proxy/direct path",
+        "SSE trace emission"
+      ],
+      "allowed_write_scopes": [
+        "fallback selection logic",
+        "trace emission",
+        "QuerySpec success and fallback rate metrics"
+      ],
+      "implementation_scope": [
+        "Fallback on planning skill missing, QuerySpec invalid, validation failed, repair failed",
+        "Emit FALLBACK_TRIGGERED or WARN with reason and original error",
+        "Route fallback args through Guardrail"
+      ],
+      "must_not": [
+        "Fallback silently",
+        "Treat MCP proxy/direct as default long-term path",
+        "Use renderer unavailable as query fallback trigger"
+      ],
+      "deliverables": [
+        "Controlled fallback path",
+        "Fallback trace fields",
+        "QuerySpec main-path success metric"
+      ],
+      "validation": [
+        "Q1/Q6/Q10 enter tableau_mcp when QuerySpec fails",
+        "Fallback events include reason and original QuerySpec error",
+        "Fallback args pass through Guardrail"
+      ],
+      "acceptance_criteria": [
+        "No QS_LLM_INVALID hard stop when MCP baseline can answer",
+        "Every fallback is observable",
+        "QuerySpec success rate and fallback rate are reportable"
+      ]
+    },
+    {
+      "id": "MCP-ACC-04",
+      "phase": "Phase 3",
+      "title": "Dynamic Column Engine and Metrics Registry",
+      "owner": "coder",
+      "goal": "Compute derived metrics deterministically after MCP rows and before renderer.",
+      "depends_on": [
+        "MCP-ACC-01",
+        "MCP-ACC-02"
+      ],
+      "allowed_read_scopes": [
+        "MCP result normalization",
+        "response_data assembly",
+        "existing metric or semantic config"
+      ],
+      "allowed_write_scopes": [
+        "Dynamic Column Engine",
+        "non-Python Metrics Registry/config",
+        "derived metric tests"
+      ],
+      "implementation_scope": [
+        "Load metric formulas from non-Python registry",
+        "Append derived columns to response_data",
+        "Handle division by zero and missing source fields deterministically"
+      ],
+      "must_not": [
+        "Hardcode metric names, labels, or formulas in Python",
+        "Let LLM or Renderer calculate derived metrics",
+        "Overwrite MCP source rows"
+      ],
+      "deliverables": [
+        "Dynamic Column Engine",
+        "Metrics Registry config",
+        "Derived column metadata"
+      ],
+      "validation": [
+        "Unit tests for derived metric formulas",
+        "Missing input field produces diagnostic result",
+        "Renderer receives already computed values"
+      ],
+      "acceptance_criteria": [
+        "Derived metrics are present in response_data or table_display",
+        "Derived values are deterministic",
+        "No business metric literal is required in Python code"
+      ]
+    },
+    {
+      "id": "MCP-ACC-05",
+      "phase": "Phase 3",
+      "title": "Unified table response contract",
+      "owner": "coder",
+      "goal": "Make SSE table_data and final done.response_data use one table structure source.",
+      "depends_on": [
+        "MCP-ACC-04"
+      ],
+      "allowed_read_scopes": [
+        "/api/agent/stream SSE entry",
+        "done.response_data builder",
+        "frontend streaming table extraction"
+      ],
+      "allowed_write_scopes": [
+        "backend table response assembler",
+        "SSE done/table_data emission",
+        "frontend table data adapter if needed"
+      ],
+      "implementation_scope": [
+        "Emit response_type table for successful问数",
+        "Include response_data.fields, rows, table_display",
+        "Use same normalized table object for table_data and done"
+      ],
+      "must_not": [
+        "Emit answer-only success for table-capable问数",
+        "Let frontend infer table schema from prose",
+        "Create divergent table_data and done.response_data payloads"
+      ],
+      "deliverables": [
+        "Unified table assembler",
+        "SSE contract tests",
+        "Frontend adapter update if required"
+      ],
+      "validation": [
+        "Backend contract tests for done.response_data",
+        "SSE test that table_data and done share equivalent source",
+        "Frontend test for fields/rows rendering"
+      ],
+      "acceptance_criteria": [
+        "Successful问数 returns table response_type",
+        "fields and rows are non-empty",
+        "Frontend can render without guessing"
+      ]
+    },
+    {
+      "id": "MCP-ACC-06",
+      "phase": "Phase 5",
+      "title": "Q1/Q6/Q10 quality gate",
+      "owner": "coder",
+      "goal": "Block regressions where Mulan is worse than MCP baseline for first canary set.",
+      "depends_on": [
+        "MCP-ACC-02",
+        "MCP-ACC-03",
+        "MCP-ACC-05"
+      ],
+      "allowed_read_scopes": [
+        "canary runner",
+        "baseline comparator",
+        "Mulan response_data logs",
+        "UI tableData capture"
+      ],
+      "allowed_write_scopes": [
+        "quality gate runner",
+        "canary report output",
+        "test command integration"
+      ],
+      "implementation_scope": [
+        "Compare MCP baseline, Mulan response_data, and UI tableData",
+        "Check fields, row count, Top N order, numeric tolerance",
+        "Fail on missing Guardrail pass or silent fallback"
+      ],
+      "must_not": [
+        "Mark answer text as pass without response_data match",
+        "Commit code before this gate passes",
+        "Ignore fallback rate in report"
+      ],
+      "deliverables": [
+        "Q1/Q6/Q10 gate",
+        "quality report",
+        "documented command to run gate"
+      ],
+      "validation": [
+        "Gate passes for compliant fixtures",
+        "Gate fails for missing field, wrong order, numeric drift, no Guardrail trace",
+        "Gate output names failure category"
+      ],
+      "acceptance_criteria": [
+        "Q1/Q6/Q10 pass against reviewed MCP baseline",
+        "All three enter tableau_mcp",
+        "All three include non-empty table response_data"
+      ]
+    },
+    {
+      "id": "MCP-ACC-07",
+      "phase": "Phase 5",
+      "title": "Q4/Q8 extension and rate metrics",
+      "owner": "coder",
+      "goal": "Extend canary coverage and expose QuerySpec main-path success and fallback rate.",
+      "depends_on": [
+        "MCP-ACC-06"
+      ],
+      "allowed_read_scopes": [
+        "Q4/Q8 Batch 2 baseline outputs",
+        "quality gate runner",
+        "trace metrics aggregation"
+      ],
+      "allowed_write_scopes": [
+        "Q4/Q8 fixtures",
+        "metrics report",
+        "quality gate cases"
+      ],
+      "implementation_scope": [
+        "Add Q4 and Q8 baselines",
+        "Track QuerySpec main-path success rate",
+        "Track fallback rate by day or version"
+      ],
+      "must_not": [
+        "Hide fallback rate behind aggregate pass",
+        "Accept QuerySpec success rate below 80 percent without explicit failure",
+        "Use ad hoc case-specific Python rules"
+      ],
+      "deliverables": [
+        "Q4/Q8 gate cases",
+        "success and fallback rate report",
+        "80 percent threshold failure"
+      ],
+      "validation": [
+        "Gate runs Q1/Q4/Q6/Q8/Q10",
+        "Metrics report includes QuerySpec success rate and fallback rate",
+        "Threshold breach is visible"
+      ],
+      "acceptance_criteria": [
+        "Five canaries are repeatable",
+        "Failures identify affected layer",
+        "QuerySpec success rate below 80 percent fails the quality gate"
+      ]
+    },
+    {
+      "id": "MCP-ACC-08",
+      "phase": "Phase 4",
+      "title": "Renderer output skill contract",
+      "owner": "coder",
+      "goal": "Restrict renderer to explanation and display formatting over computed response_data.",
+      "depends_on": [
+        "MCP-ACC-04",
+        "MCP-ACC-05"
+      ],
+      "allowed_read_scopes": [
+        "answer renderer",
+        "output skill inputs",
+        "renderer fallback path",
+        "answer consistency checks"
+      ],
+      "allowed_write_scopes": [
+        "renderer input contract",
+        "deterministic table fallback",
+        "answer versus rows consistency check"
+      ],
+      "implementation_scope": [
+        "Renderer consumes question, fields, rows, field types, derived columns",
+        "Renderer formats labels, units, and Chinese summary",
+        "Renderer unavailable returns deterministic table output"
+      ],
+      "must_not": [
+        "Renderer calculates business metrics",
+        "Renderer modifies rows, sort, or filter scope",
+        "Renderer unavailable triggers query fallback"
+      ],
+      "deliverables": [
+        "Renderer input contract",
+        "deterministic fallback output",
+        "consistency warning or failure"
+      ],
+      "validation": [
+        "Renderer receives computed derived columns",
+        "Renderer outage preserves response_data",
+        "Answer mismatch against rows is flagged"
+      ],
+      "acceptance_criteria": [
+        "Same response_data yields stable facts across models",
+        "Text differences do not change facts",
+        "Renderer failure does not rerun query"
+      ]
+    },
+    {
+      "id": "MCP-ACC-09",
+      "phase": "Phase 5",
+      "title": "Batch 2 full gate and commit decision",
+      "owner": "coder",
+      "goal": "Run full Batch 2 baseline comparison and allow commit only if the gate passes.",
+      "depends_on": [
+        "MCP-ACC-07",
+        "MCP-ACC-08"
+      ],
+      "allowed_read_scopes": [
+        "Batch 2 Q1-Q10 baselines",
+        "quality gate reports",
+        "git status"
+      ],
+      "allowed_write_scopes": [
+        "full Batch 2 report",
+        "formal test report location if required"
+      ],
+      "implementation_scope": [
+        "Run Q1-Q10 baseline comparison",
+        "Run backend and frontend validation required by changed files",
+        "Prepare commit only after all gates pass"
+      ],
+      "must_not": [
+        "Commit if Batch 2 baseline comparison fails",
+        "Mix unrelated user changes into commit",
+        "Downgrade gate failures to warnings"
+      ],
+      "deliverables": [
+        "Batch 2 full comparison report",
+        "validation summary",
+        "commit-ready file list"
+      ],
+      "validation": [
+        "Batch 2 Q1-Q10 comparison passes",
+        "Project-required tests pass for touched files",
+        "git status reviewed before staging"
+      ],
+      "acceptance_criteria": [
+        "No canary is worse than MCP baseline",
+        "No Guardrail bypass exists",
+        "Commit is allowed only after all validation passes"
+      ]
+    }
+  ]
+}

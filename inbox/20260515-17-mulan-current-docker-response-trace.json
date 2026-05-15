@@ -1,0 +1,3851 @@
+{
+  "questions": [
+    [
+      "Q0",
+      "介绍数据源“订单+ (示例 - 超市)”"
+    ],
+    [
+      "Q1",
+      "整体的销售额、利润、利润率、客户数、客单价是什么样子"
+    ],
+    [
+      "Q2",
+      "这个指标过去几年的趋势是什么样子"
+    ],
+    [
+      "Q3",
+      "统计一下每个子类别的销售额、利润和利润率"
+    ],
+    [
+      "Q4",
+      "继续拆分到每个年份"
+    ],
+    [
+      "Q5",
+      "2025 年没有销售记录的子类别有哪些？"
+    ],
+    [
+      "Q6",
+      "Top 10 大客户是谁？请列出客户名称和销售金额及占比"
+    ],
+    [
+      "Q7",
+      "“邓保”这个客户的合作记录是什么样？最近还有合作吗？"
+    ],
+    [
+      "Q8",
+      "哪个子类别的利润每年都在持续增长？"
+    ],
+    [
+      "Q9",
+      "我计划关闭一些区域，止损。哪些省份一致没挣到钱？利润是亏的"
+    ],
+    [
+      "Q10",
+      "为什么辽宁、福建在 2024 年出现了巨亏？请看看是什么产品线和客户导致的"
+    ]
+  ],
+  "baseline_source": "inbox/20260515-13-abtest-raw.json#mcp",
+  "mulan": {
+    "Q0": {
+      "duration": 2.4085319999721833,
+      "status_code": 200,
+      "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+      "done": {
+        "type": "done",
+        "answer": "数据资产 **订单+ (示例 - 超市)** 返回了 **11 个字段**：\n\n| 序号 | 字段名称 | 类型 | 角色 | 计算字段 |\n|---:|---|---|---|---|\n| 1 | 客单价 | REAL | measure | 是 |\n| 2 | 利润率 | REAL | measure | 是 |\n| 3 | 客户数 | INTEGER | measure | 是 |\n| 4 | 子类别 | STRING | dimension | 否 |\n| 5 | 发货年份 | STRING | dimension | 是 |\n| 6 | 发货日期 | DATE | dimension | 否 |\n| 7 | 销售额 | REAL | measure | 否 |\n| 8 | 利润 | REAL | measure | 否 |\n| 9 | 客户名称 | STRING | dimension | 否 |\n| 10 | 省/自治区 | STRING | dimension | 否 |\n| 11 | 类别 | STRING | dimension | 否 |",
+        "trace_id": "t-84a01d69",
+        "run_id": "e8418389-a35e-4a64-864c-e5fc4c23a7d1",
+        "tools_used": [
+          "schema"
+        ],
+        "response_type": "schema_inventory",
+        "response_data": {
+          "connection_id": 2,
+          "connection_name": "Tableau-online",
+          "db_type": "tableau",
+          "mode": "fields",
+          "requested_table_name": "“订单+ (示例 - 超市)”",
+          "matched_asset": {
+            "name": "订单+ (示例 - 超市)",
+            "asset_type": "datasource",
+            "project": "default",
+            "web_url": "https://online.tableau.com/#/site/zy_bi/datasources/8902076",
+            "tableau_id": "f4290485-26d3-428f-aa8d-ccc33862a411"
+          },
+          "field_count": 11,
+          "raw_field_count": 11,
+          "fields": [
+            {
+              "name": "客单价",
+              "caption": "客单价",
+              "display_name": "客单价",
+              "data_type": "REAL",
+              "role": "measure",
+              "is_calculated": true
+            },
+            {
+              "name": "利润率",
+              "caption": "利润率",
+              "display_name": "利润率",
+              "data_type": "REAL",
+              "role": "measure",
+              "is_calculated": true
+            },
+            {
+              "name": "客户数",
+              "caption": "客户数",
+              "display_name": "客户数",
+              "data_type": "INTEGER",
+              "role": "measure",
+              "is_calculated": true
+            },
+            {
+              "name": "子类别",
+              "caption": "子类别",
+              "display_name": "子类别",
+              "data_type": "STRING",
+              "role": "dimension",
+              "is_calculated": false
+            },
+            {
+              "name": "发货年份",
+              "caption": "发货年份",
+              "display_name": "发货年份",
+              "data_type": "STRING",
+              "role": "dimension",
+              "is_calculated": true
+            },
+            {
+              "name": "发货日期",
+              "caption": "发货日期",
+              "display_name": "发货日期",
+              "data_type": "DATE",
+              "role": "dimension",
+              "is_calculated": false
+            },
+            {
+              "name": "销售额",
+              "caption": "销售额",
+              "display_name": "销售额",
+              "data_type": "REAL",
+              "role": "measure",
+              "is_calculated": false
+            },
+            {
+              "name": "利润",
+              "caption": "利润",
+              "display_name": "利润",
+              "data_type": "REAL",
+              "role": "measure",
+              "is_calculated": false
+            },
+            {
+              "name": "客户名称",
+              "caption": "客户名称",
+              "display_name": "客户名称",
+              "data_type": "STRING",
+              "role": "dimension",
+              "is_calculated": false
+            },
+            {
+              "name": "省/自治区",
+              "caption": "省/自治区",
+              "display_name": "省/自治区",
+              "data_type": "STRING",
+              "role": "dimension",
+              "is_calculated": false
+            },
+            {
+              "name": "类别",
+              "caption": "类别",
+              "display_name": "类别",
+              "data_type": "STRING",
+              "role": "dimension",
+              "is_calculated": false
+            }
+          ],
+          "warning": null
+        },
+        "steps_count": 4,
+        "execution_time_ms": 2388,
+        "sources_count": 0,
+        "top_sources": [],
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "e8418389-a35e-4a64-864c-e5fc4c23a7d1",
+          "trace_id": "t-84a01d69",
+          "phases": {
+            "intent": {
+              "intent": "schema_inventory",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "asset_metadata_pattern",
+                "message": "asset_metadata_pattern"
+              }
+            },
+            "postprocess": {
+              "response_type": "schema_inventory",
+              "row_count": 0,
+              "displayed_row_count": 0,
+              "formatting": [
+                "markdown_summary"
+              ]
+            }
+          }
+        }
+      },
+      "error": null,
+      "row_count": 11,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "asset_question",
+          "confidence": 0.95,
+          "route": "schema_inventory",
+          "allowed_tools": [
+            "schema"
+          ],
+          "forbidden_tools": [
+            "query"
+          ],
+          "fallback_policy": "schema_only",
+          "reason": "asset_metadata_pattern",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "schema_inventory",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "asset_metadata_pattern",
+              "message": "asset_metadata_pattern"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.62,
+              "route_reason": "generic_business_data_context"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+          "run_id": "e8418389-a35e-4a64-864c-e5fc4c23a7d1",
+          "trace_id": "t-84a01d69",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "识别为数据源清单问题，准备读取当前连接的 schema 信息。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "schema",
+          "params": {
+            "table_name": "“订单+ (示例 - 超市)”"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "schema",
+          "summary": "mode=fields, asset=订单+ (示例 - 超市), fields=11, raw_fields=11"
+        },
+        {
+          "type": "token",
+          "content": "数据资产 **订单+ (示例 - 超市)** 返回了 **11 个字段**：\n\n| 序号 | 字段名称 | 类型 | 角色 | 计算字段 |\n|---:|---|---|---|---|\n| 1 | 客单价 | REAL | measure | 是 |\n| 2 | 利润率 | REAL | measure | 是 |\n| 3 | 客户数 | INTEGER | measure | 是 |\n| 4 | 子类别 | STRING | dimension | 否 |\n| 5 | 发货年份 | STRING | dimension | 是 |\n| 6 | 发货日期 | DATE | dimension | 否 |\n| 7 | 销售额 | REAL | measure | 否 |\n| 8 | 利润 | REAL | measure | 否 |\n| 9 | 客户名称 | STRING | dimension | 否 |\n| 10 | 省/自治区 | STRING | dimension | 否 |\n| 11 | 类别 | STRING | dimension | 否 |"
+        },
+        {
+          "type": "done",
+          "answer": "数据资产 **订单+ (示例 - 超市)** 返回了 **11 个字段**：\n\n| 序号 | 字段名称 | 类型 | 角色 | 计算字段 |\n|---:|---|---|---|---|\n| 1 | 客单价 | REAL | measure | 是 |\n| 2 | 利润率 | REAL | measure | 是 |\n| 3 | 客户数 | INTEGER | measure | 是 |\n| 4 | 子类别 | STRING | dimension | 否 |\n| 5 | 发货年份 | STRING | dimension | 是 |\n| 6 | 发货日期 | DATE | dimension | 否 |\n| 7 | 销售额 | REAL | measure | 否 |\n| 8 | 利润 | REAL | measure | 否 |\n| 9 | 客户名称 | STRING | dimension | 否 |\n| 10 | 省/自治区 | STRING | dimension | 否 |\n| 11 | 类别 | STRING | dimension | 否 |",
+          "trace_id": "t-84a01d69",
+          "run_id": "e8418389-a35e-4a64-864c-e5fc4c23a7d1",
+          "tools_used": [
+            "schema"
+          ],
+          "response_type": "schema_inventory",
+          "response_data": {
+            "connection_id": 2,
+            "connection_name": "Tableau-online",
+            "db_type": "tableau",
+            "mode": "fields",
+            "requested_table_name": "“订单+ (示例 - 超市)”",
+            "matched_asset": {
+              "name": "订单+ (示例 - 超市)",
+              "asset_type": "datasource",
+              "project": "default",
+              "web_url": "https://online.tableau.com/#/site/zy_bi/datasources/8902076",
+              "tableau_id": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "raw_field_count": 11,
+            "fields": [
+              {
+                "name": "客单价",
+                "caption": "客单价",
+                "display_name": "客单价",
+                "data_type": "REAL",
+                "role": "measure",
+                "is_calculated": true
+              },
+              {
+                "name": "利润率",
+                "caption": "利润率",
+                "display_name": "利润率",
+                "data_type": "REAL",
+                "role": "measure",
+                "is_calculated": true
+              },
+              {
+                "name": "客户数",
+                "caption": "客户数",
+                "display_name": "客户数",
+                "data_type": "INTEGER",
+                "role": "measure",
+                "is_calculated": true
+              },
+              {
+                "name": "子类别",
+                "caption": "子类别",
+                "display_name": "子类别",
+                "data_type": "STRING",
+                "role": "dimension",
+                "is_calculated": false
+              },
+              {
+                "name": "发货年份",
+                "caption": "发货年份",
+                "display_name": "发货年份",
+                "data_type": "STRING",
+                "role": "dimension",
+                "is_calculated": true
+              },
+              {
+                "name": "发货日期",
+                "caption": "发货日期",
+                "display_name": "发货日期",
+                "data_type": "DATE",
+                "role": "dimension",
+                "is_calculated": false
+              },
+              {
+                "name": "销售额",
+                "caption": "销售额",
+                "display_name": "销售额",
+                "data_type": "REAL",
+                "role": "measure",
+                "is_calculated": false
+              },
+              {
+                "name": "利润",
+                "caption": "利润",
+                "display_name": "利润",
+                "data_type": "REAL",
+                "role": "measure",
+                "is_calculated": false
+              },
+              {
+                "name": "客户名称",
+                "caption": "客户名称",
+                "display_name": "客户名称",
+                "data_type": "STRING",
+                "role": "dimension",
+                "is_calculated": false
+              },
+              {
+                "name": "省/自治区",
+                "caption": "省/自治区",
+                "display_name": "省/自治区",
+                "data_type": "STRING",
+                "role": "dimension",
+                "is_calculated": false
+              },
+              {
+                "name": "类别",
+                "caption": "类别",
+                "display_name": "类别",
+                "data_type": "STRING",
+                "role": "dimension",
+                "is_calculated": false
+              }
+            ],
+            "warning": null
+          },
+          "steps_count": 4,
+          "execution_time_ms": 2388,
+          "sources_count": 0,
+          "top_sources": [],
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "e8418389-a35e-4a64-864c-e5fc4c23a7d1",
+            "trace_id": "t-84a01d69",
+            "phases": {
+              "intent": {
+                "intent": "schema_inventory",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "asset_metadata_pattern",
+                  "message": "asset_metadata_pattern"
+                }
+              },
+              "postprocess": {
+                "response_type": "schema_inventory",
+                "row_count": 0,
+                "displayed_row_count": 0,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "eld_count\": 11, \"raw_field_count\": 11, \"fields\": [{\"name\": \"客单价\", \"caption\": \"客单价\", \"display_name\": \"客单价\", \"data_type\": \"REAL\", \"role\": \"measure\", \"is_calculated\": true}, {\"name\": \"利润率\", \"caption\": \"利润率\", \"display_name\": \"利润率\", \"data_type\": \"REAL\", \"role\": \"measure\", \"is_calculated\": true}, {\"name\": \"客户数\", \"caption\": \"客户数\", \"display_name\": \"客户数\", \"data_type\": \"INTEGER\", \"role\": \"measure\", \"is_calculated\": true}, {\"name\": \"子类别\", \"caption\": \"子类别\", \"display_name\": \"子类别\", \"data_type\": \"STRING\", \"role\": \"dimension\", \"is_calculated\": false}, {\"name\": \"发货年份\", \"caption\": \"发货年份\", \"display_name\": \"发货年份\", \"data_type\": \"STRING\", \"role\": \"dimension\", \"is_calculated\": true}, {\"name\": \"发货日期\", \"caption\": \"发货日期\", \"display_name\": \"发货日期\", \"data_type\": \"DATE\", \"role\": \"dimension\", \"is_calculated\": false}, {\"name\": \"销售额\", \"caption\": \"销售额\", \"display_name\": \"销售额\", \"data_type\": \"REAL\", \"role\": \"measure\", \"is_calculated\": false}, {\"name\": \"利润\", \"caption\": \"利润\", \"display_name\": \"利润\", \"data_type\": \"REAL\", \"role\": \"measure\", \"is_calculated\": false}, {\"name\": \"客户名称\", \"caption\": \"客户名称\", \"display_name\": \"客户名称\", \"data_type\": \"STRING\", \"role\": \"dimension\", \"is_calculated\": false}, {\"name\": \"省/自治区\", \"caption\": \"省/自治区\", \"display_name\": \"省/自治区\", \"data_type\": \"STRING\", \"role\": \"dimension\", \"is_calculated\": false}, {\"name\": \"类别\", \"caption\": \"类别\", \"display_name\": \"类别\", \"data_type\": \"STRING\", \"role\": \"dimension\", \"is_calculated\": false}], \"warning\": null}, \"steps_count\": 4, \"execution_time_ms\": 2388, \"sources_count\": 0, \"top_sources\": [], \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"e8418389-a35e-4a64-864c-e5fc4c23a7d1\", \"trace_id\": \"t-84a01d69\", \"phases\": {\"intent\": {\"intent\": \"schema_inventory\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"asset_metadata_pattern\", \"message\": \"asset_metadata_pattern\"}}, \"postprocess\": {\"response_type\": \"schema_inventory\", \"row_count\": 0, \"displayed_row_count\": 0, \"formatting\": [\"markdown_summary\"]}}}}\n\n"
+    },
+    "Q1": {
+      "duration": 54.70202635903843,
+      "status_code": 200,
+      "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "MCP_ARGS_LLM_INVALID",
+        "message": "LLM 未生成可执行的 MCP tool args。",
+        "fallback_type": "guardrail_rejected",
+        "trace_id": "t-d4d1fea9",
+        "retryable": true,
+        "suggested_actions": [
+          "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_mcp_args",
+          "mcp_args_guardrail"
+        ],
+        "intent_classifier": {
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_reason": "llm_queryspec_failed",
+            "original_error": {
+              "ok": false,
+              "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 26657, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+            },
+            "fallback_mode": "mcp_proxy",
+            "chain_mode": "queryspec_mcp_fallback",
+            "metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "llm_queryspec_failed"
+            },
+            "guardrail_decision": "reject",
+            "guardrail_repairs": [],
+            "llm_error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 26095, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+          }
+        },
+        "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "guardrail_rejected",
+              "message": "LLM 未生成可执行的 MCP tool args。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-d4d1fea9",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "guardrail_rejected",
+                  "message": "LLM 未生成可执行的 MCP tool args。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.62,
+              "route_reason": "generic_business_data_context"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+          "run_id": "f7307e54-bc33-4efd-9cc0-cf1cfdd7f1ae",
+          "trace_id": "t-d4d1fea9",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：aggregate。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "aggregate",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'aggregate', 'kind': 'planning', 'checksum': '30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19', 'version': 'v1', 'source_path': '/app/skills/planning/aggrega"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "aggregate",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 26657, 'error': 'Anthropic API"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_mcp_fallback",
+          "params": {
+            "event": "FALLBACK_TRIGGERED",
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_mode": "mcp_proxy"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_mcp_fallback",
+          "summary": "{'phase': 'queryspec_generation', 'reason': 'llm_queryspec_failed', 'fallback_reason': 'llm_queryspec_failed', 'original_error': {'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 L"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_tool_description_loader",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_tool_description_loader",
+          "summary": "{'description': 'Tool: query-datasource\\nPurpose: read aggregated data from one Tableau published datasource.\\nArguments JSON shape: {\"datasourceLuid\": string, \"query\": {\"fields\": [...], \"filters\": [."
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_mcp_args",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "queryspec_mcp_fallback",
+            "fallback_reason": "llm_queryspec_failed"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_mcp_args",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 26095, 'error': 'Anthropic API"
+        },
+        {
+          "type": "error",
+          "error_code": "MCP_ARGS_LLM_INVALID",
+          "message": "LLM 未生成可执行的 MCP tool args。",
+          "fallback_type": "guardrail_rejected",
+          "trace_id": "t-d4d1fea9",
+          "retryable": true,
+          "suggested_actions": [
+            "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_mcp_args",
+            "mcp_args_guardrail"
+          ],
+          "intent_classifier": {
+            "intent": "aggregate",
+            "confidence": 0.62,
+            "route_reason": "generic_business_data_context"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {
+              "phase": "queryspec_generation",
+              "reason": "llm_queryspec_failed",
+              "fallback_reason": "llm_queryspec_failed",
+              "original_error": {
+                "ok": false,
+                "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 26657, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+              },
+              "fallback_mode": "mcp_proxy",
+              "chain_mode": "queryspec_mcp_fallback",
+              "metrics": {
+                "queryspec_main_path_success": false,
+                "queryspec_fallback_triggered": true,
+                "queryspec_fallback_mode": "mcp_proxy",
+                "queryspec_fallback_reason": "llm_queryspec_failed"
+              },
+              "guardrail_decision": "reject",
+              "guardrail_repairs": [],
+              "llm_error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 26095, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+            }
+          },
+          "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "guardrail_rejected",
+                "message": "LLM 未生成可执行的 MCP tool args。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-d4d1fea9",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "guardrail_rejected",
+                    "message": "LLM 未生成可执行的 MCP tool args。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 26657, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}\"}, \"fallback_mode\": \"mcp_proxy\", \"chain_mode\": \"queryspec_mcp_fallback\", \"metrics\": {\"queryspec_main_path_success\": false, \"queryspec_fallback_triggered\": true, \"queryspec_fallback_mode\": \"mcp_proxy\", \"queryspec_fallback_reason\": \"llm_queryspec_failed\"}, \"guardrail_decision\": \"reject\", \"guardrail_repairs\": [], \"llm_error\": \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 26095, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}\"}}, \"user_hint\": \"请换一种更明确的问法，补充指标、时间范围或维度。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-d4d1fea9\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}}}}\n\n"
+    },
+    "Q2": {
+      "duration": 49.60639764799271,
+      "status_code": 200,
+      "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "MCP_ARGS_LLM_INVALID",
+        "message": "LLM 未生成可执行的 MCP tool args。",
+        "fallback_type": "guardrail_rejected",
+        "trace_id": "t-df80e241",
+        "retryable": true,
+        "suggested_actions": [
+          "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_mcp_args",
+          "mcp_args_guardrail"
+        ],
+        "intent_classifier": {
+          "intent": "trend_condition",
+          "confidence": 0.82,
+          "route_reason": "trend_condition_pattern"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_reason": "llm_queryspec_failed",
+            "original_error": {
+              "ok": false,
+              "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25802, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+            },
+            "fallback_mode": "mcp_proxy",
+            "chain_mode": "queryspec_mcp_fallback",
+            "metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "llm_queryspec_failed"
+            },
+            "guardrail_decision": "reject",
+            "guardrail_repairs": [],
+            "llm_error": "invalid_json: Expecting value: line 1 column 1 (char 0)"
+          }
+        },
+        "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "guardrail_rejected",
+              "message": "LLM 未生成可执行的 MCP tool args。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-df80e241",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.8500000000000001,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "data_action_pattern",
+                "message": "data_action_pattern"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "guardrail_rejected",
+                  "message": "LLM 未生成可执行的 MCP tool args。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "trend_condition",
+          "confidence": 0.82,
+          "route_reason": "trend_condition_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.8500000000000001,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "data_action_pattern",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.8500000000000001,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "data_action_pattern",
+              "message": "data_action_pattern"
+            },
+            "intent_classifier": {
+              "intent": "trend_condition",
+              "confidence": 0.82,
+              "route_reason": "trend_condition_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+          "run_id": "0b95339f-ca22-47c0-8f8b-07bbacbae734",
+          "trace_id": "t-df80e241",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：trend_condition。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "trend_condition",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'trend_condition', 'kind': 'planning', 'checksum': '9e5fbaf844ed7b16b4c5cf3b8909e84c67249db5c9944537908a098e43240b97', 'version': 'v1', 'source_path': '/app/skills/planning/t"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "trend_condition",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "9e5fbaf844ed7b16b4c5cf3b8909e84c67249db5c9944537908a098e43240b97"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25802, 'error': 'Anthropic API"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_mcp_fallback",
+          "params": {
+            "event": "FALLBACK_TRIGGERED",
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_mode": "mcp_proxy"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_mcp_fallback",
+          "summary": "{'phase': 'queryspec_generation', 'reason': 'llm_queryspec_failed', 'fallback_reason': 'llm_queryspec_failed', 'original_error': {'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 L"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_tool_description_loader",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_tool_description_loader",
+          "summary": "{'description': 'Tool: query-datasource\\nPurpose: read aggregated data from one Tableau published datasource.\\nArguments JSON shape: {\"datasourceLuid\": string, \"query\": {\"fields\": [...], \"filters\": [."
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_mcp_args",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "queryspec_mcp_fallback",
+            "fallback_reason": "llm_queryspec_failed"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_mcp_args",
+          "summary": "{'ok': False, 'error': 'invalid_json: Expecting value: line 1 column 1 (char 0)', 'raw': 'The user is asking \"这个指标过去几年的趋势是什么样子\" which translates to \"What is the trend of this indicator over the past f"
+        },
+        {
+          "type": "error",
+          "error_code": "MCP_ARGS_LLM_INVALID",
+          "message": "LLM 未生成可执行的 MCP tool args。",
+          "fallback_type": "guardrail_rejected",
+          "trace_id": "t-df80e241",
+          "retryable": true,
+          "suggested_actions": [
+            "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_mcp_args",
+            "mcp_args_guardrail"
+          ],
+          "intent_classifier": {
+            "intent": "trend_condition",
+            "confidence": 0.82,
+            "route_reason": "trend_condition_pattern"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {
+              "phase": "queryspec_generation",
+              "reason": "llm_queryspec_failed",
+              "fallback_reason": "llm_queryspec_failed",
+              "original_error": {
+                "ok": false,
+                "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25802, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+              },
+              "fallback_mode": "mcp_proxy",
+              "chain_mode": "queryspec_mcp_fallback",
+              "metrics": {
+                "queryspec_main_path_success": false,
+                "queryspec_fallback_triggered": true,
+                "queryspec_fallback_mode": "mcp_proxy",
+                "queryspec_fallback_reason": "llm_queryspec_failed"
+              },
+              "guardrail_decision": "reject",
+              "guardrail_repairs": [],
+              "llm_error": "invalid_json: Expecting value: line 1 column 1 (char 0)"
+            }
+          },
+          "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "guardrail_rejected",
+                "message": "LLM 未生成可执行的 MCP tool args。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-df80e241",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.8500000000000001,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "data_action_pattern",
+                  "message": "data_action_pattern"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "guardrail_rejected",
+                    "message": "LLM 未生成可执行的 MCP tool args。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": " \"controlled_chain\": {\"status\": \"failed\", \"detail\": {\"phase\": \"queryspec_generation\", \"reason\": \"llm_queryspec_failed\", \"fallback_reason\": \"llm_queryspec_failed\", \"original_error\": {\"ok\": false, \"error\": \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25802, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}\"}, \"fallback_mode\": \"mcp_proxy\", \"chain_mode\": \"queryspec_mcp_fallback\", \"metrics\": {\"queryspec_main_path_success\": false, \"queryspec_fallback_triggered\": true, \"queryspec_fallback_mode\": \"mcp_proxy\", \"queryspec_fallback_reason\": \"llm_queryspec_failed\"}, \"guardrail_decision\": \"reject\", \"guardrail_repairs\": [], \"llm_error\": \"invalid_json: Expecting value: line 1 column 1 (char 0)\"}}, \"user_hint\": \"请换一种更明确的问法，补充指标、时间范围或维度。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-df80e241\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.8500000000000001, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"data_action_pattern\", \"message\": \"data_action_pattern\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}}}}\n\n"
+    },
+    "Q3": {
+      "duration": 54.194625817006454,
+      "status_code": 200,
+      "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "MCP_ARGS_LLM_INVALID",
+        "message": "LLM 未生成可执行的 MCP tool args。",
+        "fallback_type": "guardrail_rejected",
+        "trace_id": "t-ba990cae",
+        "retryable": true,
+        "suggested_actions": [
+          "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_mcp_args",
+          "mcp_args_guardrail"
+        ],
+        "intent_classifier": {
+          "intent": "aggregate",
+          "confidence": 0.78,
+          "route_reason": "aggregate_pattern"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_reason": "llm_queryspec_failed",
+            "original_error": {
+              "ok": false,
+              "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25744, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+            },
+            "fallback_mode": "mcp_proxy",
+            "chain_mode": "queryspec_mcp_fallback",
+            "metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "llm_queryspec_failed"
+            },
+            "guardrail_decision": "reject",
+            "guardrail_repairs": [],
+            "llm_error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 26124, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+          }
+        },
+        "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "guardrail_rejected",
+              "message": "LLM 未生成可执行的 MCP tool args。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-ba990cae",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "guardrail_rejected",
+                  "message": "LLM 未生成可执行的 MCP tool args。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.78,
+          "route_reason": "aggregate_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.78,
+              "route_reason": "aggregate_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+          "run_id": "bfbccd61-da26-4aec-a1f2-4c50e84a1c4b",
+          "trace_id": "t-ba990cae",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：aggregate。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "aggregate",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'aggregate', 'kind': 'planning', 'checksum': '30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19', 'version': 'v1', 'source_path': '/app/skills/planning/aggrega"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "aggregate",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25744, 'error': 'Anthropic API"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_mcp_fallback",
+          "params": {
+            "event": "FALLBACK_TRIGGERED",
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_mode": "mcp_proxy"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_mcp_fallback",
+          "summary": "{'phase': 'queryspec_generation', 'reason': 'llm_queryspec_failed', 'fallback_reason': 'llm_queryspec_failed', 'original_error': {'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 L"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_tool_description_loader",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_tool_description_loader",
+          "summary": "{'description': 'Tool: query-datasource\\nPurpose: read aggregated data from one Tableau published datasource.\\nArguments JSON shape: {\"datasourceLuid\": string, \"query\": {\"fields\": [...], \"filters\": [."
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_mcp_args",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "queryspec_mcp_fallback",
+            "fallback_reason": "llm_queryspec_failed"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_mcp_args",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 26124, 'error': 'Anthropic API"
+        },
+        {
+          "type": "error",
+          "error_code": "MCP_ARGS_LLM_INVALID",
+          "message": "LLM 未生成可执行的 MCP tool args。",
+          "fallback_type": "guardrail_rejected",
+          "trace_id": "t-ba990cae",
+          "retryable": true,
+          "suggested_actions": [
+            "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_mcp_args",
+            "mcp_args_guardrail"
+          ],
+          "intent_classifier": {
+            "intent": "aggregate",
+            "confidence": 0.78,
+            "route_reason": "aggregate_pattern"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {
+              "phase": "queryspec_generation",
+              "reason": "llm_queryspec_failed",
+              "fallback_reason": "llm_queryspec_failed",
+              "original_error": {
+                "ok": false,
+                "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25744, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+              },
+              "fallback_mode": "mcp_proxy",
+              "chain_mode": "queryspec_mcp_fallback",
+              "metrics": {
+                "queryspec_main_path_success": false,
+                "queryspec_fallback_triggered": true,
+                "queryspec_fallback_mode": "mcp_proxy",
+                "queryspec_fallback_reason": "llm_queryspec_failed"
+              },
+              "guardrail_decision": "reject",
+              "guardrail_repairs": [],
+              "llm_error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 26124, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+            }
+          },
+          "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "guardrail_rejected",
+                "message": "LLM 未生成可执行的 MCP tool args。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-ba990cae",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "guardrail_rejected",
+                    "message": "LLM 未生成可执行的 MCP tool args。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25744, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}\"}, \"fallback_mode\": \"mcp_proxy\", \"chain_mode\": \"queryspec_mcp_fallback\", \"metrics\": {\"queryspec_main_path_success\": false, \"queryspec_fallback_triggered\": true, \"queryspec_fallback_mode\": \"mcp_proxy\", \"queryspec_fallback_reason\": \"llm_queryspec_failed\"}, \"guardrail_decision\": \"reject\", \"guardrail_repairs\": [], \"llm_error\": \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 26124, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}\"}}, \"user_hint\": \"请换一种更明确的问法，补充指标、时间范围或维度。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-ba990cae\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}}}}\n\n"
+    },
+    "Q4": {
+      "duration": 53.76187248300994,
+      "status_code": 200,
+      "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "MCP_PROXY_EXECUTION_FAILED",
+        "message": "Tableau MCP 查询失败，本次不输出结论。",
+        "fallback_type": "guardrail_rejected",
+        "trace_id": "t-d7990a6c",
+        "retryable": true,
+        "suggested_actions": [
+          "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_mcp_args",
+          "mcp_args_guardrail"
+        ],
+        "intent_classifier": {
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_reason": "llm_queryspec_failed",
+            "original_error": {
+              "ok": false,
+              "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 26155, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+            },
+            "fallback_mode": "mcp_proxy",
+            "chain_mode": "queryspec_mcp_fallback",
+            "metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "llm_queryspec_failed"
+            },
+            "guardrail_decision": "repair",
+            "guardrail_repairs": [
+              {
+                "type": "limit_default",
+                "path": "limit",
+                "before": null,
+                "after": 100,
+                "reason": "schema supports limit and args omitted it"
+              }
+            ]
+          }
+        },
+        "user_hint": "请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "guardrail_rejected",
+              "message": "Tableau MCP 查询失败，本次不输出结论。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-d7990a6c",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.75,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "data_action_pattern",
+                "message": "data_action_pattern"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "guardrail_rejected",
+                  "message": "Tableau MCP 查询失败，本次不输出结论。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.75,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "data_action_pattern",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.75,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "data_action_pattern",
+              "message": "data_action_pattern"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.62,
+              "route_reason": "generic_business_data_context"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+          "run_id": "e908651d-2d06-4aab-96cb-2bacff8ef05a",
+          "trace_id": "t-d7990a6c",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：aggregate。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "aggregate",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'aggregate', 'kind': 'planning', 'checksum': '30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19', 'version': 'v1', 'source_path': '/app/skills/planning/aggrega"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "aggregate",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 26155, 'error': 'Anthropic API"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_mcp_fallback",
+          "params": {
+            "event": "FALLBACK_TRIGGERED",
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_mode": "mcp_proxy"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_mcp_fallback",
+          "summary": "{'phase': 'queryspec_generation', 'reason': 'llm_queryspec_failed', 'fallback_reason': 'llm_queryspec_failed', 'original_error': {'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 L"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_tool_description_loader",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_tool_description_loader",
+          "summary": "{'description': 'Tool: query-datasource\\nPurpose: read aggregated data from one Tableau published datasource.\\nArguments JSON shape: {\"datasourceLuid\": string, \"query\": {\"fields\": [...], \"filters\": [."
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_mcp_args",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "queryspec_mcp_fallback",
+            "fallback_reason": "llm_queryspec_failed"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_mcp_args",
+          "summary": "{'args': {'datasourceLuid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'query': {'fields': ['发货年份']}}, 'chain_mode': 'queryspec_mcp_fallback', 'fallback_reason': 'llm_queryspec_failed'}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_args_guardrail",
+          "params": {
+            "tool": "query-datasource",
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_args_guardrail",
+          "summary": "{'decision': 'repair', 'args': {'datasourceLuid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'query': {'fields': ['发货年份']}, 'limit': 100}, 'repairs': [{'type': 'limit_default', 'path': 'limit', 'before':"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "mcp_tool": "query-datasource",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "queryspec_mcp_fallback",
+            "guardrail_decision": "repair",
+            "guardrail_repairs": [
+              {
+                "type": "limit_default",
+                "path": "limit",
+                "before": null,
+                "after": 100,
+                "reason": "schema supports limit and args omitted it"
+              }
+            ],
+            "fallback_reason": "llm_queryspec_failed"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'error': '[NLQ_006] MCP 工具执行失败: MCP error -32602: Input validation error: Invalid arguments for tool query-datasource: [\\n  {\\n    \"code\": \"invalid_union\",\\n    \"unionErrors\": [\\n      {\\n        \"is"
+        },
+        {
+          "type": "error",
+          "error_code": "MCP_PROXY_EXECUTION_FAILED",
+          "message": "Tableau MCP 查询失败，本次不输出结论。",
+          "fallback_type": "guardrail_rejected",
+          "trace_id": "t-d7990a6c",
+          "retryable": true,
+          "suggested_actions": [
+            "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_mcp_args",
+            "mcp_args_guardrail"
+          ],
+          "intent_classifier": {
+            "intent": "aggregate",
+            "confidence": 0.62,
+            "route_reason": "generic_business_data_context"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {
+              "phase": "queryspec_generation",
+              "reason": "llm_queryspec_failed",
+              "fallback_reason": "llm_queryspec_failed",
+              "original_error": {
+                "ok": false,
+                "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 26155, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+              },
+              "fallback_mode": "mcp_proxy",
+              "chain_mode": "queryspec_mcp_fallback",
+              "metrics": {
+                "queryspec_main_path_success": false,
+                "queryspec_fallback_triggered": true,
+                "queryspec_fallback_mode": "mcp_proxy",
+                "queryspec_fallback_reason": "llm_queryspec_failed"
+              },
+              "guardrail_decision": "repair",
+              "guardrail_repairs": [
+                {
+                  "type": "limit_default",
+                  "path": "limit",
+                  "before": null,
+                  "after": 100,
+                  "reason": "schema supports limit and args omitted it"
+                }
+              ]
+            }
+          },
+          "user_hint": "请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "guardrail_rejected",
+                "message": "Tableau MCP 查询失败，本次不输出结论。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-d7990a6c",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.75,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "data_action_pattern",
+                  "message": "data_action_pattern"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "guardrail_rejected",
+                    "message": "Tableau MCP 查询失败，本次不输出结论。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "ed\", \"fallback_reason\": \"llm_queryspec_failed\", \"original_error\": {\"ok\": false, \"error\": \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 26155, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}\"}, \"fallback_mode\": \"mcp_proxy\", \"chain_mode\": \"queryspec_mcp_fallback\", \"metrics\": {\"queryspec_main_path_success\": false, \"queryspec_fallback_triggered\": true, \"queryspec_fallback_mode\": \"mcp_proxy\", \"queryspec_fallback_reason\": \"llm_queryspec_failed\"}, \"guardrail_decision\": \"repair\", \"guardrail_repairs\": [{\"type\": \"limit_default\", \"path\": \"limit\", \"before\": null, \"after\": 100, \"reason\": \"schema supports limit and args omitted it\"}]}}, \"user_hint\": \"请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"Tableau MCP 查询失败，本次不输出结论。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"Tableau MCP 查询失败，本次不输出结论。\\n\\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-d7990a6c\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.75, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"data_action_pattern\", \"message\": \"data_action_pattern\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"Tableau MCP 查询失败，本次不输出结论。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"Tableau MCP 查询失败，本次不输出结论。\\n\\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。\"}}}}\n\n"
+    },
+    "Q5": {
+      "duration": 65.27429619705072,
+      "status_code": 200,
+      "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "MCP_ARGS_LLM_INVALID",
+        "message": "LLM 未生成可执行的 MCP tool args。",
+        "fallback_type": "guardrail_rejected",
+        "trace_id": "t-bf79dabf",
+        "retryable": true,
+        "suggested_actions": [
+          "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_mcp_args",
+          "mcp_args_guardrail"
+        ],
+        "intent_classifier": {
+          "intent": "set_difference",
+          "confidence": 0.86,
+          "route_reason": "set_difference_pattern"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_reason": "llm_queryspec_failed",
+            "original_error": {
+              "ok": false,
+              "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25967, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+            },
+            "fallback_mode": "mcp_proxy",
+            "chain_mode": "queryspec_mcp_fallback",
+            "metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "llm_queryspec_failed"
+            },
+            "guardrail_decision": "reject",
+            "guardrail_repairs": [],
+            "llm_error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25971, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+          }
+        },
+        "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "guardrail_rejected",
+              "message": "LLM 未生成可执行的 MCP tool args。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-bf79dabf",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "guardrail_rejected",
+                  "message": "LLM 未生成可执行的 MCP tool args。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "set_difference",
+          "confidence": 0.86,
+          "route_reason": "set_difference_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "set_difference",
+              "confidence": 0.86,
+              "route_reason": "set_difference_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+          "run_id": "1ce53032-6103-45cf-b621-d16c29c7ece0",
+          "trace_id": "t-bf79dabf",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：set_difference。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "set_difference",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'set_difference', 'kind': 'planning', 'checksum': '625b15aa549c5df4d0e27f8cb75c03a9eb76e9f51d9ef57e7994b579a76baaa4', 'version': 'v1', 'source_path': '/app/skills/planning/se"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "set_difference",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "625b15aa549c5df4d0e27f8cb75c03a9eb76e9f51d9ef57e7994b579a76baaa4"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25967, 'error': 'Anthropic API"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_mcp_fallback",
+          "params": {
+            "event": "FALLBACK_TRIGGERED",
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_mode": "mcp_proxy"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_mcp_fallback",
+          "summary": "{'phase': 'queryspec_generation', 'reason': 'llm_queryspec_failed', 'fallback_reason': 'llm_queryspec_failed', 'original_error': {'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 L"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_tool_description_loader",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_tool_description_loader",
+          "summary": "{'description': 'Tool: query-datasource\\nPurpose: read aggregated data from one Tableau published datasource.\\nArguments JSON shape: {\"datasourceLuid\": string, \"query\": {\"fields\": [...], \"filters\": [."
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_mcp_args",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "queryspec_mcp_fallback",
+            "fallback_reason": "llm_queryspec_failed"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_mcp_args",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25971, 'error': 'Anthropic API"
+        },
+        {
+          "type": "error",
+          "error_code": "MCP_ARGS_LLM_INVALID",
+          "message": "LLM 未生成可执行的 MCP tool args。",
+          "fallback_type": "guardrail_rejected",
+          "trace_id": "t-bf79dabf",
+          "retryable": true,
+          "suggested_actions": [
+            "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_mcp_args",
+            "mcp_args_guardrail"
+          ],
+          "intent_classifier": {
+            "intent": "set_difference",
+            "confidence": 0.86,
+            "route_reason": "set_difference_pattern"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {
+              "phase": "queryspec_generation",
+              "reason": "llm_queryspec_failed",
+              "fallback_reason": "llm_queryspec_failed",
+              "original_error": {
+                "ok": false,
+                "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25967, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+              },
+              "fallback_mode": "mcp_proxy",
+              "chain_mode": "queryspec_mcp_fallback",
+              "metrics": {
+                "queryspec_main_path_success": false,
+                "queryspec_fallback_triggered": true,
+                "queryspec_fallback_mode": "mcp_proxy",
+                "queryspec_fallback_reason": "llm_queryspec_failed"
+              },
+              "guardrail_decision": "reject",
+              "guardrail_repairs": [],
+              "llm_error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25971, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+            }
+          },
+          "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "guardrail_rejected",
+                "message": "LLM 未生成可执行的 MCP tool args。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-bf79dabf",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "guardrail_rejected",
+                    "message": "LLM 未生成可执行的 MCP tool args。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25967, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}\"}, \"fallback_mode\": \"mcp_proxy\", \"chain_mode\": \"queryspec_mcp_fallback\", \"metrics\": {\"queryspec_main_path_success\": false, \"queryspec_fallback_triggered\": true, \"queryspec_fallback_mode\": \"mcp_proxy\", \"queryspec_fallback_reason\": \"llm_queryspec_failed\"}, \"guardrail_decision\": \"reject\", \"guardrail_repairs\": [], \"llm_error\": \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25971, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}\"}}, \"user_hint\": \"请换一种更明确的问法，补充指标、时间范围或维度。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-bf79dabf\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}}}}\n\n"
+    },
+    "Q6": {
+      "duration": 42.22815618599998,
+      "status_code": 200,
+      "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "MCP_PROXY_EXECUTION_FAILED",
+        "message": "Tableau MCP 查询失败，本次不输出结论。",
+        "fallback_type": "guardrail_rejected",
+        "trace_id": "t-c18d738d",
+        "retryable": true,
+        "suggested_actions": [
+          "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_mcp_args",
+          "mcp_args_guardrail"
+        ],
+        "intent_classifier": {
+          "intent": "ranking",
+          "confidence": 0.82,
+          "route_reason": "ranking_pattern"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_reason": "llm_queryspec_failed",
+            "original_error": {
+              "ok": false,
+              "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25939, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+            },
+            "fallback_mode": "mcp_proxy",
+            "chain_mode": "queryspec_mcp_fallback",
+            "metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "llm_queryspec_failed"
+            },
+            "guardrail_decision": "allow",
+            "guardrail_repairs": []
+          }
+        },
+        "user_hint": "请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "guardrail_rejected",
+              "message": "Tableau MCP 查询失败，本次不输出结论。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-c18d738d",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "guardrail_rejected",
+                  "message": "Tableau MCP 查询失败，本次不输出结论。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "ranking",
+          "confidence": 0.82,
+          "route_reason": "ranking_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "ranking",
+              "confidence": 0.82,
+              "route_reason": "ranking_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+          "run_id": "c86738d2-48ae-406d-b9c6-01bb509344e7",
+          "trace_id": "t-c18d738d",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：ranking。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "ranking",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'ranking', 'kind': 'planning', 'checksum': '1fec656fb4512836deddb4e8fbb9e68e16c6f43800c0db1189f4c2e1a1ab173f', 'version': 'v1', 'source_path': '/app/skills/planning/ranking.m"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "ranking",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "1fec656fb4512836deddb4e8fbb9e68e16c6f43800c0db1189f4c2e1a1ab173f"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25939, 'error': 'Anthropic API"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_mcp_fallback",
+          "params": {
+            "event": "FALLBACK_TRIGGERED",
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_mode": "mcp_proxy"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_mcp_fallback",
+          "summary": "{'phase': 'queryspec_generation', 'reason': 'llm_queryspec_failed', 'fallback_reason': 'llm_queryspec_failed', 'original_error': {'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 L"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_tool_description_loader",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_tool_description_loader",
+          "summary": "{'description': 'Tool: query-datasource\\nPurpose: read aggregated data from one Tableau published datasource.\\nArguments JSON shape: {\"datasourceLuid\": string, \"query\": {\"fields\": [...], \"filters\": [."
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_mcp_args",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "queryspec_mcp_fallback",
+            "fallback_reason": "llm_queryspec_failed"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_mcp_args",
+          "summary": "{'args': {'datasourceLuid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'query': {'fields': ['客户名称', '销售额'], 'filters': []}, 'limit': 10}, 'chain_mode': 'queryspec_mcp_fallback', 'fallback_reason': 'llm_q"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_args_guardrail",
+          "params": {
+            "tool": "query-datasource",
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_args_guardrail",
+          "summary": "{'decision': 'allow', 'args': {'datasourceLuid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'query': {'fields': ['客户名称', '销售额'], 'filters': []}, 'limit': 10}, 'repairs': [], 'reject_code': None, 'message"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "mcp_tool": "query-datasource",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "queryspec_mcp_fallback",
+            "guardrail_decision": "allow",
+            "guardrail_repairs": [],
+            "fallback_reason": "llm_queryspec_failed"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'error': '[NLQ_006] MCP 工具执行失败: MCP error -32602: Input validation error: Invalid arguments for tool query-datasource: [\\n  {\\n    \"code\": \"invalid_union\",\\n    \"unionErrors\": [\\n      {\\n        \"is"
+        },
+        {
+          "type": "error",
+          "error_code": "MCP_PROXY_EXECUTION_FAILED",
+          "message": "Tableau MCP 查询失败，本次不输出结论。",
+          "fallback_type": "guardrail_rejected",
+          "trace_id": "t-c18d738d",
+          "retryable": true,
+          "suggested_actions": [
+            "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_mcp_args",
+            "mcp_args_guardrail"
+          ],
+          "intent_classifier": {
+            "intent": "ranking",
+            "confidence": 0.82,
+            "route_reason": "ranking_pattern"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {
+              "phase": "queryspec_generation",
+              "reason": "llm_queryspec_failed",
+              "fallback_reason": "llm_queryspec_failed",
+              "original_error": {
+                "ok": false,
+                "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25939, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+              },
+              "fallback_mode": "mcp_proxy",
+              "chain_mode": "queryspec_mcp_fallback",
+              "metrics": {
+                "queryspec_main_path_success": false,
+                "queryspec_fallback_triggered": true,
+                "queryspec_fallback_mode": "mcp_proxy",
+                "queryspec_fallback_reason": "llm_queryspec_failed"
+              },
+              "guardrail_decision": "allow",
+              "guardrail_repairs": []
+            }
+          },
+          "user_hint": "请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "guardrail_rejected",
+                "message": "Tableau MCP 查询失败，本次不输出结论。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-c18d738d",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "guardrail_rejected",
+                    "message": "Tableau MCP 查询失败，本次不输出结论。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "n\": \"ranking_pattern\"}, \"controlled_chain\": {\"status\": \"failed\", \"detail\": {\"phase\": \"queryspec_generation\", \"reason\": \"llm_queryspec_failed\", \"fallback_reason\": \"llm_queryspec_failed\", \"original_error\": {\"ok\": false, \"error\": \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25939, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}\"}, \"fallback_mode\": \"mcp_proxy\", \"chain_mode\": \"queryspec_mcp_fallback\", \"metrics\": {\"queryspec_main_path_success\": false, \"queryspec_fallback_triggered\": true, \"queryspec_fallback_mode\": \"mcp_proxy\", \"queryspec_fallback_reason\": \"llm_queryspec_failed\"}, \"guardrail_decision\": \"allow\", \"guardrail_repairs\": []}}, \"user_hint\": \"请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"Tableau MCP 查询失败，本次不输出结论。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"Tableau MCP 查询失败，本次不输出结论。\\n\\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-c18d738d\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"Tableau MCP 查询失败，本次不输出结论。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"Tableau MCP 查询失败，本次不输出结论。\\n\\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。\"}}}}\n\n"
+    },
+    "Q7": {
+      "duration": 50.39267160597956,
+      "status_code": 200,
+      "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "MCP_PROXY_EXECUTION_FAILED",
+        "message": "Tableau MCP 查询失败，本次不输出结论。",
+        "fallback_type": "guardrail_rejected",
+        "trace_id": "t-9ae749a9",
+        "retryable": true,
+        "suggested_actions": [
+          "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_mcp_args",
+          "mcp_args_guardrail"
+        ],
+        "intent_classifier": {
+          "intent": "customer_record",
+          "confidence": 0.8,
+          "route_reason": "customer_record_pattern"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {
+            "phase": "queryspec_model_validation",
+            "reason": "queryspec_model_invalid",
+            "fallback_reason": "queryspec_model_invalid",
+            "original_error": {
+              "type": "ValidationError",
+              "message": "1 validation error for QuerySpec\nintent\n  Field required [type=missing, input_value={'field': '销售额', 'aggregation': 'SUM'}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing"
+            },
+            "fallback_mode": "mcp_proxy",
+            "chain_mode": "queryspec_mcp_fallback",
+            "metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "queryspec_model_invalid"
+            },
+            "guardrail_decision": "allow",
+            "guardrail_repairs": []
+          }
+        },
+        "user_hint": "请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "guardrail_rejected",
+              "message": "Tableau MCP 查询失败，本次不输出结论。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-9ae749a9",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "data_action_pattern",
+                "message": "data_action_pattern"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "guardrail_rejected",
+                  "message": "Tableau MCP 查询失败，本次不输出结论。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "customer_record",
+          "confidence": 0.8,
+          "route_reason": "customer_record_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "data_action_pattern",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "data_action_pattern",
+              "message": "data_action_pattern"
+            },
+            "intent_classifier": {
+              "intent": "customer_record",
+              "confidence": 0.8,
+              "route_reason": "customer_record_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+          "run_id": "57d8898b-f80a-4180-a06a-6ee7349e5233",
+          "trace_id": "t-9ae749a9",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：customer_record。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "customer_record",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'customer_record', 'kind': 'planning', 'checksum': '77d71c211d96ec30b2ebf9c8541d985919d4701a568beedb88ca0c1456401147', 'version': 'v1', 'source_path': '/app/skills/planning/c"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "customer_record",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "77d71c211d96ec30b2ebf9c8541d985919d4701a568beedb88ca0c1456401147"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'queryspec': {'field': '销售额', 'aggregation': 'SUM'}}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_mcp_fallback",
+          "params": {
+            "event": "FALLBACK_TRIGGERED",
+            "phase": "queryspec_model_validation",
+            "reason": "queryspec_model_invalid",
+            "fallback_mode": "mcp_proxy"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_mcp_fallback",
+          "summary": "{'phase': 'queryspec_model_validation', 'reason': 'queryspec_model_invalid', 'fallback_reason': 'queryspec_model_invalid', 'original_error': {'type': 'ValidationError', 'message': \"1 validation error "
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_tool_description_loader",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_tool_description_loader",
+          "summary": "{'description': 'Tool: query-datasource\\nPurpose: read aggregated data from one Tableau published datasource.\\nArguments JSON shape: {\"datasourceLuid\": string, \"query\": {\"fields\": [...], \"filters\": [."
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_mcp_args",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "queryspec_mcp_fallback",
+            "fallback_reason": "queryspec_model_invalid"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_mcp_args",
+          "summary": "{'args': {'datasourceLuid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'query': {'fields': ['客户名称', '销售额', '利润', '利润率', '发货日期', '发货年份', '类别', '子类别'], 'filters': [{'field': '客户名称', 'values': ['邓保']}]}, 'l"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_args_guardrail",
+          "params": {
+            "tool": "query-datasource",
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_args_guardrail",
+          "summary": "{'decision': 'allow', 'args': {'datasourceLuid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'query': {'fields': ['客户名称', '销售额', '利润', '利润率', '发货日期', '发货年份', '类别', '子类别'], 'filters': [{'field': '客户名称', 'v"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "mcp_tool": "query-datasource",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "queryspec_mcp_fallback",
+            "guardrail_decision": "allow",
+            "guardrail_repairs": [],
+            "fallback_reason": "queryspec_model_invalid"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'error': '[NLQ_006] MCP 工具执行失败: MCP error -32602: Input validation error: Invalid arguments for tool query-datasource: [\\n  {\\n    \"code\": \"invalid_union\",\\n    \"unionErrors\": [\\n      {\\n        \"is"
+        },
+        {
+          "type": "error",
+          "error_code": "MCP_PROXY_EXECUTION_FAILED",
+          "message": "Tableau MCP 查询失败，本次不输出结论。",
+          "fallback_type": "guardrail_rejected",
+          "trace_id": "t-9ae749a9",
+          "retryable": true,
+          "suggested_actions": [
+            "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_mcp_args",
+            "mcp_args_guardrail"
+          ],
+          "intent_classifier": {
+            "intent": "customer_record",
+            "confidence": 0.8,
+            "route_reason": "customer_record_pattern"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {
+              "phase": "queryspec_model_validation",
+              "reason": "queryspec_model_invalid",
+              "fallback_reason": "queryspec_model_invalid",
+              "original_error": {
+                "type": "ValidationError",
+                "message": "1 validation error for QuerySpec\nintent\n  Field required [type=missing, input_value={'field': '销售额', 'aggregation': 'SUM'}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing"
+              },
+              "fallback_mode": "mcp_proxy",
+              "chain_mode": "queryspec_mcp_fallback",
+              "metrics": {
+                "queryspec_main_path_success": false,
+                "queryspec_fallback_triggered": true,
+                "queryspec_fallback_mode": "mcp_proxy",
+                "queryspec_fallback_reason": "queryspec_model_invalid"
+              },
+              "guardrail_decision": "allow",
+              "guardrail_repairs": []
+            }
+          },
+          "user_hint": "请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "guardrail_rejected",
+                "message": "Tableau MCP 查询失败，本次不输出结论。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-9ae749a9",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "data_action_pattern",
+                  "message": "data_action_pattern"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "guardrail_rejected",
+                    "message": "Tableau MCP 查询失败，本次不输出结论。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "args\", \"mcp_args_guardrail\"], \"intent_classifier\": {\"intent\": \"customer_record\", \"confidence\": 0.8, \"route_reason\": \"customer_record_pattern\"}, \"controlled_chain\": {\"status\": \"failed\", \"detail\": {\"phase\": \"queryspec_model_validation\", \"reason\": \"queryspec_model_invalid\", \"fallback_reason\": \"queryspec_model_invalid\", \"original_error\": {\"type\": \"ValidationError\", \"message\": \"1 validation error for QuerySpec\\nintent\\n  Field required [type=missing, input_value={'field': '销售额', 'aggregation': 'SUM'}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\"}, \"fallback_mode\": \"mcp_proxy\", \"chain_mode\": \"queryspec_mcp_fallback\", \"metrics\": {\"queryspec_main_path_success\": false, \"queryspec_fallback_triggered\": true, \"queryspec_fallback_mode\": \"mcp_proxy\", \"queryspec_fallback_reason\": \"queryspec_model_invalid\"}, \"guardrail_decision\": \"allow\", \"guardrail_repairs\": []}}, \"user_hint\": \"请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"Tableau MCP 查询失败，本次不输出结论。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"Tableau MCP 查询失败，本次不输出结论。\\n\\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-9ae749a9\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"data_action_pattern\", \"message\": \"data_action_pattern\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"Tableau MCP 查询失败，本次不输出结论。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"Tableau MCP 查询失败，本次不输出结论。\\n\\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。\"}}}}\n\n"
+    },
+    "Q8": {
+      "duration": 43.936807646008674,
+      "status_code": 200,
+      "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "mcp_execution_failed",
+        "message": "Tableau MCP 查询失败，本次不输出结论。",
+        "fallback_type": "query_plan_unavailable",
+        "trace_id": "t-babac98f",
+        "retryable": true,
+        "suggested_actions": [
+          "请补充指标、时间范围、维度或筛选条件后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_queryspec",
+          "queryspec_fallback",
+          "queryspec_validator",
+          "tableau_mcp",
+          "answer_renderer"
+        ],
+        "intent_classifier": {
+          "intent": "trend_condition",
+          "confidence": 0.82,
+          "route_reason": "trend_condition_pattern"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {}
+        },
+        "user_hint": "请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "query_plan_unavailable",
+              "message": "Tableau MCP 查询失败，本次不输出结论。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-babac98f",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "query_plan_unavailable",
+                  "message": "Tableau MCP 查询失败，本次不输出结论。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "trend_condition",
+          "confidence": 0.82,
+          "route_reason": "trend_condition_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "trend_condition",
+              "confidence": 0.82,
+              "route_reason": "trend_condition_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+          "run_id": "4191a8aa-dea6-4981-a0aa-c090e09d5983",
+          "trace_id": "t-babac98f",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：trend_condition。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "trend_condition",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'trend_condition', 'kind': 'planning', 'checksum': '9e5fbaf844ed7b16b4c5cf3b8909e84c67249db5c9944537908a098e43240b97', 'version': 'v1', 'source_path': '/app/skills/planning/t"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "trend_condition",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "9e5fbaf844ed7b16b4c5cf3b8909e84c67249db5c9944537908a098e43240b97"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'queryspec': {'intent': 'trend_condition', 'operator': 'trend_condition', 'datasource': {'luid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'name': '订单+ (示例 - 超市)'}, 'time': {'field': '发货年份', 'grain': '"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_validator",
+          "params": {
+            "intent": "trend_condition",
+            "operator": "trend_condition"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_validator",
+          "summary": "{'passed': True, 'code': 'QS_VALID', 'message': 'QuerySpec 校验通过。', 'user_hint': '', 'detail': {'intent': 'trend_condition', 'operator': 'trend_condition', 'field_count': 3}}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "operator": "trend_condition",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'error': \"[NLQ_006] MCP 工具执行失败: The '发货年份' field is of type 'STRING'. The 'YEAR' function can not be applied to fields of this data type.\"}"
+        },
+        {
+          "type": "error",
+          "error_code": "mcp_execution_failed",
+          "message": "Tableau MCP 查询失败，本次不输出结论。",
+          "fallback_type": "query_plan_unavailable",
+          "trace_id": "t-babac98f",
+          "retryable": true,
+          "suggested_actions": [
+            "请补充指标、时间范围、维度或筛选条件后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_queryspec",
+            "queryspec_fallback",
+            "queryspec_validator",
+            "tableau_mcp",
+            "answer_renderer"
+          ],
+          "intent_classifier": {
+            "intent": "trend_condition",
+            "confidence": 0.82,
+            "route_reason": "trend_condition_pattern"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {}
+          },
+          "user_hint": "请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "query_plan_unavailable",
+                "message": "Tableau MCP 查询失败，本次不输出结论。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-babac98f",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "query_plan_unavailable",
+                    "message": "Tableau MCP 查询失败，本次不输出结论。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "3}}\"}\n\ndata: {\"type\": \"tool_call\", \"tool\": \"tableau_mcp\", \"params\": {\"operator\": \"trend_condition\", \"datasource_luid\": \"f4290485-26d3-428f-aa8d-ccc33862a411\"}}\n\ndata: {\"type\": \"tool_result\", \"tool\": \"tableau_mcp\", \"summary\": \"{'error': \\\"[NLQ_006] MCP 工具执行失败: The '发货年份' field is of type 'STRING'. The 'YEAR' function can not be applied to fields of this data type.\\\"}\"}\n\ndata: {\"type\": \"error\", \"error_code\": \"mcp_execution_failed\", \"message\": \"Tableau MCP 查询失败，本次不输出结论。\", \"fallback_type\": \"query_plan_unavailable\", \"trace_id\": \"t-babac98f\", \"retryable\": true, \"suggested_actions\": [\"请补充指标、时间范围、维度或筛选条件后重试。\"], \"tools_used\": [\"intent_classifier\", \"llm_queryspec\", \"queryspec_fallback\", \"queryspec_validator\", \"tableau_mcp\", \"answer_renderer\"], \"intent_classifier\": {\"intent\": \"trend_condition\", \"confidence\": 0.82, \"route_reason\": \"trend_condition_pattern\"}, \"controlled_chain\": {\"status\": \"failed\", \"detail\": {}}, \"user_hint\": \"请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"query_plan_unavailable\", \"message\": \"Tableau MCP 查询失败，本次不输出结论。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"Tableau MCP 查询失败，本次不输出结论。\\n\\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-babac98f\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"query_plan_unavailable\", \"message\": \"Tableau MCP 查询失败，本次不输出结论。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"Tableau MCP 查询失败，本次不输出结论。\\n\\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。\"}}}}\n\n"
+    },
+    "Q9": {
+      "duration": 39.44843572599348,
+      "status_code": 200,
+      "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "MCP_ARGS_LLM_INVALID",
+        "message": "LLM 未生成可执行的 MCP tool args。",
+        "fallback_type": "guardrail_rejected",
+        "trace_id": "t-e96326b2",
+        "retryable": true,
+        "suggested_actions": [
+          "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_mcp_args",
+          "mcp_args_guardrail"
+        ],
+        "intent_classifier": {
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {
+            "phase": "queryspec_semantic_check",
+            "reason": "queryspec_semantic_mismatch",
+            "fallback_reason": "queryspec_semantic_mismatch",
+            "original_error": {
+              "fallback_reason": "llm_queryspec_operator_mismatch:aggregate->all_period_condition",
+              "queryspec": {
+                "intent": "aggregate",
+                "operator": "aggregate",
+                "datasource": {
+                  "luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+                  "name": "订单+ (示例 - 超市)"
+                },
+                "time": null,
+                "metrics": [
+                  {
+                    "field": "利润",
+                    "aggregation": "SUM"
+                  }
+                ],
+                "derived_metrics": [],
+                "dimensions": [
+                  "省/自治区"
+                ],
+                "filters": [],
+                "sort": [
+                  {
+                    "field": "SUM(利润)",
+                    "direction": "ASC"
+                  }
+                ],
+                "limit": 100,
+                "operator_spec": {},
+                "answer_contract": {
+                  "max_chars": 120,
+                  "must_include": [
+                    "利润",
+                    "省/自治区"
+                  ],
+                  "forbid": [
+                    "明细列表",
+                    "猜测原因"
+                  ]
+                }
+              }
+            },
+            "fallback_mode": "mcp_proxy",
+            "chain_mode": "queryspec_mcp_fallback",
+            "metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "queryspec_semantic_mismatch"
+            },
+            "guardrail_decision": "reject",
+            "guardrail_repairs": [],
+            "llm_error": "invalid_json: Unterminated string starting at: line 4 column 16 (char 90)"
+          }
+        },
+        "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "guardrail_rejected",
+              "message": "LLM 未生成可执行的 MCP tool args。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-e96326b2",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "guardrail_rejected",
+                  "message": "LLM 未生成可执行的 MCP tool args。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.62,
+              "route_reason": "generic_business_data_context"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+          "run_id": "724815a2-9dba-4057-8cb4-25e1e2065540",
+          "trace_id": "t-e96326b2",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：aggregate。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "aggregate",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'aggregate', 'kind': 'planning', 'checksum': '30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19', 'version': 'v1', 'source_path': '/app/skills/planning/aggrega"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "aggregate",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'queryspec': {'intent': 'aggregate', 'operator': 'aggregate', 'datasource': {'luid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'name': '订单+ (示例 - 超市)'}, 'time': None, 'metrics': [{'field': '利润', 'aggre"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_mcp_fallback",
+          "params": {
+            "event": "FALLBACK_TRIGGERED",
+            "phase": "queryspec_semantic_check",
+            "reason": "queryspec_semantic_mismatch",
+            "fallback_mode": "mcp_proxy"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_mcp_fallback",
+          "summary": "{'phase': 'queryspec_semantic_check', 'reason': 'queryspec_semantic_mismatch', 'fallback_reason': 'queryspec_semantic_mismatch', 'original_error': {'fallback_reason': 'llm_queryspec_operator_mismatch:"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_tool_description_loader",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_tool_description_loader",
+          "summary": "{'description': 'Tool: query-datasource\\nPurpose: read aggregated data from one Tableau published datasource.\\nArguments JSON shape: {\"datasourceLuid\": string, \"query\": {\"fields\": [...], \"filters\": [."
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_mcp_args",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "queryspec_mcp_fallback",
+            "fallback_reason": "queryspec_semantic_mismatch"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_mcp_args",
+          "summary": "{'ok': False, 'error': 'invalid_json: Unterminated string starting at: line 4 column 16 (char 90)', 'raw': '{\\n  \"datasourceLuid\": \"f4290485-26d3-428f-aa8d-ccc33862a411\",\\n  \"query\": {\\n    \"fields\": "
+        },
+        {
+          "type": "error",
+          "error_code": "MCP_ARGS_LLM_INVALID",
+          "message": "LLM 未生成可执行的 MCP tool args。",
+          "fallback_type": "guardrail_rejected",
+          "trace_id": "t-e96326b2",
+          "retryable": true,
+          "suggested_actions": [
+            "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_mcp_args",
+            "mcp_args_guardrail"
+          ],
+          "intent_classifier": {
+            "intent": "aggregate",
+            "confidence": 0.62,
+            "route_reason": "generic_business_data_context"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {
+              "phase": "queryspec_semantic_check",
+              "reason": "queryspec_semantic_mismatch",
+              "fallback_reason": "queryspec_semantic_mismatch",
+              "original_error": {
+                "fallback_reason": "llm_queryspec_operator_mismatch:aggregate->all_period_condition",
+                "queryspec": {
+                  "intent": "aggregate",
+                  "operator": "aggregate",
+                  "datasource": {
+                    "luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+                    "name": "订单+ (示例 - 超市)"
+                  },
+                  "time": null,
+                  "metrics": [
+                    {
+                      "field": "利润",
+                      "aggregation": "SUM"
+                    }
+                  ],
+                  "derived_metrics": [],
+                  "dimensions": [
+                    "省/自治区"
+                  ],
+                  "filters": [],
+                  "sort": [
+                    {
+                      "field": "SUM(利润)",
+                      "direction": "ASC"
+                    }
+                  ],
+                  "limit": 100,
+                  "operator_spec": {},
+                  "answer_contract": {
+                    "max_chars": 120,
+                    "must_include": [
+                      "利润",
+                      "省/自治区"
+                    ],
+                    "forbid": [
+                      "明细列表",
+                      "猜测原因"
+                    ]
+                  }
+                }
+              },
+              "fallback_mode": "mcp_proxy",
+              "chain_mode": "queryspec_mcp_fallback",
+              "metrics": {
+                "queryspec_main_path_success": false,
+                "queryspec_fallback_triggered": true,
+                "queryspec_fallback_mode": "mcp_proxy",
+                "queryspec_fallback_reason": "queryspec_semantic_mismatch"
+              },
+              "guardrail_decision": "reject",
+              "guardrail_repairs": [],
+              "llm_error": "invalid_json: Unterminated string starting at: line 4 column 16 (char 90)"
+            }
+          },
+          "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "guardrail_rejected",
+                "message": "LLM 未生成可执行的 MCP tool args。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-e96326b2",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "guardrail_rejected",
+                    "message": "LLM 未生成可执行的 MCP tool args。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "tic_mismatch\", \"original_error\": {\"fallback_reason\": \"llm_queryspec_operator_mismatch:aggregate->all_period_condition\", \"queryspec\": {\"intent\": \"aggregate\", \"operator\": \"aggregate\", \"datasource\": {\"luid\": \"f4290485-26d3-428f-aa8d-ccc33862a411\", \"name\": \"订单+ (示例 - 超市)\"}, \"time\": null, \"metrics\": [{\"field\": \"利润\", \"aggregation\": \"SUM\"}], \"derived_metrics\": [], \"dimensions\": [\"省/自治区\"], \"filters\": [], \"sort\": [{\"field\": \"SUM(利润)\", \"direction\": \"ASC\"}], \"limit\": 100, \"operator_spec\": {}, \"answer_contract\": {\"max_chars\": 120, \"must_include\": [\"利润\", \"省/自治区\"], \"forbid\": [\"明细列表\", \"猜测原因\"]}}}, \"fallback_mode\": \"mcp_proxy\", \"chain_mode\": \"queryspec_mcp_fallback\", \"metrics\": {\"queryspec_main_path_success\": false, \"queryspec_fallback_triggered\": true, \"queryspec_fallback_mode\": \"mcp_proxy\", \"queryspec_fallback_reason\": \"queryspec_semantic_mismatch\"}, \"guardrail_decision\": \"reject\", \"guardrail_repairs\": [], \"llm_error\": \"invalid_json: Unterminated string starting at: line 4 column 16 (char 90)\"}}, \"user_hint\": \"请换一种更明确的问法，补充指标、时间范围或维度。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-e96326b2\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}}}}\n\n"
+    },
+    "Q10": {
+      "duration": 44.11009768699296,
+      "status_code": 200,
+      "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "mcp_execution_failed",
+        "message": "Tableau MCP 查询失败，本次不输出结论。",
+        "fallback_type": "query_plan_unavailable",
+        "trace_id": "t-79dcab25",
+        "retryable": true,
+        "suggested_actions": [
+          "请补充指标、时间范围、维度或筛选条件后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_queryspec",
+          "queryspec_fallback",
+          "queryspec_validator",
+          "tableau_mcp",
+          "answer_renderer"
+        ],
+        "intent_classifier": {
+          "intent": "root_cause",
+          "confidence": 0.9,
+          "route_reason": "root_cause_pattern"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {}
+        },
+        "user_hint": "请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "query_plan_unavailable",
+              "message": "Tableau MCP 查询失败，本次不输出结论。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-79dcab25",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "data_action_pattern",
+                "message": "data_action_pattern"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "query_plan_unavailable",
+                  "message": "Tableau MCP 查询失败，本次不输出结论。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "root_cause",
+          "confidence": 0.9,
+          "route_reason": "root_cause_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "data_action_pattern",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "data_action_pattern",
+              "message": "data_action_pattern"
+            },
+            "intent_classifier": {
+              "intent": "root_cause",
+              "confidence": 0.9,
+              "route_reason": "root_cause_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "aa818de2-8bdd-4129-849d-767269404534",
+          "run_id": "7dfa4fe2-c378-46fd-b245-496f95ab38ee",
+          "trace_id": "t-79dcab25",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：root_cause。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "root_cause",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'root_cause', 'kind': 'planning', 'checksum': '5d853d17c5eb37c9430975c5b03506949d4dc0a61fa694e1b48fc7def63f2139', 'version': 'v1', 'source_path': '/app/skills/planning/root_c"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "root_cause",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "5d853d17c5eb37c9430975c5b03506949d4dc0a61fa694e1b48fc7def63f2139"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'queryspec': {'intent': 'root_cause', 'operator': 'root_cause', 'datasource': {'luid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'name': '订单+ (示例 - 超市)'}, 'time': {'field': '发货年份', 'grain': 'YEAR', 'ra"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_validator",
+          "params": {
+            "intent": "root_cause",
+            "operator": "root_cause"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_validator",
+          "summary": "{'passed': True, 'code': 'QS_VALID', 'message': 'QuerySpec 校验通过。', 'user_hint': '', 'detail': {'intent': 'root_cause', 'operator': 'root_cause', 'field_count': 6}}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "operator": "root_cause",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'error': '[NLQ_006] MCP 工具执行失败: Filter on Field 发货年份 is the wrong type for that Field.'}"
+        },
+        {
+          "type": "error",
+          "error_code": "mcp_execution_failed",
+          "message": "Tableau MCP 查询失败，本次不输出结论。",
+          "fallback_type": "query_plan_unavailable",
+          "trace_id": "t-79dcab25",
+          "retryable": true,
+          "suggested_actions": [
+            "请补充指标、时间范围、维度或筛选条件后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_queryspec",
+            "queryspec_fallback",
+            "queryspec_validator",
+            "tableau_mcp",
+            "answer_renderer"
+          ],
+          "intent_classifier": {
+            "intent": "root_cause",
+            "confidence": 0.9,
+            "route_reason": "root_cause_pattern"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {}
+          },
+          "user_hint": "请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "query_plan_unavailable",
+                "message": "Tableau MCP 查询失败，本次不输出结论。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-79dcab25",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "data_action_pattern",
+                  "message": "data_action_pattern"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "query_plan_unavailable",
+                    "message": "Tableau MCP 查询失败，本次不输出结论。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "t': 'root_cause', 'operator': 'root_cause', 'field_count': 6}}\"}\n\ndata: {\"type\": \"tool_call\", \"tool\": \"tableau_mcp\", \"params\": {\"operator\": \"root_cause\", \"datasource_luid\": \"f4290485-26d3-428f-aa8d-ccc33862a411\"}}\n\ndata: {\"type\": \"tool_result\", \"tool\": \"tableau_mcp\", \"summary\": \"{'error': '[NLQ_006] MCP 工具执行失败: Filter on Field 发货年份 is the wrong type for that Field.'}\"}\n\ndata: {\"type\": \"error\", \"error_code\": \"mcp_execution_failed\", \"message\": \"Tableau MCP 查询失败，本次不输出结论。\", \"fallback_type\": \"query_plan_unavailable\", \"trace_id\": \"t-79dcab25\", \"retryable\": true, \"suggested_actions\": [\"请补充指标、时间范围、维度或筛选条件后重试。\"], \"tools_used\": [\"intent_classifier\", \"llm_queryspec\", \"queryspec_fallback\", \"queryspec_validator\", \"tableau_mcp\", \"answer_renderer\"], \"intent_classifier\": {\"intent\": \"root_cause\", \"confidence\": 0.9, \"route_reason\": \"root_cause_pattern\"}, \"controlled_chain\": {\"status\": \"failed\", \"detail\": {}}, \"user_hint\": \"请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"query_plan_unavailable\", \"message\": \"Tableau MCP 查询失败，本次不输出结论。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"Tableau MCP 查询失败，本次不输出结论。\\n\\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-79dcab25\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"data_action_pattern\", \"message\": \"data_action_pattern\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"query_plan_unavailable\", \"message\": \"Tableau MCP 查询失败，本次不输出结论。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"Tableau MCP 查询失败，本次不输出结论。\\n\\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。\"}}}}\n\n"
+    }
+  }
+}

@@ -9,7 +9,13 @@ import os
 from typing import Any, AsyncGenerator, Mapping, Optional
 
 from services.data_agent.intent_classifier import IntentClassification
-from services.data_agent.mcp_args_guardrail import McpArgsGuardrailInput, validate_mcp_args
+from services.data_agent.mcp_args_guardrail import (
+    MCP_ARGS_GUARDRAIL_PASS,
+    MCP_ARGS_GUARDRAIL_REJECT,
+    McpArgsGuardrailInput,
+    query_datasource_tool_schema,
+    validate_mcp_args,
+)
 from services.data_agent.mcp_first_main import (
     _call_llm_json,
     _queryable_fields,
@@ -162,7 +168,11 @@ async def run_mcp_proxy_main_path(
     })
     yield AgentEvent(type="tool_result", content={
         "tool": "mcp_args_guardrail",
-        "result": {"success": guardrail.decision != "reject", "data": guardrail_payload},
+        "result": {
+            "success": guardrail.decision != "reject",
+            "event": MCP_ARGS_GUARDRAIL_REJECT if guardrail.decision == "reject" else MCP_ARGS_GUARDRAIL_PASS,
+            "data": guardrail_payload,
+        },
     })
 
     if guardrail.decision == "reject":
@@ -228,37 +238,7 @@ async def run_mcp_proxy_main_path(
 
 
 def _query_datasource_tool_schema() -> dict[str, Any]:
-    return {
-        "type": "object",
-        "properties": {
-            "datasourceLuid": {
-                "type": "string",
-                "description": "Tableau published datasource LUID. Must match the current datasource.",
-            },
-            "query": {
-                "type": "object",
-                "description": "VizQL query JSON accepted by Tableau MCP query-datasource.",
-                "properties": {
-                    "fields": {
-                        "type": "array",
-                        "items": {"type": ["object", "string"]},
-                    },
-                    "filters": {
-                        "type": "array",
-                        "items": {"type": "object"},
-                    },
-                },
-                "additionalProperties": True,
-            },
-            "limit": {
-                "type": "integer",
-                "minimum": 1,
-                "description": "Maximum rows to return. Guardrail clamps this to the safe maximum.",
-            },
-        },
-        "required": ["datasourceLuid", "query"],
-        "additionalProperties": False,
-    }
+    return query_datasource_tool_schema()
 
 
 def _mcp_tool_description(ds_info: Mapping[str, Any], queryable_fields: list[str]) -> str:

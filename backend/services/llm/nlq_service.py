@@ -14,7 +14,13 @@ from sqlalchemy.orm import Session
 from services.capability.audit import get_trace_id, get_principal
 from services.llm.service import llm_service
 from services.llm.prompts import ONE_PASS_NL_TO_QUERY_TEMPLATE, ONE_PASS_RETRY_TEMPLATE
-from services.tableau.models import TableauDatabase, TableauAsset
+from services.data_agent.mcp_args_guardrail import (
+    DEFAULT_LIMIT as DEFAULT_GUARDRAIL_LIMIT,
+    McpArgsGuardrailRejected,
+    execute_query_datasource_with_guardrail,
+    extract_queryable_fields_from_metadata,
+)
+from services.tableau.models import TableauDatabase, TableauAsset, TableauDatasourceField
 
 
 def _mcp_query_datasource_direct(
@@ -106,6 +112,7 @@ def execute_query(
     timeout: int = 30,
     connection_id: Optional[int] = None,
     wrapper=None,
+    question: str = "",
 ) -> Dict[str, Any]:
     """
     Stage 3：查询执行。
@@ -140,18 +147,35 @@ def execute_query(
 
     if effective_wrapper is not None:
         principal = get_principal() or {"id": 0, "role": "analyst"}
-        cap_result = effective_wrapper.invoke(
-            principal=principal,
-            capability_name="query_metric",
-            params={
-                "datasource_luid": datasource_luid,
-                "vizql_json": vizql_json,
-                "limit": limit,
-                "timeout": timeout,
-                "connection_id": connection_id,
-            },
-        )
-        return cap_result.data if hasattr(cap_result, "data") else cap_result
+        try:
+            return _guarded_execute_query_datasource(
+                question=question,
+                datasource_luid=datasource_luid,
+                query=vizql_json,
+                limit=limit,
+                timeout=timeout,
+                connection_id=connection_id,
+                queryable_fields=_load_cached_queryable_fields(datasource_luid, connection_id=connection_id),
+                execute=lambda safe_args: _capability_result_data(
+                    effective_wrapper.invoke(
+                        principal=principal,
+                        capability_name="query_metric",
+                        params={
+                            "datasource_luid": safe_args.get("datasourceLuid"),
+                            "vizql_json": safe_args.get("query") or {},
+                            "limit": int(safe_args.get("limit") or DEFAULT_GUARDRAIL_LIMIT),
+                            "timeout": int(safe_args.get("timeout") or timeout),
+                            "connection_id": safe_args.get("connection_id"),
+                        },
+                    )
+                ),
+            )
+        except McpArgsGuardrailRejected as e:
+            raise NLQError(
+                e.result.reject_code or "MCP_ARGS_REJECTED",
+                message=e.result.message,
+                details=e.result.to_dict(),
+            ) from e
 
     if connection_id is None:
         # Fallback：当 connection_id=None 时，从活跃 MCP server config 获取 credentials
@@ -180,30 +204,61 @@ def execute_query(
             if not pat_value:
                 raise NLQError("NLQ_005", message="Tableau PAT 未配置")
 
-            result = _mcp_query_datasource_direct(
-                mcp_server_url=mcp_record.server_url,
-                site=creds.get("site_name", ""),
-                token_name=creds.get("pat_name", ""),
-                token_value=pat_value,
-                datasource_luid=datasource_luid,
-                query=vizql_json,
-                limit=limit,
-                timeout=timeout,
-            )
+            try:
+                result = _guarded_execute_query_datasource(
+                question=question,
+                    datasource_luid=datasource_luid,
+                    query=vizql_json,
+                    limit=limit,
+                    timeout=timeout,
+                    connection_id=None,
+                    queryable_fields=_load_cached_queryable_fields(datasource_luid, connection_id=None),
+                    execute=lambda safe_args: _mcp_query_datasource_direct(
+                        mcp_server_url=mcp_record.server_url,
+                        site=creds.get("site_name", ""),
+                        token_name=creds.get("pat_name", ""),
+                        token_value=pat_value,
+                        datasource_luid=str(safe_args.get("datasourceLuid") or ""),
+                        query=safe_args.get("query") or {},
+                        limit=int(safe_args.get("limit") or DEFAULT_GUARDRAIL_LIMIT),
+                        timeout=int(safe_args.get("timeout") or timeout),
+                    ),
+                )
+            except McpArgsGuardrailRejected as e:
+                raise NLQError(
+                    e.result.reject_code or "MCP_ARGS_REJECTED",
+                    message=e.result.message,
+                    details=e.result.to_dict(),
+                ) from e
             return result
         finally:
             db.close()
 
     client = get_tableau_mcp_client(connection_id=connection_id)
     try:
-        result = client.query_datasource(
+        result = _guarded_execute_query_datasource(
+            question=question,
             datasource_luid=datasource_luid,
             query=vizql_json,
             limit=limit,
             timeout=timeout,
             connection_id=connection_id,
+            queryable_fields=_load_mcp_queryable_fields(client, datasource_luid, connection_id, timeout),
+            execute=lambda safe_args: client.query_datasource(
+                datasource_luid=str(safe_args.get("datasourceLuid") or ""),
+                query=safe_args.get("query") or {},
+                limit=int(safe_args.get("limit") or DEFAULT_GUARDRAIL_LIMIT),
+                timeout=int(safe_args.get("timeout") or timeout),
+                connection_id=safe_args.get("connection_id"),
+            ),
         )
         return result
+    except McpArgsGuardrailRejected as e:
+        raise NLQError(
+            e.result.reject_code or "MCP_ARGS_REJECTED",
+            message=e.result.message,
+            details=e.result.to_dict(),
+        ) from e
     except TableauMCPError as e:
         # TableauMCPError → NLQError 统一映射
         code_map = {
@@ -215,6 +270,93 @@ def execute_query(
         raise NLQError(nlq_code, message=e.message, details=e.details)
 
 logger = logging.getLogger(__name__)
+
+
+def _guarded_execute_query_datasource(
+    *,
+    question: str,
+    datasource_luid: str,
+    query: Dict[str, Any],
+    limit: int,
+    timeout: int,
+    connection_id: Optional[int],
+    queryable_fields: list[str],
+    execute,
+) -> Dict[str, Any]:
+    trace_id = get_trace_id()
+    return execute_query_datasource_with_guardrail(
+        question=question,
+        datasource_luid=datasource_luid,
+        query=query or {},
+        limit=limit,
+        timeout=timeout,
+        connection_id=connection_id,
+        queryable_fields=queryable_fields,
+        current_datasource={"luid": datasource_luid, "connection_id": connection_id},
+        user_context={
+            "accessible_datasource_luids": [datasource_luid],
+            "accessible_connection_ids": [connection_id] if connection_id is not None else [],
+            "connection_id": connection_id,
+        },
+        execute=execute,
+        trace_id=trace_id,
+        chain_mode="nlq_execute_query",
+    )
+
+
+def _capability_result_data(cap_result: Any) -> Any:
+    return cap_result.data if hasattr(cap_result, "data") else cap_result
+
+
+def _load_mcp_queryable_fields(client, datasource_luid: str, connection_id: Optional[int], timeout: int) -> list[str]:
+    try:
+        metadata = client.get_datasource_metadata(datasource_luid, timeout=min(timeout, 30))
+        fields = extract_queryable_fields_from_metadata(metadata)
+        if fields:
+            return fields
+    except Exception as exc:
+        logger.warning(
+            "MCP guardrail metadata lookup failed: datasource=%s connection=%s error=%s",
+            datasource_luid,
+            connection_id,
+            exc,
+        )
+    return _load_cached_queryable_fields(datasource_luid, connection_id=connection_id)
+
+
+def _load_cached_queryable_fields(datasource_luid: str, connection_id: Optional[int]) -> list[str]:
+    db = TableauDatabase()
+    session = db.session
+    try:
+        asset_query = session.query(TableauAsset).filter(
+            TableauAsset.tableau_id == datasource_luid,
+            TableauAsset.is_deleted == False,
+        )
+        if connection_id is not None:
+            asset_query = asset_query.filter(TableauAsset.connection_id == connection_id)
+        asset = asset_query.order_by(TableauAsset.id.asc()).first()
+        if not asset:
+            return []
+
+        field_rows = session.query(TableauDatasourceField).filter(
+            TableauDatasourceField.asset_id == asset.id,
+            TableauDatasourceField.datasource_luid == datasource_luid,
+        ).all()
+        fields = extract_queryable_fields_from_metadata([row.to_dict() for row in field_rows])
+        if fields:
+            return fields
+        return extract_queryable_fields_from_metadata(asset.raw_metadata or {})
+    except Exception as exc:
+        logger.warning(
+            "Cached guardrail metadata lookup failed: datasource=%s connection=%s error=%s",
+            datasource_luid,
+            connection_id,
+            exc,
+        )
+        return []
+    finally:
+        session.close()
+
 
 # === T1.3 入口1+2 共享：CapabilityWrapper context var ===
 # 供 execute_query（入口2）和内部 LLM 调用（入口1）从 context 获取 wrapper 实例

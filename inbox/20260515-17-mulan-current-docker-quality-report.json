@@ -1,0 +1,1148 @@
+{
+  "schema_version": "mcp_accuracy_quality_report.v1",
+  "source_plan": "inbox/20260515-15-mulan-mcp-accuracy-repair-plan.md",
+  "snapshot_id": "superstore_2026_05_13",
+  "generated_at": "2026-05-15T09:32:32.236539+00:00",
+  "status": "block",
+  "case_set": "all",
+  "cases": [
+    {
+      "case_id": "batch2.q1_overall_kpis",
+      "question_id": "Q1",
+      "status": "block",
+      "failure_layer": "no_mcp",
+      "checks": [
+        {
+          "name": "baseline_mcp_execution",
+          "status": "block",
+          "check_type": "route",
+          "message": "MCP execution was not observed",
+          "details": {
+            "tools_used": [
+              "llm_mcp_args",
+              "llm_queryspec",
+              "mcp_tool_description_loader",
+              "planning_skill_loader",
+              "queryspec_mcp_fallback"
+            ]
+          }
+        },
+        {
+          "name": "baseline_fallback_trace",
+          "status": "pass",
+          "check_type": "route",
+          "message": "fallback trace observed",
+          "details": {
+            "expected_event": [
+              "FALLBACK_TRIGGERED",
+              "WARN"
+            ]
+          }
+        }
+      ],
+      "queryspec_metrics": {
+        "queryspec_main_path_success": false,
+        "queryspec_fallback_triggered": true
+      },
+      "mcp_baseline": {
+        "fields": [
+          "SUM(销售额)",
+          "SUM(利润)",
+          "COUNTD(客户名称)",
+          "利润率",
+          "客单价"
+        ],
+        "row_count": 1
+      },
+      "mulan_response_data": {
+        "fields": [],
+        "row_count": 0
+      },
+      "ui_table_data": {
+        "fields": [],
+        "row_count": 0
+      }
+    },
+    {
+      "case_id": "batch2.q2_followup_metric_trend",
+      "question_id": "Q2",
+      "status": "block",
+      "failure_layer": "no_mcp",
+      "checks": [
+        {
+          "name": "baseline_mcp_execution",
+          "status": "block",
+          "check_type": "route",
+          "message": "MCP execution was not observed",
+          "details": {
+            "tools_used": [
+              "llm_mcp_args",
+              "llm_queryspec",
+              "mcp_tool_description_loader",
+              "planning_skill_loader",
+              "queryspec_mcp_fallback"
+            ]
+          }
+        },
+        {
+          "name": "baseline_fallback_trace",
+          "status": "pass",
+          "check_type": "route",
+          "message": "fallback trace observed",
+          "details": {
+            "expected_event": [
+              "FALLBACK_TRIGGERED",
+              "WARN"
+            ]
+          }
+        }
+      ],
+      "queryspec_metrics": {
+        "queryspec_main_path_success": false,
+        "queryspec_fallback_triggered": true
+      },
+      "mcp_baseline": {
+        "fields": [
+          "YEAR(发货日期)",
+          "SUM(销售额)",
+          "SUM(利润)",
+          "COUNTD(客户名称)"
+        ],
+        "row_count": 5
+      },
+      "mulan_response_data": {
+        "fields": [],
+        "row_count": 0
+      },
+      "ui_table_data": {
+        "fields": [],
+        "row_count": 0
+      }
+    },
+    {
+      "case_id": "batch2.q4_continue_split_each_year",
+      "question_id": "Q4",
+      "status": "block",
+      "failure_layer": "mcp_failure",
+      "checks": [
+        {
+          "name": "baseline_mcp_execution",
+          "status": "pass",
+          "check_type": "route",
+          "message": "MCP execution observed",
+          "details": {
+            "tools_used": [
+              "llm_mcp_args",
+              "llm_queryspec",
+              "mcp_args_guardrail",
+              "mcp_tool_description_loader",
+              "planning_skill_loader",
+              "queryspec_mcp_fallback",
+              "tableau_mcp"
+            ]
+          }
+        },
+        {
+          "name": "baseline_mcp_result",
+          "status": "block",
+          "check_type": "route",
+          "message": "MCP execution did not produce response data",
+          "details": {
+            "error": {
+              "type": "error",
+              "error_code": "MCP_PROXY_EXECUTION_FAILED",
+              "message": "Tableau MCP 查询失败，本次不输出结论。",
+              "fallback_type": "guardrail_rejected",
+              "trace_id": "t-d7990a6c",
+              "retryable": true,
+              "suggested_actions": [
+                "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+              ],
+              "tools_used": [
+                "intent_classifier",
+                "llm_mcp_args",
+                "mcp_args_guardrail"
+              ],
+              "intent_classifier": {
+                "intent": "aggregate",
+                "confidence": 0.62,
+                "route_reason": "generic_business_data_context"
+              },
+              "controlled_chain": {
+                "status": "failed",
+                "detail": {
+                  "phase": "queryspec_generation",
+                  "reason": "llm_queryspec_failed",
+                  "fallback_reason": "llm_queryspec_failed",
+                  "original_error": {
+                    "ok": false,
+                    "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 26155, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+                  },
+                  "fallback_mode": "mcp_proxy",
+                  "chain_mode": "queryspec_mcp_fallback",
+                  "metrics": {
+                    "queryspec_main_path_success": false,
+                    "queryspec_fallback_triggered": true,
+                    "queryspec_fallback_mode": "mcp_proxy",
+                    "queryspec_fallback_reason": "llm_queryspec_failed"
+                  },
+                  "guardrail_decision": "repair",
+                  "guardrail_repairs": [
+                    {
+                      "type": "limit_default",
+                      "path": "limit",
+                      "before": null,
+                      "after": 100,
+                      "reason": "schema supports limit and args omitted it"
+                    }
+                  ]
+                }
+              },
+              "user_hint": "请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "guardrail_rejected",
+                    "message": "Tableau MCP 查询失败，本次不输出结论。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+              },
+              "explainability": {
+                "schema_version": "p0.1",
+                "run_id": "",
+                "trace_id": "t-d7990a6c",
+                "phases": {
+                  "intent": {
+                    "intent": "query",
+                    "confidence": 0.75,
+                    "strategy": "router_guardrail",
+                    "guardrail": {
+                      "decision": "allow",
+                      "reason_code": "data_action_pattern",
+                      "message": "data_action_pattern"
+                    }
+                  },
+                  "postprocess": {
+                    "response_type": "fallback",
+                    "row_count": null,
+                    "displayed_row_count": null,
+                    "formatting": [
+                      "markdown_summary"
+                    ]
+                  },
+                  "fallback": {
+                    "occurred": true,
+                    "chain": [
+                      {
+                        "from": "router_guardrail",
+                        "to": "error",
+                        "reason_code": "guardrail_rejected",
+                        "message": "Tableau MCP 查询失败，本次不输出结论。"
+                      }
+                    ],
+                    "final_source": "fallback",
+                    "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "baseline_response_contract",
+          "status": "block",
+          "check_type": "set",
+          "message": "table response_data contract is missing",
+          "details": {
+            "response_type": null
+          }
+        },
+        {
+          "name": "baseline_guardrail_trace",
+          "status": "block",
+          "check_type": "route",
+          "message": "MCP execution is missing Guardrail pass trace",
+          "details": {
+            "expected_event": "MCP_ARGS_GUARDRAIL_PASS"
+          }
+        },
+        {
+          "name": "baseline_fallback_trace",
+          "status": "pass",
+          "check_type": "route",
+          "message": "fallback trace observed",
+          "details": {
+            "expected_event": [
+              "FALLBACK_TRIGGERED",
+              "WARN"
+            ]
+          }
+        }
+      ],
+      "queryspec_metrics": {
+        "queryspec_main_path_success": false,
+        "queryspec_fallback_triggered": true
+      },
+      "mcp_baseline": {
+        "fields": [
+          "子类别",
+          "YEAR(发货日期)",
+          "SUM(销售额)",
+          "SUM(利润)"
+        ],
+        "row_count": 80
+      },
+      "mulan_response_data": {
+        "fields": [],
+        "row_count": 0
+      },
+      "ui_table_data": {
+        "fields": [],
+        "row_count": 0
+      }
+    },
+    {
+      "case_id": "batch2.q5_subcategories_without_sales_2025",
+      "question_id": "Q5",
+      "status": "block",
+      "failure_layer": "no_mcp",
+      "checks": [
+        {
+          "name": "baseline_mcp_execution",
+          "status": "block",
+          "check_type": "route",
+          "message": "MCP execution was not observed",
+          "details": {
+            "tools_used": [
+              "llm_mcp_args",
+              "llm_queryspec",
+              "mcp_tool_description_loader",
+              "planning_skill_loader",
+              "queryspec_mcp_fallback"
+            ]
+          }
+        },
+        {
+          "name": "baseline_fallback_trace",
+          "status": "pass",
+          "check_type": "route",
+          "message": "fallback trace observed",
+          "details": {
+            "expected_event": [
+              "FALLBACK_TRIGGERED",
+              "WARN"
+            ]
+          }
+        }
+      ],
+      "queryspec_metrics": {
+        "queryspec_main_path_success": false,
+        "queryspec_fallback_triggered": true
+      },
+      "mcp_baseline": {
+        "fields": [
+          "子类别"
+        ],
+        "row_count": 5
+      },
+      "mulan_response_data": {
+        "fields": [],
+        "row_count": 0
+      },
+      "ui_table_data": {
+        "fields": [],
+        "row_count": 0
+      }
+    },
+    {
+      "case_id": "batch2.q6_top10_customers",
+      "question_id": "Q6",
+      "status": "block",
+      "failure_layer": "mcp_failure",
+      "checks": [
+        {
+          "name": "baseline_mcp_execution",
+          "status": "pass",
+          "check_type": "route",
+          "message": "MCP execution observed",
+          "details": {
+            "tools_used": [
+              "llm_mcp_args",
+              "llm_queryspec",
+              "mcp_args_guardrail",
+              "mcp_tool_description_loader",
+              "planning_skill_loader",
+              "queryspec_mcp_fallback",
+              "tableau_mcp"
+            ]
+          }
+        },
+        {
+          "name": "baseline_mcp_result",
+          "status": "block",
+          "check_type": "route",
+          "message": "MCP execution did not produce response data",
+          "details": {
+            "error": {
+              "type": "error",
+              "error_code": "MCP_PROXY_EXECUTION_FAILED",
+              "message": "Tableau MCP 查询失败，本次不输出结论。",
+              "fallback_type": "guardrail_rejected",
+              "trace_id": "t-c18d738d",
+              "retryable": true,
+              "suggested_actions": [
+                "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+              ],
+              "tools_used": [
+                "intent_classifier",
+                "llm_mcp_args",
+                "mcp_args_guardrail"
+              ],
+              "intent_classifier": {
+                "intent": "ranking",
+                "confidence": 0.82,
+                "route_reason": "ranking_pattern"
+              },
+              "controlled_chain": {
+                "status": "failed",
+                "detail": {
+                  "phase": "queryspec_generation",
+                  "reason": "llm_queryspec_failed",
+                  "fallback_reason": "llm_queryspec_failed",
+                  "original_error": {
+                    "ok": false,
+                    "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': 25939, 'error': 'Anthropic API 错误: Request timed out or interrupted. This could be due to a network timeout, dropped connection, or request cancellation. See https://docs.anthropic.com/en/api/errors#long-requests for more details.'}]}}"
+                  },
+                  "fallback_mode": "mcp_proxy",
+                  "chain_mode": "queryspec_mcp_fallback",
+                  "metrics": {
+                    "queryspec_main_path_success": false,
+                    "queryspec_fallback_triggered": true,
+                    "queryspec_fallback_mode": "mcp_proxy",
+                    "queryspec_fallback_reason": "llm_queryspec_failed"
+                  },
+                  "guardrail_decision": "allow",
+                  "guardrail_repairs": []
+                }
+              },
+              "user_hint": "请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "guardrail_rejected",
+                    "message": "Tableau MCP 查询失败，本次不输出结论。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+              },
+              "explainability": {
+                "schema_version": "p0.1",
+                "run_id": "",
+                "trace_id": "t-c18d738d",
+                "phases": {
+                  "intent": {
+                    "intent": "query",
+                    "confidence": 0.95,
+                    "strategy": "router_guardrail",
+                    "guardrail": {
+                      "decision": "allow",
+                      "reason_code": "metric_keyword",
+                      "message": "metric_keyword"
+                    }
+                  },
+                  "postprocess": {
+                    "response_type": "fallback",
+                    "row_count": null,
+                    "displayed_row_count": null,
+                    "formatting": [
+                      "markdown_summary"
+                    ]
+                  },
+                  "fallback": {
+                    "occurred": true,
+                    "chain": [
+                      {
+                        "from": "router_guardrail",
+                        "to": "error",
+                        "reason_code": "guardrail_rejected",
+                        "message": "Tableau MCP 查询失败，本次不输出结论。"
+                      }
+                    ],
+                    "final_source": "fallback",
+                    "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "baseline_response_contract",
+          "status": "block",
+          "check_type": "set",
+          "message": "table response_data contract is missing",
+          "details": {
+            "response_type": null
+          }
+        },
+        {
+          "name": "baseline_guardrail_trace",
+          "status": "block",
+          "check_type": "route",
+          "message": "MCP execution is missing Guardrail pass trace",
+          "details": {
+            "expected_event": "MCP_ARGS_GUARDRAIL_PASS"
+          }
+        },
+        {
+          "name": "baseline_fallback_trace",
+          "status": "pass",
+          "check_type": "route",
+          "message": "fallback trace observed",
+          "details": {
+            "expected_event": [
+              "FALLBACK_TRIGGERED",
+              "WARN"
+            ]
+          }
+        }
+      ],
+      "queryspec_metrics": {
+        "queryspec_main_path_success": false,
+        "queryspec_fallback_triggered": true
+      },
+      "mcp_baseline": {
+        "fields": [
+          "客户名称",
+          "SUM(销售额)",
+          "销售额占比"
+        ],
+        "row_count": 10
+      },
+      "mulan_response_data": {
+        "fields": [],
+        "row_count": 0
+      },
+      "ui_table_data": {
+        "fields": [],
+        "row_count": 0
+      }
+    },
+    {
+      "case_id": "batch2.q7_customer_dengbao_history",
+      "question_id": "Q7",
+      "status": "block",
+      "failure_layer": "mcp_failure",
+      "checks": [
+        {
+          "name": "baseline_mcp_execution",
+          "status": "pass",
+          "check_type": "route",
+          "message": "MCP execution observed",
+          "details": {
+            "tools_used": [
+              "llm_mcp_args",
+              "llm_queryspec",
+              "mcp_args_guardrail",
+              "mcp_tool_description_loader",
+              "planning_skill_loader",
+              "queryspec_mcp_fallback",
+              "tableau_mcp"
+            ]
+          }
+        },
+        {
+          "name": "baseline_mcp_result",
+          "status": "block",
+          "check_type": "route",
+          "message": "MCP execution did not produce response data",
+          "details": {
+            "error": {
+              "type": "error",
+              "error_code": "MCP_PROXY_EXECUTION_FAILED",
+              "message": "Tableau MCP 查询失败，本次不输出结论。",
+              "fallback_type": "guardrail_rejected",
+              "trace_id": "t-9ae749a9",
+              "retryable": true,
+              "suggested_actions": [
+                "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+              ],
+              "tools_used": [
+                "intent_classifier",
+                "llm_mcp_args",
+                "mcp_args_guardrail"
+              ],
+              "intent_classifier": {
+                "intent": "customer_record",
+                "confidence": 0.8,
+                "route_reason": "customer_record_pattern"
+              },
+              "controlled_chain": {
+                "status": "failed",
+                "detail": {
+                  "phase": "queryspec_model_validation",
+                  "reason": "queryspec_model_invalid",
+                  "fallback_reason": "queryspec_model_invalid",
+                  "original_error": {
+                    "type": "ValidationError",
+                    "message": "1 validation error for QuerySpec\nintent\n  Field required [type=missing, input_value={'field': '销售额', 'aggregation': 'SUM'}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing"
+                  },
+                  "fallback_mode": "mcp_proxy",
+                  "chain_mode": "queryspec_mcp_fallback",
+                  "metrics": {
+                    "queryspec_main_path_success": false,
+                    "queryspec_fallback_triggered": true,
+                    "queryspec_fallback_mode": "mcp_proxy",
+                    "queryspec_fallback_reason": "queryspec_model_invalid"
+                  },
+                  "guardrail_decision": "allow",
+                  "guardrail_repairs": []
+                }
+              },
+              "user_hint": "请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "guardrail_rejected",
+                    "message": "Tableau MCP 查询失败，本次不输出结论。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+              },
+              "explainability": {
+                "schema_version": "p0.1",
+                "run_id": "",
+                "trace_id": "t-9ae749a9",
+                "phases": {
+                  "intent": {
+                    "intent": "query",
+                    "confidence": 0.95,
+                    "strategy": "router_guardrail",
+                    "guardrail": {
+                      "decision": "allow",
+                      "reason_code": "data_action_pattern",
+                      "message": "data_action_pattern"
+                    }
+                  },
+                  "postprocess": {
+                    "response_type": "fallback",
+                    "row_count": null,
+                    "displayed_row_count": null,
+                    "formatting": [
+                      "markdown_summary"
+                    ]
+                  },
+                  "fallback": {
+                    "occurred": true,
+                    "chain": [
+                      {
+                        "from": "router_guardrail",
+                        "to": "error",
+                        "reason_code": "guardrail_rejected",
+                        "message": "Tableau MCP 查询失败，本次不输出结论。"
+                      }
+                    ],
+                    "final_source": "fallback",
+                    "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "baseline_response_contract",
+          "status": "block",
+          "check_type": "set",
+          "message": "table response_data contract is missing",
+          "details": {
+            "response_type": null
+          }
+        },
+        {
+          "name": "baseline_guardrail_trace",
+          "status": "block",
+          "check_type": "route",
+          "message": "MCP execution is missing Guardrail pass trace",
+          "details": {
+            "expected_event": "MCP_ARGS_GUARDRAIL_PASS"
+          }
+        },
+        {
+          "name": "baseline_fallback_trace",
+          "status": "pass",
+          "check_type": "route",
+          "message": "fallback trace observed",
+          "details": {
+            "expected_event": [
+              "FALLBACK_TRIGGERED",
+              "WARN"
+            ]
+          }
+        }
+      ],
+      "queryspec_metrics": {
+        "queryspec_main_path_success": false,
+        "queryspec_fallback_triggered": true
+      },
+      "mcp_baseline": {
+        "fields": [
+          "YEAR(发货日期)",
+          "SUM(销售额)",
+          "SUM(利润)"
+        ],
+        "row_count": 2
+      },
+      "mulan_response_data": {
+        "fields": [],
+        "row_count": 0
+      },
+      "ui_table_data": {
+        "fields": [],
+        "row_count": 0
+      }
+    },
+    {
+      "case_id": "batch2.q8_subcategory_profit_continuous_growth",
+      "question_id": "Q8",
+      "status": "block",
+      "failure_layer": "mcp_failure",
+      "checks": [
+        {
+          "name": "baseline_mcp_execution",
+          "status": "pass",
+          "check_type": "route",
+          "message": "MCP execution observed",
+          "details": {
+            "tools_used": [
+              "llm_queryspec",
+              "planning_skill_loader",
+              "queryspec_validator",
+              "tableau_mcp"
+            ]
+          }
+        },
+        {
+          "name": "baseline_mcp_result",
+          "status": "block",
+          "check_type": "route",
+          "message": "MCP execution did not produce response data",
+          "details": {
+            "error": {
+              "type": "error",
+              "error_code": "mcp_execution_failed",
+              "message": "Tableau MCP 查询失败，本次不输出结论。",
+              "fallback_type": "query_plan_unavailable",
+              "trace_id": "t-babac98f",
+              "retryable": true,
+              "suggested_actions": [
+                "请补充指标、时间范围、维度或筛选条件后重试。"
+              ],
+              "tools_used": [
+                "intent_classifier",
+                "llm_queryspec",
+                "queryspec_fallback",
+                "queryspec_validator",
+                "tableau_mcp",
+                "answer_renderer"
+              ],
+              "intent_classifier": {
+                "intent": "trend_condition",
+                "confidence": 0.82,
+                "route_reason": "trend_condition_pattern"
+              },
+              "controlled_chain": {
+                "status": "failed",
+                "detail": {}
+              },
+              "user_hint": "请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "query_plan_unavailable",
+                    "message": "Tableau MCP 查询失败，本次不输出结论。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+              },
+              "explainability": {
+                "schema_version": "p0.1",
+                "run_id": "",
+                "trace_id": "t-babac98f",
+                "phases": {
+                  "intent": {
+                    "intent": "query",
+                    "confidence": 0.95,
+                    "strategy": "router_guardrail",
+                    "guardrail": {
+                      "decision": "allow",
+                      "reason_code": "metric_keyword",
+                      "message": "metric_keyword"
+                    }
+                  },
+                  "postprocess": {
+                    "response_type": "fallback",
+                    "row_count": null,
+                    "displayed_row_count": null,
+                    "formatting": [
+                      "markdown_summary"
+                    ]
+                  },
+                  "fallback": {
+                    "occurred": true,
+                    "chain": [
+                      {
+                        "from": "router_guardrail",
+                        "to": "error",
+                        "reason_code": "query_plan_unavailable",
+                        "message": "Tableau MCP 查询失败，本次不输出结论。"
+                      }
+                    ],
+                    "final_source": "fallback",
+                    "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "baseline_response_contract",
+          "status": "block",
+          "check_type": "set",
+          "message": "table response_data contract is missing",
+          "details": {
+            "response_type": null
+          }
+        },
+        {
+          "name": "baseline_guardrail_trace",
+          "status": "block",
+          "check_type": "route",
+          "message": "MCP execution is missing Guardrail pass trace",
+          "details": {
+            "expected_event": "MCP_ARGS_GUARDRAIL_PASS"
+          }
+        },
+        {
+          "name": "baseline_fallback_trace",
+          "status": "block",
+          "check_type": "route",
+          "message": "fallback occurred without FALLBACK_TRIGGERED/WARN trace",
+          "details": {
+            "expected_event": [
+              "FALLBACK_TRIGGERED",
+              "WARN"
+            ]
+          }
+        }
+      ],
+      "queryspec_metrics": {
+        "queryspec_main_path_success": null,
+        "queryspec_fallback_triggered": null
+      },
+      "mcp_baseline": {
+        "tables": {
+          "result": {
+            "fields": [
+              "子类别",
+              "is_increasing"
+            ],
+            "row_count": 5
+          },
+          "source": {
+            "fields": [
+              "子类别",
+              "YEAR(发货日期)",
+              "SUM(销售额)",
+              "SUM(利润)"
+            ],
+            "row_count": 80
+          }
+        }
+      },
+      "mulan_response_data": {
+        "fields": [],
+        "row_count": 0
+      },
+      "ui_table_data": {
+        "fields": [],
+        "row_count": 0
+      }
+    },
+    {
+      "case_id": "batch2.q9_provinces_always_loss",
+      "question_id": "Q9",
+      "status": "block",
+      "failure_layer": "no_mcp",
+      "checks": [
+        {
+          "name": "baseline_mcp_execution",
+          "status": "block",
+          "check_type": "route",
+          "message": "MCP execution was not observed",
+          "details": {
+            "tools_used": [
+              "llm_mcp_args",
+              "llm_queryspec",
+              "mcp_tool_description_loader",
+              "planning_skill_loader",
+              "queryspec_mcp_fallback"
+            ]
+          }
+        },
+        {
+          "name": "baseline_fallback_trace",
+          "status": "pass",
+          "check_type": "route",
+          "message": "fallback trace observed",
+          "details": {
+            "expected_event": [
+              "FALLBACK_TRIGGERED",
+              "WARN"
+            ]
+          }
+        }
+      ],
+      "queryspec_metrics": {
+        "queryspec_main_path_success": false,
+        "queryspec_fallback_triggered": true
+      },
+      "mcp_baseline": {
+        "fields": [
+          "省/自治区",
+          "all_periods_match"
+        ],
+        "row_count": 1
+      },
+      "mulan_response_data": {
+        "fields": [],
+        "row_count": 0
+      },
+      "ui_table_data": {
+        "fields": [],
+        "row_count": 0
+      }
+    },
+    {
+      "case_id": "batch2.q10_loss_root_cause_liaoning_fujian_2024",
+      "question_id": "Q10",
+      "status": "block",
+      "failure_layer": "mcp_failure",
+      "checks": [
+        {
+          "name": "baseline_mcp_execution",
+          "status": "pass",
+          "check_type": "route",
+          "message": "MCP execution observed",
+          "details": {
+            "tools_used": [
+              "llm_queryspec",
+              "planning_skill_loader",
+              "queryspec_validator",
+              "tableau_mcp"
+            ]
+          }
+        },
+        {
+          "name": "baseline_mcp_result",
+          "status": "block",
+          "check_type": "route",
+          "message": "MCP execution did not produce response data",
+          "details": {
+            "error": {
+              "type": "error",
+              "error_code": "mcp_execution_failed",
+              "message": "Tableau MCP 查询失败，本次不输出结论。",
+              "fallback_type": "query_plan_unavailable",
+              "trace_id": "t-79dcab25",
+              "retryable": true,
+              "suggested_actions": [
+                "请补充指标、时间范围、维度或筛选条件后重试。"
+              ],
+              "tools_used": [
+                "intent_classifier",
+                "llm_queryspec",
+                "queryspec_fallback",
+                "queryspec_validator",
+                "tableau_mcp",
+                "answer_renderer"
+              ],
+              "intent_classifier": {
+                "intent": "root_cause",
+                "confidence": 0.9,
+                "route_reason": "root_cause_pattern"
+              },
+              "controlled_chain": {
+                "status": "failed",
+                "detail": {}
+              },
+              "user_hint": "请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "query_plan_unavailable",
+                    "message": "Tableau MCP 查询失败，本次不输出结论。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+              },
+              "explainability": {
+                "schema_version": "p0.1",
+                "run_id": "",
+                "trace_id": "t-79dcab25",
+                "phases": {
+                  "intent": {
+                    "intent": "query",
+                    "confidence": 0.95,
+                    "strategy": "router_guardrail",
+                    "guardrail": {
+                      "decision": "allow",
+                      "reason_code": "data_action_pattern",
+                      "message": "data_action_pattern"
+                    }
+                  },
+                  "postprocess": {
+                    "response_type": "fallback",
+                    "row_count": null,
+                    "displayed_row_count": null,
+                    "formatting": [
+                      "markdown_summary"
+                    ]
+                  },
+                  "fallback": {
+                    "occurred": true,
+                    "chain": [
+                      {
+                        "from": "router_guardrail",
+                        "to": "error",
+                        "reason_code": "query_plan_unavailable",
+                        "message": "Tableau MCP 查询失败，本次不输出结论。"
+                      }
+                    ],
+                    "final_source": "fallback",
+                    "user_visible_message": "Tableau MCP 查询失败，本次不输出结论。\n\n请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "baseline_response_contract",
+          "status": "block",
+          "check_type": "set",
+          "message": "table response_data contract is missing",
+          "details": {
+            "response_type": null
+          }
+        },
+        {
+          "name": "baseline_guardrail_trace",
+          "status": "block",
+          "check_type": "route",
+          "message": "MCP execution is missing Guardrail pass trace",
+          "details": {
+            "expected_event": "MCP_ARGS_GUARDRAIL_PASS"
+          }
+        },
+        {
+          "name": "baseline_fallback_trace",
+          "status": "block",
+          "check_type": "route",
+          "message": "fallback occurred without FALLBACK_TRIGGERED/WARN trace",
+          "details": {
+            "expected_event": [
+              "FALLBACK_TRIGGERED",
+              "WARN"
+            ]
+          }
+        }
+      ],
+      "queryspec_metrics": {
+        "queryspec_main_path_success": null,
+        "queryspec_fallback_triggered": null
+      },
+      "mcp_baseline": {
+        "tables": {
+          "product": {
+            "fields": [
+              "省/自治区",
+              "子类别",
+              "SUM(利润)"
+            ],
+            "row_count": 10
+          },
+          "customer": {
+            "fields": [
+              "省/自治区",
+              "客户名称",
+              "SUM(利润)"
+            ],
+            "row_count": 10
+          }
+        }
+      },
+      "mulan_response_data": {
+        "fields": [],
+        "row_count": 0
+      },
+      "ui_table_data": {
+        "fields": [],
+        "row_count": 0
+      }
+    }
+  ],
+  "metrics": {
+    "case_count": 9,
+    "queryspec_main_path_success_count": 0,
+    "queryspec_main_path_success_rate": 0.0,
+    "fallback_count": 7,
+    "fallback_rate": 0.7777777777777778,
+    "missing_trace_metrics_count": 2,
+    "queryspec_success_rate_threshold": 0.8
+  },
+  "blockers": [
+    {
+      "code": "queryspec_success_rate",
+      "message": "QuerySpec main-path success rate is below threshold",
+      "details": {
+        "case_count": 9,
+        "queryspec_main_path_success_count": 0,
+        "queryspec_main_path_success_rate": 0.0,
+        "fallback_count": 7,
+        "fallback_rate": 0.7777777777777778,
+        "missing_trace_metrics_count": 2,
+        "queryspec_success_rate_threshold": 0.8
+      }
+    }
+  ],
+  "failure_categories": [
+    "guardrail_missing",
+    "silent_fallback",
+    "response_data_empty",
+    "ui_table_mismatch"
+  ],
+  "command": "cd backend && .venv/bin/python -m services.data_agent.quality_gate --runs ../inbox/20260515-13-abtest-raw.json --report ../tmp/mcp_acc_06_quality_report.json"
+}

@@ -245,6 +245,59 @@ async def test_controlled_path_defaults_to_legacy_queryspec(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_controlled_table_success_emits_shared_table_data_and_done_response(monkeypatch):
+    async def _controlled_path(**kwargs):
+        response_data = {
+            "fields": ["region", "sales"],
+            "rows": [["east", 100]],
+            "table_display": {
+                "columns": [
+                    {"key": "region", "label": "Region", "align": "left", "format": "plain"},
+                    {"key": "sales", "label": "Sales", "align": "right", "format": "number"},
+                ]
+            },
+        }
+        yield AgentEvent(type="tool_call", content={"tool": "tableau_mcp", "params": {}})
+        yield AgentEvent(type="tool_result", content={"tool": "tableau_mcp", "result": {"data": response_data}})
+        yield AgentEvent(type="answer", content="query complete")
+
+    monkeypatch.setattr("services.data_agent.runner.run_mcp_first_main_path", _controlled_path)
+
+    db = _FakeDb()
+    session_mgr = _FakeSessionManager()
+    session = AgentSession(conversation_id=uuid.uuid4(), user_id=7)
+    context = ToolContext(session_id=str(session.conversation_id), user_id=7, connection_id=2, trace_id="t-table")
+
+    events = [
+        event
+        async for event in run_agent(
+            engine=_NoEngineFallback(),
+            context=context,
+            session_mgr=session_mgr,
+            session=session,
+            question="show sales by region",
+            trace_id="t-table",
+            current_user={"id": 7},
+            db=db,
+            connection_id=2,
+            intent_result=classify_intent("show sales by region", connection_type="tableau"),
+            enforce_controlled_data_path=True,
+        )
+    ]
+
+    table_event = next(event for event in events if event.type == "table_data")
+    done = events[-1].content
+
+    assert done["response_type"] == "table"
+    assert done["response_data"]["fields"] == ["region", "sales"]
+    assert done["response_data"]["rows"] == [["east", 100]]
+    assert done["response_data"]["table_display"]["columns"][1]["label"] == "Sales"
+    assert table_event.content == {"type": "table_data", **done["response_data"]}
+    assert session_mgr.messages[0]["response_data"] == done["response_data"]
+    assert db.updates[-1][BiAgentRun.response_type] == "table"
+
+
+@pytest.mark.asyncio
 async def test_controlled_path_uses_mcp_proxy_only_when_mode_and_flag_enabled(monkeypatch):
     monkeypatch.setenv("DATA_AGENT_CHAIN_MODE", "mcp_proxy")
     monkeypatch.setenv("DATA_AGENT_MCP_PROXY_ENABLED", "true")

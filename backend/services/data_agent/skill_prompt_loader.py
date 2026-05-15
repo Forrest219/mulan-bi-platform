@@ -12,7 +12,7 @@ from typing import Literal
 SkillPromptKind = Literal["planning", "rendering"]
 
 SKILL_PROMPT_VERSION_FALLBACK = "prompt.v1"
-DEFAULT_SKILL_PROMPT_ROOT = Path(__file__).resolve().parents[3] / "skills"
+DEFAULT_SKILL_PROMPT_ROOT = Path(__file__).resolve().parents[2] / "skills"
 _SKILL_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 

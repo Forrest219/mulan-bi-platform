@@ -1,0 +1,150 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/pretool-guard.sh",
+            "timeout": 5,
+            "statusMessage": "PreToolUse guard (Bash)..."
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/pretool-guard.sh",
+            "timeout": 5,
+            "statusMessage": "PreToolUse guard (Write)..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/pretool-guard.sh",
+            "timeout": 5,
+            "statusMessage": "PreToolUse guard (Edit)..."
+          }
+        ]
+      },
+      {
+        "matcher": "MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/pretool-guard.sh",
+            "timeout": 5,
+            "statusMessage": "PreToolUse guard (MultiEdit)..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/check-handover.sh",
+            "timeout": 10,
+            "statusMessage": "Checking handover artifacts..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/check-handover.sh",
+            "timeout": 10,
+            "statusMessage": "Checking handover artifacts..."
+          }
+        ]
+      },
+      {
+        "matcher": "MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/check-handover.sh",
+            "timeout": 10,
+            "statusMessage": "Checking handover artifacts..."
+          }
+        ]
+      },
+      {
+        "matcher": "Delete",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/check-handover.sh",
+            "timeout": 10,
+            "statusMessage": "Checking handover artifacts..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'set -o pipefail; cd frontend && npm run lint 2>&1; [ $? -eq 0 ]'",
+            "timeout": 120,
+            "statusMessage": "Running frontend lint..."
+          },
+          {
+            "type": "command",
+            "command": "bash -c 'set -o pipefail; cd frontend && npm run type-check 2>&1; [ $? -eq 0 ]'",
+            "timeout": 120,
+            "statusMessage": "Running frontend type check..."
+          },
+          {
+            "type": "command",
+            "command": "bash -c 'set -o pipefail; bash scripts/audit-todos.sh 2>&1; [ $? -eq 0 ]'",
+            "timeout": 30,
+            "statusMessage": "Auditing TODO comments..."
+          },
+          {
+            "type": "command",
+            "command": "bash -c 'set -o pipefail; bash scripts/audit-internal-links.sh 2>&1; [ $? -eq 0 ]'",
+            "timeout": 30,
+            "statusMessage": "Auditing SPA router safety..."
+          },
+          {
+            "type": "command",
+            "command": "bash -c 'set -o pipefail; bash scripts/audit-alembic-server-defaults.sh 2>&1; [ $? -eq 0 ]'",
+            "timeout": 30,
+            "statusMessage": "Auditing alembic server defaults..."
+          },
+          {
+            "type": "command",
+            "command": "bash -c 'set -o pipefail; cd backend && ruff check . 2>&1; [ $? -eq 0 ]'",
+            "timeout": 60,
+            "statusMessage": "Running backend ruff check..."
+          },
+          {
+            "type": "command",
+            "command": "bash -c 'set -o pipefail; cd backend && pytest -q --tb=short 2>&1; [ $? -eq 0 ]'",
+            "timeout": 120,
+            "statusMessage": "Running backend tests..."
+          },
+          {
+            "type": "command",
+            "command": "bash -c 'set -o pipefail; bash scripts/audit-adrs.sh 2>&1; [ $? -eq 0 ]'",
+            "timeout": 30,
+            "statusMessage": "Auditing expired ADRs..."
+          }
+        ]
+      }
+    ]
+  }
+}

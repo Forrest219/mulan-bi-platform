@@ -1,4 +1,15 @@
-from services.data_agent.mcp_args_guardrail import McpArgsGuardrailInput, validate_mcp_args
+import logging
+
+import pytest
+
+from services.data_agent.mcp_args_guardrail import (
+    MCP_ARGS_GUARDRAIL_PASS,
+    MCP_ARGS_GUARDRAIL_REJECT,
+    McpArgsGuardrailInput,
+    McpArgsGuardrailRejected,
+    execute_query_datasource_with_guardrail,
+    validate_mcp_args,
+)
 
 
 def _schema(**properties):
@@ -284,3 +295,69 @@ def test_rejects_schema_without_repairing_business_operator():
     assert result.decision == "reject"
     assert result.reject_code == "MCP_ARGS_SCHEMA_INVALID"
     assert result.args is None
+
+
+def test_rejects_illegal_aggregation():
+    result = validate_mcp_args(
+        _request(
+            {
+                "datasource_luid": "ds-1",
+                "connection_id": 7,
+                "fields": [{"fieldCaption": "销售额", "function": "PERCENTILE"}],
+                "limit": 20,
+            }
+        )
+    )
+
+    assert result.decision == "reject"
+    assert result.reject_code == "MCP_ARGS_ILLEGAL_AGGREGATION"
+
+
+def test_execute_query_datasource_with_guardrail_passes_and_traces(caplog):
+    executed = {}
+
+    def _execute(args):
+        executed.update(args)
+        return {"fields": ["SUM(销售额)"], "rows": [[100]]}
+
+    with caplog.at_level(logging.INFO, logger="services.data_agent.mcp_args_guardrail"):
+        result = execute_query_datasource_with_guardrail(
+            question="总销售额是多少？",
+            datasource_luid="ds-1",
+            query={"fields": [{"fieldCaption": "销售额", "function": "SUM"}]},
+            limit=50,
+            timeout=30,
+            connection_id=7,
+            queryable_fields=["销售额"],
+            execute=_execute,
+            trace_id="trace-guardrail",
+            chain_mode="test_chain",
+        )
+
+    assert executed["datasourceLuid"] == "ds-1"
+    assert executed["query"]["fields"][0]["fieldCaption"] == "销售额"
+    assert result["mcp_args_guardrail"]["decision"] == "allow"
+    assert any(MCP_ARGS_GUARDRAIL_PASS in record.message for record in caplog.records)
+
+
+def test_execute_query_datasource_with_guardrail_rejects_before_execute(caplog):
+    def _execute(args):
+        raise AssertionError("guardrail reject must not execute MCP")
+
+    with caplog.at_level(logging.INFO, logger="services.data_agent.mcp_args_guardrail"):
+        with pytest.raises(McpArgsGuardrailRejected) as exc_info:
+            execute_query_datasource_with_guardrail(
+                question="按不存在字段看销售额",
+                datasource_luid="ds-1",
+                query={"fields": [{"fieldCaption": "不存在字段"}]},
+                limit=50,
+                timeout=30,
+                connection_id=7,
+                queryable_fields=["销售额"],
+                execute=_execute,
+                trace_id="trace-guardrail",
+                chain_mode="test_chain",
+            )
+
+    assert exc_info.value.result.reject_code == "MCP_ARGS_UNKNOWN_FIELD"
+    assert any(MCP_ARGS_GUARDRAIL_REJECT in record.message for record in caplog.records)

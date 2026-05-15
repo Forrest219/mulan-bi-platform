@@ -215,7 +215,7 @@ async def test_mcp_first_main_lets_mcp_handle_calculation_metric_without_extra_a
     assert events[-1].type == "answer"
 
 
-def test_normalize_mcp_data_does_not_compute_missing_calculation_metric():
+def test_normalize_mcp_data_computes_requested_registry_derived_metric():
     spec = QuerySpec.model_validate({
         "intent": "aggregate",
         "operator": "aggregate",
@@ -243,5 +243,6 @@ def test_normalize_mcp_data_does_not_compute_missing_calculation_metric():
         {"name": "测试数据源", "luid": "ds-1"},
     )
 
-    assert data["fields"] == ["子类别", "SUM(销售额)", "SUM(利润)"]
-    assert data["rows"] == [["大计", 200, 50], ["小计", 100, 10]]
+    assert data["fields"] == ["子类别", "SUM(销售额)", "SUM(利润)", "利润率"]
+    assert data["rows"] == [["大计", 200, 50, 0.25], ["小计", 100, 10, 0.1]]
+    assert data["derived_columns"][0]["status"] == "computed"

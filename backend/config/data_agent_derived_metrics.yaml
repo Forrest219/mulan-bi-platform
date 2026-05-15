@@ -1,0 +1,49 @@
+version: 1
+derived_metrics:
+  - name: "利润率"
+    aliases:
+      - "毛利率"
+    label: "利润率"
+    result_type: "number"
+    formula: "profit / revenue"
+    inputs:
+      profit:
+        fields:
+          - "SUM(利润)"
+          - "利润"
+      revenue:
+        fields:
+          - "SUM(销售额)"
+          - "销售额"
+
+  - name: "客单价"
+    aliases:
+      - "客均价"
+      - "平均客单"
+      - "单客价"
+    label: "客单价"
+    result_type: "number"
+    formula: "revenue / customer_count"
+    inputs:
+      revenue:
+        fields:
+          - "SUM(销售额)"
+          - "销售额"
+      customer_count:
+        fields:
+          - "COUNTD(客户名称)"
+          - "客户数"
+
+  - name: "销售额占比"
+    label: "销售额占比"
+    result_type: "number"
+    formula: "revenue / total_revenue"
+    inputs:
+      revenue:
+        fields:
+          - "SUM(销售额)"
+          - "销售额"
+      total_revenue:
+        fields:
+          - "SUM(销售额总计)"
+          - "销售额总计"

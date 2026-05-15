@@ -13,6 +13,12 @@ import logging
 from contextvars import ContextVar
 from typing import Dict, Any, Optional
 
+from services.data_agent.mcp_args_guardrail import (
+    DEFAULT_LIMIT as DEFAULT_GUARDRAIL_LIMIT,
+    McpArgsGuardrailRejected,
+    execute_query_datasource_with_guardrail,
+    extract_queryable_fields_from_metadata,
+)
 from services.tableau.mcp_client import get_tableau_mcp_client, TableauMCPError
 from services.llm.nlq_service import get_wrapper, get_principal
 
@@ -118,13 +124,40 @@ class QueryExecutor:
             if self.mcp_client is None:
                 self.mcp_client = get_tableau_mcp_client(connection_id=connection_id)
             try:
-                result = self.mcp_client.query_datasource(
+                queryable_fields = _load_mcp_queryable_fields(
+                    self.mcp_client,
+                    datasource_luid,
+                    timeout,
+                )
+                result = execute_query_datasource_with_guardrail(
+                    question="",
                     datasource_luid=datasource_luid,
-                    query=vizql_json,
+                    query=vizql_json or {},
                     limit=limit,
                     timeout=timeout,
                     connection_id=connection_id,
+                    queryable_fields=queryable_fields,
+                    current_datasource={"luid": datasource_luid, "connection_id": connection_id},
+                    user_context={
+                        "accessible_datasource_luids": [datasource_luid],
+                        "accessible_connection_ids": [connection_id] if connection_id is not None else [],
+                        "connection_id": connection_id,
+                    },
+                    execute=lambda safe_args: self.mcp_client.query_datasource(
+                        datasource_luid=str(safe_args.get("datasourceLuid") or ""),
+                        query=safe_args.get("query") or {},
+                        limit=int(safe_args.get("limit") or DEFAULT_GUARDRAIL_LIMIT),
+                        timeout=int(safe_args.get("timeout") or timeout),
+                        connection_id=safe_args.get("connection_id"),
+                    ),
+                    chain_mode="query_executor",
                 )
+            except McpArgsGuardrailRejected as e:
+                raise QueryExecutorError(
+                    code=e.result.reject_code or "MCP_ARGS_REJECTED",
+                    message=e.result.message,
+                    details=e.result.to_dict(),
+                ) from e
             except TableauMCPError as e:
                 # TableauMCPError → NLQError 统一映射
                 code_map = {
@@ -201,3 +234,12 @@ def execute_query(
         timeout=timeout,
         connection_id=connection_id,
     )
+
+
+def _load_mcp_queryable_fields(client, datasource_luid: str, timeout: int) -> list[str]:
+    try:
+        metadata = client.get_datasource_metadata(datasource_luid, timeout=min(timeout, 30))
+        return extract_queryable_fields_from_metadata(metadata)
+    except Exception as exc:
+        logger.warning("QueryExecutor guardrail metadata lookup failed: datasource=%s error=%s", datasource_luid, exc)
+        return []

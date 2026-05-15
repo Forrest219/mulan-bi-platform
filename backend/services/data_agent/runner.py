@@ -24,7 +24,7 @@ from .intent_classifier import IntentClassification, classify_intent
 from .mcp_first_main import run_mcp_first_main_path
 from .mcp_proxy_main import run_mcp_proxy_main_path
 from .models import BiAgentRun, BiAgentStep
-from .response import AgentEvent
+from .response import AgentEvent, normalize_table_response, table_data_event_from_response
 from .router_guardrail import RouteDecision
 from .session import AgentSession, SessionManager
 from .intent.keyword_match import is_direct_query, is_chart_request
@@ -65,6 +65,8 @@ async def run_agent(
     tools_used: List[str] = []
     steps_count = 0
     last_tool_result: Dict = {}
+    table_response: Optional[dict] = None
+    table_data_emitted = False
     run_id: Optional[uuid_lib.UUID] = None
 
     try:
@@ -178,13 +180,30 @@ async def run_agent(
                     last_step_at = event_at
                     last_tool_result = result_data
                     yield event
+                    data = result_data.get("data") if isinstance(result_data, dict) else None
+                    normalized = normalize_table_response(data)
+                    if normalized is not None:
+                        table_response = normalized
+                        table_data_emitted = True
+                        yield AgentEvent(type="table_data", content=table_data_event_from_response(table_response))
+                elif event.type == "table_data":
+                    normalized = normalize_table_response(event.content)
+                    if normalized is not None:
+                        table_response = normalized
+                        table_data_emitted = True
+                        yield AgentEvent(type="table_data", content=table_data_event_from_response(table_response))
+                    else:
+                        yield event
                 elif event.type == "answer":
                     answer_text = str(event.content or "")
                     execution_time_ms = _elapsed_ms(total_start, event_at)
                     response_type = "text"
                     response_data = None
                     data = last_tool_result.get("data") if isinstance(last_tool_result, dict) else None
-                    if isinstance(data, dict):
+                    if table_response is not None:
+                        response_data = table_response
+                        response_type = "table"
+                    elif isinstance(data, dict):
                         response_data = data
                         response_type = "table" if "rows" in data and "fields" in data else "text"
                     step_number += 1
@@ -221,6 +240,9 @@ async def run_agent(
                         sources_count=1 if context.connection_id else 0,
                         top_sources=[context.connection_name] if context.connection_id and context.connection_name else [],
                     )
+                    if response_type == "table" and table_response is not None and not table_data_emitted:
+                        table_data_emitted = True
+                        yield AgentEvent(type="table_data", content=table_data_event_from_response(table_response))
                     yield AgentEvent(type="done", content={
                         "answer": answer_text,
                         "trace_id": trace_id,
@@ -377,10 +399,19 @@ async def run_agent(
                 last_step_at = event_at
                 last_tool_result = result_data
                 yield event
+                data = result_data.get("data") if isinstance(result_data, dict) else None
+                normalized = normalize_table_response(data)
+                if normalized is not None:
+                    table_response = normalized
 
             elif event.type == "table_data":
-                # Pass structured table data through to the API layer unchanged
-                yield event
+                normalized = normalize_table_response(event.content)
+                if normalized is not None:
+                    table_response = normalized
+                    table_data_emitted = True
+                    yield AgentEvent(type="table_data", content=table_data_event_from_response(table_response))
+                else:
+                    yield event
 
             elif event.type == "chart_data":
                 # Pass chart data through to the API layer unchanged
@@ -393,7 +424,10 @@ async def run_agent(
 
                 response_type = "text"
                 response_data = None
-                if last_tool_result and isinstance(last_tool_result, dict):
+                if table_response is not None:
+                    response_type = "table"
+                    response_data = table_response
+                elif last_tool_result and isinstance(last_tool_result, dict):
                     data = last_tool_result.get("data")
                     if isinstance(data, dict):
                         if data.get("field_unavailable"):
@@ -445,8 +479,12 @@ async def run_agent(
                         _col_types = _infer_col_types(_fields, _rows)
                         yield AgentEvent(
                             type="chart_data",
-                            content=_build_chart_data(_fields, _rows, _col_types, _chart_type),
+                                content=_build_chart_data(_fields, _rows, _col_types, _chart_type),
                         )
+
+                if response_type == "table" and table_response is not None and not table_data_emitted:
+                    table_data_emitted = True
+                    yield AgentEvent(type="table_data", content=table_data_event_from_response(table_response))
 
                 # Yield a synthetic "done" event that carries all metadata
                 yield AgentEvent(

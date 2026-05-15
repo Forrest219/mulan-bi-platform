@@ -49,15 +49,11 @@ def test_queryspec_prompt_includes_datasource_intent_question_and_context():
 
 def test_answer_prompt_forbids_facts_not_returned_by_mcp():
     messages = build_answer_prompt(
-        mcp_result={
+        question="按维度看指标排名前 1 的项目",
+        response_data={
             "fields": ["维度X", "SUM(指标Y)"],
             "rows": [["项目A", 100]],
             "summary": "项目A为 100",
-        },
-        queryspec={
-            "operator": "ranking",
-            "metrics": [{"field": "指标Y", "aggregation": "SUM"}],
-            "dimensions": ["维度X"],
         },
         rendering_skill_content="回答必须简短，并保留查询口径。",
     )
@@ -65,7 +61,7 @@ def test_answer_prompt_forbids_facts_not_returned_by_mcp():
     joined = "\n".join(message["content"] for message in messages)
     assert "不得新增事实" in joined
     assert "不得补充外部知识" in joined
-    assert "不得重新计算 MCP 结果中不存在的数值" in joined
-    assert "只能复述、概括或排序 MCP JSON 中已经返回的事实" in joined
+    assert "不得计算任何业务指标" in joined
+    assert "只能复述 response_data.fields" in joined
     assert "项目A" in joined
     assert "SUM(指标Y)" in joined

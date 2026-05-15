@@ -42,6 +42,7 @@ from services.data_agent.models import (
     BiAgentFeedback,
 )
 from services.data_agent.runner import resolve_recent_schema_asset_name, run_agent
+from services.data_agent.response import normalize_table_response, table_data_event_from_response
 from services.data_agent.session import SessionManager, AgentSession
 from services.data_agent.tool_base import ToolContext, ToolRegistry
 from services.data_agent.context import build_session_context
@@ -588,6 +589,13 @@ async def try_fast_mcp_stream(
             response_data.update({k: v for k, v in processed.items() if k not in {"fields", "rows"}})
         response_data["datasource_name"] = datasource_name
         response_data["datasource_luid"] = datasource_luid
+        normalized_response_data = normalize_table_response(response_data)
+        if normalized_response_data is None:
+            logger.info("[SLOW_FALLBACK] table response normalization failed, trace=%s", context.trace_id)
+            return None
+        response_data = normalized_response_data
+        fields = response_data["fields"]
+        rows = response_data["rows"]
     except (TableauMCPError, QueryExecutorError, NLQError) as e:
         code = getattr(e, "code", None) or (getattr(e, "error_code", None) if hasattr(e, "error_code") else None)
         if code in _FAST_RECOVERABLE_ERRORS:
@@ -681,8 +689,7 @@ async def try_fast_mcp_stream(
             run_id = None
 
         # 流式输出 table_data
-        table_payload = json.dumps({'type': 'table_data', 'fields': fields, 'rows': rows, 'col_types': []}, ensure_ascii=False)
-        yield f"data: {table_payload}\n\n"
+        yield _sse_data(table_data_event_from_response(response_data))
         # 流式输出 token
         for char in answer_text:
             yield f"data: {json.dumps({'type': 'token', 'content': char}, ensure_ascii=False)}\n\n"
@@ -1332,7 +1339,11 @@ async def agent_stream(
                 yield f"data: {json.dumps({'type': 'tool_result', 'tool': event.content.get('tool', ''), 'summary': summary_str}, ensure_ascii=False)}\n\n"
 
             elif event.type == "table_data":
-                yield f"data: {json.dumps({'type': 'table_data', 'fields': event.content.get('fields', []), 'rows': event.content.get('rows', []), 'col_types': event.content.get('col_types', [])}, ensure_ascii=False)}\n\n"
+                table_response = normalize_table_response(event.content)
+                if table_response is not None:
+                    yield _sse_data(table_data_event_from_response(table_response))
+                else:
+                    yield f"data: {json.dumps({'type': 'table_data', 'fields': event.content.get('fields', []), 'rows': event.content.get('rows', []), 'col_types': event.content.get('col_types', [])}, ensure_ascii=False)}\n\n"
 
             elif event.type == "chart_data":
                 yield f"data: {json.dumps({'type': 'chart_data', 'chart_type': event.content.get('chart_type', 'bar'), 'x_field': event.content.get('x_field'), 'y_fields': event.content.get('y_fields', []), 'series_field': event.content.get('series_field'), 'data': event.content.get('data', [])}, ensure_ascii=False)}\n\n"
@@ -1345,6 +1356,8 @@ async def agent_stream(
                     await asyncio.sleep(0.01)
                 response_type = event.content.get('response_type', 'text')
                 response_data = event.content.get('response_data')
+                if response_type == "table":
+                    response_data = normalize_table_response(response_data) or response_data
                 row_count = (
                     len(response_data.get("rows", []))
                     if isinstance(response_data, dict) and isinstance(response_data.get("rows"), list)

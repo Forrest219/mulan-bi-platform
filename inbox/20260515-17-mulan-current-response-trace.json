@@ -1,0 +1,3147 @@
+{
+  "questions": [
+    [
+      "Q0",
+      "介绍数据源“订单+ (示例 - 超市)”"
+    ],
+    [
+      "Q1",
+      "整体的销售额、利润、利润率、客户数、客单价是什么样子"
+    ],
+    [
+      "Q2",
+      "这个指标过去几年的趋势是什么样子"
+    ],
+    [
+      "Q3",
+      "统计一下每个子类别的销售额、利润和利润率"
+    ],
+    [
+      "Q4",
+      "继续拆分到每个年份"
+    ],
+    [
+      "Q5",
+      "2025 年没有销售记录的子类别有哪些？"
+    ],
+    [
+      "Q6",
+      "Top 10 大客户是谁？请列出客户名称和销售金额及占比"
+    ],
+    [
+      "Q7",
+      "“邓保”这个客户的合作记录是什么样？最近还有合作吗？"
+    ],
+    [
+      "Q8",
+      "哪个子类别的利润每年都在持续增长？"
+    ],
+    [
+      "Q9",
+      "我计划关闭一些区域，止损。哪些省份一致没挣到钱？利润是亏的"
+    ],
+    [
+      "Q10",
+      "为什么辽宁、福建在 2024 年出现了巨亏？请看看是什么产品线和客户导致的"
+    ]
+  ],
+  "baseline_source": "inbox/20260515-13-abtest-raw.json#mcp",
+  "mulan": {
+    "Q0": {
+      "duration": 0.37129483302123845,
+      "status_code": 200,
+      "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+      "done": {
+        "type": "done",
+        "answer": "未找到 **订单+ (示例 - 超市)** 的字段信息。",
+        "trace_id": "t-c8152f79",
+        "run_id": "a73322ea-a953-4126-a71a-3659876811da",
+        "tools_used": [
+          "schema"
+        ],
+        "response_type": "schema_inventory",
+        "response_data": {
+          "connection_id": 2,
+          "connection_name": "Tableau-online",
+          "db_type": "tableau",
+          "mode": "fields",
+          "requested_table_name": "“订单+ (示例 - 超市)”",
+          "matched_asset": {
+            "name": "订单+ (示例 - 超市)",
+            "asset_type": "datasource",
+            "project": "default",
+            "web_url": "https://online.tableau.com/#/site/zy_bi/datasources/8902076",
+            "tableau_id": "f4290485-26d3-428f-aa8d-ccc33862a411"
+          },
+          "field_count": 0,
+          "raw_field_count": 0,
+          "fields": [],
+          "warning": "已匹配到 Tableau 资产，但 Tableau MCP 未返回当前可查询字段；为避免把资产元数据字段误认为可查询字段，本次不展示 API 同步字段。"
+        },
+        "steps_count": 4,
+        "execution_time_ms": 323,
+        "sources_count": 0,
+        "top_sources": [],
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "a73322ea-a953-4126-a71a-3659876811da",
+          "trace_id": "t-c8152f79",
+          "phases": {
+            "intent": {
+              "intent": "schema_inventory",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "asset_metadata_pattern",
+                "message": "asset_metadata_pattern"
+              }
+            },
+            "postprocess": {
+              "response_type": "schema_inventory",
+              "row_count": 0,
+              "displayed_row_count": 0,
+              "formatting": [
+                "markdown_summary"
+              ]
+            }
+          }
+        }
+      },
+      "error": null,
+      "row_count": 0,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "asset_question",
+          "confidence": 0.95,
+          "route": "schema_inventory",
+          "allowed_tools": [
+            "schema"
+          ],
+          "forbidden_tools": [
+            "query"
+          ],
+          "fallback_policy": "schema_only",
+          "reason": "asset_metadata_pattern",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "schema_inventory",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "asset_metadata_pattern",
+              "message": "asset_metadata_pattern"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.62,
+              "route_reason": "generic_business_data_context"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+          "run_id": "a73322ea-a953-4126-a71a-3659876811da",
+          "trace_id": "t-c8152f79",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "识别为数据源清单问题，准备读取当前连接的 schema 信息。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "schema",
+          "params": {
+            "table_name": "“订单+ (示例 - 超市)”"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "schema",
+          "summary": "mode=fields, asset=订单+ (示例 - 超市), fields=0, raw_fields=0"
+        },
+        {
+          "type": "token",
+          "content": "未找到 **订单+ (示例 - 超市)** 的字段信息。"
+        },
+        {
+          "type": "done",
+          "answer": "未找到 **订单+ (示例 - 超市)** 的字段信息。",
+          "trace_id": "t-c8152f79",
+          "run_id": "a73322ea-a953-4126-a71a-3659876811da",
+          "tools_used": [
+            "schema"
+          ],
+          "response_type": "schema_inventory",
+          "response_data": {
+            "connection_id": 2,
+            "connection_name": "Tableau-online",
+            "db_type": "tableau",
+            "mode": "fields",
+            "requested_table_name": "“订单+ (示例 - 超市)”",
+            "matched_asset": {
+              "name": "订单+ (示例 - 超市)",
+              "asset_type": "datasource",
+              "project": "default",
+              "web_url": "https://online.tableau.com/#/site/zy_bi/datasources/8902076",
+              "tableau_id": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 0,
+            "raw_field_count": 0,
+            "fields": [],
+            "warning": "已匹配到 Tableau 资产，但 Tableau MCP 未返回当前可查询字段；为避免把资产元数据字段误认为可查询字段，本次不展示 API 同步字段。"
+          },
+          "steps_count": 4,
+          "execution_time_ms": 323,
+          "sources_count": 0,
+          "top_sources": [],
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "a73322ea-a953-4126-a71a-3659876811da",
+            "trace_id": "t-c8152f79",
+            "phases": {
+              "intent": {
+                "intent": "schema_inventory",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "asset_metadata_pattern",
+                  "message": "asset_metadata_pattern"
+                }
+              },
+              "postprocess": {
+                "response_type": "schema_inventory",
+                "row_count": 0,
+                "displayed_row_count": 0,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "a_pattern\", \"message\": \"asset_metadata_pattern\"}, \"intent_classifier\": {\"intent\": \"aggregate\", \"confidence\": 0.62, \"route_reason\": \"generic_business_data_context\"}}}\n\ndata: {\"type\": \"metadata\", \"conversation_id\": \"2cfdbf4e-2a9d-4408-b231-79d398f88f85\", \"run_id\": \"a73322ea-a953-4126-a71a-3659876811da\", \"trace_id\": \"t-c8152f79\", \"contract_version\": \"p0.1\"}\n\ndata: {\"type\": \"thinking\", \"content\": \"识别为数据源清单问题，准备读取当前连接的 schema 信息。\"}\n\ndata: {\"type\": \"tool_call\", \"tool\": \"schema\", \"params\": {\"table_name\": \"“订单+ (示例 - 超市)”\"}}\n\ndata: {\"type\": \"tool_result\", \"tool\": \"schema\", \"summary\": \"mode=fields, asset=订单+ (示例 - 超市), fields=0, raw_fields=0\"}\n\ndata: {\"type\": \"token\", \"content\": \"未找到 **订单+ (示例 - 超市)** 的字段信息。\"}\n\ndata: {\"type\": \"done\", \"answer\": \"未找到 **订单+ (示例 - 超市)** 的字段信息。\", \"trace_id\": \"t-c8152f79\", \"run_id\": \"a73322ea-a953-4126-a71a-3659876811da\", \"tools_used\": [\"schema\"], \"response_type\": \"schema_inventory\", \"response_data\": {\"connection_id\": 2, \"connection_name\": \"Tableau-online\", \"db_type\": \"tableau\", \"mode\": \"fields\", \"requested_table_name\": \"“订单+ (示例 - 超市)”\", \"matched_asset\": {\"name\": \"订单+ (示例 - 超市)\", \"asset_type\": \"datasource\", \"project\": \"default\", \"web_url\": \"https://online.tableau.com/#/site/zy_bi/datasources/8902076\", \"tableau_id\": \"f4290485-26d3-428f-aa8d-ccc33862a411\"}, \"field_count\": 0, \"raw_field_count\": 0, \"fields\": [], \"warning\": \"已匹配到 Tableau 资产，但 Tableau MCP 未返回当前可查询字段；为避免把资产元数据字段误认为可查询字段，本次不展示 API 同步字段。\"}, \"steps_count\": 4, \"execution_time_ms\": 323, \"sources_count\": 0, \"top_sources\": [], \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"a73322ea-a953-4126-a71a-3659876811da\", \"trace_id\": \"t-c8152f79\", \"phases\": {\"intent\": {\"intent\": \"schema_inventory\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"asset_metadata_pattern\", \"message\": \"asset_metadata_pattern\"}}, \"postprocess\": {\"response_type\": \"schema_inventory\", \"row_count\": 0, \"displayed_row_count\": 0, \"formatting\": [\"markdown_summary\"]}}}}\n\n"
+    },
+    "Q1": {
+      "duration": 0.283139500010293,
+      "status_code": 200,
+      "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "MCP_ARGS_LLM_INVALID",
+        "message": "LLM 未生成可执行的 MCP tool args。",
+        "fallback_type": "guardrail_rejected",
+        "trace_id": "t-d32aa9bd",
+        "retryable": true,
+        "suggested_actions": [
+          "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_mcp_args",
+          "mcp_args_guardrail"
+        ],
+        "intent_classifier": {
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_reason": "llm_queryspec_failed",
+            "original_error": {
+              "ok": false,
+              "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+            },
+            "fallback_mode": "mcp_proxy",
+            "chain_mode": "queryspec_mcp_fallback",
+            "metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "llm_queryspec_failed"
+            },
+            "guardrail_decision": "reject",
+            "guardrail_repairs": [],
+            "llm_error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+          }
+        },
+        "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "guardrail_rejected",
+              "message": "LLM 未生成可执行的 MCP tool args。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-d32aa9bd",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "guardrail_rejected",
+                  "message": "LLM 未生成可执行的 MCP tool args。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.62,
+              "route_reason": "generic_business_data_context"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+          "run_id": "3fd085b9-97b1-409d-8aa3-92501076fd12",
+          "trace_id": "t-d32aa9bd",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：aggregate。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "aggregate",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'aggregate', 'kind': 'planning', 'checksum': '30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19', 'version': 'v1', 'source_path': '/Users/forrest/Projects/mula"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "aggregate",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_mcp_fallback",
+          "params": {
+            "event": "FALLBACK_TRIGGERED",
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_mode": "mcp_proxy"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_mcp_fallback",
+          "summary": "{'phase': 'queryspec_generation', 'reason': 'llm_queryspec_failed', 'fallback_reason': 'llm_queryspec_failed', 'original_error': {'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 L"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_tool_description_loader",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_tool_description_loader",
+          "summary": "{'description': 'Tool: query-datasource\\nPurpose: read aggregated data from one Tableau published datasource.\\nArguments JSON shape: {\"datasourceLuid\": string, \"query\": {\"fields\": [...], \"filters\": [."
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_mcp_args",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "queryspec_mcp_fallback",
+            "fallback_reason": "llm_queryspec_failed"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_mcp_args",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}"
+        },
+        {
+          "type": "error",
+          "error_code": "MCP_ARGS_LLM_INVALID",
+          "message": "LLM 未生成可执行的 MCP tool args。",
+          "fallback_type": "guardrail_rejected",
+          "trace_id": "t-d32aa9bd",
+          "retryable": true,
+          "suggested_actions": [
+            "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_mcp_args",
+            "mcp_args_guardrail"
+          ],
+          "intent_classifier": {
+            "intent": "aggregate",
+            "confidence": 0.62,
+            "route_reason": "generic_business_data_context"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {
+              "phase": "queryspec_generation",
+              "reason": "llm_queryspec_failed",
+              "fallback_reason": "llm_queryspec_failed",
+              "original_error": {
+                "ok": false,
+                "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+              },
+              "fallback_mode": "mcp_proxy",
+              "chain_mode": "queryspec_mcp_fallback",
+              "metrics": {
+                "queryspec_main_path_success": false,
+                "queryspec_fallback_triggered": true,
+                "queryspec_fallback_mode": "mcp_proxy",
+                "queryspec_fallback_reason": "llm_queryspec_failed"
+              },
+              "guardrail_decision": "reject",
+              "guardrail_repairs": [],
+              "llm_error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+            }
+          },
+          "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "guardrail_rejected",
+                "message": "LLM 未生成可执行的 MCP tool args。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-d32aa9bd",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "guardrail_rejected",
+                    "message": "LLM 未生成可执行的 MCP tool args。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "classifier\": {\"intent\": \"aggregate\", \"confidence\": 0.62, \"route_reason\": \"generic_business_data_context\"}, \"controlled_chain\": {\"status\": \"failed\", \"detail\": {\"phase\": \"queryspec_generation\", \"reason\": \"llm_queryspec_failed\", \"fallback_reason\": \"llm_queryspec_failed\", \"original_error\": {\"ok\": false, \"error\": \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}\"}, \"fallback_mode\": \"mcp_proxy\", \"chain_mode\": \"queryspec_mcp_fallback\", \"metrics\": {\"queryspec_main_path_success\": false, \"queryspec_fallback_triggered\": true, \"queryspec_fallback_mode\": \"mcp_proxy\", \"queryspec_fallback_reason\": \"llm_queryspec_failed\"}, \"guardrail_decision\": \"reject\", \"guardrail_repairs\": [], \"llm_error\": \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}\"}}, \"user_hint\": \"请换一种更明确的问法，补充指标、时间范围或维度。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-d32aa9bd\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}}}}\n\n"
+    },
+    "Q2": {
+      "duration": 0.05047295900294557,
+      "status_code": 200,
+      "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "datasource_not_matched",
+        "message": "未找到可安全查询的 Tableau 数据源。",
+        "fallback_type": "query_plan_unavailable",
+        "trace_id": "t-3fe8af27",
+        "retryable": true,
+        "suggested_actions": [
+          "请补充指标、时间范围、维度或筛选条件后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_queryspec",
+          "queryspec_fallback",
+          "queryspec_validator",
+          "tableau_mcp",
+          "answer_renderer"
+        ],
+        "intent_classifier": {
+          "intent": "trend_condition",
+          "confidence": 0.82,
+          "route_reason": "trend_condition_pattern"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {}
+        },
+        "user_hint": "请先选择一个 Tableau 数据源，或在问题中明确数据源名称。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "query_plan_unavailable",
+              "message": "未找到可安全查询的 Tableau 数据源。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "未找到可安全查询的 Tableau 数据源。\n\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-3fe8af27",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.8500000000000001,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "data_action_pattern",
+                "message": "data_action_pattern"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "query_plan_unavailable",
+                  "message": "未找到可安全查询的 Tableau 数据源。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "未找到可安全查询的 Tableau 数据源。\n\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "trend_condition",
+          "confidence": 0.82,
+          "route_reason": "trend_condition_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.8500000000000001,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "data_action_pattern",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.8500000000000001,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "data_action_pattern",
+              "message": "data_action_pattern"
+            },
+            "intent_classifier": {
+              "intent": "trend_condition",
+              "confidence": 0.82,
+              "route_reason": "trend_condition_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+          "run_id": "c116d843-8895-443a-8124-894b54b4d4c2",
+          "trace_id": "t-3fe8af27",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：trend_condition。"
+        },
+        {
+          "type": "error",
+          "error_code": "datasource_not_matched",
+          "message": "未找到可安全查询的 Tableau 数据源。",
+          "fallback_type": "query_plan_unavailable",
+          "trace_id": "t-3fe8af27",
+          "retryable": true,
+          "suggested_actions": [
+            "请补充指标、时间范围、维度或筛选条件后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_queryspec",
+            "queryspec_fallback",
+            "queryspec_validator",
+            "tableau_mcp",
+            "answer_renderer"
+          ],
+          "intent_classifier": {
+            "intent": "trend_condition",
+            "confidence": 0.82,
+            "route_reason": "trend_condition_pattern"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {}
+          },
+          "user_hint": "请先选择一个 Tableau 数据源，或在问题中明确数据源名称。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "query_plan_unavailable",
+                "message": "未找到可安全查询的 Tableau 数据源。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "未找到可安全查询的 Tableau 数据源。\n\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-3fe8af27",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.8500000000000001,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "data_action_pattern",
+                  "message": "data_action_pattern"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "query_plan_unavailable",
+                    "message": "未找到可安全查询的 Tableau 数据源。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "未找到可安全查询的 Tableau 数据源。\n\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": ", \"message\": \"data_action_pattern\"}, \"intent_classifier\": {\"intent\": \"trend_condition\", \"confidence\": 0.82, \"route_reason\": \"trend_condition_pattern\"}}}\n\ndata: {\"type\": \"metadata\", \"conversation_id\": \"2cfdbf4e-2a9d-4408-b231-79d398f88f85\", \"run_id\": \"c116d843-8895-443a-8124-894b54b4d4c2\", \"trace_id\": \"t-3fe8af27\", \"contract_version\": \"p0.1\"}\n\ndata: {\"type\": \"thinking\", \"content\": \"已识别为受控问数意图：trend_condition。\"}\n\ndata: {\"type\": \"error\", \"error_code\": \"datasource_not_matched\", \"message\": \"未找到可安全查询的 Tableau 数据源。\", \"fallback_type\": \"query_plan_unavailable\", \"trace_id\": \"t-3fe8af27\", \"retryable\": true, \"suggested_actions\": [\"请补充指标、时间范围、维度或筛选条件后重试。\"], \"tools_used\": [\"intent_classifier\", \"llm_queryspec\", \"queryspec_fallback\", \"queryspec_validator\", \"tableau_mcp\", \"answer_renderer\"], \"intent_classifier\": {\"intent\": \"trend_condition\", \"confidence\": 0.82, \"route_reason\": \"trend_condition_pattern\"}, \"controlled_chain\": {\"status\": \"failed\", \"detail\": {}}, \"user_hint\": \"请先选择一个 Tableau 数据源，或在问题中明确数据源名称。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"query_plan_unavailable\", \"message\": \"未找到可安全查询的 Tableau 数据源。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"未找到可安全查询的 Tableau 数据源。\\n\\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-3fe8af27\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.8500000000000001, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"data_action_pattern\", \"message\": \"data_action_pattern\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"query_plan_unavailable\", \"message\": \"未找到可安全查询的 Tableau 数据源。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"未找到可安全查询的 Tableau 数据源。\\n\\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。\"}}}}\n\n"
+    },
+    "Q3": {
+      "duration": 0.2358612499665469,
+      "status_code": 200,
+      "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "MCP_ARGS_LLM_INVALID",
+        "message": "LLM 未生成可执行的 MCP tool args。",
+        "fallback_type": "guardrail_rejected",
+        "trace_id": "t-caac0cdc",
+        "retryable": true,
+        "suggested_actions": [
+          "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_mcp_args",
+          "mcp_args_guardrail"
+        ],
+        "intent_classifier": {
+          "intent": "aggregate",
+          "confidence": 0.78,
+          "route_reason": "aggregate_pattern"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_reason": "llm_queryspec_failed",
+            "original_error": {
+              "ok": false,
+              "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+            },
+            "fallback_mode": "mcp_proxy",
+            "chain_mode": "queryspec_mcp_fallback",
+            "metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "llm_queryspec_failed"
+            },
+            "guardrail_decision": "reject",
+            "guardrail_repairs": [],
+            "llm_error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+          }
+        },
+        "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "guardrail_rejected",
+              "message": "LLM 未生成可执行的 MCP tool args。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-caac0cdc",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "guardrail_rejected",
+                  "message": "LLM 未生成可执行的 MCP tool args。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.78,
+          "route_reason": "aggregate_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.78,
+              "route_reason": "aggregate_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+          "run_id": "11804b59-f09b-4a99-b7c1-fdef5ea70990",
+          "trace_id": "t-caac0cdc",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：aggregate。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "aggregate",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'aggregate', 'kind': 'planning', 'checksum': '30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19', 'version': 'v1', 'source_path': '/Users/forrest/Projects/mula"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "aggregate",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_mcp_fallback",
+          "params": {
+            "event": "FALLBACK_TRIGGERED",
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_mode": "mcp_proxy"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_mcp_fallback",
+          "summary": "{'phase': 'queryspec_generation', 'reason': 'llm_queryspec_failed', 'fallback_reason': 'llm_queryspec_failed', 'original_error': {'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 L"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_tool_description_loader",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_tool_description_loader",
+          "summary": "{'description': 'Tool: query-datasource\\nPurpose: read aggregated data from one Tableau published datasource.\\nArguments JSON shape: {\"datasourceLuid\": string, \"query\": {\"fields\": [...], \"filters\": [."
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_mcp_args",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "queryspec_mcp_fallback",
+            "fallback_reason": "llm_queryspec_failed"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_mcp_args",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}"
+        },
+        {
+          "type": "error",
+          "error_code": "MCP_ARGS_LLM_INVALID",
+          "message": "LLM 未生成可执行的 MCP tool args。",
+          "fallback_type": "guardrail_rejected",
+          "trace_id": "t-caac0cdc",
+          "retryable": true,
+          "suggested_actions": [
+            "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_mcp_args",
+            "mcp_args_guardrail"
+          ],
+          "intent_classifier": {
+            "intent": "aggregate",
+            "confidence": 0.78,
+            "route_reason": "aggregate_pattern"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {
+              "phase": "queryspec_generation",
+              "reason": "llm_queryspec_failed",
+              "fallback_reason": "llm_queryspec_failed",
+              "original_error": {
+                "ok": false,
+                "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+              },
+              "fallback_mode": "mcp_proxy",
+              "chain_mode": "queryspec_mcp_fallback",
+              "metrics": {
+                "queryspec_main_path_success": false,
+                "queryspec_fallback_triggered": true,
+                "queryspec_fallback_mode": "mcp_proxy",
+                "queryspec_fallback_reason": "llm_queryspec_failed"
+              },
+              "guardrail_decision": "reject",
+              "guardrail_repairs": [],
+              "llm_error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+            }
+          },
+          "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "guardrail_rejected",
+                "message": "LLM 未生成可执行的 MCP tool args。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-caac0cdc",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "guardrail_rejected",
+                    "message": "LLM 未生成可执行的 MCP tool args。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "\"], \"intent_classifier\": {\"intent\": \"aggregate\", \"confidence\": 0.78, \"route_reason\": \"aggregate_pattern\"}, \"controlled_chain\": {\"status\": \"failed\", \"detail\": {\"phase\": \"queryspec_generation\", \"reason\": \"llm_queryspec_failed\", \"fallback_reason\": \"llm_queryspec_failed\", \"original_error\": {\"ok\": false, \"error\": \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}\"}, \"fallback_mode\": \"mcp_proxy\", \"chain_mode\": \"queryspec_mcp_fallback\", \"metrics\": {\"queryspec_main_path_success\": false, \"queryspec_fallback_triggered\": true, \"queryspec_fallback_mode\": \"mcp_proxy\", \"queryspec_fallback_reason\": \"llm_queryspec_failed\"}, \"guardrail_decision\": \"reject\", \"guardrail_repairs\": [], \"llm_error\": \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}\"}}, \"user_hint\": \"请换一种更明确的问法，补充指标、时间范围或维度。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-caac0cdc\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}}}}\n\n"
+    },
+    "Q4": {
+      "duration": 0.046088416944257915,
+      "status_code": 200,
+      "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "datasource_not_matched",
+        "message": "未找到可安全查询的 Tableau 数据源。",
+        "fallback_type": "query_plan_unavailable",
+        "trace_id": "t-93fc3ab0",
+        "retryable": true,
+        "suggested_actions": [
+          "请补充指标、时间范围、维度或筛选条件后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_queryspec",
+          "queryspec_fallback",
+          "queryspec_validator",
+          "tableau_mcp",
+          "answer_renderer"
+        ],
+        "intent_classifier": {
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {}
+        },
+        "user_hint": "请先选择一个 Tableau 数据源，或在问题中明确数据源名称。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "query_plan_unavailable",
+              "message": "未找到可安全查询的 Tableau 数据源。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "未找到可安全查询的 Tableau 数据源。\n\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-93fc3ab0",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.75,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "data_action_pattern",
+                "message": "data_action_pattern"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "query_plan_unavailable",
+                  "message": "未找到可安全查询的 Tableau 数据源。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "未找到可安全查询的 Tableau 数据源。\n\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.75,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "data_action_pattern",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.75,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "data_action_pattern",
+              "message": "data_action_pattern"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.62,
+              "route_reason": "generic_business_data_context"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+          "run_id": "46b358bd-8b08-496d-ada7-5fd0850676d6",
+          "trace_id": "t-93fc3ab0",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：aggregate。"
+        },
+        {
+          "type": "error",
+          "error_code": "datasource_not_matched",
+          "message": "未找到可安全查询的 Tableau 数据源。",
+          "fallback_type": "query_plan_unavailable",
+          "trace_id": "t-93fc3ab0",
+          "retryable": true,
+          "suggested_actions": [
+            "请补充指标、时间范围、维度或筛选条件后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_queryspec",
+            "queryspec_fallback",
+            "queryspec_validator",
+            "tableau_mcp",
+            "answer_renderer"
+          ],
+          "intent_classifier": {
+            "intent": "aggregate",
+            "confidence": 0.62,
+            "route_reason": "generic_business_data_context"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {}
+          },
+          "user_hint": "请先选择一个 Tableau 数据源，或在问题中明确数据源名称。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "query_plan_unavailable",
+                "message": "未找到可安全查询的 Tableau 数据源。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "未找到可安全查询的 Tableau 数据源。\n\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-93fc3ab0",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.75,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "data_action_pattern",
+                  "message": "data_action_pattern"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "query_plan_unavailable",
+                    "message": "未找到可安全查询的 Tableau 数据源。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "未找到可安全查询的 Tableau 数据源。\n\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "data_action_pattern\", \"message\": \"data_action_pattern\"}, \"intent_classifier\": {\"intent\": \"aggregate\", \"confidence\": 0.62, \"route_reason\": \"generic_business_data_context\"}}}\n\ndata: {\"type\": \"metadata\", \"conversation_id\": \"2cfdbf4e-2a9d-4408-b231-79d398f88f85\", \"run_id\": \"46b358bd-8b08-496d-ada7-5fd0850676d6\", \"trace_id\": \"t-93fc3ab0\", \"contract_version\": \"p0.1\"}\n\ndata: {\"type\": \"thinking\", \"content\": \"已识别为受控问数意图：aggregate。\"}\n\ndata: {\"type\": \"error\", \"error_code\": \"datasource_not_matched\", \"message\": \"未找到可安全查询的 Tableau 数据源。\", \"fallback_type\": \"query_plan_unavailable\", \"trace_id\": \"t-93fc3ab0\", \"retryable\": true, \"suggested_actions\": [\"请补充指标、时间范围、维度或筛选条件后重试。\"], \"tools_used\": [\"intent_classifier\", \"llm_queryspec\", \"queryspec_fallback\", \"queryspec_validator\", \"tableau_mcp\", \"answer_renderer\"], \"intent_classifier\": {\"intent\": \"aggregate\", \"confidence\": 0.62, \"route_reason\": \"generic_business_data_context\"}, \"controlled_chain\": {\"status\": \"failed\", \"detail\": {}}, \"user_hint\": \"请先选择一个 Tableau 数据源，或在问题中明确数据源名称。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"query_plan_unavailable\", \"message\": \"未找到可安全查询的 Tableau 数据源。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"未找到可安全查询的 Tableau 数据源。\\n\\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-93fc3ab0\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.75, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"data_action_pattern\", \"message\": \"data_action_pattern\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"query_plan_unavailable\", \"message\": \"未找到可安全查询的 Tableau 数据源。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"未找到可安全查询的 Tableau 数据源。\\n\\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。\"}}}}\n\n"
+    },
+    "Q5": {
+      "duration": 0.22284683299949393,
+      "status_code": 200,
+      "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "MCP_ARGS_LLM_INVALID",
+        "message": "LLM 未生成可执行的 MCP tool args。",
+        "fallback_type": "guardrail_rejected",
+        "trace_id": "t-7aeb68fa",
+        "retryable": true,
+        "suggested_actions": [
+          "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_mcp_args",
+          "mcp_args_guardrail"
+        ],
+        "intent_classifier": {
+          "intent": "set_difference",
+          "confidence": 0.86,
+          "route_reason": "set_difference_pattern"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_reason": "llm_queryspec_failed",
+            "original_error": {
+              "ok": false,
+              "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+            },
+            "fallback_mode": "mcp_proxy",
+            "chain_mode": "queryspec_mcp_fallback",
+            "metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "llm_queryspec_failed"
+            },
+            "guardrail_decision": "reject",
+            "guardrail_repairs": [],
+            "llm_error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+          }
+        },
+        "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "guardrail_rejected",
+              "message": "LLM 未生成可执行的 MCP tool args。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-7aeb68fa",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "guardrail_rejected",
+                  "message": "LLM 未生成可执行的 MCP tool args。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "set_difference",
+          "confidence": 0.86,
+          "route_reason": "set_difference_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "set_difference",
+              "confidence": 0.86,
+              "route_reason": "set_difference_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+          "run_id": "5739f2f4-681d-41e4-bb65-56cada010a9a",
+          "trace_id": "t-7aeb68fa",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：set_difference。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "set_difference",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'set_difference', 'kind': 'planning', 'checksum': '625b15aa549c5df4d0e27f8cb75c03a9eb76e9f51d9ef57e7994b579a76baaa4', 'version': 'v1', 'source_path': '/Users/forrest/Projects"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "set_difference",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "625b15aa549c5df4d0e27f8cb75c03a9eb76e9f51d9ef57e7994b579a76baaa4"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_mcp_fallback",
+          "params": {
+            "event": "FALLBACK_TRIGGERED",
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_mode": "mcp_proxy"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_mcp_fallback",
+          "summary": "{'phase': 'queryspec_generation', 'reason': 'llm_queryspec_failed', 'fallback_reason': 'llm_queryspec_failed', 'original_error': {'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 L"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_tool_description_loader",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_tool_description_loader",
+          "summary": "{'description': 'Tool: query-datasource\\nPurpose: read aggregated data from one Tableau published datasource.\\nArguments JSON shape: {\"datasourceLuid\": string, \"query\": {\"fields\": [...], \"filters\": [."
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_mcp_args",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "queryspec_mcp_fallback",
+            "fallback_reason": "llm_queryspec_failed"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_mcp_args",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}"
+        },
+        {
+          "type": "error",
+          "error_code": "MCP_ARGS_LLM_INVALID",
+          "message": "LLM 未生成可执行的 MCP tool args。",
+          "fallback_type": "guardrail_rejected",
+          "trace_id": "t-7aeb68fa",
+          "retryable": true,
+          "suggested_actions": [
+            "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_mcp_args",
+            "mcp_args_guardrail"
+          ],
+          "intent_classifier": {
+            "intent": "set_difference",
+            "confidence": 0.86,
+            "route_reason": "set_difference_pattern"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {
+              "phase": "queryspec_generation",
+              "reason": "llm_queryspec_failed",
+              "fallback_reason": "llm_queryspec_failed",
+              "original_error": {
+                "ok": false,
+                "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+              },
+              "fallback_mode": "mcp_proxy",
+              "chain_mode": "queryspec_mcp_fallback",
+              "metrics": {
+                "queryspec_main_path_success": false,
+                "queryspec_fallback_triggered": true,
+                "queryspec_fallback_mode": "mcp_proxy",
+                "queryspec_fallback_reason": "llm_queryspec_failed"
+              },
+              "guardrail_decision": "reject",
+              "guardrail_repairs": [],
+              "llm_error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+            }
+          },
+          "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "guardrail_rejected",
+                "message": "LLM 未生成可执行的 MCP tool args。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-7aeb68fa",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "guardrail_rejected",
+                    "message": "LLM 未生成可执行的 MCP tool args。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "t_classifier\": {\"intent\": \"set_difference\", \"confidence\": 0.86, \"route_reason\": \"set_difference_pattern\"}, \"controlled_chain\": {\"status\": \"failed\", \"detail\": {\"phase\": \"queryspec_generation\", \"reason\": \"llm_queryspec_failed\", \"fallback_reason\": \"llm_queryspec_failed\", \"original_error\": {\"ok\": false, \"error\": \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}\"}, \"fallback_mode\": \"mcp_proxy\", \"chain_mode\": \"queryspec_mcp_fallback\", \"metrics\": {\"queryspec_main_path_success\": false, \"queryspec_fallback_triggered\": true, \"queryspec_fallback_mode\": \"mcp_proxy\", \"queryspec_fallback_reason\": \"llm_queryspec_failed\"}, \"guardrail_decision\": \"reject\", \"guardrail_repairs\": [], \"llm_error\": \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}\"}}, \"user_hint\": \"请换一种更明确的问法，补充指标、时间范围或维度。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-7aeb68fa\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}}}}\n\n"
+    },
+    "Q6": {
+      "duration": 0.2770502920029685,
+      "status_code": 200,
+      "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "MCP_ARGS_LLM_INVALID",
+        "message": "LLM 未生成可执行的 MCP tool args。",
+        "fallback_type": "guardrail_rejected",
+        "trace_id": "t-cede0e64",
+        "retryable": true,
+        "suggested_actions": [
+          "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_mcp_args",
+          "mcp_args_guardrail"
+        ],
+        "intent_classifier": {
+          "intent": "ranking",
+          "confidence": 0.82,
+          "route_reason": "ranking_pattern"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_reason": "llm_queryspec_failed",
+            "original_error": {
+              "ok": false,
+              "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+            },
+            "fallback_mode": "mcp_proxy",
+            "chain_mode": "queryspec_mcp_fallback",
+            "metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "llm_queryspec_failed"
+            },
+            "guardrail_decision": "reject",
+            "guardrail_repairs": [],
+            "llm_error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+          }
+        },
+        "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "guardrail_rejected",
+              "message": "LLM 未生成可执行的 MCP tool args。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-cede0e64",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "guardrail_rejected",
+                  "message": "LLM 未生成可执行的 MCP tool args。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "ranking",
+          "confidence": 0.82,
+          "route_reason": "ranking_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "ranking",
+              "confidence": 0.82,
+              "route_reason": "ranking_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+          "run_id": "c48d18e3-7f80-48bd-ae16-c2209cee0142",
+          "trace_id": "t-cede0e64",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：ranking。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "ranking",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'ranking', 'kind': 'planning', 'checksum': '1fec656fb4512836deddb4e8fbb9e68e16c6f43800c0db1189f4c2e1a1ab173f', 'version': 'v1', 'source_path': '/Users/forrest/Projects/mulan-"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "ranking",
+            "datasource": {
+              "name": "Permissions",
+              "luid": "755da1cf-bd88-4bb8-983f-59b7f0abff81"
+            },
+            "field_count": 21,
+            "skill_checksum": "1fec656fb4512836deddb4e8fbb9e68e16c6f43800c0db1189f4c2e1a1ab173f"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_mcp_fallback",
+          "params": {
+            "event": "FALLBACK_TRIGGERED",
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_mode": "mcp_proxy"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_mcp_fallback",
+          "summary": "{'phase': 'queryspec_generation', 'reason': 'llm_queryspec_failed', 'fallback_reason': 'llm_queryspec_failed', 'original_error': {'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 L"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_tool_description_loader",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "Permissions",
+              "luid": "755da1cf-bd88-4bb8-983f-59b7f0abff81"
+            },
+            "field_count": 21,
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_tool_description_loader",
+          "summary": "{'description': 'Tool: query-datasource\\nPurpose: read aggregated data from one Tableau published datasource.\\nArguments JSON shape: {\"datasourceLuid\": string, \"query\": {\"fields\": [...], \"filters\": [."
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_mcp_args",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "Permissions",
+              "luid": "755da1cf-bd88-4bb8-983f-59b7f0abff81"
+            },
+            "chain_mode": "queryspec_mcp_fallback",
+            "fallback_reason": "llm_queryspec_failed"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_mcp_args",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}"
+        },
+        {
+          "type": "error",
+          "error_code": "MCP_ARGS_LLM_INVALID",
+          "message": "LLM 未生成可执行的 MCP tool args。",
+          "fallback_type": "guardrail_rejected",
+          "trace_id": "t-cede0e64",
+          "retryable": true,
+          "suggested_actions": [
+            "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_mcp_args",
+            "mcp_args_guardrail"
+          ],
+          "intent_classifier": {
+            "intent": "ranking",
+            "confidence": 0.82,
+            "route_reason": "ranking_pattern"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {
+              "phase": "queryspec_generation",
+              "reason": "llm_queryspec_failed",
+              "fallback_reason": "llm_queryspec_failed",
+              "original_error": {
+                "ok": false,
+                "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+              },
+              "fallback_mode": "mcp_proxy",
+              "chain_mode": "queryspec_mcp_fallback",
+              "metrics": {
+                "queryspec_main_path_success": false,
+                "queryspec_fallback_triggered": true,
+                "queryspec_fallback_mode": "mcp_proxy",
+                "queryspec_fallback_reason": "llm_queryspec_failed"
+              },
+              "guardrail_decision": "reject",
+              "guardrail_repairs": [],
+              "llm_error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+            }
+          },
+          "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "guardrail_rejected",
+                "message": "LLM 未生成可执行的 MCP tool args。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-cede0e64",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "guardrail_rejected",
+                    "message": "LLM 未生成可执行的 MCP tool args。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "rail\"], \"intent_classifier\": {\"intent\": \"ranking\", \"confidence\": 0.82, \"route_reason\": \"ranking_pattern\"}, \"controlled_chain\": {\"status\": \"failed\", \"detail\": {\"phase\": \"queryspec_generation\", \"reason\": \"llm_queryspec_failed\", \"fallback_reason\": \"llm_queryspec_failed\", \"original_error\": {\"ok\": false, \"error\": \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}\"}, \"fallback_mode\": \"mcp_proxy\", \"chain_mode\": \"queryspec_mcp_fallback\", \"metrics\": {\"queryspec_main_path_success\": false, \"queryspec_fallback_triggered\": true, \"queryspec_fallback_mode\": \"mcp_proxy\", \"queryspec_fallback_reason\": \"llm_queryspec_failed\"}, \"guardrail_decision\": \"reject\", \"guardrail_repairs\": [], \"llm_error\": \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}\"}}, \"user_hint\": \"请换一种更明确的问法，补充指标、时间范围或维度。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-cede0e64\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}}}}\n\n"
+    },
+    "Q7": {
+      "duration": 0.05030695802997798,
+      "status_code": 200,
+      "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "datasource_not_matched",
+        "message": "未找到可安全查询的 Tableau 数据源。",
+        "fallback_type": "query_plan_unavailable",
+        "trace_id": "t-437054da",
+        "retryable": true,
+        "suggested_actions": [
+          "请补充指标、时间范围、维度或筛选条件后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_queryspec",
+          "queryspec_fallback",
+          "queryspec_validator",
+          "tableau_mcp",
+          "answer_renderer"
+        ],
+        "intent_classifier": {
+          "intent": "customer_record",
+          "confidence": 0.8,
+          "route_reason": "customer_record_pattern"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {}
+        },
+        "user_hint": "请先选择一个 Tableau 数据源，或在问题中明确数据源名称。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "query_plan_unavailable",
+              "message": "未找到可安全查询的 Tableau 数据源。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "未找到可安全查询的 Tableau 数据源。\n\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-437054da",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "data_action_pattern",
+                "message": "data_action_pattern"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "query_plan_unavailable",
+                  "message": "未找到可安全查询的 Tableau 数据源。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "未找到可安全查询的 Tableau 数据源。\n\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "customer_record",
+          "confidence": 0.8,
+          "route_reason": "customer_record_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "data_action_pattern",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "data_action_pattern",
+              "message": "data_action_pattern"
+            },
+            "intent_classifier": {
+              "intent": "customer_record",
+              "confidence": 0.8,
+              "route_reason": "customer_record_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+          "run_id": "680a8e14-b23c-41ca-99e2-90868a83af54",
+          "trace_id": "t-437054da",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：customer_record。"
+        },
+        {
+          "type": "error",
+          "error_code": "datasource_not_matched",
+          "message": "未找到可安全查询的 Tableau 数据源。",
+          "fallback_type": "query_plan_unavailable",
+          "trace_id": "t-437054da",
+          "retryable": true,
+          "suggested_actions": [
+            "请补充指标、时间范围、维度或筛选条件后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_queryspec",
+            "queryspec_fallback",
+            "queryspec_validator",
+            "tableau_mcp",
+            "answer_renderer"
+          ],
+          "intent_classifier": {
+            "intent": "customer_record",
+            "confidence": 0.8,
+            "route_reason": "customer_record_pattern"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {}
+          },
+          "user_hint": "请先选择一个 Tableau 数据源，或在问题中明确数据源名称。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "query_plan_unavailable",
+                "message": "未找到可安全查询的 Tableau 数据源。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "未找到可安全查询的 Tableau 数据源。\n\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-437054da",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "data_action_pattern",
+                  "message": "data_action_pattern"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "query_plan_unavailable",
+                    "message": "未找到可安全查询的 Tableau 数据源。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "未找到可安全查询的 Tableau 数据源。\n\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "_action_pattern\", \"message\": \"data_action_pattern\"}, \"intent_classifier\": {\"intent\": \"customer_record\", \"confidence\": 0.8, \"route_reason\": \"customer_record_pattern\"}}}\n\ndata: {\"type\": \"metadata\", \"conversation_id\": \"2cfdbf4e-2a9d-4408-b231-79d398f88f85\", \"run_id\": \"680a8e14-b23c-41ca-99e2-90868a83af54\", \"trace_id\": \"t-437054da\", \"contract_version\": \"p0.1\"}\n\ndata: {\"type\": \"thinking\", \"content\": \"已识别为受控问数意图：customer_record。\"}\n\ndata: {\"type\": \"error\", \"error_code\": \"datasource_not_matched\", \"message\": \"未找到可安全查询的 Tableau 数据源。\", \"fallback_type\": \"query_plan_unavailable\", \"trace_id\": \"t-437054da\", \"retryable\": true, \"suggested_actions\": [\"请补充指标、时间范围、维度或筛选条件后重试。\"], \"tools_used\": [\"intent_classifier\", \"llm_queryspec\", \"queryspec_fallback\", \"queryspec_validator\", \"tableau_mcp\", \"answer_renderer\"], \"intent_classifier\": {\"intent\": \"customer_record\", \"confidence\": 0.8, \"route_reason\": \"customer_record_pattern\"}, \"controlled_chain\": {\"status\": \"failed\", \"detail\": {}}, \"user_hint\": \"请先选择一个 Tableau 数据源，或在问题中明确数据源名称。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"query_plan_unavailable\", \"message\": \"未找到可安全查询的 Tableau 数据源。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"未找到可安全查询的 Tableau 数据源。\\n\\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-437054da\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"data_action_pattern\", \"message\": \"data_action_pattern\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"query_plan_unavailable\", \"message\": \"未找到可安全查询的 Tableau 数据源。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"未找到可安全查询的 Tableau 数据源。\\n\\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。\"}}}}\n\n"
+    },
+    "Q8": {
+      "duration": 0.4307755409972742,
+      "status_code": 200,
+      "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "MCP_ARGS_LLM_INVALID",
+        "message": "LLM 未生成可执行的 MCP tool args。",
+        "fallback_type": "guardrail_rejected",
+        "trace_id": "t-90fadd04",
+        "retryable": true,
+        "suggested_actions": [
+          "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_mcp_args",
+          "mcp_args_guardrail"
+        ],
+        "intent_classifier": {
+          "intent": "trend_condition",
+          "confidence": 0.82,
+          "route_reason": "trend_condition_pattern"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_reason": "llm_queryspec_failed",
+            "original_error": {
+              "ok": false,
+              "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+            },
+            "fallback_mode": "mcp_proxy",
+            "chain_mode": "queryspec_mcp_fallback",
+            "metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "llm_queryspec_failed"
+            },
+            "guardrail_decision": "reject",
+            "guardrail_repairs": [],
+            "llm_error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+          }
+        },
+        "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "guardrail_rejected",
+              "message": "LLM 未生成可执行的 MCP tool args。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-90fadd04",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "guardrail_rejected",
+                  "message": "LLM 未生成可执行的 MCP tool args。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "trend_condition",
+          "confidence": 0.82,
+          "route_reason": "trend_condition_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "trend_condition",
+              "confidence": 0.82,
+              "route_reason": "trend_condition_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+          "run_id": "3f03b158-2fb3-45d1-8f33-20cb4d6ad959",
+          "trace_id": "t-90fadd04",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：trend_condition。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "trend_condition",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'trend_condition', 'kind': 'planning', 'checksum': '9e5fbaf844ed7b16b4c5cf3b8909e84c67249db5c9944537908a098e43240b97', 'version': 'v1', 'source_path': '/Users/forrest/Project"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "trend_condition",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "9e5fbaf844ed7b16b4c5cf3b8909e84c67249db5c9944537908a098e43240b97"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_mcp_fallback",
+          "params": {
+            "event": "FALLBACK_TRIGGERED",
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_mode": "mcp_proxy"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_mcp_fallback",
+          "summary": "{'phase': 'queryspec_generation', 'reason': 'llm_queryspec_failed', 'fallback_reason': 'llm_queryspec_failed', 'original_error': {'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 L"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_tool_description_loader",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_tool_description_loader",
+          "summary": "{'description': 'Tool: query-datasource\\nPurpose: read aggregated data from one Tableau published datasource.\\nArguments JSON shape: {\"datasourceLuid\": string, \"query\": {\"fields\": [...], \"filters\": [."
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_mcp_args",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "queryspec_mcp_fallback",
+            "fallback_reason": "llm_queryspec_failed"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_mcp_args",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}"
+        },
+        {
+          "type": "error",
+          "error_code": "MCP_ARGS_LLM_INVALID",
+          "message": "LLM 未生成可执行的 MCP tool args。",
+          "fallback_type": "guardrail_rejected",
+          "trace_id": "t-90fadd04",
+          "retryable": true,
+          "suggested_actions": [
+            "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_mcp_args",
+            "mcp_args_guardrail"
+          ],
+          "intent_classifier": {
+            "intent": "trend_condition",
+            "confidence": 0.82,
+            "route_reason": "trend_condition_pattern"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {
+              "phase": "queryspec_generation",
+              "reason": "llm_queryspec_failed",
+              "fallback_reason": "llm_queryspec_failed",
+              "original_error": {
+                "ok": false,
+                "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+              },
+              "fallback_mode": "mcp_proxy",
+              "chain_mode": "queryspec_mcp_fallback",
+              "metrics": {
+                "queryspec_main_path_success": false,
+                "queryspec_fallback_triggered": true,
+                "queryspec_fallback_mode": "mcp_proxy",
+                "queryspec_fallback_reason": "llm_queryspec_failed"
+              },
+              "guardrail_decision": "reject",
+              "guardrail_repairs": [],
+              "llm_error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+            }
+          },
+          "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "guardrail_rejected",
+                "message": "LLM 未生成可执行的 MCP tool args。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-90fadd04",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "guardrail_rejected",
+                    "message": "LLM 未生成可执行的 MCP tool args。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "classifier\": {\"intent\": \"trend_condition\", \"confidence\": 0.82, \"route_reason\": \"trend_condition_pattern\"}, \"controlled_chain\": {\"status\": \"failed\", \"detail\": {\"phase\": \"queryspec_generation\", \"reason\": \"llm_queryspec_failed\", \"fallback_reason\": \"llm_queryspec_failed\", \"original_error\": {\"ok\": false, \"error\": \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}\"}, \"fallback_mode\": \"mcp_proxy\", \"chain_mode\": \"queryspec_mcp_fallback\", \"metrics\": {\"queryspec_main_path_success\": false, \"queryspec_fallback_triggered\": true, \"queryspec_fallback_mode\": \"mcp_proxy\", \"queryspec_fallback_reason\": \"llm_queryspec_failed\"}, \"guardrail_decision\": \"reject\", \"guardrail_repairs\": [], \"llm_error\": \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}\"}}, \"user_hint\": \"请换一种更明确的问法，补充指标、时间范围或维度。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-90fadd04\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}}}}\n\n"
+    },
+    "Q9": {
+      "duration": 0.24115229200106114,
+      "status_code": 200,
+      "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "MCP_ARGS_LLM_INVALID",
+        "message": "LLM 未生成可执行的 MCP tool args。",
+        "fallback_type": "guardrail_rejected",
+        "trace_id": "t-3388d90b",
+        "retryable": true,
+        "suggested_actions": [
+          "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_mcp_args",
+          "mcp_args_guardrail"
+        ],
+        "intent_classifier": {
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_reason": "llm_queryspec_failed",
+            "original_error": {
+              "ok": false,
+              "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+            },
+            "fallback_mode": "mcp_proxy",
+            "chain_mode": "queryspec_mcp_fallback",
+            "metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "llm_queryspec_failed"
+            },
+            "guardrail_decision": "reject",
+            "guardrail_repairs": [],
+            "llm_error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+          }
+        },
+        "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "guardrail_rejected",
+              "message": "LLM 未生成可执行的 MCP tool args。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-3388d90b",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "guardrail_rejected",
+                  "message": "LLM 未生成可执行的 MCP tool args。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.62,
+              "route_reason": "generic_business_data_context"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+          "run_id": "d4b4e3a8-38c8-41f6-8e9a-39ba72748d4e",
+          "trace_id": "t-3388d90b",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：aggregate。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "aggregate",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'aggregate', 'kind': 'planning', 'checksum': '30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19', 'version': 'v1', 'source_path': '/Users/forrest/Projects/mula"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "aggregate",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_mcp_fallback",
+          "params": {
+            "event": "FALLBACK_TRIGGERED",
+            "phase": "queryspec_generation",
+            "reason": "llm_queryspec_failed",
+            "fallback_mode": "mcp_proxy"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_mcp_fallback",
+          "summary": "{'phase': 'queryspec_generation', 'reason': 'llm_queryspec_failed', 'fallback_reason': 'llm_queryspec_failed', 'original_error': {'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 L"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_tool_description_loader",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_tool_description_loader",
+          "summary": "{'description': 'Tool: query-datasource\\nPurpose: read aggregated data from one Tableau published datasource.\\nArguments JSON shape: {\"datasourceLuid\": string, \"query\": {\"fields\": [...], \"filters\": [."
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_mcp_args",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "queryspec_mcp_fallback",
+            "fallback_reason": "llm_queryspec_failed"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_mcp_args",
+          "summary": "{'ok': False, 'error': \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}"
+        },
+        {
+          "type": "error",
+          "error_code": "MCP_ARGS_LLM_INVALID",
+          "message": "LLM 未生成可执行的 MCP tool args。",
+          "fallback_type": "guardrail_rejected",
+          "trace_id": "t-3388d90b",
+          "retryable": true,
+          "suggested_actions": [
+            "请缩小查询范围，或明确指标、维度、时间范围和返回行数后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_mcp_args",
+            "mcp_args_guardrail"
+          ],
+          "intent_classifier": {
+            "intent": "aggregate",
+            "confidence": 0.62,
+            "route_reason": "generic_business_data_context"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {
+              "phase": "queryspec_generation",
+              "reason": "llm_queryspec_failed",
+              "fallback_reason": "llm_queryspec_failed",
+              "original_error": {
+                "ok": false,
+                "error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+              },
+              "fallback_mode": "mcp_proxy",
+              "chain_mode": "queryspec_mcp_fallback",
+              "metrics": {
+                "queryspec_main_path_success": false,
+                "queryspec_fallback_triggered": true,
+                "queryspec_fallback_mode": "mcp_proxy",
+                "queryspec_fallback_reason": "llm_queryspec_failed"
+              },
+              "guardrail_decision": "reject",
+              "guardrail_repairs": [],
+              "llm_error": "500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}"
+            }
+          },
+          "user_hint": "请换一种更明确的问法，补充指标、时间范围或维度。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "guardrail_rejected",
+                "message": "LLM 未生成可执行的 MCP tool args。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-3388d90b",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "guardrail_rejected",
+                    "message": "LLM 未生成可执行的 MCP tool args。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "LLM 未生成可执行的 MCP tool args。\n\n请换一种更明确的问法，补充指标、时间范围或维度。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "classifier\": {\"intent\": \"aggregate\", \"confidence\": 0.62, \"route_reason\": \"generic_business_data_context\"}, \"controlled_chain\": {\"status\": \"failed\", \"detail\": {\"phase\": \"queryspec_generation\", \"reason\": \"llm_queryspec_failed\", \"fallback_reason\": \"llm_queryspec_failed\", \"original_error\": {\"ok\": false, \"error\": \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}\"}, \"fallback_mode\": \"mcp_proxy\", \"chain_mode\": \"queryspec_mcp_fallback\", \"metrics\": {\"queryspec_main_path_success\": false, \"queryspec_fallback_triggered\": true, \"queryspec_fallback_mode\": \"mcp_proxy\", \"queryspec_fallback_reason\": \"llm_queryspec_failed\"}, \"guardrail_decision\": \"reject\", \"guardrail_repairs\": [], \"llm_error\": \"500: {'error_code': 'LLM_500', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': None, 'error': 'LLM 认证配置错误'}]}}\"}}, \"user_hint\": \"请换一种更明确的问法，补充指标、时间范围或维度。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-3388d90b\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"guardrail_rejected\", \"message\": \"LLM 未生成可执行的 MCP tool args。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"LLM 未生成可执行的 MCP tool args。\\n\\n请换一种更明确的问法，补充指标、时间范围或维度。\"}}}}\n\n"
+    },
+    "Q10": {
+      "duration": 0.04899729200406,
+      "status_code": 200,
+      "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "datasource_not_matched",
+        "message": "未找到可安全查询的 Tableau 数据源。",
+        "fallback_type": "query_plan_unavailable",
+        "trace_id": "t-52357af2",
+        "retryable": true,
+        "suggested_actions": [
+          "请补充指标、时间范围、维度或筛选条件后重试。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "llm_queryspec",
+          "queryspec_fallback",
+          "queryspec_validator",
+          "tableau_mcp",
+          "answer_renderer"
+        ],
+        "intent_classifier": {
+          "intent": "root_cause",
+          "confidence": 0.9,
+          "route_reason": "root_cause_pattern"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {}
+        },
+        "user_hint": "请先选择一个 Tableau 数据源，或在问题中明确数据源名称。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "query_plan_unavailable",
+              "message": "未找到可安全查询的 Tableau 数据源。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "未找到可安全查询的 Tableau 数据源。\n\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-52357af2",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "data_action_pattern",
+                "message": "data_action_pattern"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "query_plan_unavailable",
+                  "message": "未找到可安全查询的 Tableau 数据源。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "未找到可安全查询的 Tableau 数据源。\n\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "root_cause",
+          "confidence": 0.9,
+          "route_reason": "root_cause_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "data_action_pattern",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "data_action_pattern",
+              "message": "data_action_pattern"
+            },
+            "intent_classifier": {
+              "intent": "root_cause",
+              "confidence": 0.9,
+              "route_reason": "root_cause_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "2cfdbf4e-2a9d-4408-b231-79d398f88f85",
+          "run_id": "a5d9d0ea-737b-43d1-8532-2003efd196df",
+          "trace_id": "t-52357af2",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：root_cause。"
+        },
+        {
+          "type": "error",
+          "error_code": "datasource_not_matched",
+          "message": "未找到可安全查询的 Tableau 数据源。",
+          "fallback_type": "query_plan_unavailable",
+          "trace_id": "t-52357af2",
+          "retryable": true,
+          "suggested_actions": [
+            "请补充指标、时间范围、维度或筛选条件后重试。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "llm_queryspec",
+            "queryspec_fallback",
+            "queryspec_validator",
+            "tableau_mcp",
+            "answer_renderer"
+          ],
+          "intent_classifier": {
+            "intent": "root_cause",
+            "confidence": 0.9,
+            "route_reason": "root_cause_pattern"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {}
+          },
+          "user_hint": "请先选择一个 Tableau 数据源，或在问题中明确数据源名称。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "query_plan_unavailable",
+                "message": "未找到可安全查询的 Tableau 数据源。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "未找到可安全查询的 Tableau 数据源。\n\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-52357af2",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "data_action_pattern",
+                  "message": "data_action_pattern"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "query_plan_unavailable",
+                    "message": "未找到可安全查询的 Tableau 数据源。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "未找到可安全查询的 Tableau 数据源。\n\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "ow\", \"reason_code\": \"data_action_pattern\", \"message\": \"data_action_pattern\"}, \"intent_classifier\": {\"intent\": \"root_cause\", \"confidence\": 0.9, \"route_reason\": \"root_cause_pattern\"}}}\n\ndata: {\"type\": \"metadata\", \"conversation_id\": \"2cfdbf4e-2a9d-4408-b231-79d398f88f85\", \"run_id\": \"a5d9d0ea-737b-43d1-8532-2003efd196df\", \"trace_id\": \"t-52357af2\", \"contract_version\": \"p0.1\"}\n\ndata: {\"type\": \"thinking\", \"content\": \"已识别为受控问数意图：root_cause。\"}\n\ndata: {\"type\": \"error\", \"error_code\": \"datasource_not_matched\", \"message\": \"未找到可安全查询的 Tableau 数据源。\", \"fallback_type\": \"query_plan_unavailable\", \"trace_id\": \"t-52357af2\", \"retryable\": true, \"suggested_actions\": [\"请补充指标、时间范围、维度或筛选条件后重试。\"], \"tools_used\": [\"intent_classifier\", \"llm_queryspec\", \"queryspec_fallback\", \"queryspec_validator\", \"tableau_mcp\", \"answer_renderer\"], \"intent_classifier\": {\"intent\": \"root_cause\", \"confidence\": 0.9, \"route_reason\": \"root_cause_pattern\"}, \"controlled_chain\": {\"status\": \"failed\", \"detail\": {}}, \"user_hint\": \"请先选择一个 Tableau 数据源，或在问题中明确数据源名称。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"query_plan_unavailable\", \"message\": \"未找到可安全查询的 Tableau 数据源。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"未找到可安全查询的 Tableau 数据源。\\n\\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-52357af2\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"data_action_pattern\", \"message\": \"data_action_pattern\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"query_plan_unavailable\", \"message\": \"未找到可安全查询的 Tableau 数据源。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"未找到可安全查询的 Tableau 数据源。\\n\\n请先选择一个 Tableau 数据源，或在问题中明确数据源名称。\"}}}}\n\n"
+    }
+  }
+}

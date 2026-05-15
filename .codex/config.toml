@@ -1,0 +1,11 @@
+[mcp_servers.codex]
+command = "/Users/forrest/.local/node-v24.14.1-darwin-arm64/bin/codex-mcp-server"
+
+[mcp_servers.mulan-tableau]
+url = "http://localhost:8000/tableau-mcp"
+
+[shell_environment_policy]
+inherit = "core"
+
+[shell_environment_policy.set]
+VITE_API_BASE = "http://localhost:8000"

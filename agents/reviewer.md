@@ -44,5 +44,11 @@
 - 逻辑重写（单处 > 3 行 或 总计 > 5 行）
 - 修改 SPEC.md（即使以”优化”为名）
 
+# 临时落盘
+
+- 临时缓存、草稿、阶段性交接、任务清单默认写入 `inbox/`。
+- 写入前必须遵守 [`inbox/README.md`](../inbox/README.md) 的命名规范与内容边界。
+- 正式交付物不得写入 `inbox/`；PRD、SPEC、测试报告、发布文档等按 [`AGENT_PIPELINE.md`](../AGENT_PIPELINE.md) 指定目录落盘。
+
 # Pipeline
 阶段四（合规 + 风险双维复核）— 打回上限（2 次）与完整 Change Budget 规则见 [`AGENT_PIPELINE.md`](../AGENT_PIPELINE.md) 及 [`.claude/rules/review-constraint.md`](../.claude/rules/review-constraint.md)。

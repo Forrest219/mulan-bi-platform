@@ -165,7 +165,7 @@ export type AgentStreamEvent =
   | { type: 'tool_result'; tool: string; summary: string }
   | { type: 'explainability'; phase: ExplainabilityPhase; status: ExplainabilityStatus; payload: unknown; explainability?: AgentExplainability }
   | { type: 'token'; content: string }
-  | { type: 'table_data'; fields: string[]; rows: (string | number | null)[][]; col_types: ('numeric' | 'string')[] }
+  | { type: 'table_data'; fields: string[]; rows: (string | number | null)[][]; col_types: ('numeric' | 'string')[]; table_display?: unknown }
   | { type: 'chart_data'; chart_type: 'bar' | 'line' | 'pie'; x_field: string | null; y_fields: string[]; series_field: string | null; data: Record<string, string | number | null>[] }
   | { type: 'done'; answer: string; trace_id: string; run_id: string; tools_used: string[]; response_type: string; response_data: unknown; steps_count: number; execution_time_ms: number; sources_count: number; top_sources: string[]; explainability?: AgentExplainability; fallback?: FallbackExplain }
   | { type: 'error'; error_code: string; message: string; user_hint?: string; explainability?: AgentExplainability; fallback?: FallbackExplain };
@@ -323,6 +323,7 @@ export function streamAgent(
                   fields: (raw['fields'] as string[]) ?? [],
                   rows: (raw['rows'] as (string | number | null)[][]) ?? [],
                   col_types: (raw['col_types'] as ('numeric' | 'string')[]) ?? [],
+                  table_display: raw['table_display'],
                 });
               } else if (raw['type'] === 'chart_data') {
                 controller.enqueue({

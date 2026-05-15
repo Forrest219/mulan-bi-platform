@@ -1,0 +1,222 @@
+{
+  "main": {
+    "id": "9c024eadf6eb0c9d",
+    "type": "split",
+    "children": [
+      {
+        "id": "27907596833a4584",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "6b9acc0540bb058d",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "inbox/20260515-menu-spec-risk-mapping.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "20260515-menu-spec-risk-mapping"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "83dfee56f9de7982",
+    "type": "split",
+    "children": [
+      {
+        "id": "faeca3e738388071",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "45c8313cdabfb12e",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "文件列表"
+            }
+          },
+          {
+            "id": "1beb23550bfb1eb6",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "搜索"
+            }
+          },
+          {
+            "id": "68cf9ae173fce13d",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "书签"
+            }
+          }
+        ],
+        "currentTab": 1
+      }
+    ],
+    "direction": "horizontal",
+    "width": 434.5
+  },
+  "right": {
+    "id": "6888dc380d4ff900",
+    "type": "split",
+    "children": [
+      {
+        "id": "19ce3f36fc3dfb4a",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "cbad8c3c504a1b2d",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "inbox/20260515-00-agent-pipeline-upgrade-tasks.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "20260515-00-agent-pipeline-upgrade-tasks 的反向链接列表"
+            }
+          },
+          {
+            "id": "4a90956c79a967a5",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "inbox/20260515-00-agent-pipeline-upgrade-tasks.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "20260515-00-agent-pipeline-upgrade-tasks 的出链列表"
+            }
+          },
+          {
+            "id": "85b1ba6865ace99c",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "标签"
+            }
+          },
+          {
+            "id": "c721b125181783a1",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "添加笔记属性"
+            }
+          },
+          {
+            "id": "b78b168048d44b22",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "inbox/20260515-00-agent-pipeline-upgrade-tasks.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "20260515-00-agent-pipeline-upgrade-tasks 的大纲"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:打开快速切换": false,
+      "graph:查看关系图谱": false,
+      "canvas:新建白板": false,
+      "daily-notes:打开/创建今天的日记": false,
+      "templates:插入模板": false,
+      "command-palette:打开命令面板": false,
+      "bases:新建数据库": false
+    }
+  },
+  "active": "6b9acc0540bb058d",
+  "lastOpenFiles": [
+    "inbox/20260515-18-llm-queryspec-stability-coder-task.md",
+    "inbox/20260515-17-mulan-current-docker-quality-report.json",
+    "inbox/20260515-17-mulan-current-docker-response-trace.json",
+    "inbox/20260515-mulan-tableau-vs-finside.md",
+    "inbox/20260515-17-mulan-current-quality-report.json",
+    "inbox/20260515-17-mulan-current-response-trace.json",
+    "inbox/__pycache__/20260515-13-abtest-runner.cpython-311.pyc",
+    "inbox/__pycache__",
+    "inbox/20260515-zhiou-financial-middle-platform-understanding.md",
+    "inbox/20260515-15-mcp-accuracy-quality-report.json",
+    "inbox/20260515-reviewer-final-verdict.md",
+    "inbox/20260515-reviewer-objection-menu-spec-risk-mapping.md",
+    "inbox/20260515-uat-config-mulan-report.md",
+    "inbox/20260515-00-agent-pipeline-upgrade-tasks.md",
+    "inbox/20260514-23-docs-reorg-plan.md",
+    "inbox/archived/20260514-14-cleanup-proposal.md",
+    "inbox/archived/20260514-23-docs-reorg-execution-log.md",
+    "inbox/archived/20260514-23-docs-reorg-plan.md",
+    "inbox/archived/20260514-23-docs-reorg-tasks.md",
+    "inbox/archived",
+    "inbox/未命名文件夹",
+    "inbox/20260514-23-docs-reorg-tasks.md",
+    "inbox/20260515-00-coder-fix-p0.md",
+    "inbox/20260515-00-SESSION.md",
+    "inbox/20260515-00-tester-smoke-review.md",
+    "inbox/20260515-13-mcp-baseline-vs-mulan-agent-stream-analysis.md",
+    "inbox/20260515-13-mulan-vs-mcp-abtest.md",
+    "inbox/20260515-15-mulan-mcp-accuracy-repair-plan.md",
+    "inbox/20260515-15-mulan-mcp-accuracy-repair-task-plan.md",
+    "inbox/20260515-menu-spec-risk-mapping.md",
+    "backend/tests/services/data_agent/__pycache__/test_runner_controlled_main_path.cpython-311.pyc",
+    "inbox/20260514-14-cleanup-proposal.md"
+  ]
+}

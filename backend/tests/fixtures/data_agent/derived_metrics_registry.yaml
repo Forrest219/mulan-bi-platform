@@ -1,0 +1,22 @@
+version: 1
+derived_metrics:
+  - name: "ratio_metric"
+    label: "ratio_metric"
+    result_type: "number"
+    formula: "numerator / denominator"
+    inputs:
+      numerator:
+        fields:
+          - "SUM(metric_a)"
+      denominator:
+        fields:
+          - "SUM(metric_b)"
+
+  - name: "share_metric"
+    label: "share_metric"
+    result_type: "number"
+    formula: "value / sum(value)"
+    inputs:
+      value:
+        fields:
+          - "SUM(metric_c)"
