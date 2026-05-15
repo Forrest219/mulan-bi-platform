@@ -1,0 +1,32 @@
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+version: "3.9"
+
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  backend:
+    volumes:
+      - ./backend:/app
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      target: builder
+    command: npm run dev -- --host 0.0.0.0 --port 3000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+  # Dev mode: nginx not needed (Vite dev server has its own proxy)
+  nginx:
+    profiles: ["disabled"]
