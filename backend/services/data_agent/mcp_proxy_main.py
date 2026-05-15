@@ -124,13 +124,14 @@ async def run_mcp_proxy_main_path(
         purpose="data_agent_mcp_proxy_args",
     )
     if not llm_result.get("ok"):
-        error = str(llm_result.get("error") or "llm_mcp_args_failed")
+        error_code = str(llm_result.get("error_code") or llm_result.get("error") or "MCP_ARGS_LLM_INVALID")
+        error = str(llm_result.get("message") or llm_result.get("error") or "llm_mcp_args_failed")
         yield AgentEvent(type="tool_result", content={
             "tool": "llm_mcp_args",
-            "result": {"success": False, "error": error, "data": llm_result},
+            "result": {"success": False, "error": error_code, "data": llm_result},
         })
         yield AgentEvent(type="error", content=_guardrail_fallback_payload(
-            "MCP_ARGS_LLM_INVALID",
+            error_code if error_code.startswith("LLM_") else "MCP_ARGS_LLM_INVALID",
             "LLM 未生成可执行的 MCP tool args。",
             "请换一种更明确的问法，补充指标、时间范围或维度。",
             context.trace_id,
@@ -140,6 +141,7 @@ async def run_mcp_proxy_main_path(
                 "guardrail_decision": "reject",
                 "guardrail_repairs": [],
                 "llm_error": error[:500],
+                "fallback_reason": error_code,
             },
         ))
         return

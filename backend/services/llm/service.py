@@ -2,7 +2,7 @@
 import contextvars
 import logging
 import time
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 from app.core.config import get_settings
 from app.core.errors import MulanError
@@ -17,6 +17,101 @@ llm_user_id_var: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar(
 )
 
 logger = logging.getLogger(__name__)
+
+LLM_NOT_CONFIGURED = "LLM_NOT_CONFIGURED"
+LLM_AUTH_CONFIG_ERROR = "LLM_AUTH_CONFIG_ERROR"
+LLM_PROVIDER_TIMEOUT = "LLM_PROVIDER_TIMEOUT"
+LLM_PROVIDER_ERROR = "LLM_PROVIDER_ERROR"
+LLM_EMPTY_RESPONSE = "LLM_EMPTY_RESPONSE"
+LLM_THINKING_ONLY_RESPONSE = "LLM_THINKING_ONLY_RESPONSE"
+
+JSON_PLANNING_PURPOSES = {"data_agent_queryspec", "data_agent_mcp_proxy_args"}
+
+
+def _llm_error_payload(
+    code: str,
+    message: str,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    purpose: str | None = None,
+    latency_ms: int | None = None,
+    attempts: list[dict[str, Any]] | None = None,
+    detail: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "error": message,
+        "error_code": code,
+    }
+    if provider is not None:
+        payload["provider"] = provider
+    if model is not None:
+        payload["model"] = model
+    if purpose is not None:
+        payload["purpose"] = purpose
+    if latency_ms is not None:
+        payload["latency_ms"] = latency_ms
+    if attempts is not None:
+        payload["attempts"] = attempts
+    if detail:
+        payload["detail"] = detail
+    return payload
+
+
+def _classify_provider_exception(exc: BaseException) -> tuple[str, str]:
+    name = exc.__class__.__name__
+    message = str(exc)
+    lowered = f"{name} {message}".lower()
+    status_code = getattr(exc, "status_code", None)
+
+    if isinstance(exc, (TimeoutError,)):
+        return LLM_PROVIDER_TIMEOUT, "LLM provider 调用超时"
+    if "timeout" in lowered or "timed out" in lowered or "request timed out" in lowered:
+        return LLM_PROVIDER_TIMEOUT, "LLM provider 调用超时"
+    if status_code in {401, 403}:
+        return LLM_AUTH_CONFIG_ERROR, "LLM 认证配置错误"
+    if any(token in lowered for token in ("authentication", "unauthorized", "permissiondenied", "invalid api key")):
+        return LLM_AUTH_CONFIG_ERROR, "LLM 认证配置错误"
+    return LLM_PROVIDER_ERROR, "LLM provider 调用失败"
+
+
+def _attempt_payload(
+    *,
+    config: Any,
+    purpose: str,
+    latency_ms: int | None,
+    error: str,
+    error_code: str,
+) -> dict[str, Any]:
+    return {
+        "provider": getattr(config, "provider", None),
+        "model": getattr(config, "model", None),
+        "latency_ms": latency_ms,
+        "purpose": purpose,
+        "error": error,
+        "error_code": error_code,
+    }
+
+
+def _primary_attempt_error_code(attempts: list[dict[str, Any]]) -> str:
+    priority = [
+        LLM_AUTH_CONFIG_ERROR,
+        LLM_NOT_CONFIGURED,
+        LLM_PROVIDER_TIMEOUT,
+        LLM_THINKING_ONLY_RESPONSE,
+        LLM_EMPTY_RESPONSE,
+        LLM_PROVIDER_ERROR,
+    ]
+    seen = {str(attempt.get("error_code") or "") for attempt in attempts}
+    for code in priority:
+        if code in seen:
+            return code
+    return LLM_PROVIDER_ERROR
+
+
+def _config_priority(config: Any) -> int:
+    value = getattr(config, "priority", 0)
+    return value if isinstance(value, int) else 0
 
 # =============================================================================
 # 加密工具（惰性加载，缓存清除后下次调用重新初始化）
@@ -82,11 +177,11 @@ class _TimedClientCache:
         self._timestamps: dict = {}
         self._ttl = ttl_seconds
 
-    def _make_key(self, provider: str, base_url: str, model: str, api_key: str) -> str:
-        return f"{provider}:{base_url}:{model}:{hash(api_key)}"
+    def _make_key(self, provider: str, base_url: str, model: str, api_key: str, timeout: int) -> str:
+        return f"{provider}:{base_url}:{model}:{timeout}:{hash(api_key)}"
 
-    def get(self, provider: str, base_url: str, model: str, api_key: str):
-        key = self._make_key(provider, base_url, model, api_key)
+    def get(self, provider: str, base_url: str, model: str, api_key: str, timeout: int):
+        key = self._make_key(provider, base_url, model, api_key, timeout)
         if key in self._cache:
             # 检查 TTL
             if time.time() - self._timestamps.get(key, 0) > self._ttl:
@@ -95,8 +190,8 @@ class _TimedClientCache:
             return self._cache[key]
         return None
 
-    def set(self, provider: str, base_url: str, model: str, api_key: str, client):
-        key = self._make_key(provider, base_url, model, api_key)
+    def set(self, provider: str, base_url: str, model: str, api_key: str, timeout: int, client):
+        key = self._make_key(provider, base_url, model, api_key, timeout)
         self._cache[key] = client
         self._timestamps[key] = time.time()
 
@@ -169,20 +264,20 @@ class LLMService:
 
     def _get_openai_client(self, api_key: str, base_url: str, model: str, timeout: int):
         from openai import AsyncOpenAI
-        cached = _client_cache.get("openai", base_url, model, api_key)
+        cached = _client_cache.get("openai", base_url, model, api_key, timeout)
         if cached is not None:
             return cached
         client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
-        _client_cache.set("openai", base_url, model, api_key, client)
+        _client_cache.set("openai", base_url, model, api_key, timeout, client)
         return client
 
     def _get_anthropic_client(self, api_key: str, base_url: str, model: str, timeout: int):
         from anthropic import AsyncAnthropic
-        cached = _client_cache.get("anthropic", base_url, model, api_key)
+        cached = _client_cache.get("anthropic", base_url, model, api_key, timeout)
         if cached is not None:
             return cached
         client = AsyncAnthropic(api_key=api_key, base_url=base_url, timeout=timeout)
-        _client_cache.set("anthropic", base_url, model, api_key, client)
+        _client_cache.set("anthropic", base_url, model, api_key, timeout, client)
         return client
 
     async def complete(self, prompt: str, system: str = None, timeout: int = 15, purpose: str = "default") -> dict:
@@ -203,76 +298,90 @@ class LLMService:
             if config and getattr(config, "is_active", False):
                 configs = [config]
         if not configs:
-            return {"error": "LLM 未配置，请联系管理员"}
+            return _llm_error_payload(
+                LLM_NOT_CONFIGURED,
+                "LLM 未配置，请联系管理员",
+                purpose=purpose,
+            )
 
         attempts = []
 
         for config in configs:
             # Skip configs without valid api_key
             if not config.api_key_encrypted:
-                attempts.append({
-                    "provider": config.provider,
-                    "model": config.model,
-                    "latency_ms": None,
-                    "error": "API Key 未配置",
-                })
+                attempts.append(_attempt_payload(
+                    config=config,
+                    purpose=purpose,
+                    latency_ms=None,
+                    error="API Key 未配置",
+                    error_code=LLM_AUTH_CONFIG_ERROR,
+                ))
                 continue
 
             try:
                 api_key = _decrypt(config.api_key_encrypted)
             except Exception as e:
                 logger.error("LLM API Key 解密失败: %s", e, exc_info=True)
-                attempts.append({
-                    "provider": config.provider,
-                    "model": config.model,
-                    "latency_ms": None,
-                    "error": "LLM 认证配置错误",
-                })
+                attempts.append(_attempt_payload(
+                    config=config,
+                    purpose=purpose,
+                    latency_ms=None,
+                    error="LLM 认证配置错误",
+                    error_code=LLM_AUTH_CONFIG_ERROR,
+                ))
                 continue
 
+            start_time = time.time()
             try:
-                start_time = time.time()
                 if config.provider in ("anthropic", "minimax") or "anthropic" in (config.base_url or ""):
-                    result = await self._anthropic_complete(api_key, config, prompt, system, timeout)
+                    result = await self._anthropic_complete(api_key, config, prompt, system, timeout, purpose=purpose)
                 else:
                     result = await self._openai_complete(api_key, config, prompt, system, timeout)
                 latency_ms = int((time.time() - start_time) * 1000)
 
                 if "content" in result:
+                    result.setdefault("provider", config.provider)
+                    result.setdefault("model", config.model)
+                    result.setdefault("purpose", purpose)
+                    result.setdefault("latency_ms", latency_ms)
                     return result
 
                 # LLM 调用失败，记录并降级
-                attempts.append({
-                    "provider": config.provider,
-                    "model": config.model,
-                    "latency_ms": latency_ms,
-                    "error": result.get("error", "未知错误"),
-                })
+                attempts.append(_attempt_payload(
+                    config=config,
+                    purpose=purpose,
+                    latency_ms=latency_ms,
+                    error=result.get("error", "未知错误"),
+                    error_code=result.get("error_code") or LLM_PROVIDER_ERROR,
+                ))
                 logger.warning(
-                    "LLM 调用失败 [priority=%d, provider=%s, model=%s]: %s，降级至下一配置",
-                    config.priority, config.provider, config.model,
+                    "LLM 调用失败 [priority=%d, provider=%s, model=%s, code=%s]: %s，降级至下一配置",
+                    _config_priority(config), config.provider, config.model,
+                    result.get("error_code") or LLM_PROVIDER_ERROR,
                     result.get("error", "未知错误"),
                 )
             except Exception as e:
-                import time as _time
-                attempts.append({
-                    "provider": config.provider,
-                    "model": config.model,
-                    "latency_ms": int((_time.time() - start_time) * 1000) if 'start_time' in dir() else None,
-                    "error": str(e),
-                })
+                error_code, error_message = _classify_provider_exception(e)
+                attempts.append(_attempt_payload(
+                    config=config,
+                    purpose=purpose,
+                    latency_ms=int((time.time() - start_time) * 1000),
+                    error=error_message,
+                    error_code=error_code,
+                ))
                 logger.warning(
-                    "LLM 调用异常 [priority=%d, provider=%s, model=%s]: %s，降级至下一配置",
-                    config.priority, config.provider, config.model, e,
+                    "LLM 调用异常 [priority=%d, provider=%s, model=%s, code=%s]: %s，降级至下一配置",
+                    _config_priority(config), config.provider, config.model, error_code, e,
                 )
 
         # 全部失败，抛出 MulanError（Gap 3：同 purpose 多配置失败切备用）
         logger.error("所有 LLM 配置均不可用，已尝试 %d 个配置", len(attempts))
+        primary_error_code = _primary_attempt_error_code(attempts)
         raise MulanError(
             error_code="LLM_500",
             message="所有 LLM 配置均不可用",
             status_code=500,
-            detail={"attempts": attempts},
+            detail={"attempts": attempts, "error_code": primary_error_code, "purpose": purpose},
         )
 
     async def complete_with_temp(
@@ -450,10 +559,26 @@ class LLMService:
             max_tokens=config.max_tokens,
         )
         self._record_usage(config, response, provider="openai")
-        content = response.choices[0].message.content.strip()
+        content = (response.choices[0].message.content or "").strip()
+        if not content:
+            return _llm_error_payload(
+                LLM_EMPTY_RESPONSE,
+                "LLM provider 返回空文本",
+                provider=getattr(config, "provider", "openai"),
+                model=getattr(config, "model", None),
+            )
         return {"content": content}
 
-    async def _anthropic_complete(self, api_key: str, config, prompt: str, system: str, timeout: int) -> dict:
+    async def _anthropic_complete(
+        self,
+        api_key: str,
+        config,
+        prompt: str,
+        system: str,
+        timeout: int,
+        *,
+        purpose: str = "default",
+    ) -> dict:
         base_url = config.base_url or "https://api.minimaxi.com/anthropic"
         client = self._get_anthropic_client(api_key, base_url, config.model, timeout)
         messages = []
@@ -473,7 +598,15 @@ class LLMService:
             error_type = type(e).__name__
             error_msg = str(e)
             logger.error("Anthropic API 调用失败 [%s]: %s", error_type, error_msg, exc_info=True)
-            return {"error": f"Anthropic API 错误: {error_msg}"}
+            error_code, message = _classify_provider_exception(e)
+            return _llm_error_payload(
+                error_code,
+                message,
+                provider=getattr(config, "provider", "anthropic"),
+                model=getattr(config, "model", None),
+                purpose=purpose,
+                detail={"provider_error_type": error_type},
+            )
 
         self._record_usage(config, response, provider="anthropic")
         # Only TextBlock is user-visible model output. ThinkingBlock is internal
@@ -481,9 +614,33 @@ class LLMService:
         from anthropic.types import TextBlock
         text_blocks = [block for block in response.content if isinstance(block, TextBlock)]
         if not text_blocks:
+            has_thinking = any(getattr(block, "thinking", None) for block in response.content)
+            if has_thinking:
+                logger.error("Anthropic 响应仅包含 ThinkingBlock，无 TextBlock: %s", response.content)
+                return _llm_error_payload(
+                    LLM_THINKING_ONLY_RESPONSE,
+                    "MiniMax 响应仅包含 ThinkingBlock，未找到文本内容",
+                    provider=getattr(config, "provider", "anthropic"),
+                    model=getattr(config, "model", None),
+                    purpose=purpose,
+                )
             logger.error("Anthropic 响应中无 TextBlock: %s", response.content)
-            return {"error": "MiniMax 响应格式异常：未找到文本内容"}
+            return _llm_error_payload(
+                LLM_EMPTY_RESPONSE,
+                "MiniMax 响应格式异常：未找到文本内容",
+                provider=getattr(config, "provider", "anthropic"),
+                model=getattr(config, "model", None),
+                purpose=purpose,
+            )
         content = text_blocks[0].text.strip()
+        if not content:
+            return _llm_error_payload(
+                LLM_EMPTY_RESPONSE,
+                "LLM provider 返回空文本",
+                provider=getattr(config, "provider", "anthropic"),
+                model=getattr(config, "model", None),
+                purpose=purpose,
+            )
         return {"content": content}
 
     async def generate_asset_summary(self, asset) -> dict:

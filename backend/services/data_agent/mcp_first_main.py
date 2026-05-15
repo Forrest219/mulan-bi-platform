@@ -13,9 +13,9 @@ from services.data_agent.answer_prompt_builder import build_answer_prompt
 from services.data_agent.dynamic_column_engine import append_derived_columns, derived_metric_names_in_text
 from services.data_agent.intent_classifier import IntentClassification
 from services.data_agent.query_plan import OperatorResult, QueryPlanContext
-from services.data_agent.queryspec import FilterSpec, MetricSpec, QuerySpec, SortSpec
+from services.data_agent.queryspec import ALLOWED_INTENTS, ALLOWED_OPERATORS, FilterSpec, MetricSpec, QuerySpec, SortSpec
 from services.data_agent.queryspec_fallback import build_fallback_queryspec, infer_fallback_operator
-from services.data_agent.queryspec_prompt_builder import build_queryspec_prompt
+from services.data_agent.queryspec_prompt_builder import build_queryspec_prompt, build_queryspec_repair_prompt
 from services.data_agent.queryspec_validator import validate_queryspec
 from services.data_agent.response import AgentEvent
 from services.data_agent.semantic_operators.registry import default_registry
@@ -23,7 +23,15 @@ from services.data_agent.skill_prompt_loader import SkillPromptLoader
 from services.data_agent.table_display import infer_table_display_schema
 from services.data_agent.tool_base import ToolContext
 from services.llm.nlq_service import get_datasource_fields_cached, route_datasource
-from services.llm.service import LLMService
+from services.llm.service import (
+    LLM_AUTH_CONFIG_ERROR,
+    LLM_EMPTY_RESPONSE,
+    LLM_NOT_CONFIGURED,
+    LLM_PROVIDER_ERROR,
+    LLM_PROVIDER_TIMEOUT,
+    LLM_THINKING_ONLY_RESPONSE,
+    LLMService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +39,24 @@ FALLBACK_TRIGGERED_EVENT = "FALLBACK_TRIGGERED"
 WARN_EVENT = "WARN"
 QUERYSPEC_MCP_FALLBACK_CHAIN_MODE = "queryspec_mcp_fallback"
 ENV_QUERYSPEC_MCP_FALLBACK_ENABLED = "DATA_AGENT_QUERYSPEC_MCP_FALLBACK_ENABLED"
+JSON_PLANNING_TIMEOUT_SECONDS = 18
+QS_JSON_INVALID = "QS_JSON_INVALID"
+QS_JSON_NOT_FOUND = "QS_JSON_NOT_FOUND"
+QS_MODEL_INVALID = "QS_MODEL_INVALID"
+QS_VALIDATION_FAILED = "QS_VALIDATION_FAILED"
+QUERYSPEC_REPAIRABLE_ERROR_CODES = {
+    QS_JSON_INVALID,
+    QS_JSON_NOT_FOUND,
+    QS_MODEL_INVALID,
+    QS_VALIDATION_FAILED,
+}
+NON_REPAIRABLE_LLM_ERROR_CODES = {
+    LLM_NOT_CONFIGURED,
+    LLM_AUTH_CONFIG_ERROR,
+    LLM_PROVIDER_TIMEOUT,
+    LLM_EMPTY_RESPONSE,
+    LLM_THINKING_ONLY_RESPONSE,
+}
 
 
 async def run_mcp_first_main_path(
@@ -104,6 +130,7 @@ async def run_mcp_first_main_path(
     queryspec_fallback_enabled = _queryspec_fallback_enabled()
     queryspec_fallback_used = False
     queryspec_fallback_reason: Optional[str] = None
+    queryspec_repair_attempted = False
 
     raw_spec = None
     if queryspec_fallback_enabled and _should_prefer_deterministic_queryspec(question, intent_result, analysis_context):
@@ -160,82 +187,137 @@ async def run_mcp_first_main_path(
         })
         queryspec_result = await _call_llm_json(llm, prompt_messages, purpose="data_agent_queryspec")
         if not queryspec_result.get("ok"):
-            fallback_reason = str(queryspec_result.get("error") or "llm_queryspec_failed")
+            failure_code = _queryspec_failure_code(queryspec_result, QS_JSON_INVALID)
             yield AgentEvent(type="tool_result", content={
                 "tool": "llm_queryspec",
-                "result": {"success": False, "error": queryspec_result.get("error"), "data": queryspec_result},
-            })
-            if not queryspec_fallback_enabled:
-                async for event in _run_queryspec_mcp_fallback(
-                    question=question,
-                    context=context,
-                    intent_result=intent_result,
-                    datasource=ds_info,
-                    queryable_fields=field_captions,
-                    analysis_context=analysis_context,
-                    llm=llm,
-                    phase="queryspec_generation",
-                    reason="llm_queryspec_failed",
-                    original_error=queryspec_result,
-                    error_code="QS_LLM_INVALID",
-                    message="LLM 未生成可执行的 QuerySpec。",
-                    user_hint="请换一种更明确的问法，补充指标、时间范围或维度。",
-                ):
-                    yield event
-                return
-            raw_spec = _build_fallback_queryspec(
-                question=question,
-                intent_result=intent_result,
-                datasource=ds_info,
-                queryable_fields=field_captions,
-                analysis_context=analysis_context,
-                reason=fallback_reason,
-            )
-            if not raw_spec:
-                async for event in _run_queryspec_mcp_fallback(
-                    question=question,
-                    context=context,
-                    intent_result=intent_result,
-                    datasource=ds_info,
-                    queryable_fields=field_captions,
-                    analysis_context=analysis_context,
-                    llm=llm,
-                    phase="queryspec_repair",
-                    reason="queryspec_repair_failed",
-                    original_error={
-                        "queryspec_error": _queryspec_original_error(queryspec_result),
-                        "repair_error": "deterministic_queryspec_unavailable",
-                    },
-                    error_code="query_plan_unavailable",
-                    message="没有生成可安全执行的 QuerySpec。",
-                    user_hint="请换一种更明确的问法，补充指标、时间范围或维度。",
-                    failure_fallback_type="query_plan_unavailable",
-                ):
-                    yield event
-                return
-            queryspec_fallback_used = True
-            queryspec_fallback_reason = "llm_queryspec_failed"
-            yield AgentEvent(type="tool_call", content={
-                "tool": "queryspec_fallback",
-                "params": {"reason": "llm_queryspec_failed", "intent": intent_result.intent},
-            })
-            yield AgentEvent(type="tool_result", content={
-                "tool": "queryspec_fallback",
                 "result": {
-                    "event": FALLBACK_TRIGGERED_EVENT,
-                    "data": {
-                        "queryspec": _redact_large(raw_spec),
-                        "reason": "llm_queryspec_failed",
-                        "original_error": _queryspec_original_error(queryspec_result),
-                        "metrics": _queryspec_trace_metrics(
-                            main_path_success=False,
-                            fallback_triggered=True,
-                            fallback_mode="deterministic_queryspec",
-                            fallback_reason="llm_queryspec_failed",
-                        ),
-                    },
+                    "success": False,
+                    "error": failure_code,
+                    "data": queryspec_result,
+                    "fallback_reason": failure_code,
                 },
             })
+            if _is_queryspec_repairable(failure_code):
+                queryspec_repair_attempted = True
+                yield AgentEvent(type="tool_call", content={
+                    "tool": "llm_queryspec_repair",
+                    "params": {
+                        "reason": failure_code,
+                        "intent": intent_result.intent,
+                        "datasource": datasource_payload,
+                    },
+                })
+                repair_result = await _repair_queryspec_once(
+                    llm=llm,
+                    question=question,
+                    intent=intent_result.intent,
+                    datasource_payload=datasource_payload,
+                    queryable_fields=field_captions,
+                    analysis_context=analysis_context,
+                    planning_skill_content=planning_skill.content,
+                    original_output=queryspec_result.get("raw") or queryspec_result,
+                    error_summary=queryspec_result,
+                )
+                if repair_result.get("ok"):
+                    raw_spec = repair_result["json"]
+                    yield AgentEvent(type="tool_result", content={
+                        "tool": "llm_queryspec_repair",
+                        "result": {"data": {"queryspec": _redact_large(raw_spec)}, "success": True},
+                    })
+                else:
+                    yield AgentEvent(type="tool_result", content={
+                        "tool": "llm_queryspec_repair",
+                        "result": {
+                            "success": False,
+                            "error": _queryspec_failure_code(repair_result, QS_JSON_INVALID),
+                            "data": repair_result,
+                        },
+                    })
+                    queryspec_result = _queryspec_repair_error_payload(
+                        error_code=failure_code,
+                        original_error=queryspec_result,
+                        repair_error=repair_result,
+                    )
+            if not queryspec_fallback_enabled:
+                if raw_spec is not None:
+                    pass
+                else:
+                    async for event in _run_queryspec_mcp_fallback(
+                        question=question,
+                        context=context,
+                        intent_result=intent_result,
+                        datasource=ds_info,
+                        queryable_fields=field_captions,
+                        analysis_context=analysis_context,
+                        llm=llm,
+                        phase="queryspec_generation",
+                        reason=failure_code,
+                        original_error=queryspec_result,
+                        error_code=failure_code,
+                        message="LLM 未生成可执行的 QuerySpec。",
+                        user_hint="请换一种更明确的问法，补充指标、时间范围或维度。",
+                    ):
+                        yield event
+                    return
+            if raw_spec is not None:
+                pass
+            elif not queryspec_fallback_enabled:
+                return
+            else:
+                raw_spec = _build_fallback_queryspec(
+                    question=question,
+                    intent_result=intent_result,
+                    datasource=ds_info,
+                    queryable_fields=field_captions,
+                    analysis_context=analysis_context,
+                    reason=failure_code,
+                )
+                if not raw_spec:
+                    async for event in _run_queryspec_mcp_fallback(
+                        question=question,
+                        context=context,
+                        intent_result=intent_result,
+                        datasource=ds_info,
+                        queryable_fields=field_captions,
+                        analysis_context=analysis_context,
+                        llm=llm,
+                        phase="queryspec_repair" if queryspec_repair_attempted else "queryspec_generation",
+                        reason=failure_code,
+                        original_error=_queryspec_repair_error_payload(
+                            error_code=failure_code,
+                            original_error=queryspec_result,
+                            repair_error="deterministic_queryspec_unavailable",
+                        ),
+                        error_code=failure_code,
+                        message="没有生成可安全执行的 QuerySpec。",
+                        user_hint="请换一种更明确的问法，补充指标、时间范围或维度。",
+                        failure_fallback_type="query_plan_unavailable",
+                    ):
+                        yield event
+                    return
+                queryspec_fallback_used = True
+                queryspec_fallback_reason = failure_code
+                yield AgentEvent(type="tool_call", content={
+                    "tool": "queryspec_fallback",
+                    "params": {"reason": failure_code, "intent": intent_result.intent},
+                })
+                yield AgentEvent(type="tool_result", content={
+                    "tool": "queryspec_fallback",
+                    "result": {
+                        "event": FALLBACK_TRIGGERED_EVENT,
+                        "data": {
+                            "queryspec": _redact_large(raw_spec),
+                            "reason": failure_code,
+                            "original_error": _queryspec_original_error(queryspec_result),
+                            "metrics": _queryspec_trace_metrics(
+                                main_path_success=False,
+                                fallback_triggered=True,
+                                fallback_mode="deterministic_queryspec",
+                                fallback_reason=failure_code,
+                            ),
+                        },
+                    },
+                })
         else:
             raw_spec = queryspec_result["json"]
             yield AgentEvent(type="tool_result", content={
@@ -247,105 +329,165 @@ async def run_mcp_first_main_path(
         spec = QuerySpec.model_validate(raw_spec)
         spec = _normalize_mcp_handled_metrics(spec, question, field_captions)
     except Exception as exc:
-        fallback_reason = f"queryspec_model_invalid: {exc}"
-        if not queryspec_fallback_enabled:
-            async for event in _run_queryspec_mcp_fallback(
+        model_error = exc
+        if not queryspec_repair_attempted:
+            queryspec_repair_attempted = True
+            yield AgentEvent(type="tool_call", content={
+                "tool": "llm_queryspec_repair",
+                "params": {"reason": QS_MODEL_INVALID, "intent": intent_result.intent, "datasource": datasource_payload},
+            })
+            repair_result = await _repair_queryspec_once(
+                llm=llm,
                 question=question,
-                context=context,
+                intent=intent_result.intent,
+                datasource_payload=datasource_payload,
+                queryable_fields=field_captions,
+                analysis_context=analysis_context,
+                planning_skill_content=planning_skill.content,
+                original_output=raw_spec,
+                error_summary={"error_code": QS_MODEL_INVALID, "error": _queryspec_original_error(exc)},
+            )
+            if repair_result.get("ok"):
+                raw_spec = repair_result["json"]
+                try:
+                    spec = _normalize_mcp_handled_metrics(QuerySpec.model_validate(raw_spec), question, field_captions)
+                    model_error = None
+                except Exception as repair_exc:
+                    model_error = repair_exc
+                    yield AgentEvent(type="tool_result", content={
+                        "tool": "llm_queryspec_repair",
+                        "result": {
+                            "success": False,
+                            "error": QS_MODEL_INVALID,
+                            "data": _queryspec_repair_error_payload(
+                                error_code=QS_MODEL_INVALID,
+                                original_error=exc,
+                                repair_error=repair_exc,
+                            ),
+                        },
+                    })
+                else:
+                    yield AgentEvent(type="tool_result", content={
+                        "tool": "llm_queryspec_repair",
+                        "result": {"data": {"queryspec": _redact_large(raw_spec)}, "success": True},
+                    })
+            else:
+                yield AgentEvent(type="tool_result", content={
+                    "tool": "llm_queryspec_repair",
+                    "result": {
+                        "success": False,
+                        "error": _queryspec_failure_code(repair_result, QS_JSON_INVALID),
+                        "data": repair_result,
+                    },
+                })
+                model_error = _queryspec_repair_error_payload(
+                    error_code=QS_MODEL_INVALID,
+                    original_error=exc,
+                    repair_error=repair_result,
+                )
+
+        if model_error is not None:
+            if not queryspec_fallback_enabled:
+                async for event in _run_queryspec_mcp_fallback(
+                    question=question,
+                    context=context,
+                    intent_result=intent_result,
+                    datasource=ds_info,
+                    queryable_fields=field_captions,
+                    analysis_context=analysis_context,
+                    llm=llm,
+                    phase="queryspec_model_validation",
+                    reason=QS_MODEL_INVALID,
+                    original_error=model_error,
+                    error_code=QS_MODEL_INVALID,
+                    message="QuerySpec 结构不符合契约。",
+                    user_hint="我没有生成可安全执行的查询计划，请换一种更明确的问法。",
+                ):
+                    yield event
+                return
+            raw_spec = _build_fallback_queryspec(
+                question=question,
                 intent_result=intent_result,
                 datasource=ds_info,
                 queryable_fields=field_captions,
                 analysis_context=analysis_context,
-                llm=llm,
-                phase="queryspec_model_validation",
-                reason="queryspec_model_invalid",
-                original_error=exc,
-                error_code="QS_INVALID_JSON",
-                message="QuerySpec 结构不符合契约。",
-                user_hint="我没有生成可安全执行的查询计划，请换一种更明确的问法。",
-            ):
-                yield event
-            return
-        raw_spec = _build_fallback_queryspec(
-            question=question,
-            intent_result=intent_result,
-            datasource=ds_info,
-            queryable_fields=field_captions,
-            analysis_context=analysis_context,
-            reason=fallback_reason,
-        )
-        if not raw_spec:
-            async for event in _run_queryspec_mcp_fallback(
-                question=question,
-                context=context,
-                intent_result=intent_result,
-                datasource=ds_info,
-                queryable_fields=field_captions,
-                analysis_context=analysis_context,
-                llm=llm,
-                phase="queryspec_repair",
-                reason="queryspec_repair_failed",
-                original_error={
-                    "queryspec_error": _queryspec_original_error(exc),
-                    "repair_error": "deterministic_queryspec_unavailable",
-                },
-                error_code="QS_INVALID_JSON",
-                message="QuerySpec 结构不符合契约。",
-                user_hint="我没有生成可安全执行的查询计划，请换一种更明确的问法。",
-                failure_fallback_type="query_plan_unavailable",
-            ):
-                yield event
-            return
-        queryspec_fallback_used = True
-        queryspec_fallback_reason = "queryspec_model_invalid"
-        yield AgentEvent(type="tool_call", content={
-            "tool": "queryspec_fallback",
-            "params": {"reason": "queryspec_model_invalid", "intent": intent_result.intent},
-        })
-        yield AgentEvent(type="tool_result", content={
-            "tool": "queryspec_fallback",
-            "result": {
-                "event": FALLBACK_TRIGGERED_EVENT,
-                "data": {
-                    "queryspec": _redact_large(raw_spec),
-                    "reason": "queryspec_model_invalid",
-                    "original_error": _queryspec_original_error(exc),
-                    "metrics": _queryspec_trace_metrics(
-                        main_path_success=False,
-                        fallback_triggered=True,
-                        fallback_mode="deterministic_queryspec",
-                        fallback_reason="queryspec_model_invalid",
+                reason=QS_MODEL_INVALID,
+            )
+            if not raw_spec:
+                async for event in _run_queryspec_mcp_fallback(
+                    question=question,
+                    context=context,
+                    intent_result=intent_result,
+                    datasource=ds_info,
+                    queryable_fields=field_captions,
+                    analysis_context=analysis_context,
+                    llm=llm,
+                    phase="queryspec_repair",
+                    reason=QS_MODEL_INVALID,
+                    original_error=_queryspec_repair_error_payload(
+                        error_code=QS_MODEL_INVALID,
+                        original_error=model_error,
+                        repair_error="deterministic_queryspec_unavailable",
                     ),
+                    error_code=QS_MODEL_INVALID,
+                    message="QuerySpec 结构不符合契约。",
+                    user_hint="我没有生成可安全执行的查询计划，请换一种更明确的问法。",
+                    failure_fallback_type="query_plan_unavailable",
+                ):
+                    yield event
+                return
+            queryspec_fallback_used = True
+            queryspec_fallback_reason = QS_MODEL_INVALID
+            yield AgentEvent(type="tool_call", content={
+                "tool": "queryspec_fallback",
+                "params": {"reason": QS_MODEL_INVALID, "intent": intent_result.intent},
+            })
+            yield AgentEvent(type="tool_result", content={
+                "tool": "queryspec_fallback",
+                "result": {
+                    "event": FALLBACK_TRIGGERED_EVENT,
+                    "data": {
+                        "queryspec": _redact_large(raw_spec),
+                        "reason": QS_MODEL_INVALID,
+                        "original_error": _queryspec_original_error(model_error),
+                        "metrics": _queryspec_trace_metrics(
+                            main_path_success=False,
+                            fallback_triggered=True,
+                            fallback_mode="deterministic_queryspec",
+                            fallback_reason=QS_MODEL_INVALID,
+                        ),
+                    },
                 },
-            },
-        })
-        try:
-            spec = _normalize_mcp_handled_metrics(QuerySpec.model_validate(raw_spec), question, field_captions)
-        except Exception as repair_exc:
-            async for event in _run_queryspec_mcp_fallback(
-                question=question,
-                context=context,
-                intent_result=intent_result,
-                datasource=ds_info,
-                queryable_fields=field_captions,
-                analysis_context=analysis_context,
-                llm=llm,
-                phase="queryspec_repair",
-                reason="queryspec_repair_failed",
-                original_error={
-                    "queryspec_error": _queryspec_original_error(exc),
-                    "repair_error": _queryspec_original_error(repair_exc),
-                },
-                error_code="QS_INVALID_JSON",
-                message="QuerySpec 结构不符合契约。",
-                user_hint="我没有生成可安全执行的查询计划，请换一种更明确的问法。",
-                failure_fallback_type="query_plan_unavailable",
-            ):
-                yield event
-            return
+            })
+            try:
+                spec = _normalize_mcp_handled_metrics(QuerySpec.model_validate(raw_spec), question, field_captions)
+            except Exception as repair_exc:
+                async for event in _run_queryspec_mcp_fallback(
+                    question=question,
+                    context=context,
+                    intent_result=intent_result,
+                    datasource=ds_info,
+                    queryable_fields=field_captions,
+                    analysis_context=analysis_context,
+                    llm=llm,
+                    phase="queryspec_repair",
+                    reason=QS_MODEL_INVALID,
+                    original_error=_queryspec_repair_error_payload(
+                        error_code=QS_MODEL_INVALID,
+                        original_error=model_error,
+                        repair_error=repair_exc,
+                    ),
+                    error_code=QS_MODEL_INVALID,
+                    message="QuerySpec 结构不符合契约。",
+                    user_hint="我没有生成可安全执行的查询计划，请换一种更明确的问法。",
+                    failure_fallback_type="query_plan_unavailable",
+                ):
+                    yield event
+                return
 
     replacement_reason = _queryspec_replacement_reason(question, intent_result, spec, analysis_context)
     if replacement_reason:
+        replacement_error = {"validator_code": "QS_OPERATOR_MISMATCH", "fallback_reason": replacement_reason, "queryspec": _redact_large(raw_spec)}
         if not queryspec_fallback_enabled:
             async for event in _run_queryspec_mcp_fallback(
                 question=question,
@@ -356,9 +498,9 @@ async def run_mcp_first_main_path(
                 analysis_context=analysis_context,
                 llm=llm,
                 phase="queryspec_semantic_check",
-                reason="queryspec_semantic_mismatch",
-                original_error={"fallback_reason": replacement_reason, "queryspec": _redact_large(raw_spec)},
-                error_code="QS_OPERATOR_MISMATCH",
+                reason=QS_VALIDATION_FAILED,
+                original_error=replacement_error,
+                error_code=QS_VALIDATION_FAILED,
                 message="QuerySpec 与用户问题的语义方向不一致。",
                 user_hint="请重新提问并明确要查询的指标、维度和判断方向。",
             ):
@@ -370,14 +512,14 @@ async def run_mcp_first_main_path(
             datasource=ds_info,
             queryable_fields=field_captions,
             analysis_context=analysis_context,
-            reason=replacement_reason,
+            reason=QS_VALIDATION_FAILED,
         )
         if fallback_raw:
             queryspec_fallback_used = True
-            queryspec_fallback_reason = replacement_reason
+            queryspec_fallback_reason = QS_VALIDATION_FAILED
             yield AgentEvent(type="tool_call", content={
                 "tool": "queryspec_fallback",
-                "params": {"reason": replacement_reason, "intent": intent_result.intent},
+                "params": {"reason": QS_VALIDATION_FAILED, "intent": intent_result.intent, "code": "QS_OPERATOR_MISMATCH"},
             })
             yield AgentEvent(type="tool_result", content={
                 "tool": "queryspec_fallback",
@@ -385,13 +527,13 @@ async def run_mcp_first_main_path(
                     "event": FALLBACK_TRIGGERED_EVENT,
                     "data": {
                         "queryspec": _redact_large(fallback_raw),
-                        "reason": replacement_reason,
-                        "original_error": {"fallback_reason": replacement_reason, "queryspec": _redact_large(raw_spec)},
+                        "reason": QS_VALIDATION_FAILED,
+                        "original_error": replacement_error,
                         "metrics": _queryspec_trace_metrics(
                             main_path_success=False,
                             fallback_triggered=True,
                             fallback_mode="deterministic_queryspec",
-                            fallback_reason=replacement_reason,
+                            fallback_reason=QS_VALIDATION_FAILED,
                         ),
                     },
                 },
@@ -408,12 +550,12 @@ async def run_mcp_first_main_path(
                     analysis_context=analysis_context,
                     llm=llm,
                     phase="queryspec_repair",
-                    reason="queryspec_repair_failed",
+                    reason=QS_VALIDATION_FAILED,
                     original_error={
-                        "queryspec_error": {"fallback_reason": replacement_reason},
+                        "queryspec_error": replacement_error,
                         "repair_error": _queryspec_original_error(repair_exc),
                     },
-                    error_code="QS_OPERATOR_MISMATCH",
+                    error_code=QS_VALIDATION_FAILED,
                     message="QuerySpec 与用户问题的语义方向不一致。",
                     user_hint="请重新提问并明确要查询的指标、维度和判断方向。",
                     failure_fallback_type="query_plan_unavailable",
@@ -430,12 +572,12 @@ async def run_mcp_first_main_path(
                 analysis_context=analysis_context,
                 llm=llm,
                 phase="queryspec_repair",
-                reason="queryspec_repair_failed",
+                reason=QS_VALIDATION_FAILED,
                 original_error={
-                    "queryspec_error": {"fallback_reason": replacement_reason},
+                    "queryspec_error": replacement_error,
                     "repair_error": "deterministic_queryspec_unavailable",
                 },
-                error_code="QS_OPERATOR_MISMATCH",
+                error_code=QS_VALIDATION_FAILED,
                 message="QuerySpec 与用户问题的语义方向不一致。",
                 user_hint="请重新提问并明确要查询的指标、维度和判断方向。",
                 failure_fallback_type="query_plan_unavailable",
@@ -476,24 +618,106 @@ async def run_mcp_first_main_path(
     })
     if not validation.passed:
         fallback_raw = None
-        repair_attempted = False
         initial_validation = validation
-        if queryspec_fallback_enabled and spec.source != "deterministic_fallback":
-            repair_attempted = True
+        if not queryspec_repair_attempted and spec.source != "deterministic_fallback":
+            queryspec_repair_attempted = True
+            yield AgentEvent(type="tool_call", content={
+                "tool": "llm_queryspec_repair",
+                "params": {
+                    "reason": QS_VALIDATION_FAILED,
+                    "intent": intent_result.intent,
+                    "datasource": datasource_payload,
+                    "validator_code": validation.code,
+                },
+            })
+            repair_result = await _repair_queryspec_once(
+                llm=llm,
+                question=question,
+                intent=intent_result.intent,
+                datasource_payload=datasource_payload,
+                queryable_fields=field_captions,
+                analysis_context=analysis_context,
+                planning_skill_content=planning_skill.content,
+                original_output=raw_spec,
+                error_summary={"error_code": QS_VALIDATION_FAILED, "validation": validation.to_dict()},
+            )
+            if repair_result.get("ok"):
+                raw_spec = repair_result["json"]
+                try:
+                    spec = _normalize_mcp_handled_metrics(QuerySpec.model_validate(raw_spec), question, field_captions)
+                    validation = validate_queryspec(
+                        spec,
+                        field_captions,
+                        {
+                            "name": ds_info.get("name"),
+                            "luid": ds_info.get("luid"),
+                            "metadata_fields": ds_info.get("metadata_fields") or [],
+                        },
+                        {
+                            "accessible_datasource_luids": [ds_info.get("luid")],
+                            "question": question,
+                            "analysis_context": analysis_context or {},
+                        },
+                    )
+                    yield AgentEvent(type="tool_result", content={
+                        "tool": "llm_queryspec_repair",
+                        "result": {"data": {"queryspec": _redact_large(raw_spec)}, "success": True},
+                    })
+                    yield AgentEvent(type="tool_call", content={
+                        "tool": "queryspec_validator",
+                        "params": {"intent": spec.intent, "operator": spec.effective_operator, "source": spec.source},
+                    })
+                    yield AgentEvent(type="tool_result", content={
+                        "tool": "queryspec_validator",
+                        "result": {
+                            "data": validation.to_dict(),
+                            "success": validation.passed,
+                            "metrics": _queryspec_trace_metrics(
+                                main_path_success=validation.passed and not queryspec_fallback_used,
+                                fallback_triggered=queryspec_fallback_used,
+                                fallback_mode="deterministic_queryspec" if queryspec_fallback_used else None,
+                                fallback_reason=queryspec_fallback_reason,
+                            ),
+                        },
+                    })
+                except Exception as repair_exc:
+                    validation = initial_validation
+                    repair_result = _queryspec_repair_error_payload(
+                        error_code=QS_MODEL_INVALID,
+                        original_error=initial_validation.to_dict(),
+                        repair_error=repair_exc,
+                    )
+                    yield AgentEvent(type="tool_result", content={
+                        "tool": "llm_queryspec_repair",
+                        "result": {"success": False, "error": QS_MODEL_INVALID, "data": repair_result},
+                    })
+            else:
+                yield AgentEvent(type="tool_result", content={
+                    "tool": "llm_queryspec_repair",
+                    "result": {
+                        "success": False,
+                        "error": _queryspec_failure_code(repair_result, QS_JSON_INVALID),
+                        "data": repair_result,
+                    },
+                })
+
+        if validation.passed:
+            pass
+        elif queryspec_fallback_enabled and spec.source != "deterministic_fallback":
             fallback_raw = _build_fallback_queryspec(
                 question=question,
                 intent_result=intent_result,
                 datasource=ds_info,
                 queryable_fields=field_captions,
                 analysis_context=analysis_context,
-                reason=f"queryspec_validation_failed: {validation.code}",
+                reason=QS_VALIDATION_FAILED,
             )
         if fallback_raw:
             queryspec_fallback_used = True
-            queryspec_fallback_reason = "queryspec_validation_failed"
+            queryspec_fallback_reason = QS_VALIDATION_FAILED
             yield AgentEvent(type="tool_call", content={
                 "tool": "queryspec_fallback",
-                "params": {"reason": "queryspec_validation_failed", "intent": intent_result.intent, "code": validation.code},
+                "params": {"reason": QS_VALIDATION_FAILED, "intent": intent_result.intent, "code": validation.code},
             })
             yield AgentEvent(type="tool_result", content={
                 "tool": "queryspec_fallback",
@@ -501,13 +725,13 @@ async def run_mcp_first_main_path(
                     "event": FALLBACK_TRIGGERED_EVENT,
                     "data": {
                         "queryspec": _redact_large(fallback_raw),
-                        "reason": "queryspec_validation_failed",
+                        "reason": QS_VALIDATION_FAILED,
                         "original_error": validation.to_dict(),
                         "metrics": _queryspec_trace_metrics(
                             main_path_success=False,
                             fallback_triggered=True,
                             fallback_mode="deterministic_queryspec",
-                            fallback_reason="queryspec_validation_failed",
+                            fallback_reason=QS_VALIDATION_FAILED,
                         ),
                     },
                 },
@@ -524,12 +748,12 @@ async def run_mcp_first_main_path(
                     analysis_context=analysis_context,
                     llm=llm,
                     phase="queryspec_repair",
-                    reason="queryspec_repair_failed",
+                    reason=QS_VALIDATION_FAILED,
                     original_error={
                         "queryspec_error": initial_validation.to_dict(),
                         "repair_error": _queryspec_original_error(repair_exc),
                     },
-                    error_code=initial_validation.code,
+                    error_code=QS_VALIDATION_FAILED,
                     message=initial_validation.message,
                     user_hint=initial_validation.user_hint,
                     failure_fallback_type="query_plan_unavailable",
@@ -569,9 +793,9 @@ async def run_mcp_first_main_path(
             })
         if not validation.passed:
             rejection_detail = dict(validation.detail or {})
-            fallback_reason = "queryspec_repair_failed" if repair_attempted else "queryspec_validation_failed"
             rejection_detail.update({
-                "fallback_reason": f"{fallback_reason}: {validation.code}",
+                "fallback_reason": QS_VALIDATION_FAILED,
+                "validator_code": validation.code,
                 "initial_validation": initial_validation.to_dict(),
             })
             async for event in _run_queryspec_mcp_fallback(
@@ -582,13 +806,13 @@ async def run_mcp_first_main_path(
                 queryable_fields=field_captions,
                 analysis_context=analysis_context,
                 llm=llm,
-                phase="queryspec_repair" if repair_attempted else "queryspec_validation",
-                reason=f"{fallback_reason}: {validation.code}",
+                phase="queryspec_repair" if queryspec_repair_attempted else "queryspec_validation",
+                reason=QS_VALIDATION_FAILED,
                 original_error=rejection_detail,
-                error_code=validation.code,
+                error_code=QS_VALIDATION_FAILED,
                 message=validation.message,
                 user_hint=validation.user_hint,
-                failure_fallback_type="query_plan_unavailable" if repair_attempted else "query_plan_rejected",
+                failure_fallback_type="query_plan_unavailable" if queryspec_repair_attempted else "query_plan_rejected",
             ):
                 yield event
             return
@@ -769,15 +993,26 @@ async def _call_llm_json(llm: LLMService, messages: list[dict[str, str]], *, pur
         result = await llm.complete(
             prompt=messages[-1]["content"],
             system=messages[0]["content"],
-            timeout=45,
+            timeout=JSON_PLANNING_TIMEOUT_SECONDS,
             purpose=purpose,
         )
     except Exception as exc:
         logger.warning("LLM QuerySpec generation failed: %s", exc)
-        return {"ok": False, "error": str(exc)}
+        return _llm_exception_failure(exc)
+    if "content" not in result and result.get("error"):
+        return _llm_result_failure(result)
     content = (result.get("content") or "").strip()
     if not content:
-        return {"ok": False, "error": result.get("error") or "empty_llm_response"}
+        error_code = result.get("error_code") or LLM_EMPTY_RESPONSE
+        return {
+            "ok": False,
+            "error": error_code,
+            "error_code": error_code,
+            "message": result.get("error") or "LLM provider 返回空文本",
+            "detail": _redact_large(result),
+        }
+    if purpose == "data_agent_queryspec":
+        return _parse_queryspec_json_content(content)
     try:
         return {"ok": True, "json": json.loads(_strip_json_fence(content))}
     except json.JSONDecodeError as exc:
@@ -787,7 +1022,13 @@ async def _call_llm_json(llm: LLMService, messages: list[dict[str, str]], *, pur
                 return {"ok": True, "json": json.loads(extracted)}
             except json.JSONDecodeError:
                 pass
-        return {"ok": False, "error": f"invalid_json: {exc}", "raw": content[:1000]}
+        return {
+            "ok": False,
+            "error": "JSON_INVALID",
+            "error_code": "JSON_INVALID",
+            "message": f"invalid_json: {exc}",
+            "raw": content[:1000],
+        }
 
 
 async def _call_llm_text(llm: LLMService, messages: list[dict[str, str]], *, purpose: str) -> str:
@@ -804,6 +1045,54 @@ async def _call_llm_text(llm: LLMService, messages: list[dict[str, str]], *, pur
     return (result.get("content") or "").strip()
 
 
+async def _repair_queryspec_once(
+    *,
+    llm: LLMService,
+    question: str,
+    intent: str,
+    datasource_payload: Mapping[str, Any],
+    queryable_fields: list[str],
+    analysis_context: Optional[Mapping[str, Any]],
+    planning_skill_content: str,
+    original_output: Any,
+    error_summary: Any,
+) -> dict[str, Any]:
+    messages = build_queryspec_repair_prompt(
+        question=question,
+        intent=intent,
+        datasource=datasource_payload,
+        queryable_fields=queryable_fields,
+        analysis_context=analysis_context or {},
+        original_output=original_output,
+        error_summary=error_summary,
+        planning_skill_content=planning_skill_content,
+    )
+    return await _call_llm_json(llm, messages, purpose="data_agent_queryspec")
+
+
+def _queryspec_failure_code(value: Mapping[str, Any] | BaseException | None, default: str) -> str:
+    if isinstance(value, Mapping):
+        return str(value.get("error_code") or value.get("error") or default)
+    return default
+
+
+def _is_queryspec_repairable(error_code: str) -> bool:
+    return error_code in QUERYSPEC_REPAIRABLE_ERROR_CODES and error_code not in NON_REPAIRABLE_LLM_ERROR_CODES
+
+
+def _queryspec_repair_error_payload(
+    *,
+    error_code: str,
+    original_error: Any,
+    repair_error: Any,
+) -> dict[str, Any]:
+    return {
+        "error_code": error_code,
+        "queryspec_error": _queryspec_original_error(original_error),
+        "repair_error": _queryspec_original_error(repair_error),
+    }
+
+
 def _strip_json_fence(content: str) -> str:
     stripped = content.strip()
     fenced = re.match(r"^```(?:json)?\s*(.*?)\s*```$", stripped, flags=re.DOTALL | re.IGNORECASE)
@@ -811,30 +1100,174 @@ def _strip_json_fence(content: str) -> str:
 
 
 def _extract_first_json_object(content: str) -> Optional[str]:
-    start = content.find("{")
-    if start < 0:
-        return None
-    depth = 0
-    in_string = False
-    escape = False
-    for index, char in enumerate(content[start:], start=start):
-        if in_string:
-            if escape:
-                escape = False
-            elif char == "\\":
-                escape = True
-            elif char == '"':
-                in_string = False
-            continue
-        if char == '"':
-            in_string = True
-        elif char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return content[start:index + 1]
+    for item in _iter_json_objects(content):
+        return item
     return None
+
+
+def _parse_queryspec_json_content(content: str) -> dict[str, Any]:
+    stripped = _strip_json_fence(content)
+    first_error: dict[str, Any] | None = None
+
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError as exc:
+        code = QS_JSON_INVALID if "{" in stripped else QS_JSON_NOT_FOUND
+        first_error = {
+            "ok": False,
+            "error": code,
+            "error_code": code,
+            "message": f"invalid_json: {exc}",
+            "raw": content[:1000],
+        }
+    else:
+        rejection = _queryspec_contract_rejection(parsed)
+        if rejection is None:
+            return {"ok": True, "json": parsed}
+        first_error = _queryspec_json_failure(rejection, content)
+
+    for candidate in _iter_json_objects(content):
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        rejection = _queryspec_contract_rejection(parsed)
+        if rejection is None:
+            return {"ok": True, "json": parsed}
+        if first_error is None:
+            first_error = _queryspec_json_failure(rejection, content)
+
+    if first_error is not None:
+        return first_error
+    code = QS_JSON_INVALID if "{" in content else QS_JSON_NOT_FOUND
+    return {
+        "ok": False,
+        "error": code,
+        "error_code": code,
+        "message": "未找到满足 QuerySpec 顶层契约的 JSON object。",
+        "raw": content[:1000],
+    }
+
+
+def _queryspec_contract_rejection(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return {"code": QS_JSON_INVALID, "reason": "queryspec_top_level_not_object"}
+    intent = value.get("intent")
+    operator = value.get("operator")
+    if not isinstance(intent, str) or intent not in ALLOWED_INTENTS:
+        return {"code": QS_JSON_NOT_FOUND, "reason": "queryspec_intent_missing_or_invalid"}
+    if operator is not None and (not isinstance(operator, str) or operator not in ALLOWED_OPERATORS):
+        return {"code": QS_JSON_NOT_FOUND, "reason": "queryspec_operator_invalid"}
+    required = ("datasource", "metrics", "dimensions", "filters")
+    missing = [key for key in required if key not in value]
+    if missing:
+        return {"code": QS_JSON_NOT_FOUND, "reason": "queryspec_required_fields_missing", "missing": missing}
+    if not isinstance(value.get("datasource"), Mapping):
+        return {"code": QS_JSON_INVALID, "reason": "queryspec_datasource_not_object"}
+    if not isinstance(value.get("metrics"), list):
+        return {"code": QS_JSON_INVALID, "reason": "queryspec_metrics_not_list"}
+    if not isinstance(value.get("dimensions"), list):
+        return {"code": QS_JSON_INVALID, "reason": "queryspec_dimensions_not_list"}
+    if not isinstance(value.get("filters"), list):
+        return {"code": QS_JSON_INVALID, "reason": "queryspec_filters_not_list"}
+    return None
+
+
+def _queryspec_json_failure(rejection: Mapping[str, Any], content: str) -> dict[str, Any]:
+    code = str(rejection.get("code") or QS_JSON_INVALID)
+    return {
+        "ok": False,
+        "error": code,
+        "error_code": code,
+        "message": "未找到满足 QuerySpec 顶层契约的 JSON object。",
+        "detail": dict(rejection),
+        "raw": content[:1000],
+    }
+
+
+def _iter_json_objects(content: str) -> list[str]:
+    objects: list[str] = []
+    for start, char in enumerate(content):
+        if char != "{":
+            continue
+        depth = 0
+        in_string = False
+        escape = False
+        for index, current in enumerate(content[start:], start=start):
+            if in_string:
+                if escape:
+                    escape = False
+                elif current == "\\":
+                    escape = True
+                elif current == '"':
+                    in_string = False
+                continue
+            if current == '"':
+                in_string = True
+            elif current == "{":
+                depth += 1
+            elif current == "}":
+                depth -= 1
+                if depth == 0:
+                    objects.append(content[start:index + 1])
+                    break
+    return objects
+
+
+def _llm_result_failure(result: Mapping[str, Any]) -> dict[str, Any]:
+    error_code = str(result.get("error_code") or LLM_PROVIDER_ERROR)
+    return {
+        "ok": False,
+        "error": error_code,
+        "error_code": error_code,
+        "message": str(result.get("error") or error_code),
+        "detail": _redact_large(dict(result)),
+    }
+
+
+def _llm_exception_failure(exc: BaseException) -> dict[str, Any]:
+    detail = getattr(exc, "error_detail", None)
+    if not isinstance(detail, Mapping):
+        raw_detail = getattr(exc, "detail", None)
+        if isinstance(raw_detail, Mapping):
+            nested = raw_detail.get("detail")
+            detail = nested if isinstance(nested, Mapping) else raw_detail
+    if isinstance(detail, Mapping):
+        attempts = detail.get("attempts")
+        error_code = detail.get("error_code") or _last_attempt_error_code(attempts)
+        if error_code:
+            return {
+                "ok": False,
+                "error": str(error_code),
+                "error_code": str(error_code),
+                "message": str(getattr(exc, "message", "") or error_code),
+                "detail": _redact_large(dict(detail)),
+            }
+    error_code = _classify_llm_exception_text(exc)
+    return {
+        "ok": False,
+        "error": error_code,
+        "error_code": error_code,
+        "message": str(exc)[:500],
+    }
+
+
+def _last_attempt_error_code(attempts: Any) -> Optional[str]:
+    if not isinstance(attempts, list):
+        return None
+    for attempt in reversed(attempts):
+        if isinstance(attempt, Mapping) and attempt.get("error_code"):
+            return str(attempt["error_code"])
+    return None
+
+
+def _classify_llm_exception_text(exc: BaseException) -> str:
+    text = f"{exc.__class__.__name__} {exc}".lower()
+    if "timeout" in text or "timed out" in text:
+        return LLM_PROVIDER_TIMEOUT
+    if "auth" in text or "unauthorized" in text or "api key" in text:
+        return LLM_AUTH_CONFIG_ERROR
+    return LLM_PROVIDER_ERROR
 
 
 async def _execute_queryspec(
@@ -1330,10 +1763,11 @@ async def _run_queryspec_mcp_fallback(
         purpose="data_agent_mcp_proxy_args",
     )
     if not llm_result.get("ok"):
-        error = str(llm_result.get("error") or "llm_mcp_args_failed")
+        error_code = str(llm_result.get("error_code") or llm_result.get("error") or "MCP_ARGS_LLM_INVALID")
+        error = str(llm_result.get("message") or llm_result.get("error") or "llm_mcp_args_failed")
         yield AgentEvent(type="tool_result", content={
             "tool": "llm_mcp_args",
-            "result": {"success": False, "error": error, "data": llm_result},
+            "result": {"success": False, "error": error_code, "data": llm_result},
         })
         detail = dict(fallback_detail)
         detail.update({
@@ -1341,9 +1775,10 @@ async def _run_queryspec_mcp_fallback(
             "guardrail_decision": "reject",
             "guardrail_repairs": [],
             "llm_error": error[:500],
+            "fallback_reason": error_code,
         })
         yield AgentEvent(type="error", content=mcp_proxy_main._guardrail_fallback_payload(
-            "MCP_ARGS_LLM_INVALID",
+            error_code if error_code.startswith("LLM_") else "MCP_ARGS_LLM_INVALID",
             "LLM 未生成可执行的 MCP tool args。",
             "请换一种更明确的问法，补充指标、时间范围或维度。",
             context.trace_id,

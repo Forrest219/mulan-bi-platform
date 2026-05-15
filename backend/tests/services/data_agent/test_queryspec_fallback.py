@@ -238,6 +238,7 @@ class _HallucinatedAnswerLLM:
                     "datasource": {"name": "测试数据源", "luid": "ds-1"},
                     "metrics": [{"field": "销售额", "aggregation": "SUM"}],
                     "dimensions": [],
+                    "filters": [],
                     "limit": 100,
                     "answer_contract": {"must_include": ["销售额"], "forbid": ["猜测原因"]},
                 }, ensure_ascii=False)
@@ -257,6 +258,7 @@ class _MissingMetricQuerySpecLLM:
                     "datasource": {"name": "测试数据源", "luid": "ds-1"},
                     "metrics": [{"field": "销售额", "aggregation": "SUM"}],
                     "dimensions": [],
+                    "filters": [],
                     "limit": 100,
                     "answer_contract": {"must_include": ["销售额"], "forbid": ["猜测原因"]},
                 }, ensure_ascii=False)
@@ -276,6 +278,7 @@ class _AggregateForSetDifferenceLLM:
                     "datasource": {"name": "测试数据源", "luid": "ds-1"},
                     "metrics": [{"field": "销售额", "aggregation": "SUM"}],
                     "dimensions": ["子类别"],
+                    "filters": [],
                     "limit": 100,
                     "answer_contract": {"must_include": ["销售额", "子类别"], "forbid": ["明细列表"]},
                 }, ensure_ascii=False)
@@ -355,7 +358,7 @@ async def test_mcp_first_path_rejects_invalid_llm_queryspec_when_fallback_disabl
     assert "queryspec_fallback" not in tool_names
     assert events[-1].type == "error"
     assert events[-1].content["fallback_type"] == "query_plan_rejected"
-    assert events[-1].content["error_code"] == "QS_LLM_INVALID"
+    assert events[-1].content["error_code"] == "QS_JSON_NOT_FOUND"
     assert events[-1].content["trace_id"] == "trace-1"
     assert events[-1].content["controlled_chain"]["detail"]["fallback_disabled"] is True
 
@@ -393,11 +396,12 @@ async def test_mcp_first_path_rejects_semantic_metric_missing_when_fallback_disa
     ]
     assert "queryspec_fallback" not in tool_names
     assert events[-1].type == "error"
-    assert events[-1].content["fallback_type"] == "query_plan_rejected"
-    assert events[-1].content["error_code"] == "QS_SEMANTIC_METRIC_MISSING"
+    assert events[-1].content["fallback_type"] == "query_plan_unavailable"
+    assert events[-1].content["error_code"] == "QS_VALIDATION_FAILED"
     assert events[-1].content["trace_id"] == "trace-semantic"
-    assert events[-1].content["controlled_chain"]["detail"]["fallback_reason"] == (
-        "queryspec_validation_failed: QS_SEMANTIC_METRIC_MISSING"
+    assert events[-1].content["controlled_chain"]["detail"]["fallback_reason"] == "QS_VALIDATION_FAILED"
+    assert events[-1].content["controlled_chain"]["detail"]["original_error"]["validator_code"] == (
+        "QS_SEMANTIC_METRIC_MISSING"
     )
 
 
@@ -439,7 +443,8 @@ async def test_mcp_first_path_rejects_operator_mismatch_when_fallback_disabled(m
     assert "queryspec_fallback" not in tool_names
     assert events[-1].type == "error"
     assert events[-1].content["fallback_type"] == "query_plan_rejected"
-    assert events[-1].content["error_code"] == "QS_OPERATOR_MISMATCH"
+    assert events[-1].content["error_code"] == "QS_VALIDATION_FAILED"
+    assert events[-1].content["controlled_chain"]["detail"]["fallback_reason"] == "QS_VALIDATION_FAILED"
     assert events[-1].content["controlled_chain"]["detail"]["original_error"]["fallback_reason"] == (
         "llm_queryspec_operator_mismatch:aggregate->set_difference"
     )
@@ -498,7 +503,10 @@ async def test_mcp_first_path_enters_guarded_mcp_fallback_when_queryspec_invalid
     )
 
     assert fallback_event.content["result"]["event"] == "FALLBACK_TRIGGERED"
-    assert fallback_event.content["result"]["data"]["original_error"]["error"].startswith("invalid_json")
+    assert fallback_event.content["result"]["data"]["fallback_reason"] == "QS_JSON_NOT_FOUND"
+    assert fallback_event.content["result"]["data"]["original_error"]["queryspec_error"]["message"].startswith(
+        "invalid_json"
+    )
     assert guardrail_event.content["result"]["event"] == "MCP_ARGS_GUARDRAIL_PASS"
     assert tableau_event.content["result"]["data"]["fallback_chain_mode"] == "queryspec_mcp_fallback"
     assert tableau_event.content["result"]["data"]["queryspec_metrics"]["queryspec_fallback_triggered"] is True
