@@ -476,18 +476,11 @@ class LLMService:
             return {"error": f"Anthropic API 错误: {error_msg}"}
 
         self._record_usage(config, response, provider="anthropic")
-        # 兼容 MiniMax 的 ThinkingBlock（思维链），提取第一个 TextBlock
+        # Only TextBlock is user-visible model output. ThinkingBlock is internal
+        # reasoning and must not be treated as completion content.
         from anthropic.types import TextBlock
         text_blocks = [block for block in response.content if isinstance(block, TextBlock)]
         if not text_blocks:
-            thinking_text = "\n".join(
-                str(getattr(block, "thinking", "") or "").strip()
-                for block in response.content
-                if getattr(block, "thinking", None)
-            ).strip()
-            if thinking_text:
-                logger.warning("Anthropic 响应中无 TextBlock，使用 thinking 文本作为降级内容")
-                return {"content": thinking_text}
             logger.error("Anthropic 响应中无 TextBlock: %s", response.content)
             return {"error": "MiniMax 响应格式异常：未找到文本内容"}
         content = text_blocks[0].text.strip()
