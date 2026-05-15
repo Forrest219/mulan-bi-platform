@@ -26,6 +26,8 @@
 ```
 Human 提需求
     ↓
+[OpenSpec P0] 创建/确认 openspec/changes/<change-id>/proposal.md + tasks.md（复杂设计另加 design.md）
+    ↓
 [阶段 0] pm → PRD.md ──► Human 确认（门控）
     ↓
 [阶段 0] designer → 交互说明（涉及 UI 时）
@@ -60,6 +62,9 @@ Human 最终 review + 合并
 
 | 阶段 | 执行者 | 产出文件 | 必须 |
 |------|--------|---------|------|
+| OpenSpec P0 | pm/architect | `openspec/changes/<change-id>/proposal.md` | 需求/行为/API/数据模型/UI/Agent 流程变更必须 |
+| OpenSpec P0 | pm/architect | `openspec/changes/<change-id>/tasks.md` | 需求/行为/API/数据模型/UI/Agent 流程变更必须 |
+| OpenSpec P0 | architect | `openspec/changes/<change-id>/design.md` | 复杂设计 / 跨模块架构调整 |
 | 0 | pm | `PRD.md` | ✅ |
 | 0 | designer | 交互说明 | 涉及 UI |
 | 0/一 | architect | `Context_Summary.md` | ✅ |
@@ -99,5 +104,8 @@ Human 最终 review + 合并
    - coder 阶段唯一合法交接文件名：`IMPLEMENTATION_NOTES.md`
    - `check-handover.sh` 钩子检测到非法命名**立即阻塞写入，不得绕过**
    - 新增制品名须先修改本文件制品清单，再同步更新钩子白名单
+8. **OpenSpec 是变更入口**：需求、用户可见行为、API 契约、数据模型、权限/角色、UI 交互、Agent 流程、跨模块架构调整等变更，必须先创建 `openspec/changes/<change-id>/proposal.md` 与 `tasks.md`，再进入 PRD/SPEC/实现阶段
+   - 复杂设计或跨模块架构调整必须补充 `design.md`
+   - `openspec/changes/` 管理活跃变更生命周期；`docs/specs/` 保留为长期技术规格和索引
 
 > 规则编号永不重用、永不跳号。废止的规则保留编号并标注 `(Deprecated)`。

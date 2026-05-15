@@ -12,9 +12,29 @@
 | 文档 | 说明 |
 |------|------|
 | [`AGENT_PIPELINE.md`](AGENT_PIPELINE.md) | Agent 流水线完整规则（角色、阶段、铁规则） |
+| [`openspec/changes/`](openspec/changes/) | 活跃变更入口：proposal / tasks / design（按需） |
 | [`docs/TESTING.md`](docs/TESTING.md) | 测试规范、CI 分层、tester 检查清单 |
 | [`docs/specs/README.md`](docs/specs/README.md) | 技术规格书索引（34 份 spec） |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 系统架构总览 |
+
+## OpenSpec P0 门控
+
+需求、用户可见行为、API 契约、数据模型、权限/角色、UI 交互、Agent 流程、跨模块架构调整等变更，必须先创建 OpenSpec change，再进入 PRD/SPEC/实现阶段。
+
+最小制品：
+
+```text
+openspec/changes/<change-id>/proposal.md
+openspec/changes/<change-id>/tasks.md
+```
+
+复杂设计另加：
+
+```text
+openspec/changes/<change-id>/design.md
+```
+
+职责划分：`openspec/changes/` 管理活跃变更生命周期；`docs/specs/` 保留为长期技术规格和索引。
 
 ## 多窗口 Agent 工作流
 
