@@ -55,3 +55,6 @@ frontend/cookies.txt
 # Test artifacts
 frontend/test-results/
 frontend/playwright-report/
+
+# MCP test outputs (auto-generated)
+inbox/*.json
