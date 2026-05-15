@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mulan-boundary-contraction-task-schema.v1",
+  "title": "Mulan Boundary Contraction Tasks",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_plan",
+    "status",
+    "global_constraints",
+    "tasks"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "source_plan": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft_pending_approval",
+        "approved"
+      ]
+    },
+    "global_constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "approval_required_before_code",
+        "mcp_authoritative_for_facts",
+        "mcp_authoritative_for_derived_metrics",
+        "dce_primary_path_allowed",
+        "renderer_business_calculation_allowed",
+        "queryspec_must_not_block_mcp_answerable_query",
+        "mcp_guardrail_choke_point",
+        "fallback_trace_required",
+        "python_business_terms_hardcoded_allowed",
+        "commit_requires_live_batch2_gate_pass"
+      ],
+      "properties": {
+        "approval_required_before_code": {
+          "type": "boolean",
+          "const": true
+        },
+        "mcp_authoritative_for_facts": {
+          "type": "boolean",
+          "const": true
+        },
+        "mcp_authoritative_for_derived_metrics": {
+          "type": "boolean",
+          "const": true
+        },
+        "dce_primary_path_allowed": {
+          "type": "boolean",
+          "const": false
+        },
+        "renderer_business_calculation_allowed": {
+          "type": "boolean",
+          "const": false
+        },
+        "queryspec_must_not_block_mcp_answerable_query": {
+          "type": "boolean",
+          "const": true
+        },
+        "mcp_guardrail_choke_point": {
+          "type": "boolean",
+          "const": true
+        },
+        "fallback_trace_required": {
+          "type": "boolean",
+          "const": true
+        },
+        "python_business_terms_hardcoded_allowed": {
+          "type": "boolean",
+          "const": false
+        },
+        "commit_requires_live_batch2_gate_pass": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "phase",
+          "title",
+          "owner",
+          "goal",
+          "depends_on",
+          "allowed_read_scopes",
+          "allowed_write_scopes",
+          "implementation_scope",
+          "must_not",
+          "deliverables",
+          "validation",
+          "acceptance_criteria"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^MULAN-BND-[0-9]{2}$"
+          },
+          "phase": {
+            "type": "string",
+            "pattern": "^Phase [0-9]+$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 90
+          },
+          "owner": {
+            "type": "string",
+            "enum": [
+              "coder"
+            ]
+          },
+          "goal": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "depends_on": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "pattern": "^MULAN-BND-[0-9]{2}$"
+            },
+            "uniqueItems": true
+          },
+          "allowed_read_scopes": {
+            "$ref": "#/$defs/string_list"
+          },
+          "allowed_write_scopes": {
+            "$ref": "#/$defs/string_list"
+          },
+          "implementation_scope": {
+            "$ref": "#/$defs/string_list"
+          },
+          "must_not": {
+            "$ref": "#/$defs/string_list"
+          },
+          "deliverables": {
+            "$ref": "#/$defs/string_list"
+          },
+          "validation": {
+            "$ref": "#/$defs/string_list"
+          },
+          "acceptance_criteria": {
+            "$ref": "#/$defs/string_list"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "string_list": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 260
+      },
+      "uniqueItems": true
+    }
+  }
+}

@@ -1,0 +1,401 @@
+{
+  "schema_version": "1.0",
+  "source_plan": "inbox/20260515-19-mulan-boundary-contraction-plan.md",
+  "status": "draft_pending_approval",
+  "global_constraints": {
+    "approval_required_before_code": true,
+    "mcp_authoritative_for_facts": true,
+    "mcp_authoritative_for_derived_metrics": true,
+    "dce_primary_path_allowed": false,
+    "renderer_business_calculation_allowed": false,
+    "queryspec_must_not_block_mcp_answerable_query": true,
+    "mcp_guardrail_choke_point": true,
+    "fallback_trace_required": true,
+    "python_business_terms_hardcoded_allowed": false,
+    "commit_requires_live_batch2_gate_pass": true
+  },
+  "tasks": [
+    {
+      "id": "MULAN-BND-01",
+      "phase": "Phase 0",
+      "title": "Spec sync and boundary redline",
+      "owner": "coder",
+      "goal": "Update architecture specs so MCP owns facts and calculations while Mulan owns orchestration and presentation.",
+      "depends_on": [],
+      "allowed_read_scopes": [
+        "Data Agent specs",
+        "MCP proxy specs",
+        "QuerySpec fallback specs",
+        "OpenSpec policy"
+      ],
+      "allowed_write_scopes": [
+        "approved spec files",
+        "OpenSpec change files if required",
+        "inbox spec review note"
+      ],
+      "implementation_scope": [
+        "Declare MCP as calculation authority",
+        "Declare DCE shadow-only",
+        "Declare QuerySpec advisory",
+        "Declare renderer no-calculation rule"
+      ],
+      "must_not": [
+        "Change code in this task",
+        "Leave conflicting DCE primary-path wording",
+        "Expand Mulan business calculation scope"
+      ],
+      "deliverables": [
+        "Spec patch or OpenSpec change",
+        "Spec sync summary",
+        "List of unchanged specs"
+      ],
+      "validation": [
+        "Search specs for conflicting DCE primary-path claims",
+        "Search specs for renderer calculation claims",
+        "Review OpenSpec requirement"
+      ],
+      "acceptance_criteria": [
+        "Specs state MCP owns calculations",
+        "Specs state DCE is not primary path",
+        "Specs state Mulan wraps and explains MCP output"
+      ]
+    },
+    {
+      "id": "MULAN-BND-02",
+      "phase": "Phase 1",
+      "title": "Disable DCE primary path",
+      "owner": "coder",
+      "goal": "Remove Dynamic Column Engine from successful answer data generation unless explicitly running shadow diagnostics.",
+      "depends_on": [
+        "MULAN-BND-01"
+      ],
+      "allowed_read_scopes": [
+        "MCP result normalization",
+        "DCE integration points",
+        "metrics registry config",
+        "DCE tests"
+      ],
+      "allowed_write_scopes": [
+        "DCE integration switch",
+        "DCE shadow diagnostics",
+        "DCE-related tests"
+      ],
+      "implementation_scope": [
+        "Disable DCE in primary response_data path",
+        "Preserve MCP returned fields and rows",
+        "Allow shadow output only in diagnostics",
+        "Expose no DCE values as authoritative"
+      ],
+      "must_not": [
+        "Delete DCE code without approval",
+        "Compute business metrics in Python primary path",
+        "Override MCP returned values"
+      ],
+      "deliverables": [
+        "Primary-path DCE disabled",
+        "Shadow diagnostic switch if retained",
+        "Regression tests"
+      ],
+      "validation": [
+        "DCE primary-path test shows MCP values unchanged",
+        "Shadow diagnostics absent by default",
+        "No renderer calculation is introduced"
+      ],
+      "acceptance_criteria": [
+        "Successful response_data contains MCP-authoritative values",
+        "DCE cannot change user-visible facts by default",
+        "No Python business formulas are required"
+      ]
+    },
+    {
+      "id": "MULAN-BND-03",
+      "phase": "Phase 2",
+      "title": "MCP-first execution router",
+      "owner": "coder",
+      "goal": "Route MCP-answerable questions to Tableau MCP without requiring QuerySpec success first.",
+      "depends_on": [
+        "MULAN-BND-01"
+      ],
+      "allowed_read_scopes": [
+        "Data Agent router",
+        "MCP first path",
+        "MCP proxy path",
+        "intent classification"
+      ],
+      "allowed_write_scopes": [
+        "execution routing",
+        "MCP args builder selection",
+        "routing tests"
+      ],
+      "implementation_scope": [
+        "Identify MCP-answerable query intents",
+        "Prefer MCP execution over QuerySpec blocker",
+        "Keep QuerySpec as advisory metadata",
+        "Preserve multi-turn context inputs"
+      ],
+      "must_not": [
+        "Make uncontrolled proxy the permanent main path",
+        "Bypass MCP args guardrail",
+        "Hardcode field or metric names in Python"
+      ],
+      "deliverables": [
+        "MCP-first route decision",
+        "Trace for route selection",
+        "Router tests"
+      ],
+      "validation": [
+        "QuerySpec timeout does not block MCP-answerable query",
+        "Route trace records MCP-first decision",
+        "Non-query intents remain unaffected"
+      ],
+      "acceptance_criteria": [
+        "MCP-answerable questions reach guarded MCP execution",
+        "QuerySpec failure is diagnostic not terminal",
+        "Route is observable in trace"
+      ]
+    },
+    {
+      "id": "MULAN-BND-04",
+      "phase": "Phase 2",
+      "title": "MCP args guardrail schema normalization",
+      "owner": "coder",
+      "goal": "Make the guardrail reject or normalize MCP args to the tool schema before every Tableau MCP execution.",
+      "depends_on": [
+        "MULAN-BND-01"
+      ],
+      "allowed_read_scopes": [
+        "mcp_args_guardrail.py",
+        "MCP tool schema",
+        "MCP proxy args prompt",
+        "guardrail tests"
+      ],
+      "allowed_write_scopes": [
+        "mcp_args_guardrail.py",
+        "MCP args prompt contract",
+        "guardrail tests"
+      ],
+      "implementation_scope": [
+        "Validate field item shape",
+        "Normalize safe field object forms",
+        "Reject ambiguous field strings",
+        "Emit pass, repair, or reject trace"
+      ],
+      "must_not": [
+        "Pass string field arrays to MCP",
+        "Guess aggregations from business terms in Python",
+        "Return success after guardrail reject"
+      ],
+      "deliverables": [
+        "Field schema guardrail",
+        "Repair or reject diagnostics",
+        "Q1 bad-args regression test"
+      ],
+      "validation": [
+        "String field array is rejected or normalized before MCP",
+        "Valid object field array passes",
+        "All MCP execution paths emit guardrail trace"
+      ],
+      "acceptance_criteria": [
+        "Invalid MCP args do not reach Tableau MCP",
+        "Guardrail trace is present for direct and fallback paths",
+        "No schema invalid_union from field strings"
+      ]
+    },
+    {
+      "id": "MULAN-BND-05",
+      "phase": "Phase 3",
+      "title": "QuerySpec demotion and fallback semantics",
+      "owner": "coder",
+      "goal": "Make QuerySpec useful for trace and planning hints without becoming the sole execution gate.",
+      "depends_on": [
+        "MULAN-BND-03",
+        "MULAN-BND-04"
+      ],
+      "allowed_read_scopes": [
+        "QuerySpec generation",
+        "QuerySpec validator",
+        "QuerySpec repair",
+        "fallback trace"
+      ],
+      "allowed_write_scopes": [
+        "QuerySpec orchestration",
+        "fallback reason mapping",
+        "QuerySpec tests"
+      ],
+      "implementation_scope": [
+        "Keep stable error codes",
+        "Remove QuerySpec hard stop for MCP-answerable cases",
+        "Record QuerySpec success rate",
+        "Keep controlled fallback trace"
+      ],
+      "must_not": [
+        "Hide QuerySpec failures",
+        "Retry provider timeout with repair",
+        "Bypass MCP-first route"
+      ],
+      "deliverables": [
+        "Advisory QuerySpec behavior",
+        "Fallback reason metrics",
+        "Regression tests"
+      ],
+      "validation": [
+        "Provider timeout does not trigger QuerySpec repair",
+        "Model invalid is recorded with stable code",
+        "MCP execution can proceed when safe args exist"
+      ],
+      "acceptance_criteria": [
+        "QuerySpec failure does not reduce MCP baseline reachability",
+        "Fallback metrics remain reportable",
+        "No silent fallback"
+      ]
+    },
+    {
+      "id": "MULAN-BND-06",
+      "phase": "Phase 3",
+      "title": "Thin response contract and renderer boundary",
+      "owner": "coder",
+      "goal": "Wrap MCP output into stable response_data and restrict renderer to explanation and formatting.",
+      "depends_on": [
+        "MULAN-BND-02",
+        "MULAN-BND-03",
+        "MULAN-BND-04"
+      ],
+      "allowed_read_scopes": [
+        "response_data assembly",
+        "SSE table_data",
+        "answer renderer prompt",
+        "frontend table adapter"
+      ],
+      "allowed_write_scopes": [
+        "response contract assembler",
+        "renderer prompt",
+        "contract tests"
+      ],
+      "implementation_scope": [
+        "Use MCP rows as source of truth",
+        "Keep table_data and done.response_data aligned",
+        "Prevent renderer from adding facts",
+        "Fallback renderer to deterministic table only"
+      ],
+      "must_not": [
+        "Let renderer compute metrics",
+        "Let prose alter response_data",
+        "Emit success without table data for table-capable query"
+      ],
+      "deliverables": [
+        "Thin response assembler",
+        "Renderer boundary update",
+        "SSE contract tests"
+      ],
+      "validation": [
+        "table_data equals done.response_data table",
+        "Renderer unavailable does not trigger MCP fallback",
+        "Renderer output references only MCP data"
+      ],
+      "acceptance_criteria": [
+        "MCP facts are preserved",
+        "Frontend can render without inference",
+        "Renderer is not a calculation path"
+      ]
+    },
+    {
+      "id": "MULAN-BND-07",
+      "phase": "Phase 4",
+      "title": "Context resolver without calculation",
+      "owner": "coder",
+      "goal": "Resolve multi-turn references for MCP args without computing facts or metrics inside Mulan.",
+      "depends_on": [
+        "MULAN-BND-03"
+      ],
+      "allowed_read_scopes": [
+        "conversation context",
+        "analysis context",
+        "follow-up handling",
+        "MCP args prompt inputs"
+      ],
+      "allowed_write_scopes": [
+        "context extraction",
+        "context trace fields",
+        "follow-up tests"
+      ],
+      "implementation_scope": [
+        "Carry prior datasource",
+        "Carry prior requested metric labels",
+        "Carry prior dimensions and filters",
+        "Mark unresolved references"
+      ],
+      "must_not": [
+        "Compute derived values from context",
+        "Invent fields for unresolved references",
+        "Silently reuse stale context"
+      ],
+      "deliverables": [
+        "Context resolver",
+        "Unresolved reference diagnostics",
+        "Follow-up regression tests"
+      ],
+      "validation": [
+        "Follow-up can reach guarded MCP",
+        "Unresolved reference returns controlled error",
+        "Context trace is present"
+      ],
+      "acceptance_criteria": [
+        "Multi-turn references improve routing",
+        "No calculation occurs in context resolver",
+        "Stale context is observable"
+      ]
+    },
+    {
+      "id": "MULAN-BND-08",
+      "phase": "Phase 5",
+      "title": "Live baseline gate and commit decision",
+      "owner": "coder",
+      "goal": "Validate contracted Mulan behavior against direct MCP baseline before any commit.",
+      "depends_on": [
+        "MULAN-BND-02",
+        "MULAN-BND-03",
+        "MULAN-BND-04",
+        "MULAN-BND-05",
+        "MULAN-BND-06",
+        "MULAN-BND-07"
+      ],
+      "allowed_read_scopes": [
+        "Batch 2 cases",
+        "direct MCP baseline",
+        "Mulan live response trace",
+        "quality gate report"
+      ],
+      "allowed_write_scopes": [
+        "inbox live run artifacts",
+        "quality gate tests",
+        "gate command docs"
+      ],
+      "implementation_scope": [
+        "Run live Mulan sampling",
+        "Run quality gate all cases",
+        "Compare direct MCP and Mulan response_data",
+        "Report commit eligibility"
+      ],
+      "must_not": [
+        "Commit when live gate blocks",
+        "Exclude failing Batch 2 cases",
+        "Treat renderer prose as baseline data"
+      ],
+      "deliverables": [
+        "Live response trace",
+        "Live quality report",
+        "Commit decision note"
+      ],
+      "validation": [
+        "Quality gate status is pass",
+        "QuerySpec success threshold is met or no longer primary gate",
+        "MCP guardrail trace exists for all MCP executions"
+      ],
+      "acceptance_criteria": [
+        "Mulan is not worse than direct MCP on Batch 2",
+        "No guardrail bypass remains",
+        "Commit is allowed only after pass"
+      ]
+    }
+  ]
+}
