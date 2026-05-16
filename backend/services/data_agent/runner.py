@@ -259,6 +259,7 @@ async def run_agent(
                     error_content = event.content if isinstance(event.content, dict) else {"message": str(event.content)}
                     err_code = str(error_content.get("error_code") or "AGENT_003")[:16]
                     execution_time_ms = _elapsed_ms(total_start, event_at)
+                    response_type = "fallback" if error_content.get("fallback_type") else "error"
                     step_number += 1
                     db.add(BiAgentStep(
                         run_id=run_id,
@@ -274,13 +275,26 @@ async def run_agent(
                             BiAgentRun.error_code: err_code,
                             BiAgentRun.steps_count: steps_count,
                             BiAgentRun.tools_used: tools_used if tools_used else None,
-                            BiAgentRun.response_type: "fallback",
+                            BiAgentRun.response_type: response_type,
                             BiAgentRun.execution_time_ms: execution_time_ms,
                             BiAgentRun.completed_at: sa_func.now(),
                         },
                         synchronize_session=False,
                     )
                     db.commit()
+                    session_mgr.persist_message(
+                        session=session,
+                        role="assistant",
+                        content=str(error_content.get("message") or "Agent 执行失败"),
+                        response_type=response_type,
+                        response_data=error_content,
+                        tools_used=tools_used if tools_used else None,
+                        trace_id=trace_id,
+                        steps_count=steps_count,
+                        execution_time_ms=execution_time_ms,
+                        sources_count=1 if context.connection_id else 0,
+                        top_sources=[context.connection_name] if context.connection_id and context.connection_name else [],
+                    )
                     yield event
             return
 
@@ -522,6 +536,7 @@ async def run_agent(
                 error_content = event.content if isinstance(event.content, dict) else {"message": str(event.content)}
                 err_code = error_content.get("error_code", "AGENT_003")
                 response_type = "fallback" if error_content.get("fallback_type") else "error"
+                execution_time_ms = _elapsed_ms(total_start, event_at)
 
                 step_number += 1
                 step = BiAgentStep(
@@ -537,7 +552,6 @@ async def run_agent(
                     error_type=str(error_content.get("error_type") or "AgentError"),
                     error_code=err_code,
                 )
-                execution_time_ms = _elapsed_ms(total_start, event_at)
                 db.query(BiAgentRun).filter(BiAgentRun.id == run_id).update(
                     {
                         BiAgentRun.status: "failed",
@@ -550,6 +564,19 @@ async def run_agent(
                 )
                 db.commit()
                 persist_structured_error(db, "bi_agent_steps", getattr(step, "id", None), structured_error)
+                session_mgr.persist_message(
+                    session=session,
+                    role="assistant",
+                    content=str(error_content.get("message") or "Agent 执行失败"),
+                    response_type=response_type,
+                    response_data=error_content,
+                    tools_used=tools_used if tools_used else None,
+                    trace_id=trace_id,
+                    steps_count=steps_count,
+                    execution_time_ms=execution_time_ms,
+                    sources_count=1 if context.connection_id else 0,
+                    top_sources=[context.connection_name] if context.connection_id and context.connection_name else [],
+                )
 
                 yield AgentEvent(type="error", content=error_content)
 
@@ -578,6 +605,26 @@ async def run_agent(
                 )
                 db.commit()
                 persist_structured_error(db, "bi_agent_steps", getattr(step, "id", None), structured_error)
+                try:
+                    session_mgr.persist_message(
+                        session=session,
+                        role="assistant",
+                        content=structured_error.message,
+                        response_type="error",
+                        response_data={
+                            "error_code": "AGENT_003",
+                            "message": structured_error.message,
+                            "error_type": structured_error.error_type,
+                        },
+                        tools_used=tools_used if tools_used else None,
+                        trace_id=trace_id,
+                        steps_count=steps_count,
+                        execution_time_ms=execution_time_ms,
+                        sources_count=1 if context.connection_id else 0,
+                        top_sources=[context.connection_name] if context.connection_id and context.connection_name else [],
+                    )
+                except Exception:
+                    logger.warning("Failed to persist assistant error message on exception")
             except Exception:
                 logger.warning("Failed to update run status on exception")
         yield AgentEvent(

@@ -63,6 +63,7 @@ function HomePageInner() {
     created_at?: string;
     response_type?: string | null;
     response_data?: unknown;
+    error_detail?: unknown;
     run_id?: string | null;
     explainability?: AgentExplainability | null;
     trace_id?: string | null;
@@ -103,6 +104,7 @@ function HomePageInner() {
         created_at: m.created_at,
         response_type: m.response_type,
         response_data: m.response_data,
+        error_detail: m.error_detail ?? (m.response_type === 'error' || m.response_type === 'fallback' ? m.response_data : undefined),
         run_id: m.run_id,
         explainability: m.explainability,
         trace_id: m.trace_id,

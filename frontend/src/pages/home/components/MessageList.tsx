@@ -227,6 +227,22 @@ function histExplainability(msg: HistoryMessage): AgentExplainability | undefine
   return mergeMcpProxyExplainability(embedded as AgentExplainability, msg.response_data, msg.error_detail);
 }
 
+function histErrorCode(msg: HistoryMessage): string | undefined {
+  if (msg.response_type !== 'error' && msg.response_type !== 'fallback') return undefined;
+  const payload = parseObject(msg.error_detail) ?? parseObject(msg.response_data);
+  return typeof payload?.error_code === 'string' ? payload.error_code : undefined;
+}
+
+function histErrorHint(msg: HistoryMessage): string | undefined {
+  if (msg.response_type !== 'error' && msg.response_type !== 'fallback') return undefined;
+  const payload = parseObject(msg.error_detail) ?? parseObject(msg.response_data);
+  const hint = payload?.user_hint;
+  if (typeof hint === 'string' && hint.trim()) return hint;
+  const actions = payload?.suggested_actions;
+  if (Array.isArray(actions) && typeof actions[0] === 'string') return actions[0];
+  return undefined;
+}
+
 function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onRegenerate, historyMessages, historyConversationId, onSourceClick }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -267,6 +283,9 @@ function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onR
               role: msg.role,
               content: msg.content,
               isStreaming: false,
+              isError: msg.role === 'assistant' && (msg.response_type === 'error' || msg.response_type === 'fallback'),
+              errorCode: histErrorCode(msg),
+              errorHint: histErrorHint(msg),
               tableData: histTableData(msg),
               explainability: histExplainability(msg),
               responseData: msg.response_data,

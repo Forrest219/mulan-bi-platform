@@ -96,6 +96,8 @@ class StreamRequest(BaseModel):
     question: str = Field(..., min_length=1, description="用户自然语言问题")
     conversation_id: Optional[str] = Field(None, description="续接的会话 ID")
     connection_id: Optional[int] = Field(None, description="数据源连接 ID")
+    datasource_luid: Optional[str] = Field(None, description="前端已选择的 Tableau 数据源 LUID")
+    datasource_name: Optional[str] = Field(None, description="前端已选择的 Tableau 数据源名称")
 
 
 class ConversationItem(BaseModel):
@@ -129,6 +131,9 @@ class MessageItem(BaseModel):
     content: str
     response_type: Optional[str]
     response_data: Optional[Any] = None
+    run_id: Optional[str] = None
+    error_detail: Optional[Any] = None
+    explainability: Optional[Any] = None
     tools_used: Optional[List[str]]
     trace_id: Optional[str]
     steps_count: Optional[int]
@@ -1028,6 +1033,8 @@ async def agent_stream(
         connection_type=conn_type,
         trace_id=trace_id,
         tenant_id=str(current_user["tenant_id"]) if current_user.get("tenant_id") else None,
+        selected_datasource_luid=req.datasource_luid,
+        datasource_name=req.datasource_name,
     )
 
     # 构建丰富的会话上下文（工具可通过此获取用户信息、数据源列表等）
@@ -1597,6 +1604,20 @@ def get_conversation_messages(
         raise HTTPException(status_code=404, detail={"error_code": "AGENT_004", "message": "会话不存在"})
 
     msgs = session_mgr.get_conversation_messages(conv_uuid, user_id=current_user["id"], limit=50, offset=0)
+    runs = (
+        db.query(BiAgentRun)
+        .filter(BiAgentRun.conversation_id == conv_uuid)
+        .order_by(BiAgentRun.created_at.asc())
+        .all()
+    )
+    run_id_by_message_id: Dict[int, str] = {}
+    run_index = 0
+    for msg in msgs:
+        if msg.role != "assistant" or run_index >= len(runs):
+            continue
+        run_id_by_message_id[msg.id] = str(runs[run_index].id)
+        run_index += 1
+
     return [
         MessageItem(
             id=m.id,
@@ -1604,6 +1625,13 @@ def get_conversation_messages(
             content=m.content,
             response_type=m.response_type,
             response_data=m.response_data,
+            run_id=run_id_by_message_id.get(m.id),
+            error_detail=m.response_data if m.response_type in ("error", "fallback") else None,
+            explainability=(
+                m.response_data.get("explainability")
+                if isinstance(m.response_data, dict)
+                else None
+            ),
             tools_used=m.tools_used,
             trace_id=m.trace_id,
             steps_count=m.steps_count,

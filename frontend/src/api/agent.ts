@@ -23,6 +23,7 @@ export interface AgentMessageItem {
   response_type: string | null;
   response_data?: unknown;
   run_id?: string | null;
+  error_detail?: unknown;
   explainability?: AgentExplainability | null;
   tools_used: string[] | null;
   trace_id: string | null;

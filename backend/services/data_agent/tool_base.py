@@ -35,6 +35,8 @@ class ToolContext:
     connection_type: Optional[str] = None
     trace_id: str = ""
     tenant_id: Optional[str] = None
+    selected_datasource_luid: Optional[str] = None
+    datasource_name: Optional[str] = None
 
 
 @dataclass
