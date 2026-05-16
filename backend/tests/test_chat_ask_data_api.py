@@ -153,6 +153,7 @@ def _make_mock_streaming_client(sse_lines: list[str]) -> MagicMock:
 
     # httpx.AsyncClient(timeout=...) 返回 async context manager
     mock_client_instance = MagicMock()
+    mock_client_instance.post = AsyncMock(return_value=mock_response)
     mock_client_instance.stream = MagicMock(return_value=mock_stream_ctx)
     mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
     mock_client_instance.__aexit__ = AsyncMock(return_value=False)
@@ -311,7 +312,7 @@ class TestAskData:
 
         mock_client_cls = _make_mock_async_client(_FAKE_SEARCH_RESPONSE_TEXT)
 
-        with patch("app.api.ask_data._stream_via_agent", _failing_agent_stream):
+        with patch("app.api.ask_data._stream_via_agent_forward", _failing_agent_stream):
             with patch("httpx.AsyncClient", mock_client_cls):
                 admin_client.post(
                     "/api/ask-data",

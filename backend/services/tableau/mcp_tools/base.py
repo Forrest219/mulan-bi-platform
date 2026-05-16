@@ -113,6 +113,9 @@ class TableauMCPToolBase:
         Returns:
             Dict with candidates list, each containing field metadata
         """
+        if not field_name:
+            raise FieldResolutionError("field_name is required", {})
+
         if not self.semantic_service:
             # Fallback: return empty candidates
             return {"candidates": [], "confidence": 0.0, "method": "no_semantic_layer"}
@@ -123,7 +126,7 @@ class TableauMCPToolBase:
             candidates = []
             
             # Try exact match first
-            from semantic_maintenance.models import TableauFieldSemantics
+            from services.semantic_maintenance.models import TableauFieldSemantics
             db = self.semantic_service.db
             session = db.session
             

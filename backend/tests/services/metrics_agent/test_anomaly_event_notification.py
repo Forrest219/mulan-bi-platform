@@ -77,9 +77,12 @@ def _ensure_deps(db_session):
 def _make_active_metric(db_session, name=None):
     """创建 is_active=True 的指标"""
     _ensure_deps(db_session)
+    metric_name = name or f"anomaly_test_metric_{uuid.uuid4().hex[:8]}"
     metric = BiMetricDefinition(
         tenant_id=TENANT_ID,
-        name=name or f"anomaly_test_metric_{uuid.uuid4().hex[:8]}",
+        metric_code=f"anom_{uuid.uuid4().hex[:8]}",
+        name=metric_name,
+        name_zh=metric_name,
         metric_type="atomic",
         datasource_id=1,
         table_name="fact_orders",

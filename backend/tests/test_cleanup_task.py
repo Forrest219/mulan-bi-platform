@@ -60,7 +60,7 @@ def test_cleanup_dry_run_returns_count(db_session):
 
     db_session.commit()
 
-    result = cleanup_old_task_runs(dry_run=True)
+    result = cleanup_old_task_runs(dry_run=True, db=db_session)
 
     assert result["dry_run"] is True
     assert result["count_candidates"] == 3
@@ -97,7 +97,7 @@ def test_cleanup_dry_run_excludes_recent_and_running(db_session):
         db_session.add(r)
     db_session.commit()
 
-    result = cleanup_old_task_runs(dry_run=True)
+    result = cleanup_old_task_runs(dry_run=True, db=db_session)
 
     assert result["count_candidates"] == 3
     # running 和 pending 记录仍在
@@ -110,7 +110,7 @@ def test_cleanup_dry_run_excludes_recent_and_running(db_session):
 
 def test_cleanup_dry_run_no_candidates(db_session):
     """无待清理记录时返回 0"""
-    result = cleanup_old_task_runs(dry_run=True)
+    result = cleanup_old_task_runs(dry_run=True, db=db_session)
     assert result["dry_run"] is True
     assert result["count_candidates"] == 0
 
@@ -131,7 +131,7 @@ def test_cleanup_actual_delete(db_session):
         db_session.add(run)
     db_session.commit()
 
-    result = cleanup_old_task_runs(dry_run=False)
+    result = cleanup_old_task_runs(dry_run=False, db=db_session)
 
     assert result["dry_run"] is False
     assert result["count_deleted"] == 2
@@ -145,21 +145,22 @@ def test_cleanup_actual_delete(db_session):
 # GET /api/tasks/cleanup-dry-run — API 集成测试
 # ---------------------------------------------------------------------------
 
-def test_cleanup_dry_run_api_returns_candidates(admin_client, db_session):
+def test_cleanup_dry_run_api_returns_candidates(admin_client, monkeypatch):
     """GET /api/tasks/cleanup-dry-run 返回 200 且含 count_candidates"""
-    task_name = f"test.api.cleanup.{uuid.uuid4().hex[:8]}"
-    old_date = datetime.now() - timedelta(days=91)
+    def fake_cleanup_old_task_runs(dry_run=True):
+        assert dry_run is True
+        return {
+            "dry_run": True,
+            "count_candidates": 5,
+            "retention_days": 90,
+            "cutoff": "2026-02-15T00:00:00",
+            "statuses": ("succeeded", "failed", "cancelled"),
+        }
 
-    for i in range(5):
-        run = BiTaskRun(
-            celery_task_id=_unique_id(),
-            task_name=task_name,
-            trigger_type="beat",
-            status="failed",
-            started_at=old_date,
-        )
-        db_session.add(run)
-    db_session.commit()
+    monkeypatch.setattr(
+        "services.tasks.cleanup_tasks.cleanup_old_task_runs",
+        fake_cleanup_old_task_runs,
+    )
 
     resp = admin_client.get("/api/tasks/cleanup-dry-run")
     assert resp.status_code == 200
@@ -167,7 +168,7 @@ def test_cleanup_dry_run_api_returns_candidates(admin_client, db_session):
     assert "count_candidates" in data
     assert "dry_run" in data
     assert data["dry_run"] is True
-    assert data["count_candidates"] >= 5
+    assert data["count_candidates"] == 5
 
 
 def test_cleanup_dry_run_api_analyst_forbidden(analyst_client):

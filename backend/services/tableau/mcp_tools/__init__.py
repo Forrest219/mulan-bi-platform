@@ -15,6 +15,12 @@ All tools follow the existing MCP client patterns and use the transport layer.
 from .registry import MCPToolRegistry
 from .base import TableauMCPToolBase, ToolError, IntentVerificationError, WriteOperationError, FieldResolutionError, ConfirmationPlan
 
+# Import tool modules to populate the singleton registry for direct package users.
+from . import field_resolution as field_resolution
+from . import parameter_control as parameter_control
+from . import semantic_writeback as semantic_writeback
+from . import view_control as view_control
+
 # Import dispatcher
 from .dispatcher import MCPToolDispatcher, get_dispatcher
 

@@ -14,6 +14,7 @@ Feature Flag 唯一读取入口：services.platform_settings.get('homepage_agent
   - Agent 失败率 > 5% 连续 2 小时 → 自动切 legacy_only
   - 必须写 audit log（actor=system）
 """
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -116,8 +117,9 @@ def get_homepage_agent_mode(db: Session, user_id: Optional[int] = None) -> Homep
         if override_map:
             try:
                 overrides = json.loads(override_map) if isinstance(override_map, str) else override_map
-                if user_id in overrides:
-                    mode_str = overrides[user_id]
+                override_key = str(user_id)
+                if override_key in overrides:
+                    mode_str = overrides[override_key]
                     if HomepageAgentMode.is_valid(mode_str):
                         logger.debug("HomepageAgentMode override for user %d: %s", user_id, mode_str)
                         return HomepageAgentMode(mode_str)
@@ -131,9 +133,6 @@ def get_homepage_agent_mode(db: Session, user_id: Optional[int] = None) -> Homep
 
     # 3. 回退默认值
     return HomepageAgentMode.default()
-
-
-import json as _json
 
 
 def write_dual_write_audit(
@@ -150,7 +149,6 @@ def write_dual_write_audit(
     写双写审计表（bi_agent_dual_write_audit）。
     dual_write 模式下 NLQ 结果必须落此表（即使 agent 成功）。
     """
-    from app.core.database import engine
     from sqlalchemy import text
 
     agent_hash = compute_result_hash(agent_result) if agent_result else None
@@ -160,33 +158,32 @@ def write_dual_write_audit(
     now = datetime.now()
     partition_key = now.strftime("%Y%m")
 
-    with engine.connect() as conn:
-        conn.execute(
-            text("""
-                INSERT INTO bi_agent_dual_write_audit
-                (trace_id, mode, question, agent_result, agent_result_hash,
-                 nlq_result, nlq_result_hash, is_success, error_message,
-                 created_at, partition_key)
-                VALUES
-                (:trace_id, :mode, :question, :agent_result, :agent_result_hash,
-                 :nlq_result, :nlq_result_hash, :is_success, :error_message,
-                 :created_at, :partition_key)
-            """),
-            {
-                "trace_id": trace_id,
-                "mode": mode.value,
-                "question": question,
-                "agent_result": _json.dumps(agent_result) if agent_result else None,
-                "agent_result_hash": agent_hash,
-                "nlq_result": _json.dumps(nlq_result) if nlq_result else None,
-                "nlq_result_hash": nlq_hash,
-                "is_success": is_success,
-                "error_message": error_message,
-                "created_at": now,
-                "partition_key": partition_key,
-            },
-        )
-        conn.commit()
+    db.execute(
+        text("""
+            INSERT INTO bi_agent_dual_write_audit
+            (trace_id, mode, question, agent_result, agent_result_hash,
+             nlq_result, nlq_result_hash, is_success, error_message,
+             created_at, partition_key)
+            VALUES
+            (:trace_id, :mode, :question, :agent_result, :agent_result_hash,
+             :nlq_result, :nlq_result_hash, :is_success, :error_message,
+             :created_at, :partition_key)
+        """),
+        {
+            "trace_id": trace_id,
+            "mode": mode.value,
+            "question": question,
+            "agent_result": json.dumps(agent_result) if agent_result else None,
+            "agent_result_hash": agent_hash,
+            "nlq_result": json.dumps(nlq_result) if nlq_result else None,
+            "nlq_result_hash": nlq_hash,
+            "is_success": is_success,
+            "error_message": error_message,
+            "created_at": now,
+            "partition_key": partition_key,
+        },
+    )
+    db.commit()
 
 
 def write_system_audit_log(
@@ -196,28 +193,26 @@ def write_system_audit_log(
     actor: str = "system",
 ) -> None:
     """写系统审计日志（自动回滚时使用 actor=system）"""
-    from app.core.database import engine
     from sqlalchemy import text
 
     now = datetime.now()
-    with engine.connect() as conn:
-        conn.execute(
-            text("""
-                INSERT INTO bi_agent_dual_write_audit
-                (trace_id, mode, question, is_success, error_message, created_at, partition_key)
-                VALUES
-                (:trace_id, 'system_event', :event_type, :is_success, :detail, :created_at, :partition_key)
-            """),
-            {
-                "trace_id": f"sys-{int(time.time())}",
-                "event_type": event_type,
-                "is_success": True,
-                "detail": detail,
-                "created_at": now,
-                "partition_key": now.strftime("%Y%m"),
-            },
-        )
-        conn.commit()
+    db.execute(
+        text("""
+            INSERT INTO bi_agent_dual_write_audit
+            (trace_id, mode, question, is_success, error_message, created_at, partition_key)
+            VALUES
+            (:trace_id, 'system_event', :event_type, :is_success, :detail, :created_at, :partition_key)
+        """),
+        {
+            "trace_id": f"sys-{int(time.time())}",
+            "event_type": event_type,
+            "is_success": True,
+            "detail": detail,
+            "created_at": now,
+            "partition_key": now.strftime("%Y%m"),
+        },
+    )
+    db.commit()
 
 
 async def execute_dual_write(

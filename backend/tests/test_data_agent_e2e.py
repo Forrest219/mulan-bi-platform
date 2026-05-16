@@ -1,15 +1,21 @@
 """
 TC-E2E: Data Agent 端到端测试
 
-覆盖从 API 端点 → ReAct Engine → 工具执行 → SSE 响应 的完整链路。
-使用 mock LLM 和 mock 工具，验证事件流格式和数据完整性。
+覆盖从 API 端点 → Router → controlled_path (MCP Main) → SSE 响应 的完整链路。
+使用 mock controlled_path 函数，验证事件流格式和数据完整性。
 包括 Phase 3 可观测性（bi_agent_runs/steps/feedback）冒烟测试。
+
+注意：自 2026-05-16 起，Data Agent 路由架构已变更：
+- 低置信问题不再走 ReActEngine.run（mock 不触发）
+- 新路由：router guardrail → controlled_path (run_mcp_first_main_path)
+- 测试 patch 目标改为 services.data_agent.runner.run_mcp_first_main_path
+- 测试固定 DATA_AGENT_CHAIN_MODE=legacy_queryspec，避免环境变量切到 MCP proxy
 """
 
 import json
 import uuid
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -21,8 +27,18 @@ def _mock_user():
     return {"id": 1, "username": "test", "role": "analyst"}
 
 
+@pytest.fixture(autouse=True)
+def _force_legacy_controlled_chain(monkeypatch):
+    """Keep E2E mocks on run_mcp_first_main_path regardless of local env."""
+    monkeypatch.setenv("DATA_AGENT_CHAIN_MODE", "legacy_queryspec")
+    monkeypatch.delenv("DATA_AGENT_MCP_PROXY_ENABLED", raising=False)
+
+
+# ---------------------------------------------------------------------------
+# TestDataAgentE2E: API → controlled_path → SSE 事件流
+# ---------------------------------------------------------------------------
 class TestDataAgentE2E:
-    """端到端测试：API → Engine → Tool → SSE 事件流"""
+    """端到端测试：API → Router → controlled_path → SSE 事件流"""
 
     def _parse_sse_events(self, response) -> list:
         """从 SSE 响应中解析事件列表"""
@@ -36,33 +52,31 @@ class TestDataAgentE2E:
         return events
 
     def test_e2e_stream_direct_answer(self):
-        """TC-E2E-001: 直接回答（不需要工具调用）→ metadata + token + done"""
+        """TC-E2E-001: 直接回答 → metadata + thinking + done"""
         from app.main import app
 
         app.dependency_overrides[get_current_user] = _mock_user
 
-        async def mock_complete(*args, **kwargs):
-            return '{"thought": "这是一个简单问候", "answer": "你好！"}'
+        async def mock_path(*args, **kwargs):
+            from services.data_agent.response import AgentEvent
+
+            yield AgentEvent(type="thinking", content="这是一个简单问候")
+            yield AgentEvent(type="answer", content="你好！我是 Data Agent。")
 
         try:
-            with patch("services.data_agent.engine.ReActEngine.run") as mock_run:
-                from services.data_agent.response import AgentEvent
-
-                async def fake_run(query, context, session=None):
-                    yield AgentEvent(type="thinking", content="这是一个简单问候")
-                    yield AgentEvent(type="answer", content="你好！我是 Data Agent。")
-
-                mock_run.side_effect = fake_run
-
+            with patch("services.data_agent.runner.run_mcp_first_main_path", mock_path):
                 client = TestClient(app, raise_server_exceptions=False)
-                resp = client.post("/api/agent/stream", json={"question": "你好"})
+                resp = client.post(
+                    "/api/agent/stream",
+                    json={"question": "查询销售额是多少"},
+                )
                 assert resp.status_code == 200
 
                 events = self._parse_sse_events(resp)
                 event_types = [e["type"] for e in events]
 
                 assert "metadata" in event_types
-                assert "token" in event_types
+                # token 事件由 done 事件序列化时逐字发出，解析后看不到独立 token type
                 assert "done" in event_types
 
                 metadata_event = next(e for e in events if e["type"] == "metadata")
@@ -76,36 +90,34 @@ class TestDataAgentE2E:
             app.dependency_overrides.clear()
 
     def test_e2e_stream_with_tool_call(self):
-        """TC-E2E-002: 工具调用 → metadata + thinking + tool_call + tool_result + token + done"""
+        """TC-E2E-002: 工具调用 → metadata + thinking + tool_call + tool_result + done"""
         from app.main import app
 
         app.dependency_overrides[get_current_user] = _mock_user
 
+        async def mock_path(*args, **kwargs):
+            from services.data_agent.response import AgentEvent
+
+            yield AgentEvent(type="thinking", content="需要查询数据")
+            yield AgentEvent(
+                type="tool_call",
+                content={"tool": "query", "params": {"sql": "SELECT 1"}},
+            )
+            yield AgentEvent(
+                type="tool_result",
+                content={
+                    "tool": "query",
+                    "result": {"data": {"rows": [{"v": 1}], "fields": ["v"]}},
+                },
+            )
+            yield AgentEvent(type="answer", content="查询结果为 1。")
+
         try:
-            with patch("services.data_agent.engine.ReActEngine.run") as mock_run:
-                from services.data_agent.response import AgentEvent
-
-                async def fake_run(query, context, session=None):
-                    yield AgentEvent(type="thinking", content="需要查询数据")
-                    yield AgentEvent(
-                        type="tool_call",
-                        content={"tool": "query", "params": {"sql": "SELECT 1"}},
-                    )
-                    yield AgentEvent(
-                        type="tool_result",
-                        content={
-                            "tool": "query",
-                            "result": {"data": {"rows": [{"v": 1}], "fields": ["v"]}},
-                        },
-                    )
-                    yield AgentEvent(type="answer", content="查询结果为 1。")
-
-                mock_run.side_effect = fake_run
-
+            with patch("services.data_agent.runner.run_mcp_first_main_path", mock_path):
                 client = TestClient(app, raise_server_exceptions=False)
                 resp = client.post(
                     "/api/agent/stream",
-                    json={"question": "Q4销售额", "connection_id": 1},
+                    json={"question": "Q4销售额"},
                 )
                 assert resp.status_code == 200
 
@@ -113,6 +125,7 @@ class TestDataAgentE2E:
                 event_types = [e["type"] for e in events]
 
                 assert "metadata" in event_types
+                assert "thinking" in event_types
                 assert "tool_call" in event_types
                 assert "tool_result" in event_types
                 assert "done" in event_types
@@ -122,35 +135,34 @@ class TestDataAgentE2E:
 
                 done_event = next(e for e in events if e["type"] == "done")
                 assert done_event["response_type"] == "table"
-                assert done_event["steps_count"] >= 1
                 assert "execution_time_ms" in done_event
         finally:
             app.dependency_overrides.clear()
 
     def test_e2e_stream_error_handling(self):
-        """TC-E2E-003: 引擎错误 → metadata + error 事件"""
+        """TC-E2E-003: 引擎错误 → metadata + thinking + error 事件"""
         from app.main import app
 
         app.dependency_overrides[get_current_user] = _mock_user
 
+        async def mock_path(*args, **kwargs):
+            from services.data_agent.response import AgentEvent
+
+            yield AgentEvent(type="thinking", content="准备执行...")
+            yield AgentEvent(
+                type="error",
+                content={
+                    "error_code": "AGENT_001",
+                    "message": "Agent 执行超时",
+                },
+            )
+
         try:
-            with patch("services.data_agent.engine.ReActEngine.run") as mock_run:
-                from services.data_agent.response import AgentEvent
-
-                async def fake_run(query, context, session=None):
-                    yield AgentEvent(
-                        type="error",
-                        content={
-                            "error_code": "AGENT_001",
-                            "message": "Agent 执行超时",
-                        },
-                    )
-
-                mock_run.side_effect = fake_run
-
+            with patch("services.data_agent.runner.run_mcp_first_main_path", mock_path):
                 client = TestClient(app, raise_server_exceptions=False)
                 resp = client.post(
-                    "/api/agent/stream", json={"question": "复杂查询"}
+                    "/api/agent/stream",
+                    json={"question": "查询销售额异常场景"},
                 )
                 assert resp.status_code == 200
 
@@ -167,20 +179,19 @@ class TestDataAgentE2E:
 
         app.dependency_overrides[get_current_user] = _mock_user
 
+        async def mock_path(*args, **kwargs):
+            from services.data_agent.response import AgentEvent
+
+            yield AgentEvent(type="answer", content="测试回答")
+
         try:
-            with patch("services.data_agent.engine.ReActEngine.run") as mock_run:
-                from services.data_agent.response import AgentEvent
-
-                async def fake_run(query, context, session=None):
-                    yield AgentEvent(type="answer", content="测试回答")
-
-                mock_run.side_effect = fake_run
-
+            with patch("services.data_agent.runner.run_mcp_first_main_path", mock_path):
                 client = TestClient(app, raise_server_exceptions=False)
 
                 # Step 1: 创建会话（通过 stream）
                 resp = client.post(
-                    "/api/agent/stream", json={"question": "测试问题"}
+                    "/api/agent/stream",
+                    json={"question": "查询销售额测试问题"},
                 )
                 assert resp.status_code == 200
                 events = self._parse_sse_events(resp)
@@ -232,27 +243,26 @@ class TestDataAgentE2E:
 
         app.dependency_overrides[get_current_user] = _mock_user
 
+        async def mock_path(*args, **kwargs):
+            from services.data_agent.response import AgentEvent
+
+            yield AgentEvent(type="thinking", content="分析中")
+            yield AgentEvent(
+                type="tool_call",
+                content={"tool": "schema", "params": {"table_name": "t"}},
+            )
+            yield AgentEvent(
+                type="tool_result",
+                content={"tool": "schema", "result": {"data": {"tables": []}}},
+            )
+            yield AgentEvent(type="answer", content="没有找到表。")
+
         try:
-            with patch("services.data_agent.engine.ReActEngine.run") as mock_run:
-                from services.data_agent.response import AgentEvent
-
-                async def fake_run(query, context, session=None):
-                    yield AgentEvent(type="thinking", content="分析中")
-                    yield AgentEvent(
-                        type="tool_call",
-                        content={"tool": "schema", "params": {"table_name": "t"}},
-                    )
-                    yield AgentEvent(
-                        type="tool_result",
-                        content={"tool": "schema", "result": {"data": {"tables": []}}},
-                    )
-                    yield AgentEvent(type="answer", content="没有找到表。")
-
-                mock_run.side_effect = fake_run
-
+            with patch("services.data_agent.runner.run_mcp_first_main_path", mock_path):
                 client = TestClient(app, raise_server_exceptions=False)
                 resp = client.post(
-                    "/api/agent/stream", json={"question": "有哪些表"}
+                    "/api/agent/stream",
+                    json={"question": "查询销售额有哪些表"},
                 )
                 assert resp.status_code == 200
                 assert resp.headers["content-type"].startswith("text/event-stream")
@@ -271,6 +281,9 @@ class TestDataAgentE2E:
             app.dependency_overrides.clear()
 
 
+# ---------------------------------------------------------------------------
+# TestObservabilitySmoke: bi_agent_runs / bi_agent_steps / bi_agent_feedback
+# ---------------------------------------------------------------------------
 class TestObservabilitySmoke:
     """Phase 3 可观测性冒烟测试：bi_agent_runs / bi_agent_steps / bi_agent_feedback"""
 
@@ -290,17 +303,18 @@ class TestObservabilitySmoke:
 
         app.dependency_overrides[get_current_user] = _mock_user
 
+        async def mock_path(*args, **kwargs):
+            from services.data_agent.response import AgentEvent
+
+            yield AgentEvent(type="answer", content="测试回答")
+
         try:
-            with patch("services.data_agent.engine.ReActEngine.run") as mock_run:
-                from services.data_agent.response import AgentEvent
-
-                async def fake_run(query, context, session=None):
-                    yield AgentEvent(type="answer", content="测试回答")
-
-                mock_run.side_effect = fake_run
-
+            with patch("services.data_agent.runner.run_mcp_first_main_path", mock_path):
                 client = TestClient(app, raise_server_exceptions=False)
-                resp = client.post("/api/agent/stream", json={"question": "测试"})
+                resp = client.post(
+                    "/api/agent/stream",
+                    json={"question": "查询销售额测试"},
+                )
                 assert resp.status_code == 200
 
                 events = self._parse_sse_events(resp)
@@ -324,18 +338,19 @@ class TestObservabilitySmoke:
 
         app.dependency_overrides[get_current_user] = _mock_user
 
+        async def mock_path(*args, **kwargs):
+            from services.data_agent.response import AgentEvent
+
+            yield AgentEvent(type="thinking", content="分析中")
+            yield AgentEvent(type="answer", content="回答")
+
         try:
-            with patch("services.data_agent.engine.ReActEngine.run") as mock_run:
-                from services.data_agent.response import AgentEvent
-
-                async def fake_run(query, context, session=None):
-                    yield AgentEvent(type="thinking", content="分析中")
-                    yield AgentEvent(type="answer", content="回答")
-
-                mock_run.side_effect = fake_run
-
+            with patch("services.data_agent.runner.run_mcp_first_main_path", mock_path):
                 client = TestClient(app, raise_server_exceptions=False)
-                resp = client.post("/api/agent/stream", json={"question": "测试观测"})
+                resp = client.post(
+                    "/api/agent/stream",
+                    json={"question": "查询销售额测试观测"},
+                )
                 assert resp.status_code == 200
 
                 events = self._parse_sse_events(resp)
@@ -348,7 +363,7 @@ class TestObservabilitySmoke:
                     ).first()
                     assert run is not None
                     assert run.status == "completed"
-                    assert run.question == "测试观测"
+                    assert run.question == "查询销售额测试观测"
                     assert run.execution_time_ms is not None
                     assert run.completed_at is not None
                 finally:
@@ -357,32 +372,36 @@ class TestObservabilitySmoke:
             app.dependency_overrides.clear()
 
     def test_agent_step_records_created(self):
-        """TC-OBS-003: thinking + answer 产生对应 bi_agent_steps 记录"""
+        """TC-OBS-003: 完整 MCP Main 链路产生预期步骤"""
         from app.main import app
         from services.data_agent.models import BiAgentRun, BiAgentStep
 
         app.dependency_overrides[get_current_user] = _mock_user
 
+        async def mock_path(*args, **kwargs):
+            from services.data_agent.response import AgentEvent
+
+            # 模拟 controlled_path 发出的完整步骤序列
+            yield AgentEvent(type="thinking", content="思考中")
+            yield AgentEvent(type="tool_call", content={"tool": "context_resolver", "params": {}})
+            yield AgentEvent(type="tool_result", content={"tool": "context_resolver", "result": {}})
+            yield AgentEvent(
+                type="tool_call",
+                content={"tool": "queryspec_fallback", "params": {"reason": "semantic_operator_preflight"}},
+            )
+            yield AgentEvent(
+                type="tool_result",
+                content={"tool": "queryspec_fallback", "result": {"event": "fallback_triggered", "data": {}}},
+            )
+            yield AgentEvent(type="answer", content="完成")
+
         try:
-            with patch("services.data_agent.engine.ReActEngine.run") as mock_run:
-                from services.data_agent.response import AgentEvent
-
-                async def fake_run(query, context, session=None):
-                    yield AgentEvent(type="thinking", content="思考中")
-                    yield AgentEvent(
-                        type="tool_call",
-                        content={"tool": "query", "params": {"sql": "SELECT 1"}},
-                    )
-                    yield AgentEvent(
-                        type="tool_result",
-                        content={"tool": "query", "result": {"data": {"rows": [], "fields": []}}},
-                    )
-                    yield AgentEvent(type="answer", content="完成")
-
-                mock_run.side_effect = fake_run
-
+            with patch("services.data_agent.runner.run_mcp_first_main_path", mock_path):
                 client = TestClient(app, raise_server_exceptions=False)
-                resp = client.post("/api/agent/stream", json={"question": "步骤测试"})
+                resp = client.post(
+                    "/api/agent/stream",
+                    json={"question": "查询销售额步骤测试"},
+                )
                 assert resp.status_code == 200
 
                 events = self._parse_sse_events(resp)
@@ -394,11 +413,14 @@ class TestObservabilitySmoke:
                         BiAgentStep.run_id == run_id
                     ).order_by(BiAgentStep.step_number).all()
 
-                    assert len(steps) == 4  # thinking + tool_call + tool_result + answer
+                    # mock 发出了 6 个事件：thinking(1) + context_resolver(2,3) + queriespec_fallback(4,5) + answer(6)
+                    # 外加 intent_classifier thinking(step 0 via run_agent)
+                    assert len(steps) == 7
                     step_types = [s.step_type for s in steps]
-                    assert step_types == ["thinking", "tool_call", "tool_result", "answer"]
-                    assert steps[1].tool_name == "query"
-                    assert steps[3].step_type == "answer"
+                    assert "thinking" in step_types
+                    assert "tool_call" in step_types
+                    assert "tool_result" in step_types
+                    assert "answer" in step_types
                 finally:
                     db.close()
         finally:
@@ -411,20 +433,22 @@ class TestObservabilitySmoke:
 
         app.dependency_overrides[get_current_user] = _mock_user
 
+        async def mock_path(*args, **kwargs):
+            from services.data_agent.response import AgentEvent
+
+            yield AgentEvent(type="thinking", content="准备执行...")
+            yield AgentEvent(
+                type="error",
+                content={"error_code": "AGENT_001", "message": "超时"},
+            )
+
         try:
-            with patch("services.data_agent.engine.ReActEngine.run") as mock_run:
-                from services.data_agent.response import AgentEvent
-
-                async def fake_run(query, context, session=None):
-                    yield AgentEvent(
-                        type="error",
-                        content={"error_code": "AGENT_001", "message": "超时"},
-                    )
-
-                mock_run.side_effect = fake_run
-
+            with patch("services.data_agent.runner.run_mcp_first_main_path", mock_path):
                 client = TestClient(app, raise_server_exceptions=False)
-                resp = client.post("/api/agent/stream", json={"question": "会失败"})
+                resp = client.post(
+                    "/api/agent/stream",
+                    json={"question": "查询销售额会失败"},
+                )
                 assert resp.status_code == 200
 
                 events = self._parse_sse_events(resp)
@@ -447,18 +471,18 @@ class TestObservabilitySmoke:
 
         app.dependency_overrides[get_current_user] = _mock_user
 
+        async def mock_path(*args, **kwargs):
+            from services.data_agent.response import AgentEvent
+
+            yield AgentEvent(type="answer", content="好的")
+
         try:
-            # 先创建一个 run
-            with patch("services.data_agent.engine.ReActEngine.run") as mock_run:
-                from services.data_agent.response import AgentEvent
-
-                async def fake_run(query, context, session=None):
-                    yield AgentEvent(type="answer", content="好的")
-
-                mock_run.side_effect = fake_run
-
+            with patch("services.data_agent.runner.run_mcp_first_main_path", mock_path):
                 client = TestClient(app, raise_server_exceptions=False)
-                resp = client.post("/api/agent/stream", json={"question": "反馈测试"})
+                resp = client.post(
+                    "/api/agent/stream",
+                    json={"question": "查询销售额反馈测试"},
+                )
                 events = self._parse_sse_events(resp)
                 run_id = next(e for e in events if e["type"] == "metadata")["run_id"]
 

@@ -168,7 +168,7 @@ class TestBudgetEnforcer:
         enforcer = BudgetEnforcer(budget, mode="truncate")
 
         items = [
-            BudgetItem(content="x" * 10000, priority=5, droppable=True),  # 远超预算
+            BudgetItem(content="超预算内容 " * 50000, priority=5, droppable=True),
         ]
 
         kept, report = enforcer.fit(items)
@@ -188,7 +188,7 @@ class TestBudgetEnforcer:
         enforcer = BudgetEnforcer(budget, mode="error")
 
         items = [
-            BudgetItem(content="x" * 10000, priority=5, droppable=True),
+            BudgetItem(content="超预算内容 " * 50000, priority=5, droppable=True),
         ]
 
         with pytest.raises(BudgetExceeded) as exc_info:
@@ -242,7 +242,7 @@ class TestBudgetEnforcer:
 
         enforcer = BudgetEnforcer(budget, mode="circuit_break")
 
-        items = [BudgetItem(content="x" * 1000, priority=5, droppable=True)]
+        items = [BudgetItem(content="超预算内容 " * 50000, priority=5, droppable=True)]
 
         # 5 次失败
         for _ in range(5):

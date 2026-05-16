@@ -22,11 +22,28 @@ from services.semantic_maintenance.models import (
     TableauPublishLog,
 )
 from services.semantic_maintenance.rollback_service import RollbackService
+from services.tableau.models import TableauConnection
 
 
 # -------------------------------------------------------------------------
 # 辅助函数
 # -------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _rollback_service_uses_test_session(db_session, monkeypatch):
+    """RollbackService opens SessionLocal; tests need it to share fixture data."""
+
+    class SharedSession:
+        def __getattr__(self, name):
+            return getattr(db_session, name)
+
+        def commit(self):
+            db_session.flush()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(RollbackService, "_get_session", lambda self: SharedSession())
 
 def _create_datasource_log(session, connection_id=1, object_id=1,
                             diff_json=None, status=PublishStatus.SUCCESS, operator=1):
@@ -43,7 +60,8 @@ def _create_datasource_log(session, connection_id=1, object_id=1,
         operator=operator,
     )
     session.add(log)
-    session.flush()
+    session.commit()
+    session.refresh(log)
     return log
 
 
@@ -65,7 +83,8 @@ def _create_field_log(session, connection_id=1, object_id=2,
         operator=operator,
     )
     session.add(log)
-    session.flush()
+    session.commit()
+    session.refresh(log)
     return log
 
 
@@ -109,6 +128,23 @@ def _create_field_semantics(session, connection_id=1, field_id=2,
     session.add(field)
     session.flush()
     return field
+
+
+def _create_tableau_connection(session, connection_id=1, owner_id=1):
+    """创建测试用 Tableau connection，供 API 权限校验读取。"""
+    conn = TableauConnection(
+        id=connection_id,
+        name=f"test-conn-{connection_id}",
+        server_url="https://tableau.test",
+        site="default",
+        token_name="token",
+        token_encrypted="encrypted",
+        owner_id=owner_id,
+        is_active=True,
+    )
+    session.merge(conn)
+    session.commit()
+    return conn
 
 
 # -------------------------------------------------------------------------
@@ -416,6 +452,7 @@ class TestRollbackAPIEndpoint:
 
     def test_rollback_with_connection_id(self, admin_client: TestClient, db_session):
         """带 connection_id 的回滚请求"""
+        _create_tableau_connection(db_session, connection_id=1)
         ds = _create_datasource_semantics(db_session, ds_id=11, connection_id=1)
         log = _create_datasource_log(
             db_session, object_id=11, connection_id=1, status=PublishStatus.SUCCESS,
@@ -423,10 +460,11 @@ class TestRollbackAPIEndpoint:
         )
         db_session.flush()
 
-        resp = admin_client.post(
-            f"/api/semantic-maintenance/publish-logs/{log.id}/rollback",
-            json={"connection_id": 1}
-        )
+        with patch("app.api.semantic_maintenance.publish.verify_connection_access", return_value=None):
+            resp = admin_client.post(
+                f"/api/semantic-maintenance/publish-logs/{log.id}/rollback",
+                json={"connection_id": 1}
+            )
         assert resp.status_code == 200
 
 

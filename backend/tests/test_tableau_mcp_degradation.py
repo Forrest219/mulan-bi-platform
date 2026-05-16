@@ -209,7 +209,7 @@ def test_sync_endpoint_mcp_degraded_returns_503(admin_client, db_session):
     """POST /api/tableau/connections/{id}/sync - MCP degraded 返回 503"""
     with patch("app.api.tableau.verify_connection_access"), \
          patch("services.tableau.models.TableauDatabase.get_connection") as mock_get_conn, \
-         patch("services.tableau.connection_health.is_mcp_degraded") as mock_degraded:
+         patch("app.api.tableau.is_mcp_degraded") as mock_degraded:
         
         mock_degraded.return_value = True  # degraded 状态
         mock_get_conn.return_value = _make_mock_conn(conn_id=3)
@@ -226,7 +226,7 @@ def test_sync_endpoint_mcp_healthy_succeeds(admin_client, db_session):
     """POST /api/tableau/connections/{id}/sync - MCP healthy 正常提交"""
     with patch("app.api.tableau.verify_connection_access"), \
          patch("services.tableau.models.TableauDatabase.get_connection") as mock_get_conn, \
-         patch("services.tableau.connection_health.is_mcp_degraded") as mock_degraded, \
+         patch("app.api.tableau.is_mcp_degraded") as mock_degraded, \
          patch("services.tasks.tableau_tasks.sync_connection_task") as mock_task:
         
         mock_degraded.return_value = False  # healthy

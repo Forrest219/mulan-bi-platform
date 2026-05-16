@@ -13,6 +13,14 @@ import asyncio
 import os
 import time
 
+import pytest
+
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("RUN_LLM_SMOKE") != "1",
+    reason="real LLM connectivity smoke test; set RUN_LLM_SMOKE=1 to run explicitly",
+)
+
 
 # MiniMax 配置（从环境变量读取）
 MINIMAX_TOKEN = os.environ.get("MINIMAX_TOKEN", "")

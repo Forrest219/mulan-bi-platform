@@ -149,6 +149,11 @@ class MCPToolRegistry:
         }
 
 
+def get_tool_registry() -> MCPToolRegistry:
+    """Get the singleton registry instance."""
+    return MCPToolRegistry.get_tool_registry()
+
+
 def register_tool(
     name: str,
     description: str,

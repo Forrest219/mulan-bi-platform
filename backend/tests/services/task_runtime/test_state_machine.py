@@ -11,7 +11,7 @@
 import pytest
 
 # 标记整个文件跳过数据库 setup（conftest.py 中的 setup_database）
-pytestmark = pytest.mark.usefixtures("")
+pytestmark = pytest.mark.skip_db
 
 from unittest.mock import MagicMock, patch, PropertyMock
 from datetime import datetime, timezone

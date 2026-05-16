@@ -25,6 +25,8 @@ CLEANUPABLE_STATUSES = ("succeeded", "failed", "cancelled")
 
 def count_cleanup_candidates(db) -> int:
     """返回待清理的记录数（dry-run 使用）"""
+    from services.tasks.models import BiTaskRun
+
     cutoff = datetime.now() - timedelta(days=RETENTION_DAYS)
     return db.query(func.count(BiTaskRun.id)).filter(
         BiTaskRun.started_at < cutoff,
@@ -32,7 +34,7 @@ def count_cleanup_candidates(db) -> int:
     ).scalar()
 
 
-def cleanup_old_task_runs(dry_run: bool = True) -> dict:
+def cleanup_old_task_runs(dry_run: bool = True, db=None) -> dict:
     """
     清理 90 天前已结束的 bi_task_runs 记录。
 
@@ -46,8 +48,12 @@ def cleanup_old_task_runs(dry_run: bool = True) -> dict:
 
     cutoff = datetime.now() - timedelta(days=RETENTION_DAYS)
 
-    with SessionLocal() as db:
-        candidates = db.query(BiTaskRun.id).filter(
+    owns_session = db is None
+    if owns_session:
+        db = SessionLocal()
+
+    try:
+        candidates = db.query(BiTaskRun).filter(
             BiTaskRun.started_at < cutoff,
             BiTaskRun.status.in_(CLEANUPABLE_STATUSES),
         )
@@ -80,6 +86,9 @@ def cleanup_old_task_runs(dry_run: bool = True) -> dict:
             "retention_days": RETENTION_DAYS,
             "cutoff": cutoff.isoformat(),
         }
+    finally:
+        if owns_session:
+            db.close()
 
 
 @shared_task(bind=True, name="services.tasks.cleanup_tasks.cleanup_old_task_runs")

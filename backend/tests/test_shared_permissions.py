@@ -4,6 +4,22 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 
 
+@pytest.fixture(autouse=True)
+def _use_test_db_session(db_session):
+    """Route API DB access through the test savepoint session for this module."""
+    from app.core.database import get_db
+    from app.main import app
+
+    def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
 class TestSharedPermissionsAPI:
     """GET /api/permissions/shared 端点测试"""
 
@@ -211,7 +227,7 @@ class TestBatchRevokeSharedPermissions:
 
     def test_batch_revoke_empty(self, admin_client):
         """空列表应返回 400"""
-        resp = admin_client.delete("/api/permissions/shared/batch", json={"permission_ids": []})
+        resp = admin_client.request("DELETE", "/api/permissions/shared/batch", json={"permission_ids": []})
         assert resp.status_code == 400
 
     def test_batch_revoke_success(self, admin_client, db_session):
@@ -237,7 +253,7 @@ class TestBatchRevokeSharedPermissions:
         db_session.commit()
         ids = [p.id for p in perms]
 
-        resp = admin_client.delete("/api/permissions/shared/batch", json={"permission_ids": ids[:2]})
+        resp = admin_client.request("DELETE", "/api/permissions/shared/batch", json={"permission_ids": ids[:2]})
         assert resp.status_code == 200
         data = resp.json()
         assert data["deleted"] == 2

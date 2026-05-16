@@ -41,14 +41,19 @@ DS_B = 2
 
 
 def _make_create_data(**kwargs) -> MetricCreate:
+    metric_name = f"cons_metric_{uuid.uuid4().hex[:8]}"
     defaults = {
-        "name": f"cons_metric_{uuid.uuid4().hex[:8]}",
+        "name": metric_name,
+        "name_zh": metric_name,
         "metric_type": "atomic",
         "datasource_id": DS_A,
         "table_name": "fact_orders",
         "column_name": "amount",
         "formula": "SUM(amount)",
         "sensitivity_level": "public",
+        "tableau_connection_id": 2,
+        "tableau_datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+        "field_mappings": {"amount": "销售额"},
     }
     defaults.update(kwargs)
     return MetricCreate(**defaults)

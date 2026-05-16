@@ -40,6 +40,9 @@ class MockThinkingBlock:
 
 
 # Build a fake anthropic package
+_ORIGINAL_ANTHROPIC = sys.modules.get("anthropic")
+_ORIGINAL_ANTHROPIC_TYPES = sys.modules.get("anthropic.types")
+
 mock_anthropic = types.ModuleType("anthropic")
 mock_anthropic_types = types.ModuleType("anthropic.types")
 mock_anthropic_types.TextBlock = MockTextBlock
@@ -52,6 +55,19 @@ sys.modules["anthropic.types"] = mock_anthropic_types
 # Also patch the import inside service.py's methods via mock.patch
 # (service.py imports TextBlock at runtime per-call, so we patch the reference)
 from services.llm.service import LLMService  # noqa: E402
+
+
+def teardown_module(module):
+    """Restore anthropic modules so this mock does not leak into later tests."""
+    if _ORIGINAL_ANTHROPIC is None:
+        sys.modules.pop("anthropic", None)
+    else:
+        sys.modules["anthropic"] = _ORIGINAL_ANTHROPIC
+
+    if _ORIGINAL_ANTHROPIC_TYPES is None:
+        sys.modules.pop("anthropic.types", None)
+    else:
+        sys.modules["anthropic.types"] = _ORIGINAL_ANTHROPIC_TYPES
 
 
 # =============================================================================

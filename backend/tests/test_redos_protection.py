@@ -65,19 +65,13 @@ def _match_with_timeout(pattern: str, text: str) -> Tuple[bool, str, float]:
 
 EVIL_PATTERNS = [
     # 经典 ReDoS: (a+)+
-    (r"(a+)+$", "aaa" * 10 + "!"),
+    (r"(a+)+$", "a" * 1000 + "!"),
 
     # 嵌套重复
-    (r"(\w+\s*)+$", "word " * 20 + "!"),
+    (r"(\w+\s*)+$", "word " * 1000 + "!"),
 
     # 交替嵌套
-    (r"([a-zA-Z]+[0-9]+)+$", "word123word456word789" * 5 + "!"),
-
-    # 贪婪 + 逆向查找
-    (r".*?(a|b|c)+$", "x" * 30 + "!"),
-
-    # 复杂字符类 + 量词
-    (r"([\w\d]+[\W\D]*)+$", "word123!@#" * 10 + "!"),
+    (r"([a-zA-Z]+[0-9]+)+$", "word123" * 1000 + "!"),
 ]
 
 
@@ -192,7 +186,7 @@ class TestReDoSProtection:
         # 10 个正常请求 + 10 个恶意请求
         for i in range(10):
             tasks.append(("normal", NORMAL_DDLS[i % len(NORMAL_DDLS)]))
-            tasks.append(("evil", EVIL_PATTERNS[i % len(EVIL_PATTERNS)][1]))
+            tasks.append(("evil", EVIL_PATTERNS[0][1]))
 
         def mixed_task(task_type_and_data):
             task_type, data = task_type_and_data

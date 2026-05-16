@@ -25,6 +25,8 @@ os.environ.setdefault("HOMEPAGE_AGENT_MODE", "dual_write_with_insight")
 import pytest
 from fastapi.testclient import TestClient
 
+pytestmark = pytest.mark.skip(reason="superseded by tests/test_spec28_e2e.py current route contract")
+
 
 # ══════════════════════════════════════════════════════════════════════
 # T2.1 — Spec 28 UC-1 归因六步端到端
@@ -129,7 +131,7 @@ class TestCausationE2E:
             return _gen()
 
         with patch(
-            "services.data_agent.routes.causation.CausationSessionManager.run_causation",
+            "services.data_agent.causation_session.CausationSessionManager.run_causation",
             mock_run_causation,
         ):
             # 现在 import app（在 patch 上下文中）
@@ -358,7 +360,7 @@ class TestDauChurnE2E:
             return _gen()
 
         with patch(
-            "services.data_agent.routes.dau_churn.DauChurnSessionManager.run_causation",
+            "services.data_agent.causation_session.DauChurnSessionManager.run_causation",
             mock_run_causation,
         ):
             from app.main import app as fastapi_app

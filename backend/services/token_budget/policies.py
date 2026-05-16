@@ -116,26 +116,21 @@ class PriorityDropPolicy:
         for item in ordered:
             item_tokens = self.counter.count(item.content)
 
-            # priority=0 的项有保底预算，不受 budget 限制
+            # priority=0 是业务硬保留项，即使超出预算也不丢弃。
             if item.priority == 0:
-                if used + item_tokens <= budget_tokens * 2:  # 允许 P0 超一点
-                    kept.append(item)
-                    used += item_tokens
+                kept.append(item)
+                used += item_tokens
+                continue
+
+            # droppable=False 也是硬保留项，调用方用它声明不可丢弃上下文。
+            if not item.droppable:
+                kept.append(item)
+                used += item_tokens
                 continue
 
             if used + item_tokens > budget_tokens:
-                if item.droppable:
-                    dropped_count += 1
-                    continue
-                else:
-                    # 不可丢弃，尝试压缩
-                    shrunk = self.shrink(item, budget_tokens - used)
-                    if shrunk is not None:
-                        kept.append(shrunk)
-                        used += self.counter.count(shrunk.content)
-                    else:
-                        dropped_count += 1
-                    continue
+                dropped_count += 1
+                continue
 
             kept.append(item)
             used += item_tokens

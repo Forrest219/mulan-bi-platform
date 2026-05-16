@@ -80,10 +80,15 @@ def get_db() -> Generator:
     FastAPI 依赖注入函数，为每个请求提供一个数据库会话。
     """
     session = SessionLocal()
+    # SessionLocal is scoped; startup/import-time failures in the same worker
+    # thread can leave a transaction aborted. Clear any inherited state before
+    # handing the session to request handlers.
+    session.rollback()
     try:
         yield session
     finally:
         session.close()
+        SessionLocal.remove()
 
 
 class DatabaseContext:

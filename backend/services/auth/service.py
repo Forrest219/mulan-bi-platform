@@ -163,6 +163,9 @@ class AuthService:
         if permissions is None:
             permissions = self.ROLE_DEFAULT_PERMISSIONS.get(role, [])
 
+        if email is None:
+            email = f"{username}@mulan.local"
+
         user = self._db.create_user(
             username=username,
             password_hash=self.hash_password(password),

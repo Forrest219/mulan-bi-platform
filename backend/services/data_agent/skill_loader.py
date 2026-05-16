@@ -64,6 +64,8 @@ class SkillLoader:
         except Exception as exc:
             # DB 查询失败时 graceful degradation（如表尚未创建、连接异常等）
             logger.debug("SkillLoader: DB query failed, using static meta. reason=%s", exc)
+            if hasattr(db, "rollback"):
+                db.rollback()
             return {}
 
         version_map: dict[str, str] = {}

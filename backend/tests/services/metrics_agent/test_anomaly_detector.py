@@ -259,9 +259,12 @@ def _make_metric_fixture(db_session) -> object:
 
     from models.metrics import BiMetricDefinition
 
+    metric_name = f"anomaly_test_metric_{uuid.uuid4().hex[:8]}"
     metric = BiMetricDefinition(
         tenant_id=TENANT_ID,
-        name=f"anomaly_test_metric_{uuid.uuid4().hex[:8]}",
+        metric_code=f"anom_{uuid.uuid4().hex[:8]}",
+        name=metric_name,
+        name_zh=metric_name,
         metric_type="atomic",
         datasource_id=1,
         table_name="fact_orders",

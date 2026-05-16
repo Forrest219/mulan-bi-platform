@@ -54,6 +54,12 @@ def redact_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def _redact_string(s: str) -> str:
     """对字符串中可能存在的 token 进行脱敏"""
+    sensitive_names = r"(password|secret|token|api_key|apikey|credential|private_key)"
+    s = re.sub(
+        rf"(?i)\b({sensitive_names})\s*=\s*[^,\s;]+",
+        lambda match: f"{match.group(1)}={REDACTED}",
+        s,
+    )
     # 脱敏常见的 token 格式
     # OpenAI key: sk-... 或 sk-prod-...
     s = re.sub(r'sk-[A-Za-z0-9_-]{20,}', REDACTED, s)

@@ -148,8 +148,9 @@ class MCPToolDispatcher:
         
         # Return confirmation plan
         if dry_run:
-            return tool.dry_run(**kwargs)
-        
+            plan = tool.dry_run(**kwargs)
+            return plan.to_dict() if hasattr(plan, "to_dict") else plan
+
         return None
     
     def execute_tool(

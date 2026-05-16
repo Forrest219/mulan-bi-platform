@@ -242,8 +242,12 @@ async def _stream_llm_response(
     # Phase 1b: 优先走 Agent 转发 via httpx
     if authorization is not None or cookie is not None:
         try:
+            yielded = 0
             async for event in _stream_via_agent_forward(question, connection_id, authorization, cookie):
+                yielded += 1
                 yield event
+            if yielded == 0:
+                raise RuntimeError("agent stream returned no events")
             return  # Agent stream succeeded
         except Exception as agent_exc:
             logger.debug("Agent forward failed (%s), falling back to search", agent_exc)
@@ -297,8 +301,12 @@ async def _chat_stream_with_fallback(
     """
     # Phase 1b: 优先走 Agent 转发 via httpx
     try:
+        yielded = 0
         async for event in _stream_via_agent_forward(question, connection_id, authorization, cookie):
+            yielded += 1
             yield event
+        if yielded == 0:
+            raise RuntimeError("agent stream returned no events")
         return  # Agent stream succeeded
     except Exception as agent_exc:
         logger.debug("Agent forward failed (%s), falling back to search", agent_exc)

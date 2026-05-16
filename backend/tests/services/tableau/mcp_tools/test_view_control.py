@@ -127,7 +127,7 @@ class TestCreateCustomViewTool:
 
     def test_tool_requires_confirmation(self):
         """Tool should require confirmation"""
-        from services.tableau.mcp_tools.registry import get_tool_registry
+        from services.tableau.mcp_tools import MCPToolRegistry
         
         registry = MCPToolRegistry()
         metadata = registry.get_metadata("create-custom-view")
@@ -196,7 +196,7 @@ class TestUpdateCustomViewTool:
 
     def test_tool_requires_confirmation(self):
         """Tool should require confirmation"""
-        from services.tableau.mcp_tools.registry import get_tool_registry
+        from services.tableau.mcp_tools import MCPToolRegistry
         
         registry = MCPToolRegistry()
         metadata = registry.get_metadata("update-custom-view")
@@ -242,7 +242,7 @@ class TestListCustomViewsForViewTool:
 
     def test_tool_is_read_only(self):
         """Tool should not require confirmation"""
-        from services.tableau.mcp_tools.registry import get_tool_registry
+        from services.tableau.mcp_tools import MCPToolRegistry
         
         registry = MCPToolRegistry()
         metadata = registry.get_metadata("list-custom-views-for-view")

@@ -14,6 +14,7 @@ P1 测试：
 """
 import asyncio
 import json
+from pathlib import Path
 import pytest
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -196,11 +197,11 @@ class TestAutoRollback:
         mock_db = MagicMock()
 
         # 模拟高失败率
-        with patch("services.agent.dual_write._failure_tracker") as mock_tracker:
+        with patch("services.agent.dual_write.dual_write._failure_tracker") as mock_tracker:
             mock_tracker.should_rollback = True
             mock_tracker.failure_rate = 0.15
 
-            with patch("services.agent.dual_write.write_system_audit_log") as mock_audit:
+            with patch("services.agent.dual_write.dual_write.write_system_audit_log") as mock_audit:
                 with patch.object(PlatformSettingsService, "__init__", lambda self, db: None):
                     with patch.object(PlatformSettingsService, "set") as mock_set:
                         # 执行初次检查，should_rollback=True 时会设置 legacy_only
@@ -231,9 +232,9 @@ class TestIntentFallbackChain:
 
         strategy = KeywordMatchStrategy()
 
-        # 归因类关键词
+        # 复杂分析类关键词
         result = await strategy.classify("为什么销售额下降了", context=None)
-        assert result.intent == "attribution"
+        assert result.intent == "analysis"
 
         # 报告类关键词
         result = await strategy.classify("生成月度销售报告", context=None)
@@ -241,7 +242,7 @@ class TestIntentFallbackChain:
 
         # 查询类关键词
         result = await strategy.classify("查询今天销售额", context=None)
-        assert result.intent == "lookup"
+        assert result.intent == "query"
 
         # 闲聊
         result = await strategy.classify("你好", context=None)
@@ -265,8 +266,8 @@ class TestIntentFallbackChain:
             db=mock_db,
         )
 
-        # 应匹配 attribution（keyword_match）
-        assert result.intent == "attribution"
+        # 应匹配 analysis（keyword_match）
+        assert result.intent == "analysis"
 
     @pytest.mark.asyncio
     async def test_intent_fallback_to_chat(self):
@@ -386,7 +387,7 @@ class TestArchitectureRedlines:
 
         result = subprocess.run(
             ["grep", "-rE", "os\\.environ.*HOMEPAGE_AGENT_MODE", "services/", "app/"],
-            cwd="backend",
+            cwd=Path(__file__).parents[2],
             capture_output=True,
             text=True,
         )
@@ -399,7 +400,7 @@ class TestArchitectureRedlines:
 
         result = subprocess.run(
             ["grep", "-rl", "def compute_result_hash", "services/", "app/"],
-            cwd="backend",
+            cwd=Path(__file__).parents[2],
             capture_output=True,
             text=True,
         )

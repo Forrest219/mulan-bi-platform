@@ -41,7 +41,7 @@ def test_publish_datasource_emits_semantic_table_published_event(admin_client: T
     """
     mock_fn, calls = _mock_emit_event()
 
-    with patch("app.api.semantic_maintenance.publish.emit_event", mock_fn):
+    with patch("services.events.emit_event", mock_fn):
         # 调用 publish_datasource (simulate=True 避免真实 Tableau 调用)
         resp = admin_client.post(
             "/api/semantic-maintenance/publish/datasource",
@@ -115,7 +115,7 @@ def test_sync_fields_emits_field_sync_completed_event(admin_client: TestClient):
     """
     mock_fn, calls = _mock_emit_event()
 
-    with patch("app.api.semantic_maintenance.sync.emit_event", mock_fn):
+    with patch("services.events.emit_event", mock_fn):
         resp = admin_client.post(
             "/api/semantic-maintenance/connections/1/sync-fields",
             json={
@@ -134,7 +134,7 @@ def test_create_datasource_emits_semantic_table_created_event(admin_client: Test
     """
     mock_fn, calls = _mock_emit_event()
 
-    with patch("app.api.semantic_maintenance.datasources.emit_event", mock_fn):
+    with patch("services.events.emit_event", mock_fn):
         resp = admin_client.post(
             "/api/semantic-maintenance/datasources",
             json={
@@ -342,35 +342,22 @@ def test_list_subscriptions_requires_auth(client: TestClient):
     assert resp.status_code == 401
 
 
-def test_create_subscription_validates_event_type(client: TestClient):
+def test_create_subscription_validates_event_type(admin_client: TestClient):
     """POST /api/events/subscriptions 拒绝无效事件类型"""
-    # 先登录
-    resp = client.post(
-        "/api/auth/login",
-        json={"username": "admin", "password": "admin"},
-    )
-    assert resp.status_code == 200
-
     # 无效事件类型
-    resp = client.post(
+    resp = admin_client.post(
         "/api/events/subscriptions",
         json={"event_type": "invalid.event.type", "target_id": "123"},
     )
     assert resp.status_code == 400
-    assert "INVALID_EVENT_TYPE" in resp.json().get("detail", {}).get("error_code", "")
+    from services.events import EvtErrorCode
+    assert resp.json().get("detail", {}).get("error_code") == EvtErrorCode.INVALID_EVENT_TYPE
 
 
-def test_create_and_list_subscription(client: TestClient):
+def test_create_and_list_subscription(admin_client: TestClient):
     """创建订阅并查询"""
-    # 登录
-    resp = client.post(
-        "/api/auth/login",
-        json={"username": "admin", "password": "admin"},
-    )
-    assert resp.status_code == 200
-
     # 创建订阅
-    resp = client.post(
+    resp = admin_client.post(
         "/api/events/subscriptions",
         json={
             "event_type": "semantic_table.published",
@@ -384,23 +371,16 @@ def test_create_and_list_subscription(client: TestClient):
     subscription_id = sub_data["subscription_id"]
 
     # 查询订阅列表
-    resp = client.get("/api/events/subscriptions")
+    resp = admin_client.get("/api/events/subscriptions")
     assert resp.status_code == 200
     items = resp.json()["items"]
     assert any(s["id"] == subscription_id for s in items)
 
 
-def test_delete_subscription(client: TestClient):
+def test_delete_subscription(admin_client: TestClient):
     """删除订阅"""
-    # 登录
-    resp = client.post(
-        "/api/auth/login",
-        json={"username": "admin", "password": "admin"},
-    )
-    assert resp.status_code == 200
-
     # 创建订阅
-    resp = client.post(
+    resp = admin_client.post(
         "/api/events/subscriptions",
         json={
             "event_type": "semantic_table.published",
@@ -411,10 +391,10 @@ def test_delete_subscription(client: TestClient):
     subscription_id = resp.json()["subscription_id"]
 
     # 删除订阅
-    resp = client.delete(f"/api/events/subscriptions/{subscription_id}")
+    resp = admin_client.delete(f"/api/events/subscriptions/{subscription_id}")
     assert resp.status_code == 200
 
     # 验证已删除
-    resp = client.get("/api/events/subscriptions")
+    resp = admin_client.get("/api/events/subscriptions")
     items = resp.json()["items"]
     assert not any(s["id"] == subscription_id for s in items)

@@ -317,11 +317,12 @@ class RollbackService:
         # 恢复字段
         restored_fields = {}
         for key, tableau_val in rollback_data.items():
-            if hasattr(ds, key):
-                old_val = getattr(ds, key)
-                setattr(ds, key, tableau_val)
-                restored_fields[key] = {"from": old_val, "to": tableau_val}
-                logger.info("Datasource rollback: %s: %s -> %s", key, old_val, tableau_val)
+            target_key = "semantic_description" if key == "description" else key
+            if hasattr(ds, target_key):
+                old_val = getattr(ds, target_key)
+                setattr(ds, target_key, tableau_val)
+                restored_fields[target_key] = {"from": old_val, "to": tableau_val}
+                logger.info("Datasource rollback: %s: %s -> %s", target_key, old_val, tableau_val)
 
         session.commit()
         return True, None

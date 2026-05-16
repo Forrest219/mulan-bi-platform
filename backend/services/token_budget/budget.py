@@ -174,8 +174,12 @@ class BudgetEnforcer:
         if state is None:
             return False
 
+        opened_at = state.get("opened_at")
+        if opened_at is None:
+            return False
+
         # 检查是否在恢复期
-        if time.time() < state.get("opened_at", 0) + CIRCUIT_BREAK_RECOVERY_SECONDS:
+        if time.time() < opened_at + CIRCUIT_BREAK_RECOVERY_SECONDS:
             return True
 
         # 恢复期结束，关闭熔断

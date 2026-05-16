@@ -168,6 +168,7 @@ def sample_metric(db_session, valid_datasource, valid_user):
     """创建一个用于测试的指标，测试结束后清理。"""
     metric = BiMetricDefinition(
         tenant_id=TENANT_ID,
+        metric_code=f"lineage_{uuid.uuid4().hex[:8]}",
         name=f"test_lineage_metric_{uuid.uuid4().hex[:8]}",
         name_zh="测试血缘指标",
         metric_type="atomic",

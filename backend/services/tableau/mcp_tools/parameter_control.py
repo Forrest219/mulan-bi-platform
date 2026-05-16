@@ -8,7 +8,7 @@ Tools:
 """
 from typing import Any, Dict, List, Optional
 import json
-from urllib.parse import urlencode, quote
+from urllib.parse import urlencode, quote, quote_plus
 
 from .base import TableauMCPToolBase, WriteOperationError, ConfirmationPlan
 from .registry import register_tool
@@ -173,7 +173,7 @@ class SetParameterViaURLTool(TableauMCPToolBase):
             value_str = str(value)
             
             # URL encode the parameter
-            param_parts.append(f"{quote(name)}={quote(value_str)}")
+            param_parts.append(f"{quote_plus(name)}={quote_plus(value_str)}")
             applied_params.append({
                 "name": name,
                 "value": value,
@@ -333,7 +333,7 @@ class RunVizQLCommandTool(TableauMCPToolBase):
         """Return confirmation plan for VizQL command."""
         changes = [
             {
-                "type": "execute",
+                "type": "vizql_command_execute",
                 "object_type": "vizql_command",
                 "view_luid": view_luid,
                 "command": command,

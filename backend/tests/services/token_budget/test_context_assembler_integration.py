@@ -140,6 +140,7 @@ class TestBudgetAwareContextAssembler:
     def test_circuit_break_mode(self):
         """circuit_break 模式：连续失败触发熔断"""
         assembler = BudgetAwareContextAssembler(mode="circuit_break")
+        from services.token_budget import BudgetEnforcer
 
         # 创建大量字段
         fields = [
@@ -152,17 +153,27 @@ class TestBudgetAwareContextAssembler:
             for i in range(100)
         ]
 
-        # 连续失败 5 次
-        for attempt in range(5):
-            try:
-                context, report = assembler.build_field_context_with_budget(
-                    fields, scenario="test_circuit", provider="openai"
-                )
-            except TBD_005:
-                # 第 5 次及之后应该抛出 TBD_005
-                if attempt >= 4:
-                    break
-                continue
+        budget = TokenBudget(
+            scenario="test_circuit",
+            model="gpt-4o",
+            total_tokens=100,
+            system_reserved=0,
+            instruction_reserved=0,
+            response_reserved=0,
+        )
+
+        with patch.object(assembler, "_get_enforcer", return_value=BudgetEnforcer(budget, mode="circuit_break")):
+            # 连续失败 5 次
+            for attempt in range(5):
+                try:
+                    context, report = assembler.build_field_context_with_budget(
+                        fields, scenario="test_circuit", provider="openai"
+                    )
+                except TBD_005:
+                    # 第 5 次及之后应该抛出 TBD_005
+                    if attempt >= 4:
+                        break
+                    continue
 
         # 清理熔断状态
         _circuit_state.clear()

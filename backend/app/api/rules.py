@@ -164,6 +164,13 @@ try:
     _rule_db.seed_defaults(DEFAULT_RULES_SEED)
 except Exception as e:
     logger.warning("规则 seed 失败（数据库可能未就绪）: %s", e)
+finally:
+    # RuleConfigDatabase uses the process-wide scoped SessionLocal. During
+    # startup/tests a failed seed can otherwise poison the current thread's
+    # request session with an aborted transaction.
+    from app.core.database import SessionLocal
+
+    SessionLocal.remove()
 
 
 class ValidationRule(BaseModel):

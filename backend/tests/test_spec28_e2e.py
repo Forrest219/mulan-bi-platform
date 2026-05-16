@@ -19,6 +19,24 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
 
+@pytest.fixture(autouse=True)
+def _mock_causation_route_auth():
+    """Spec28 routes use local JWT dependencies; keep tests focused on route behavior."""
+    from app.main import app
+    from services.data_agent.routes import causation, dau_churn
+
+    def mock_user():
+        return {"user_id": 1, "tenant_id": str(uuid.uuid4()), "roles": ["analyst"]}
+
+    app.dependency_overrides[causation.extract_user_from_jwt] = mock_user
+    app.dependency_overrides[dau_churn.extract_user_from_jwt] = mock_user
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(causation.extract_user_from_jwt, None)
+        app.dependency_overrides.pop(dau_churn.extract_user_from_jwt, None)
+
+
 # ============================================================================
 # T2.1: UC-1 归因分析端到端
 # ============================================================================
@@ -74,7 +92,7 @@ class TestCausationE2E:
 
         try:
             with patch(
-                "services.data_agent.routes.causation.CausationSessionManager"
+                "services.data_agent.causation_session.CausationSessionManager"
             ) as MockMgr:
                 mock_instance = MagicMock()
                 mock_instance.create_session.return_value = MagicMock(
@@ -143,7 +161,7 @@ class TestCausationE2E:
 
         try:
             with patch(
-                "services.data_agent.routes.causation.CausationSessionManager"
+                "services.data_agent.causation_session.CausationSessionManager"
             ) as MockMgr:
                 mock_instance = MagicMock()
                 mock_session = MagicMock()
@@ -193,7 +211,7 @@ class TestCausationE2E:
 
         try:
             with patch(
-                "services.data_agent.routes.causation.CausationSessionManager"
+                "services.data_agent.causation_session.CausationSessionManager"
             ) as MockMgr:
                 mock_instance = MagicMock()
                 mock_instance.get_session.return_value = None
@@ -222,7 +240,7 @@ class TestCausationE2E:
 
         try:
             with patch(
-                "services.data_agent.routes.causation.CausationSessionManager"
+                "services.data_agent.causation_session.CausationSessionManager"
             ) as MockMgr:
                 from services.data_agent.causation_session import SessionStatus
 
@@ -273,7 +291,7 @@ class TestCausationE2E:
 
         try:
             with patch(
-                "services.data_agent.routes.causation.CausationSessionManager"
+                "services.data_agent.causation_session.CausationSessionManager"
             ) as MockMgr:
                 mock_instance = MagicMock()
                 mock_session = MagicMock()
@@ -375,7 +393,7 @@ class TestDauChurnE2E:
 
         try:
             with patch(
-                "services.data_agent.routes.dau_churn.DauChurnSessionManager"
+                "services.data_agent.causation_session.DauChurnSessionManager"
             ) as MockMgr:
                 mock_instance = MagicMock()
                 mock_instance.create_session.return_value = MagicMock(
@@ -448,7 +466,7 @@ class TestDauChurnE2E:
 
         try:
             with patch(
-                "services.data_agent.routes.dau_churn.DauChurnSessionManager"
+                "services.data_agent.causation_session.DauChurnSessionManager"
             ) as MockMgr:
                 mock_instance = MagicMock()
                 mock_session = MagicMock()
@@ -495,7 +513,7 @@ class TestDauChurnE2E:
 
         try:
             with patch(
-                "services.data_agent.routes.dau_churn.DauChurnSessionManager"
+                "services.data_agent.causation_session.DauChurnSessionManager"
             ) as MockMgr:
                 mock_instance = MagicMock()
                 mock_session = MagicMock()
@@ -540,7 +558,7 @@ class TestDauChurnE2E:
 
         try:
             with patch(
-                "services.data_agent.routes.dau_churn.DauChurnSessionManager"
+                "services.data_agent.causation_session.DauChurnSessionManager"
             ) as MockMgr:
                 mock_instance = MagicMock()
                 mock_instance.get_session.return_value = None
@@ -600,7 +618,7 @@ class TestHomepageAgentMode:
 
         try:
             with patch(
-                "services.agent.dual_write.get_homepage_agent_mode"
+                "services.agent.dual_write.dual_write.get_homepage_agent_mode"
             ) as mock_get_mode:
                 mock_get_mode.return_value = MagicMock(value="agent_with_fallback")
 
@@ -645,7 +663,7 @@ class TestHomepageAgentMode:
                 "services.agent.dual_write.write_system_audit_log"
             ) as mock_audit:
                 with patch(
-                    "services.data_agent.routes.agent.PlatformSettingsService"
+                    "services.platform_settings.PlatformSettingsService"
                 ) as MockPS:
                     mock_ps_instance = MagicMock()
                     MockPS.return_value = mock_ps_instance
@@ -721,7 +739,7 @@ class TestHomepageAgentMode:
         mock_db = MagicMock()
 
         with patch(
-            "services.agent.dual_write.get_homepage_agent_mode"
+            "services.agent.dual_write.dual_write.get_homepage_agent_mode"
         ) as mock_get_mode:
             mock_get_mode.return_value = HomepageAgentMode.LEGACY_ONLY
 
@@ -760,7 +778,7 @@ class TestHomepageAgentMode:
         mock_db = MagicMock()
 
         with patch(
-            "services.agent.dual_write.get_homepage_agent_mode"
+            "services.agent.dual_write.dual_write.get_homepage_agent_mode"
         ) as mock_get_mode:
             mock_get_mode.return_value = HomepageAgentMode.AGENT_WITH_FALLBACK
 
@@ -799,7 +817,7 @@ class TestHomepageAgentMode:
         mock_db = MagicMock()
 
         with patch(
-            "services.agent.dual_write.get_homepage_agent_mode"
+            "services.agent.dual_write.dual_write.get_homepage_agent_mode"
         ) as mock_get_mode:
             mock_get_mode.return_value = HomepageAgentMode.AGENT_WITH_FALLBACK
 
@@ -841,10 +859,10 @@ class TestHomepageAgentMode:
         mock_db = MagicMock()
 
         with patch(
-            "services.agent.dual_write.get_homepage_agent_mode"
+            "services.agent.dual_write.dual_write.get_homepage_agent_mode"
         ) as mock_get_mode:
             with patch(
-                "services.agent.dual_write.write_dual_write_audit"
+                "services.agent.dual_write.dual_write.write_dual_write_audit"
             ):
                 mock_get_mode.return_value = HomepageAgentMode.DUAL_WRITE
 
@@ -884,7 +902,7 @@ class TestHomepageAgentMode:
         mock_db = MagicMock()
 
         with patch(
-            "services.agent.dual_write.get_homepage_agent_mode"
+            "services.agent.dual_write.dual_write.get_homepage_agent_mode"
         ) as mock_get_mode:
             mock_get_mode.return_value = HomepageAgentMode.AGENT_ONLY
 
@@ -929,10 +947,10 @@ class TestHomepageAgentMode:
         _failure_tracker.record(success=False)  # 1/16 = 6.25%
 
         with patch(
-            "services.agent.dual_write.write_system_audit_log"
+            "services.agent.dual_write.dual_write.write_system_audit_log"
         ) as mock_audit:
             with patch(
-                "services.agent.dual_write.PlatformSettingsService"
+                "services.platform_settings.PlatformSettingsService"
             ) as MockPS:
                 mock_ps_instance = MagicMock()
                 MockPS.return_value = mock_ps_instance
@@ -958,7 +976,7 @@ class TestHomepageAgentMode:
                 "services.agent.dual_write.write_system_audit_log"
             ) as mock_audit:
                 with patch(
-                    "services.data_agent.routes.agent.PlatformSettingsService"
+                    "services.platform_settings.PlatformSettingsService"
                 ) as MockPS:
                     mock_ps_instance = MagicMock()
                     MockPS.return_value = mock_ps_instance
@@ -992,7 +1010,7 @@ class TestHomepageAgentMode:
                 "services.agent.dual_write.write_system_audit_log"
             ):
                 with patch(
-                    "services.data_agent.routes.agent.PlatformSettingsService"
+                    "services.platform_settings.PlatformSettingsService"
                 ) as MockPS:
                     mock_ps_instance = MagicMock()
                     MockPS.return_value = mock_ps_instance
@@ -1054,7 +1072,7 @@ class TestIntegrationE2E:
 
         try:
             with patch(
-                "services.data_agent.routes.causation.CausationSessionManager"
+                "services.data_agent.causation_session.CausationSessionManager"
             ) as MockMgr:
                 mock_instance = MagicMock()
                 mock_instance.create_session.return_value = MagicMock(
@@ -1131,7 +1149,7 @@ class TestIntegrationE2E:
 
         try:
             with patch(
-                "services.data_agent.routes.dau_churn.DauChurnSessionManager"
+                "services.data_agent.causation_session.DauChurnSessionManager"
             ) as MockMgr:
                 mock_instance = MagicMock()
                 mock_instance.create_session.return_value = MagicMock(
