@@ -242,7 +242,7 @@ function HomePageInner() {
     const convId = currentConversationId;
     if (!convId) {
       if (USE_MOCK) {
-        const id = await addConversation();
+        const id = addConversation();
         setCurrentConversationId(id);
         appendMessage(id, { role: 'user', content: question });
         const answerText =

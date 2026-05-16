@@ -46,6 +46,8 @@ services:
     container_name: mulan-bi-backend
     restart: unless-stopped
     env_file: .env
+    ports:
+      - "8000:8000"
     environment:
       DATABASE_URL: postgresql://mulan:mulan@postgres:5432/mulan_bi
       CELERY_BROKER_URL: redis://redis:6379/0
@@ -89,6 +91,8 @@ services:
       dockerfile: Dockerfile
     container_name: mulan-bi-frontend
     restart: unless-stopped
+    ports:
+      - "3000:80"
     depends_on:
       backend:
         condition: service_healthy
@@ -110,7 +114,7 @@ services:
 
   # ── Reverse proxy (only externally exposed port) ──────────────────────────
   nginx:
-    image: nginx:alpine
+    image: ghcr.io/nginxinc/nginx-unprivileged:alpine
     container_name: mulan-bi-nginx
     restart: unless-stopped
     ports:

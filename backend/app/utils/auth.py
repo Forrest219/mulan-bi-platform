@@ -8,7 +8,16 @@ def verify_connection_access(connection_id: int, user: dict, db: Session) -> Non
     """
     验证用户有权访问指定 Tableau 连接。
     管理员可访问所有连接，非管理员只能访问自己的连接。
+
+    支持虚拟连接 ID（> 10000，对应 mcp_server.id + 10000）。
+    虚拟连接的 owner_id 为 None，仅 admin 可操作。
     """
+    # 虚拟连接：仅 admin 可操作，无需查询数据库
+    if connection_id > 10000:
+        if user["role"] != "admin":
+            raise TABError.access_denied()
+        return
+
     conn = db.query(TableauConnection).filter(TableauConnection.id == connection_id).first()
     if not conn:
         raise TABError.connection_not_found()

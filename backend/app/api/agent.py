@@ -726,6 +726,8 @@ async def try_fast_mcp_stream(
         log_nlq_query(
             user_id=current_user.get("id"),
             question=question,
+            intent="data_query",
+            datasource_luid=datasource_luid,
             response_type="table",
             execution_time_ms=int((time.monotonic() - t0) * 1000),
             error_code=None,
@@ -1165,6 +1167,8 @@ async def agent_stream(
                 log_nlq_query(
                     user_id=current_user.get("id"),
                     question=req.question,
+                    intent="schema_inventory",
+                    datasource_luid=context.selected_datasource_luid,
                     execution_time_ms=execution_time_ms,
                     error_code=error_code,
                 )
@@ -1231,6 +1235,8 @@ async def agent_stream(
                 log_nlq_query(
                     user_id=current_user.get("id"),
                     question=req.question,
+                    intent="schema_inventory",
+                    datasource_luid=context.selected_datasource_luid,
                     execution_time_ms=execution_time_ms,
                     error_code=error_code,
                 )
@@ -1272,6 +1278,8 @@ async def agent_stream(
             log_nlq_query(
                 user_id=current_user.get("id"),
                 question=req.question,
+                intent="schema_inventory",
+                datasource_luid=context.selected_datasource_luid,
                 response_type=result.response_type,
                 execution_time_ms=execution_time_ms,
                 error_code=None,
@@ -1381,6 +1389,8 @@ async def agent_stream(
                 log_nlq_query(
                     user_id=current_user.get("id"),
                     question=req.question,
+                    intent=intent_result.intent if intent_result else None,
+                    datasource_luid=context.selected_datasource_luid,
                     response_type=event.content.get("response_type"),
                     execution_time_ms=event.content.get("execution_time_ms") or int((time.monotonic() - _t0) * 1000),
                     error_code=None,
@@ -1436,6 +1446,8 @@ async def agent_stream(
                 log_nlq_query(
                     user_id=current_user.get("id"),
                     question=req.question,
+                    intent=intent_result.intent if intent_result else None,
+                    datasource_luid=context.selected_datasource_luid,
                     execution_time_ms=int((time.monotonic() - _t0) * 1000),
                     error_code=err_code,
                 )
@@ -1666,6 +1678,24 @@ def archive_conversation(
 
     session_mgr.archive_session(conv_uuid, user_id=current_user["id"])
     return {"status": "archived", "conversation_id": conversation_id}
+
+
+@router.delete("/conversations")
+def clear_all_conversations(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """清空当前用户所有会话（硬删除）"""
+    _require_agent_role(current_user.get("role", "user"))
+
+    session_mgr = SessionManager(db)
+    convs = session_mgr.get_user_conversations(user_id=current_user["id"], status="active", limit=1000)
+    deleted_count = 0
+    for conv in convs:
+        session_mgr.archive_session(conv.id, user_id=current_user["id"])
+        deleted_count += 1
+
+    return {"deleted_count": deleted_count}
 
 
 # ============================================================================

@@ -350,7 +350,23 @@ async def delete_connection(
     # 使用统一的权限验证函数
     verify_connection_access(conn_id, current_user, db)
 
-    _db.delete_connection(conn_id)
+    # 优先从 tableau_connections 删除
+    deleted = _db.delete_connection(conn_id)
+
+    # 若 tableau_connections 中不存在（虚拟连接 ID = 10000 + mcp_server.id），
+    # 则从 mcp_servers 表删除
+    if not deleted and conn_id > 10000:
+        from services.mcp.models import McpServer
+        mcp_id = conn_id - 10000
+        mcp = db.query(McpServer).filter(McpServer.id == mcp_id).first()
+        if mcp and mcp.type == "tableau":
+            db.delete(mcp)
+            db.commit()
+            deleted = True
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="连接不存在")
+
     log_action(current_user["id"], current_user.get("username", ""), "delete", "tableau_connection", conn_id)
     return {"message": "连接已删除"}
 

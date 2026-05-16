@@ -20,7 +20,6 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { conversationsApi } from '../api/conversations';
 import { agentConversationsApi } from '../api/agent';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -91,7 +90,8 @@ type Action =
   | { type: 'ADD_CONVERSATION'; payload: Conversation }
   | { type: 'APPEND_MESSAGE'; payload: { conversationId: string; message: ConversationMessage } }
   | { type: 'DELETE_CONVERSATION'; payload: string }
-  | { type: 'UPDATE_TITLE'; payload: { id: string; title: string } };
+  | { type: 'UPDATE_TITLE'; payload: { id: string; title: string } }
+  | { type: 'CLEAR_ALL' };
 
 function reducer(state: Conversation[], action: Action): Conversation[] {
   switch (action.type) {
@@ -130,6 +130,9 @@ function reducer(state: Conversation[], action: Action): Conversation[] {
           : conv
       );
 
+    case 'CLEAR_ALL':
+      return [];
+
     default:
       return state;
   }
@@ -141,14 +144,16 @@ interface ConversationContextValue {
   conversations: Conversation[];
   /** 是否正在从后端加载对话列表 */
   isLoading: boolean;
-  /** 新增对话，返回新 id（异步，优先调后端） */
-  addConversation: () => Promise<string>;
+  /** 新增对话，返回新 id（纯本地，由 SSE stream 的 metadata.conversation_id 驱动） */
+  addConversation: () => string;
   /** 追加消息到指定对话 */
   appendMessage: (conversationId: string, message: Omit<ConversationMessage, 'id' | 'created_at'>) => void;
   /** 删除对话（异步，优先调后端） */
   deleteConversation: (id: string) => Promise<void>;
   /** 更新对话标题（异步，优先调后端） */
   updateConversationTitle: (id: string, title: string) => Promise<void>;
+  /** 清空所有对话（异步，优先调后端） */
+  clearAllConversations: () => Promise<void>;
 }
 
 const ConversationContext = createContext<ConversationContextValue | null>(null);
@@ -195,29 +200,16 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     saveToStorage(conversations);
   }, [conversations]);
 
-  const addConversation = useCallback(async (): Promise<string> => {
-    try {
-      const resp = await conversationsApi.create();
-      const newConv: Conversation = {
-        id: resp.id,
-        title: resp.title,
-        updated_at: resp.updated_at,
-        messages: [],
-      };
-      dispatch({ type: 'ADD_CONVERSATION', payload: newConv });
-      return resp.id;
-    } catch {
-      // 后端失败：纯本地创建
-      const id = generateId();
-      const newConv: Conversation = {
-        id,
-        title: '新对话',
-        updated_at: nowUtc(),
-        messages: [],
-      };
-      dispatch({ type: 'ADD_CONVERSATION', payload: newConv });
-      return id;
-    }
+  const addConversation = useCallback((): string => {
+    const id = generateId();
+    const newConv: Conversation = {
+      id,
+      title: '新对话',
+      updated_at: nowUtc(),
+      messages: [],
+    };
+    dispatch({ type: 'ADD_CONVERSATION', payload: newConv });
+    return id;
   }, []);
 
   const appendMessage = useCallback(
@@ -255,6 +247,18 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     }
   }, [conversations]);
 
+  const clearAllConversations = useCallback(async (): Promise<void> => {
+    try {
+      // Spec 36 §5: DELETE /api/agent/conversations（批量）
+      await agentConversationsApi.clearAll();
+    } catch {
+      // 忽略后端错误，仍然清空本地
+    }
+    // 清空 localStorage
+    localStorage.removeItem(STORAGE_KEY);
+    dispatch({ type: 'CLEAR_ALL' });
+  }, []);
+
   return (
     <ConversationContext.Provider
       value={{
@@ -264,6 +268,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
         appendMessage,
         deleteConversation,
         updateConversationTitle,
+        clearAllConversations,
       }}
     >
       {children}

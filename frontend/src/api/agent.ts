@@ -440,6 +440,18 @@ export const agentConversationsApi = {
     }).then((r) => {
       if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`);
     }),
+
+  /**
+   * DELETE /api/agent/conversations — 清空所有会话
+   */
+  clearAll: (): Promise<{ deleted_count: number }> =>
+    fetch('/api/agent/conversations', {
+      method: 'DELETE',
+      credentials: 'include',
+    }).then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    }),
 };
 
 // ─── Admin API ────────────────────────────────────────────────────────────────

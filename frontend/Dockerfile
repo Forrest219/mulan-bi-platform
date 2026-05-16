@@ -9,7 +9,7 @@ COPY . .
 RUN npm run build
 
 # ── Stage 2: serve static files ────────────────────────────────────
-FROM nginx:alpine AS production
+FROM ghcr.io/nginxinc/nginx-unprivileged:alpine AS production
 
 COPY --from=builder /app/out /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf

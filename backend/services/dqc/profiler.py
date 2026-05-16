@@ -9,6 +9,7 @@
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote_plus
 
 from sqlalchemy import column, func, select, table
 
@@ -233,14 +234,15 @@ class Profiler:
         port = self.db_config.get("port")
         database = self.db_config.get("database")
 
+        encoded_password = quote_plus(password) if password else ""
         if db_type == "postgresql":
-            url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+            url = f"postgresql+psycopg2://{user}:{encoded_password}@{host}:{port}/{database}"
             connect_args = {"options": "-c default_transaction_read_only=on"}
         elif db_type in ("mysql", "starrocks", "doris"):
-            url = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
+            url = f"mysql+pymysql://{user}:{encoded_password}@{host}:{port}/{database}"
             connect_args = {}
         else:
-            url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+            url = f"postgresql+psycopg2://{user}:{encoded_password}@{host}:{port}/{database}"
             connect_args = {}
 
         engine = create_engine(url, connect_args=connect_args, pool_pre_ping=True)

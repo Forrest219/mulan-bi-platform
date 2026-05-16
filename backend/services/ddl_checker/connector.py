@@ -2,6 +2,7 @@
 import logging
 import yaml
 from typing import Optional, Dict, Any
+from urllib.parse import quote_plus
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 
@@ -67,15 +68,16 @@ class DatabaseConnector:
         password = self.config.get("password", "")
         database = self.config.get("database", "")
 
+        encoded_password = quote_plus(password)
         if db_type == "mysql":
-            return f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
+            return f"mysql+pymysql://{user}:{encoded_password}@{host}:{port}/{database}"
         elif db_type == "postgresql":
-            return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+            return f"postgresql://{user}:{encoded_password}@{host}:{port}/{database}"
         elif db_type == "sqlite":
             return f"sqlite:///{database}"
         elif db_type == "starrocks":
             port = self.config.get("port", 9030)
-            return f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
+            return f"mysql+pymysql://{user}:{encoded_password}@{host}:{port}/{database}"
         else:
             raise ValueError(f"不支持的数据库类型: {db_type}")
 

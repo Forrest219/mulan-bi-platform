@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote_plus
 
 from sqlalchemy import column, create_engine, func, literal, select, table, text as sa_text
 
@@ -98,14 +99,15 @@ class DqcRuleEngine:
         host = self.db_config.get("host")
         port = self.db_config.get("port")
         database = self.db_config.get("database")
+        encoded_password = quote_plus(password) if password else ""
         if self.db_type == "postgresql":
-            url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+            url = f"postgresql+psycopg2://{user}:{encoded_password}@{host}:{port}/{database}"
             connect_args = {"options": "-c default_transaction_read_only=on -c statement_timeout=60000"}
         elif self.db_type in ("mysql", "starrocks", "doris"):
-            url = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
+            url = f"mysql+pymysql://{user}:{encoded_password}@{host}:{port}/{database}"
             connect_args = {}
         else:
-            url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+            url = f"postgresql+psycopg2://{user}:{encoded_password}@{host}:{port}/{database}"
             connect_args = {}
         engine = create_engine(url, connect_args=connect_args, pool_pre_ping=True)
         return engine.connect(), True
@@ -640,14 +642,15 @@ class DqcRuleEngine:
             port = config.get("port")
             database = config.get("database")
 
+            encoded_password = quote_plus(password) if password else ""
             if db_type in ("mysql", "starrocks", "doris"):
-                url = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
+                url = f"mysql+pymysql://{user}:{encoded_password}@{host}:{port}/{database}"
             elif db_type == "sqlserver":
-                url = f"mssql+pymssql://{user}:{password}@{host}:{port}/{database}"
+                url = f"mssql+pymssql://{user}:{encoded_password}@{host}:{port}/{database}"
             elif db_type == "hive" or db_type == "hive_server2":
-                url = f"pyhive://{user}:{password}@{host}:{port}/{database}"
+                url = f"pyhive://{user}:{encoded_password}@{host}:{port}/{database}"
             else:
-                url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+                url = f"postgresql+psycopg2://{user}:{encoded_password}@{host}:{port}/{database}"
 
             engine = create_engine(url, pool_pre_ping=True)
             return engine.connect()

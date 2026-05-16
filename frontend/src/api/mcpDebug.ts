@@ -66,23 +66,14 @@ export async function callMcpTool(
   return res.json();
 }
 
-/** 获取 MCP 工具列表（通过内置 /tableau-mcp 端点的 tools/list 方法） */
+/** 获取 MCP 工具列表 */
 export async function getMcpTools(serverId?: number): Promise<McpTool[]> {
   const qs = serverId != null ? `?server_id=${serverId}` : '';
-  const res = await fetch(`${API_BASE}/tableau-mcp${qs}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+  const res = await fetch(`${API_BASE}/api/mcp-debug/tools${qs}`, {
     credentials: 'include',
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/list',
-      params: {},
-    }),
   });
   if (!res.ok) throw new Error('获取工具列表失败');
-  const data = await res.json();
-  return data?.result?.tools ?? [];
+  return res.json();
 }
 
 /** 获取 MCP 调试日志 */

@@ -328,9 +328,12 @@ async def test_mcp_draft(request: Request):
     import time as _time
     import httpx as _httpx
     start = _time.monotonic()
+    # MCP 协议基于 JSON-RPC，所有端点均只接受 POST
+    # 使用 lightweight JSON-RPC probe 避免大请求体
+    probe_payload = {"jsonrpc": "2.0", "method": "initialize", "id": 1, "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "health-probe", "version": "1.0"}}}
     try:
         async with _httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(url)
+            resp = await client.post(url, json=probe_payload)
         latency_ms = int((_time.monotonic() - start) * 1000)
         return {"status": "online", "latency_ms": latency_ms, "http_status": resp.status_code}
     except (_httpx.ConnectError, _httpx.TimeoutException) as e:
@@ -354,9 +357,10 @@ async def test_mcp_server(id: int, request: Request):
     import time as _time
     import httpx as _httpx
     start = _time.monotonic()
+    probe_payload = {"jsonrpc": "2.0", "method": "initialize", "id": 1, "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "health-probe", "version": "1.0"}}}
     try:
         async with _httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(url)
+            resp = await client.post(url, json=probe_payload)
         latency_ms = int((_time.monotonic() - start) * 1000)
         return {"status": "online", "latency_ms": latency_ms, "http_status": resp.status_code}
     except (_httpx.ConnectError, _httpx.TimeoutException) as e:

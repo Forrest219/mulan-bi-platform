@@ -169,3 +169,27 @@ async def list_mcp_debug_logs(
         "page_size": page_size,
         "pages": (total + page_size - 1) // page_size,
     }
+
+
+@router.get("/tools")
+async def list_mcp_tools(
+    server_id: Optional[int] = Query(None, description="MCP 连接 ID"),
+    current_user: dict = Depends(require_roles(["admin", "data_admin"])),
+):
+    """获取 MCP 工具列表（代理到内部 MCP Gateway 的 tools/list）。"""
+    from app.api.tableau_mcp import _process_mcp_body
+
+    mcp_body = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list",
+        "params": {},
+    }
+    try:
+        result = await _process_mcp_body(mcp_body, server_id=server_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"获取工具列表失败: {exc}")
+
+    if isinstance(result, dict):
+        return result.get("result", {}).get("tools", [])
+    return []
