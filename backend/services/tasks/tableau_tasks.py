@@ -260,12 +260,32 @@ def scheduled_sync_all():
 
             connections = _db.get_all_connections(include_inactive=False)
 
+            from services.tasks.models import BiSyncTask
+            now_dt = datetime.now()
+
+            dispatch_list = []
             for conn in connections:
                 if not conn.auto_sync_enabled:
                     continue
+                task = BiSyncTask(
+                    schedule_id=None,
+                    connection_id=conn.id,
+                    scheduled_at=now_dt,
+                    status="pending",
+                    trigger_type="scheduled",
+                )
+                db.add(task)
+                dispatch_list.append((conn, task))
 
-                logger.info("Beat: triggering sync for '%s' (conn_id=%d)", conn.name, conn.id)
-                sync_connection_task.delay(conn.id, trigger_type="scheduled")
+            db.flush()
+            db.commit()
+
+            for conn, task in dispatch_list:
+                logger.info(
+                    "Beat: triggering sync for '%s' (conn_id=%d, task_id=%d)",
+                    conn.name, conn.id, task.id,
+                )
+                sync_connection_task.delay(conn.id, trigger_type="scheduled", sync_task_id=task.id)
     finally:
         try:
             redis_client.delete(lock_key)
