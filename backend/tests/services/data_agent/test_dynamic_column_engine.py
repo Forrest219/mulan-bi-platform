@@ -118,10 +118,11 @@ def test_response_data_helper_preserves_diagnostics_contract():
     assert response_data["diagnostics"]["derived_columns"][0]["status"] == "missing_input"
 
 
-def test_mcp_first_renderer_input_receives_computed_derived_values(monkeypatch):
+def test_mcp_first_primary_path_preserves_mcp_values_without_dce(monkeypatch):
     definition = _registry_metric()
     source_fields = _input_fields(definition)
     monkeypatch.setenv("DATA_AGENT_DERIVED_METRICS_REGISTRY", str(REGISTRY_PATH))
+    monkeypatch.delenv("DATA_AGENT_DCE_SHADOW_ENABLED", raising=False)
     spec = QuerySpec.model_validate(
         {
             "intent": "aggregate",
@@ -147,8 +148,47 @@ def test_mcp_first_renderer_input_receives_computed_derived_values(monkeypatch):
         rendering_skill_content="render",
     )
 
-    assert response_data["fields"] == ["dimension_key", *source_fields, definition["label"]]
-    assert response_data["rows"] == [["segment_a", 10, 2, 5.0]]
-    assert response_data["table_display"]["columns"][-1]["key"] == definition["label"]
-    assert definition["label"] in messages[1]["content"]
-    assert "5.0" in messages[1]["content"]
+    assert response_data["fields"] == ["dimension_key", *source_fields]
+    assert response_data["rows"] == [["segment_a", 10, 2]]
+    assert "dynamic_column_engine_shadow" not in response_data.get("diagnostics", {})
+    assert definition["label"] not in messages[1]["content"]
+    assert "5.0" not in messages[1]["content"]
+
+
+def test_mcp_first_dce_shadow_diagnostics_do_not_change_primary_response(monkeypatch):
+    definition = _registry_metric()
+    source_fields = _input_fields(definition)
+    monkeypatch.setenv("DATA_AGENT_DERIVED_METRICS_REGISTRY", str(REGISTRY_PATH))
+    monkeypatch.setenv("DATA_AGENT_DCE_SHADOW_ENABLED", "true")
+    spec = QuerySpec.model_validate(
+        {
+            "intent": "aggregate",
+            "operator": "aggregate",
+            "metrics": [
+                {"field": _base_metric_name(source_fields[0]), "aggregation": "SUM"},
+                {"field": _base_metric_name(source_fields[1]), "aggregation": "SUM"},
+            ],
+            "derived_metrics": [{"name": definition["name"]}],
+            "dimensions": ["dimension_key"],
+            "sort": [],
+        }
+    )
+
+    response_data = _normalize_mcp_data(
+        {"fields": ["dimension_key", *source_fields], "rows": [["segment_a", 10, 2]]},
+        spec,
+        {"name": "unit_ds", "luid": "ds-1"},
+    )
+    messages = build_answer_prompt(
+        question="unit question",
+        response_data=response_data,
+        rendering_skill_content="render",
+    )
+
+    shadow = response_data["diagnostics"]["dynamic_column_engine_shadow"]
+    assert response_data["fields"] == ["dimension_key", *source_fields]
+    assert response_data["rows"] == [["segment_a", 10, 2]]
+    assert shadow["authoritative"] is False
+    assert shadow["shadow_fields"] == ["dimension_key", *source_fields, definition["label"]]
+    assert shadow["shadow_rows_sample"] == [["segment_a", 10, 2, 5.0]]
+    assert "dynamic_column_engine_shadow" not in messages[1]["content"]

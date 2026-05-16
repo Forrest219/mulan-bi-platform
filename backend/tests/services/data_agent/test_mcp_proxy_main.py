@@ -3,7 +3,7 @@ import uuid
 
 import pytest
 
-from services.data_agent import mcp_proxy_main
+from services.data_agent import mcp_first_main, mcp_proxy_main
 from services.data_agent.intent_classifier import IntentClassification, classify_intent
 from services.data_agent.models import BiAgentRun
 from services.data_agent.response import AgentEvent
@@ -17,10 +17,12 @@ pytestmark = pytest.mark.skip_db
 class _FakeLLM:
     def __init__(self, payload):
         self.payload = payload
+        self.calls = []
 
     async def complete(self, *, prompt, system=None, timeout=None, purpose=None):
         assert purpose == "data_agent_mcp_proxy_args"
         assert "QuerySpec" in system
+        self.calls.append({"prompt": prompt, "system": system, "timeout": timeout, "purpose": purpose})
         return {"content": json.dumps(self.payload, ensure_ascii=False)}
 
 
@@ -29,40 +31,120 @@ def _intent(intent: str = "aggregate") -> IntentClassification:
 
 
 def _context() -> ToolContext:
-    return ToolContext(session_id="s1", user_id=7, connection_id=2, trace_id="trace-proxy")
+    context = ToolContext(session_id="s1", user_id=7, connection_id=2, trace_id="trace-proxy")
+    context.datasource_luid = "ds-1"
+    context.datasource_name = "测试数据源"
+    return context
 
 
-def _patch_datasource(monkeypatch, fields=None):
-    monkeypatch.setattr(
-        mcp_proxy_main,
-        "_resolve_datasource",
-        lambda question, context, datasource_name_hint: {"name": "测试数据源", "luid": "ds-1", "asset_id": 1},
-    )
-    monkeypatch.setattr(
-        mcp_proxy_main,
-        "_queryable_fields",
-        lambda ds_info, connection_id=None: fields or ["省份", "销售额", "订单日期"],
-    )
+def _tool_names(events):
+    return [
+        event.content["tool"]
+        for event in events
+        if event.type in {"tool_call", "tool_result"} and isinstance(event.content, dict)
+    ]
+
+
+class _FakeHostCatalog:
+    async def list_tools(self):
+        return {
+            "tools": [
+                {
+                    "name": "get-datasource-metadata",
+                    "inputSchema": {
+                        "type": "object",
+                        "required": ["datasourceLuid"],
+                        "properties": {"datasourceLuid": {"type": "string"}},
+                    },
+                },
+                {
+                    "name": "query-datasource",
+                    "inputSchema": {
+                        "type": "object",
+                        "required": ["datasourceLuid", "query"],
+                        "properties": {"datasourceLuid": {"type": "string"}, "query": {"type": "object"}},
+                    },
+                },
+            ]
+        }
+
+
+class _FakeHostExecutor:
+    def __init__(self, *, query_result=None, query_error=None):
+        self.calls = []
+        self.query_result = query_result or {"fields": ["Metric A"], "rows": [[100]]}
+        self.query_error = query_error
+
+    async def execute_tool(self, tool_name, arguments, context):
+        self.calls.append({"tool_name": tool_name, "arguments": dict(arguments), "context": context})
+        if tool_name == "get-datasource-metadata":
+            return {"fields": [{"name": "Metric A", "dataType": "REAL"}]}
+        if self.query_error:
+            return self.query_error
+        return self.query_result
+
+
+class _FakeHostPlanner:
+    def __init__(self, actions=None):
+        self.actions = list(actions or [_query_tool_call(), {"action": "final", "answer": "Use response_data only."}])
+        self.calls = []
+
+    async def plan(self, **kwargs):
+        self.calls.append(kwargs)
+        if not self.actions:
+            raise AssertionError("unexpected extra MCP Host planner call")
+        return self.actions.pop(0)
+
+
+def _query_tool_call():
+    return {
+        "action": "tool_call",
+        "tool_call": {
+            "tool": "query-datasource",
+            "arguments": {
+                "datasourceLuid": "ds-1",
+                "query": {"fields": [{"fieldCaption": "Metric A", "function": "SUM"}], "filters": []},
+                "limit": 50,
+            },
+        },
+    }
+
+
+def _patch_host(monkeypatch, *, query_result=None, query_error=None, actions=None):
+    executor = _FakeHostExecutor(query_result=query_result, query_error=query_error)
+    planner = _FakeHostPlanner(actions=actions)
+    catalog = _FakeHostCatalog()
+
+    async def _load_components(**kwargs):
+        return mcp_first_main._McpHostComponents(catalog=catalog, executor=executor, planner=planner)
+
+    monkeypatch.setattr(mcp_first_main, "_load_mcp_host_components", _load_components)
+    return executor, planner
+
+
+def _forbidden_main_path_markers():
+    return {
+        "mcp_nl_tool_discovery",
+        "tableau_mcp_nl",
+        "llm_mcp_args",
+        "mcp_args_guardrail",
+        "llm_queryspec",
+        "llm_queryspec_repair",
+        "queryspec_fallback",
+        "queryspec_validator",
+        "mcp_main_queryspec_fallback",
+        "queryspec_mcp_fallback",
+    }
 
 
 @pytest.mark.asyncio
-async def test_mcp_proxy_allows_llm_args_and_executes_mcp(monkeypatch):
-    _patch_datasource(monkeypatch)
-
-    async def _fake_execute(args, context):
-        assert args == {
-            "datasourceLuid": "ds-1",
-            "query": {"fields": [{"fieldCaption": "销售额", "function": "SUM"}], "filters": []},
-            "limit": 50,
-        }
-        return {"fields": ["SUM(销售额)"], "rows": [[100]]}
-
-    monkeypatch.setattr(mcp_proxy_main, "_execute_query_datasource_args", _fake_execute)
+async def test_mcp_proxy_calls_mcp_host_loop_without_llm_args(monkeypatch):
+    executor, planner = _patch_host(monkeypatch)
 
     events = [
         event
         async for event in mcp_proxy_main.run_mcp_proxy_main_path(
-            question="总销售额是多少？",
+            question="overall Metric A",
             context=_context(),
             intent_result=_intent(),
             llm_service=_FakeLLM(
@@ -75,52 +157,39 @@ async def test_mcp_proxy_allows_llm_args_and_executes_mcp(monkeypatch):
         )
     ]
 
-    tool_names = [
-        event.content["tool"]
-        for event in events
-        if event.type in {"tool_call", "tool_result"} and isinstance(event.content, dict)
-    ]
-    assert "llm_mcp_args" in tool_names
-    assert "mcp_args_guardrail" in tool_names
+    tool_names = _tool_names(events)
+    assert "mcp_host_catalog" in tool_names
+    assert "mcp_host_planner" in tool_names
     assert "tableau_mcp" in tool_names
-    assert "llm_queryspec" not in tool_names
-    assert "queryspec_validator" not in tool_names
+    assert "mcp_host_final_response" in tool_names
+    assert _forbidden_main_path_markers().isdisjoint(tool_names)
+    assert [call["tool_name"] for call in executor.calls] == ["get-datasource-metadata", "query-datasource"]
+    assert planner.calls[0]["previous_response_data"] is None
 
-    guardrail_result = next(
+    response_data = next(
         event.content["result"]["data"]
         for event in events
-        if event.type == "tool_result" and event.content.get("tool") == "mcp_args_guardrail"
+        if event.type == "tool_result" and event.content.get("tool") == "mcp_host_final_response"
     )
-    assert guardrail_result["decision"] == "allow"
-
-    mcp_result = next(
-        event.content["result"]["data"]
-        for event in events
-        if event.type == "tool_result" and event.content.get("tool") == "tableau_mcp"
-    )
-    assert mcp_result["chain_mode"] == "mcp_proxy"
-    assert mcp_result["guardrail_decision"] == "allow"
-    assert mcp_result["fields"] == ["SUM(销售额)"]
-    assert mcp_result["rows"] == [[100]]
-    assert mcp_result["table_display"]["columns"][0]["semantic_type"] == "metric"
+    assert response_data["chain_mode"] == "mcp_proxy"
+    assert response_data["mcp_host"] is True
+    assert response_data["fields"] == ["Metric A"]
+    assert response_data["rows"] == [[100]]
+    assert response_data["table_display"]["columns"][0]["semantic_type"] == "metric"
     assert events[-1].type == "answer"
 
 
 @pytest.mark.asyncio
-async def test_mcp_proxy_repairs_limit_and_records_trace(monkeypatch):
-    _patch_datasource(monkeypatch)
-    executed_args = {}
-
-    async def _fake_execute(args, context):
-        executed_args.update(args)
-        return {"fields": ["省份", "SUM(销售额)"], "rows": [["华东", 100]]}
-
-    monkeypatch.setattr(mcp_proxy_main, "_execute_query_datasource_args", _fake_execute)
+async def test_mcp_proxy_mcp_error_returns_structured_error_without_queryspec(monkeypatch):
+    _patch_host(
+        monkeypatch,
+        query_error={"success": False, "error_code": "MCP_UPSTREAM_ERROR", "error": "upstream unavailable"},
+    )
 
     events = [
         event
         async for event in mcp_proxy_main.run_mcp_proxy_main_path(
-            question="按省份看销售额",
+            question="Metric A by Dimension A",
             context=_context(),
             intent_result=_intent(),
             llm_service=_FakeLLM(
@@ -135,29 +204,65 @@ async def test_mcp_proxy_repairs_limit_and_records_trace(monkeypatch):
         )
     ]
 
-    assert executed_args["limit"] == 100
-    mcp_result = next(
-        event.content["result"]["data"]
-        for event in events
-        if event.type == "tool_result" and event.content.get("tool") == "tableau_mcp"
-    )
-    assert mcp_result["guardrail_decision"] == "repair"
-    assert mcp_result["guardrail_repairs"][0]["type"] == "limit_default"
+    tool_names = _tool_names(events)
+    assert "tableau_mcp" in tool_names
+    assert _forbidden_main_path_markers().isdisjoint(tool_names)
+    assert events[-1].type == "error"
+    assert events[-1].content["error_code"] == "MCP_UPSTREAM_ERROR"
 
 
 @pytest.mark.asyncio
-async def test_mcp_proxy_reject_does_not_enter_queryspec_or_mcp(monkeypatch):
-    _patch_datasource(monkeypatch)
-
-    async def _unexpected_execute(args, context):
-        raise AssertionError("guardrail reject must not execute MCP")
-
-    monkeypatch.setattr(mcp_proxy_main, "_execute_query_datasource_args", _unexpected_execute)
+async def test_mcp_proxy_followup_context_is_passed_to_host_not_used_to_construct_fields(monkeypatch):
+    executor, planner = _patch_host(
+        monkeypatch,
+        query_result={
+            "fields": ["Dimension A", "Year A", "Metric A", "Metric B"],
+            "rows": [["x", 2025, 10, 4]],
+        },
+    )
+    llm = _FakeLLM(
+        {
+            "datasourceLuid": "ds-1",
+            "query": {
+                "fields": [
+                    {"fieldCaption": "日期字段", "function": "YEAR"},
+                    {"fieldCaption": "指标一", "function": "SUM"},
+                ],
+                "filters": [],
+            },
+            "limit": 100,
+        }
+    )
 
     events = [
         event
         async for event in mcp_proxy_main.run_mcp_proxy_main_path(
-            question="按不存在字段看销售额",
+            question="continue by year",
+            context=_context(),
+            intent_result=_intent(),
+            analysis_context={
+                "datasource_name": "测试数据源",
+                "response_data": {"fields": ["Metric A"], "rows": [[100]]},
+            },
+            llm_service=llm,
+        )
+    ]
+
+    assert executor.calls[1]["tool_name"] == "query-datasource"
+    assert executor.calls[1]["arguments"] == _query_tool_call()["tool_call"]["arguments"]
+    assert planner.calls[0]["previous_response_data"] == {"fields": ["Metric A"], "rows": [[100]]}
+    assert events[-1].type == "answer"
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_mcp_proxy_q1_like_question_enters_host_not_llm_or_queryspec(monkeypatch):
+    _patch_host(monkeypatch)
+
+    events = [
+        event
+        async for event in mcp_proxy_main.run_mcp_proxy_main_path(
+            question="Metric A by Dimension A",
             context=_context(),
             intent_result=_intent(),
             llm_service=_FakeLLM(
@@ -173,21 +278,42 @@ async def test_mcp_proxy_reject_does_not_enter_queryspec_or_mcp(monkeypatch):
         )
     ]
 
+    tool_names = _tool_names(events)
+    assert {"mcp_host_catalog", "mcp_host_planner", "tableau_mcp", "mcp_host_final_response"}.issubset(set(tool_names))
+    assert _forbidden_main_path_markers().isdisjoint(tool_names)
+    assert events[-1].type == "answer"
+
+
+@pytest.mark.asyncio
+async def test_mcp_proxy_requires_explicit_datasource(monkeypatch):
+    async def _unexpected_components(**kwargs):
+        raise AssertionError("Host runtime must not load without an explicit datasource")
+
+    monkeypatch.setattr(mcp_first_main, "_load_mcp_host_components", _unexpected_components)
+
+    events = [
+        event
+        async for event in mcp_proxy_main.run_mcp_proxy_main_path(
+            question="整体销售额和利润率是多少",
+            context=ToolContext(session_id="s1", user_id=7, connection_id=2, trace_id="trace-proxy"),
+            intent_result=_intent(),
+            llm_service=_FakeLLM(
+                {
+                    "datasourceLuid": "ds-1",
+                    "query": {"fields": ["销售额", "利润率"], "filters": []},
+                    "limit": 20,
+                }
+            ),
+        )
+    ]
+
     error = events[-1]
     assert error.type == "error"
-    assert error.content["fallback_type"] == "guardrail_rejected"
-    assert error.content["error_code"] == "MCP_ARGS_UNKNOWN_FIELD"
-    assert error.content["controlled_chain"]["detail"]["chain_mode"] == "mcp_proxy"
-    assert error.content["controlled_chain"]["detail"]["guardrail_decision"] == "reject"
+    assert error.content["error_code"] == "MCP_EXPLICIT_DATASOURCE_REQUIRED"
+    tool_names = _tool_names(events)
+    assert "mcp_host_catalog" not in tool_names
+    assert "llm_mcp_args" not in tool_names
 
-    tool_names = [
-        event.content["tool"]
-        for event in events
-        if event.type in {"tool_call", "tool_result"} and isinstance(event.content, dict)
-    ]
-    assert "tableau_mcp" not in tool_names
-    assert "queryspec_fallback" not in tool_names
-    assert "llm_queryspec" not in tool_names
 
 
 class _FakeDb:

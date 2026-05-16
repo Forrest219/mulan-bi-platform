@@ -1,18 +1,20 @@
-"""Set-difference operator for churn / missing-record questions."""
+"""Set-difference operator for missing-record questions."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 from services.data_agent.query_plan import (
     OperatorResult,
     QueryPlanContext,
     QueryPlanStep,
     compact,
+    field_name,
     first_dimension,
     normalize_result_table,
 )
 from services.data_agent.semantic_operators.base import BaseSemanticOperator
+from services.data_agent.table_display import infer_table_display_schema
 
 
 class SetDifferenceOperator(BaseSemanticOperator):
@@ -64,37 +66,110 @@ class SetDifferenceOperator(BaseSemanticOperator):
 
     def reduce(self, ctx: QueryPlanContext, step_results: dict[str, dict[str, Any]]) -> OperatorResult:
         entity = _target_dimension(ctx)
-        base_fields, base_rows = normalize_result_table(step_results.get("universe_keys") or step_results["base_keys"])
-        compare_fields, compare_rows = normalize_result_table(step_results.get("occurred_keys") or step_results["compare_keys"])
-        base_idx = _field_index(base_fields, entity)
-        compare_idx = _field_index(compare_fields, entity)
-        base_keys = _key_set(base_rows, base_idx)
-        compare_keys = _key_set(compare_rows, compare_idx)
-        diff = sorted(base_keys - compare_keys, key=lambda value: str(value))
-        sample_limit = min(int(ctx.params.get("sample_limit") or 100), 100)
-        sample = diff[:sample_limit]
-        definition = ctx.params.get("definition") or "universe key set minus occurred key set"
-        return OperatorResult(
-            fields=[entity],
-            rows=[[value] for value in sample],
-            summary=f"{definition}; count={len(diff)}; sample_rows={len(sample)}",
-            intent=self.name,
-            confidence=0.95,
-            result_shape="key_set",
-            explain={
-                "operator": self.name,
-                "definition": definition,
-                "universe_step": "universe_keys",
-                "occurred_step": "occurred_keys",
-                "visible_sample_limit": sample_limit,
-            },
-            diagnostics={
-                "universe_count": len(base_keys),
-                "occurred_count": len(compare_keys),
-                "difference_count": len(diff),
-                "sampled": len(sample) < len(diff),
-            },
+        return reduce_set_difference_result_sets(
+            target_dimension=entity,
+            universe_result=step_results.get("universe_keys") or step_results["base_keys"],
+            occurred_result=step_results.get("occurred_keys") or step_results["compare_keys"],
+            definition=str(ctx.params.get("definition") or "universe key set minus occurred key set"),
+            sample_limit=_positive_int(ctx.params.get("sample_limit"), default=100, maximum=100),
         )
+
+
+def reduce_set_difference_result_sets(
+    *,
+    target_dimension: str,
+    universe_result: Mapping[str, Any],
+    occurred_result: Mapping[str, Any],
+    definition: str = "universe key set minus occurred key set",
+    sample_limit: int = 100,
+    universe_step_name: str = "universe_keys",
+    occurred_step_name: str = "occurred_keys",
+) -> OperatorResult:
+    """Return the deterministic set difference from two MCP result tables.
+
+    The only factual values used here are dimension values returned in the two
+    MCP result sets. The caller controls how those result sets are queried.
+    """
+
+    entity = str(target_dimension or "").strip()
+    base_fields, base_rows = normalize_result_table(dict(universe_result or {}))
+    compare_fields, compare_rows = normalize_result_table(dict(occurred_result or {}))
+    if not entity:
+        entity = _first_returned_field_name(base_fields, compare_fields) or "dimension"
+
+    base_idx = _field_index(base_fields, entity)
+    compare_idx = _field_index(compare_fields, entity)
+    base_keys = _key_set(base_rows, base_idx)
+    compare_keys = _key_set(compare_rows, compare_idx)
+    diff = sorted(base_keys - compare_keys, key=lambda value: str(value))
+    limit = _positive_int(sample_limit, default=100, maximum=100)
+    sample = diff[:limit]
+    fields = [entity]
+    rows = [[value] for value in sample]
+    return OperatorResult(
+        fields=fields,
+        rows=rows,
+        summary=f"{definition}; count={len(diff)}; sample_rows={len(sample)}",
+        intent=SetDifferenceOperator.name,
+        confidence=0.95,
+        result_shape="key_set",
+        table_display=infer_table_display_schema(
+            fields,
+            rows,
+            operator=SetDifferenceOperator.name,
+            metric_names=[],
+        ),
+        explain={
+            "operator": SetDifferenceOperator.name,
+            "definition": definition,
+            "universe_step": universe_step_name,
+            "occurred_step": occurred_step_name,
+            "visible_sample_limit": limit,
+        },
+        diagnostics={
+            "universe_count": len(base_keys),
+            "occurred_count": len(compare_keys),
+            "difference_count": len(diff),
+            "sampled": len(sample) < len(diff),
+        },
+    )
+
+
+def build_set_difference_response_data(
+    *,
+    target_dimension: str,
+    universe_result: Mapping[str, Any],
+    occurred_result: Mapping[str, Any],
+    datasource_name: str = "",
+    datasource_luid: str = "",
+    definition: str = "universe key set minus occurred key set",
+    sample_limit: int = 100,
+    fallback_detail: Mapping[str, Any] | None = None,
+    mcp_steps: Mapping[str, Any] | None = None,
+    chain_mode: str = "mcp_set_difference_fallback",
+) -> dict[str, Any]:
+    """Build one-column response_data for a QuerySpec-free MCP set difference."""
+
+    result = reduce_set_difference_result_sets(
+        target_dimension=target_dimension,
+        universe_result=universe_result,
+        occurred_result=occurred_result,
+        definition=definition,
+        sample_limit=sample_limit,
+    )
+    payload = result.to_tool_data(datasource_name=datasource_name)
+    payload.update({
+        "datasource_luid": datasource_luid,
+        "operator": SetDifferenceOperator.name,
+        "chain_mode": chain_mode,
+    })
+    if fallback_detail:
+        payload["controlled_fallback"] = dict(fallback_detail)
+        if fallback_detail.get("fallback_trace_event"):
+            payload["fallback_trace_event"] = fallback_detail.get("fallback_trace_event")
+    if mcp_steps:
+        payload["mcp_steps"] = dict(mcp_steps)
+    return payload
 
 
 def _as_filter_list(value: Any) -> list[dict[str, Any]]:
@@ -130,7 +205,7 @@ def _occurred_filters(ctx: QueryPlanContext, universe_filters: list[dict[str, An
 def _field_index(fields: list[Any], expected: str) -> int:
     expected_compact = compact(expected)
     for index, field in enumerate(fields):
-        if compact(field) == expected_compact:
+        if compact(field_name(field)) == expected_compact:
             return index
     return 0
 
@@ -144,3 +219,20 @@ def _key_set(rows: list[list[Any]], index: int) -> set[Any]:
         if value is not None and str(value) != "":
             values.add(value)
     return values
+
+
+def _first_returned_field_name(*field_lists: list[Any]) -> str:
+    for fields in field_lists:
+        for field in fields:
+            name = field_name(field).strip()
+            if name:
+                return name
+    return ""
+
+
+def _positive_int(value: Any, *, default: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return min(max(parsed, 1), maximum)

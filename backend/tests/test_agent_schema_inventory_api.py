@@ -20,6 +20,14 @@ def _parse_sse(response):
     return events
 
 
+def _business_events(events):
+    return [
+        event
+        for event in events
+        if event.get("type") not in {"intent_classifier", "route_decision", "explainability"}
+    ]
+
+
 def _override_db(db_session):
     def _get_db():
         yield db_session
@@ -100,11 +108,12 @@ def test_schema_inventory_stream_uses_deterministic_route_and_persists_observabi
 
     assert response.status_code == 200
     events = _parse_sse(response)
-    event_types = [event["type"] for event in events]
+    core_events = _business_events(events)
+    event_types = [event["type"] for event in core_events]
     assert event_types == ["metadata", "thinking", "tool_call", "tool_result", "token", "done"]
-    assert events[2] == {"type": "tool_call", "tool": "schema", "params": {}}
-    token_answer = "".join(event["content"] for event in events if event["type"] == "token")
-    done = events[-1]
+    assert core_events[2] == {"type": "tool_call", "tool": "schema", "params": {}}
+    token_answer = "".join(event["content"] for event in core_events if event["type"] == "token")
+    done = core_events[-1]
     assert done["answer"] == token_answer
     assert done["response_type"] == "schema_inventory"
     assert done["response_data"] == result.response_data
@@ -141,6 +150,16 @@ def test_schema_inventory_stream_uses_deterministic_route_and_persists_observabi
     assert assistant.tools_used == ["schema"]
     assert assistant.steps_count == 1
 
+    app.dependency_overrides[get_current_user] = _current_user
+    app.dependency_overrides[get_db] = _override_db(db_session)
+    try:
+        messages_response = client.get(f"/api/agent/conversations/{core_events[0]['conversation_id']}/messages")
+        assert messages_response.status_code == 200
+        assistant_messages = [m for m in messages_response.json() if m["role"] == "assistant"]
+        assert assistant_messages[-1]["run_id"] == str(run_id)
+    finally:
+        app.dependency_overrides.clear()
+
 
 def test_schema_inventory_disabled_returns_business_error_without_fallback(db_session):
     from app.main import app
@@ -169,9 +188,10 @@ def test_schema_inventory_disabled_returns_business_error_without_fallback(db_se
 
     assert response.status_code == 200
     events = _parse_sse(response)
-    assert [event["type"] for event in events] == ["metadata", "error"]
-    assert events[-1]["error_code"] == "AGENT_003"
-    assert "schema 工具已禁用" in events[-1]["message"]
+    core_events = _business_events(events)
+    assert [event["type"] for event in core_events] == ["metadata", "error"]
+    assert core_events[-1]["error_code"] == "AGENT_003"
+    assert "schema 工具已禁用" in core_events[-1]["message"]
     route_mock.assert_not_awaited()
 
 
@@ -214,9 +234,10 @@ def test_non_inventory_question_keeps_existing_react_path(db_session):
 
     assert response.status_code == 200
     events = _parse_sse(response)
-    assert events[0]["type"] == "metadata"
-    assert events[-1]["type"] == "done"
-    assert all(event["type"] == "token" for event in events[1:-1])
-    assert "".join(event["content"] for event in events[1:-1]) == "ReAct answer"
-    assert events[-1]["answer"] == "ReAct answer"
+    core_events = _business_events(events)
+    assert core_events[0]["type"] == "metadata"
+    assert core_events[-1]["type"] == "done"
+    assert all(event["type"] == "token" for event in core_events[1:-1])
+    assert "".join(event["content"] for event in core_events[1:-1]) == "ReAct answer"
+    assert core_events[-1]["answer"] == "ReAct answer"
     route_mock.assert_not_awaited()

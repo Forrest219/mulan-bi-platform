@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import inspect
+import importlib
 import json
 import logging
 import os
 import re
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Mapping, Optional
 
 from services.data_agent.answer_prompt_builder import build_answer_prompt
@@ -35,10 +38,29 @@ from services.llm.service import (
 
 logger = logging.getLogger(__name__)
 
+ENV_DCE_SHADOW_ENABLED = "DATA_AGENT_DCE_SHADOW_ENABLED"
 FALLBACK_TRIGGERED_EVENT = "FALLBACK_TRIGGERED"
 WARN_EVENT = "WARN"
+MCP_MAIN_CHAIN_MODE = "mcp_first_mcp_main"
+MCP_MAIN_QUERYSPEC_FALLBACK_CHAIN_MODE = "mcp_main_queryspec_fallback"
 QUERYSPEC_MCP_FALLBACK_CHAIN_MODE = "queryspec_mcp_fallback"
 ENV_QUERYSPEC_MCP_FALLBACK_ENABLED = "DATA_AGENT_QUERYSPEC_MCP_FALLBACK_ENABLED"
+ENV_MCP_NL_QUERY_TOOL_NAME = "DATA_AGENT_MCP_NL_QUERY_TOOL_NAME"
+ENV_TABLEAU_MCP_NL_QUERY_TOOL_NAME = "TABLEAU_MCP_NL_QUERY_TOOL_NAME"
+ENV_MCP_HOST_THIN_FALLBACK_ENABLED = "DATA_AGENT_MCP_HOST_THIN_FALLBACK_ENABLED"
+MCP_NL_TOOL_UNAVAILABLE = "MCP_NL_TOOL_UNAVAILABLE"
+MCP_EXPLICIT_DATASOURCE_REQUIRED = "MCP_EXPLICIT_DATASOURCE_REQUIRED"
+MCP_HOST_RUNTIME_UNAVAILABLE = "MCP_HOST_RUNTIME_UNAVAILABLE"
+MCP_HOST_PLANNER_UNAVAILABLE = "MCP_HOST_PLANNER_UNAVAILABLE"
+MCP_HOST_CATALOG_UNAVAILABLE = "MCP_HOST_CATALOG_UNAVAILABLE"
+MCP_HOST_TOOL_EXECUTION_FAILED = "MCP_HOST_TOOL_EXECUTION_FAILED"
+MCP_HOST_NO_QUERY_RESULT = "MCP_HOST_NO_QUERY_RESULT"
+MCP_HOST_LOOP_BUDGET_EXHAUSTED = "MCP_HOST_LOOP_BUDGET_EXHAUSTED"
+MCP_HOST_TOOL_NOT_IN_CATALOG = "MCP_HOST_TOOL_NOT_IN_CATALOG"
+MCP_HOST_METADATA_TOOL_NAME = "get-datasource-metadata"
+MCP_HOST_QUERY_TOOL_NAME = "query-datasource"
+MCP_HOST_MAX_TOOL_CALLS = 4
+MCP_HOST_REPAIR_BUDGET = 1
 JSON_PLANNING_TIMEOUT_SECONDS = 18
 QS_JSON_INVALID = "QS_JSON_INVALID"
 QS_JSON_NOT_FOUND = "QS_JSON_NOT_FOUND"
@@ -57,6 +79,35 @@ NON_REPAIRABLE_LLM_ERROR_CODES = {
     LLM_EMPTY_RESPONSE,
     LLM_THINKING_ONLY_RESPONSE,
 }
+_FOLLOWUP_REFERENCE_RE = re.compile(r"(这个|这些|上述|上面|上一[轮次]|该|继续)")
+_QUERYABLE_FIELDS_CONTEXT: ContextVar[tuple[str, ...]] = ContextVar("mcp_first_queryable_fields", default=())
+
+
+@dataclass(frozen=True)
+class _McpMainAttempt:
+    success: bool
+    events: list[AgentEvent]
+    reason: Optional[str] = None
+    error_code: Optional[str] = None
+    original_error: Any = None
+    message: str = "MCP 主路由未能完成查询。"
+    user_hint: str = "已切换到 QuerySpec fallback 继续尝试。"
+
+
+@dataclass(frozen=True)
+class _McpHostComponents:
+    catalog: Any
+    executor: Any
+    planner: Any
+
+
+@dataclass(frozen=True)
+class _McpHostToolResult:
+    success: bool
+    data: Any = None
+    error_code: Optional[str] = None
+    error: Any = None
+    raw: Any = None
 
 
 async def run_mcp_first_main_path(
@@ -68,34 +119,157 @@ async def run_mcp_first_main_path(
     analysis_context: Optional[Mapping[str, Any]] = None,
     llm_service: Optional[LLMService] = None,
 ) -> AsyncGenerator[AgentEvent, None]:
-    """Execute the controlled §16 chain for data intents."""
+    """Execute the MCP Host route for data intents."""
 
-    loader = SkillPromptLoader()
-    llm = llm_service or LLMService()
+    yield AgentEvent(type="thinking", content=f"已进入 Tableau MCP Host 主链路：{intent_result.intent}。")
 
-    yield AgentEvent(type="thinking", content=f"已识别为受控问数意图：{intent_result.intent}。")
-
-    ds_info = _resolve_datasource(question, context, datasource_name_hint)
+    ds_info = _resolve_explicit_datasource(
+        context=context,
+        datasource_name_hint=datasource_name_hint,
+        analysis_context=analysis_context,
+    )
     if not ds_info:
-        yield AgentEvent(type="error", content=_fallback_payload(
-            "datasource_not_matched",
-            "未找到可安全查询的 Tableau 数据源。",
-            "请先选择一个 Tableau 数据源，或在问题中明确数据源名称。",
+        yield AgentEvent(type="error", content=_mcp_passthrough_error_payload(
+            MCP_EXPLICIT_DATASOURCE_REQUIRED,
+            "请先选择一个 Tableau 数据源后再提问。",
+            "当前主链路不从问题文本推断数据源；请在请求上下文中传入 datasource_luid 或已选择的数据源。",
             context.trace_id,
             intent_result,
+            chain_mode=MCP_MAIN_CHAIN_MODE,
+            detail={"chain_mode": MCP_MAIN_CHAIN_MODE, "reason": "missing_explicit_datasource"},
         ))
         return
 
-    field_captions = _queryable_fields(ds_info, connection_id=context.connection_id)
-    if not field_captions:
-        yield AgentEvent(type="error", content=_fallback_payload(
-            "query_plan_unavailable",
-            "当前数据源没有可用于 MCP/VizQL 查询的字段。",
-            "请确认 published datasource 字段已同步，且字段可被 Tableau MCP 查询。",
-            context.trace_id,
-            intent_result,
-        ))
+    yield AgentEvent(type="tool_call", content={
+        "tool": "context_resolver",
+        "params": {"chain_mode": MCP_MAIN_CHAIN_MODE, "intent": intent_result.intent},
+    })
+    yield AgentEvent(type="tool_result", content={
+        "tool": "context_resolver",
+        "result": {"data": _context_trace_payload(question, analysis_context)},
+    })
+
+    field_captions, _metadata_fields = _queryable_field_context(ds_info, context.connection_id)
+    deterministic_operator = infer_fallback_operator(question, intent_result.intent)
+    if deterministic_operator in {
+        "aggregate",
+        "ranking",
+        "customer_record",
+        "set_difference",
+        "trend_condition",
+        "all_period_condition",
+        "root_cause",
+    }:
+        raw_spec = _build_fallback_queryspec(
+            question=question,
+            intent_result=intent_result,
+            datasource=ds_info,
+            queryable_fields=field_captions,
+            analysis_context=analysis_context,
+            reason="semantic_operator_preflight",
+        )
+        if raw_spec:
+            yield AgentEvent(type="tool_call", content={
+                "tool": "queryspec_fallback",
+                "params": {
+                    "reason": "semantic_operator_preflight",
+                    "intent": intent_result.intent,
+                    "operator": deterministic_operator,
+                },
+            })
+            yield AgentEvent(type="tool_result", content={
+                "tool": "queryspec_fallback",
+                "result": {
+                    "event": FALLBACK_TRIGGERED_EVENT,
+                    "data": {
+                        "queryspec": _redact_large(raw_spec),
+                        "reason": "semantic_operator_preflight",
+                        "original_error": None,
+                    },
+                },
+            })
+            spec = _normalize_queryspec_for_mcp(
+                QuerySpec.model_validate(raw_spec),
+                question,
+                field_captions,
+                ds_info,
+                analysis_context,
+            )
+            yield AgentEvent(type="tool_call", content={
+                "tool": "tableau_mcp",
+                "params": {
+                    "operator": spec.effective_operator,
+                    "datasource_luid": ds_info.get("luid"),
+                    "chain_mode": MCP_MAIN_QUERYSPEC_FALLBACK_CHAIN_MODE,
+                },
+            })
+            try:
+                mcp_data = await _execute_queryspec(
+                    spec,
+                    ds_info,
+                    context,
+                    question,
+                    queryable_fields=field_captions,
+                )
+            except Exception as exc:
+                logger.exception("semantic preflight MCP execution failed")
+                yield AgentEvent(type="tool_result", content={
+                    "tool": "tableau_mcp",
+                    "result": {
+                        "success": False,
+                        "error": str(exc),
+                        "data": {"error": str(exc), "chain_mode": MCP_MAIN_QUERYSPEC_FALLBACK_CHAIN_MODE},
+                    },
+                })
+            else:
+                yield AgentEvent(type="tool_result", content={
+                    "tool": "tableau_mcp",
+                    "result": {"data": mcp_data},
+                })
+                rendered = _render_deterministic_answer(mcp_data, spec)
+                yield AgentEvent(type="tool_call", content={
+                    "tool": "answer_renderer",
+                    "params": {
+                        "renderer": "deterministic_table",
+                        "operator": spec.effective_operator,
+                        "row_count": len(mcp_data.get("rows") or []),
+                    },
+                })
+                yield AgentEvent(type="tool_result", content={
+                    "tool": "answer_renderer",
+                    "result": {"data": mcp_data, "renderer": "deterministic_table"},
+                })
+                yield AgentEvent(type="answer", content=rendered)
+                return
+
+    mcp_main_attempt = await _run_mcp_main_route(
+        question=question,
+        context=context,
+        intent_result=intent_result,
+        datasource=ds_info,
+        analysis_context=analysis_context,
+        llm_service=llm_service,
+        chain_mode=MCP_MAIN_CHAIN_MODE,
+    )
+    for event in mcp_main_attempt.events:
+        yield event
+    if mcp_main_attempt.success:
         return
+
+    yield AgentEvent(type="error", content=_mcp_passthrough_error_payload(
+        mcp_main_attempt.error_code or MCP_NL_TOOL_UNAVAILABLE,
+        mcp_main_attempt.message,
+        mcp_main_attempt.user_hint,
+        context.trace_id,
+        intent_result,
+        chain_mode=MCP_MAIN_CHAIN_MODE,
+        detail={
+            "chain_mode": MCP_MAIN_CHAIN_MODE,
+            "reason": mcp_main_attempt.reason or MCP_NL_TOOL_UNAVAILABLE,
+            "original_error": _queryspec_original_error(mcp_main_attempt.original_error),
+        },
+    ))
+    return
 
     planning_skill = loader.load_planning(intent_result.intent)
     yield AgentEvent(type="tool_call", content={
@@ -326,8 +500,7 @@ async def run_mcp_first_main_path(
             })
 
     try:
-        spec = QuerySpec.model_validate(raw_spec)
-        spec = _normalize_mcp_handled_metrics(spec, question, field_captions)
+        spec = _normalize_queryspec_for_mcp(QuerySpec.model_validate(raw_spec), question, field_captions, ds_info, analysis_context)
     except Exception as exc:
         model_error = exc
         if not queryspec_repair_attempted:
@@ -350,7 +523,7 @@ async def run_mcp_first_main_path(
             if repair_result.get("ok"):
                 raw_spec = repair_result["json"]
                 try:
-                    spec = _normalize_mcp_handled_metrics(QuerySpec.model_validate(raw_spec), question, field_captions)
+                    spec = _normalize_queryspec_for_mcp(QuerySpec.model_validate(raw_spec), question, field_captions, ds_info, analysis_context)
                     model_error = None
                 except Exception as repair_exc:
                     model_error = repair_exc
@@ -460,7 +633,7 @@ async def run_mcp_first_main_path(
                 },
             })
             try:
-                spec = _normalize_mcp_handled_metrics(QuerySpec.model_validate(raw_spec), question, field_captions)
+                spec = _normalize_queryspec_for_mcp(QuerySpec.model_validate(raw_spec), question, field_captions, ds_info, analysis_context)
             except Exception as repair_exc:
                 async for event in _run_queryspec_mcp_fallback(
                     question=question,
@@ -539,7 +712,7 @@ async def run_mcp_first_main_path(
                 },
             })
             try:
-                spec = _normalize_mcp_handled_metrics(QuerySpec.model_validate(fallback_raw), question, field_captions)
+                spec = _normalize_queryspec_for_mcp(QuerySpec.model_validate(fallback_raw), question, field_captions, ds_info, analysis_context)
             except Exception as repair_exc:
                 async for event in _run_queryspec_mcp_fallback(
                     question=question,
@@ -644,7 +817,7 @@ async def run_mcp_first_main_path(
             if repair_result.get("ok"):
                 raw_spec = repair_result["json"]
                 try:
-                    spec = _normalize_mcp_handled_metrics(QuerySpec.model_validate(raw_spec), question, field_captions)
+                    spec = _normalize_queryspec_for_mcp(QuerySpec.model_validate(raw_spec), question, field_captions, ds_info, analysis_context)
                     validation = validate_queryspec(
                         spec,
                         field_captions,
@@ -737,7 +910,7 @@ async def run_mcp_first_main_path(
                 },
             })
             try:
-                spec = _normalize_mcp_handled_metrics(QuerySpec.model_validate(fallback_raw), question, field_captions)
+                spec = _normalize_queryspec_for_mcp(QuerySpec.model_validate(fallback_raw), question, field_captions, ds_info, analysis_context)
             except Exception as repair_exc:
                 async for event in _run_queryspec_mcp_fallback(
                     question=question,
@@ -822,20 +995,30 @@ async def run_mcp_first_main_path(
         "params": {"operator": spec.effective_operator, "datasource_luid": ds_info.get("luid")},
     })
     try:
-        mcp_data = await _execute_queryspec(spec, ds_info, context, question)
+        mcp_data = await _execute_queryspec(spec, ds_info, context, question, queryable_fields=field_captions)
     except Exception as exc:
         logger.exception("controlled MCP execution failed")
         yield AgentEvent(type="tool_result", content={
             "tool": "tableau_mcp",
             "result": {"success": False, "error": str(exc), "data": {"error": str(exc)}},
         })
-        yield AgentEvent(type="error", content=_fallback_payload(
-            "mcp_execution_failed",
-            "Tableau MCP 查询失败，本次不输出结论。",
-            "请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
-            context.trace_id,
-            intent_result,
-        ))
+        async for event in _run_queryspec_mcp_fallback(
+            question=question,
+            context=context,
+            intent_result=intent_result,
+            datasource=ds_info,
+            queryable_fields=field_captions,
+            analysis_context=analysis_context,
+            llm=llm,
+            phase="queryspec_mcp_execution",
+            reason="mcp_execution_failed",
+            original_error=exc,
+            error_code="mcp_execution_failed",
+            message="Tableau MCP 查询失败，本次不输出结论。",
+            user_hint="请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+            failure_fallback_type="query_plan_unavailable",
+        ):
+            yield event
         return
     yield AgentEvent(type="tool_result", content={
         "tool": "tableau_mcp",
@@ -935,7 +1118,10 @@ def _resolve_datasource(question: str, context: ToolContext, datasource_name_hin
     return route_datasource(question, connection_id=context.connection_id)
 
 
-def _queryable_fields(ds_info: Mapping[str, Any], connection_id: Optional[int] = None) -> list[str]:
+def _queryable_field_context(
+    ds_info: Mapping[str, Any],
+    connection_id: Optional[int] = None,
+) -> tuple[list[str], list[dict[str, Any]]]:
     luid = ds_info.get("luid")
     if luid and connection_id:
         try:
@@ -945,34 +1131,43 @@ def _queryable_fields(ds_info: Mapping[str, Any], connection_id: Optional[int] =
                 str(luid),
                 timeout=20,
             )
-            mcp_fields = _extract_mcp_field_names(metadata)
+            field_metadata = _extract_mcp_field_metadata(metadata)
+            mcp_fields = _field_metadata_names(field_metadata)
             if mcp_fields:
-                return mcp_fields
+                return mcp_fields, field_metadata
         except Exception:
             logger.warning("MCP metadata fields unavailable; falling back to local cache", exc_info=True)
 
     asset_id = ds_info.get("asset_id")
     if not asset_id:
-        return []
+        return [], []
     fields = get_datasource_fields_cached(asset_id) or []
-    return [str(field) for field in fields if str(field or "").strip()]
+    return [str(field) for field in fields if str(field or "").strip()], []
 
 
-def _extract_mcp_field_names(metadata: Mapping[str, Any]) -> list[str]:
+def _queryable_fields(ds_info: Mapping[str, Any], connection_id: Optional[int] = None) -> list[str]:
+    fields, metadata = _queryable_field_context(ds_info, connection_id=connection_id)
+    if metadata and isinstance(ds_info, dict):
+        ds_info.setdefault("metadata_fields", metadata)
+    return fields
+
+
+def _extract_mcp_field_metadata(metadata: Mapping[str, Any]) -> list[dict[str, Any]]:
     seen: set[str] = set()
-    names: list[str] = []
+    fields: list[dict[str, Any]] = []
 
-    def add(value: Any) -> None:
-        name = str(value or "").strip()
+    def add(item: Any) -> None:
+        if isinstance(item, Mapping):
+            payload = dict(item)
+        else:
+            payload = {"name": str(item or "").strip()}
+        name = _field_caption(payload)
         if name and name not in seen:
             seen.add(name)
-            names.append(name)
+            fields.append(payload)
 
     for item in metadata.get("fields") or []:
-        if isinstance(item, Mapping):
-            add(item.get("name") or item.get("caption") or item.get("fieldCaption"))
-        else:
-            add(item)
+        add(item)
 
     raw = metadata.get("raw")
     if isinstance(raw, Mapping):
@@ -980,12 +1175,13 @@ def _extract_mcp_field_names(metadata: Mapping[str, Any]) -> list[str]:
             if not isinstance(group, Mapping):
                 continue
             for item in group.get("fields") or []:
-                if isinstance(item, Mapping):
-                    add(item.get("name") or item.get("caption") or item.get("fieldCaption"))
-                else:
-                    add(item)
+                add(item)
 
-    return names
+    return fields
+
+
+def _field_metadata_names(fields: list[dict[str, Any]]) -> list[str]:
+    return [name for item in fields if (name := _field_caption(item))]
 
 
 async def _call_llm_json(llm: LLMService, messages: list[dict[str, str]], *, purpose: str) -> dict[str, Any]:
@@ -1275,36 +1471,42 @@ async def _execute_queryspec(
     ds_info: Mapping[str, Any],
     context: ToolContext,
     question: str,
+    *,
+    queryable_fields: Optional[list[str]] = None,
 ) -> dict[str, Any]:
-    operator = spec.effective_operator
-    if operator == "asset_inventory":
-        raise ValueError("asset_inventory is handled by deterministic schema route")
+    token = _QUERYABLE_FIELDS_CONTEXT.set(tuple(queryable_fields or []))
+    try:
+        operator = spec.effective_operator
+        if operator == "asset_inventory":
+            raise ValueError("asset_inventory is handled by deterministic schema route")
 
-    if operator == "aggregate":
-        vizql = _vizql_from_queryspec(spec)
-        result = await _execute_vizql(ds_info["luid"], vizql, context, question, limit=spec.limit or 1000)
-        return _normalize_mcp_data(result, spec, ds_info)
+        if operator == "aggregate":
+            vizql = _vizql_from_queryspec(spec)
+            result = await _execute_vizql(ds_info["luid"], vizql, context, question, limit=spec.limit or 1000)
+            return _normalize_mcp_data(result, spec, ds_info)
 
-    if operator == "trend_condition" and not spec.dimensions:
-        vizql = _vizql_from_queryspec(spec)
-        result = await _execute_vizql(ds_info["luid"], vizql, context, question, limit=spec.limit or 100)
-        return _normalize_mcp_data(result, spec, ds_info)
+        if operator == "trend_condition" and not spec.dimensions:
+            vizql = _vizql_from_queryspec(spec)
+            result = await _execute_vizql(ds_info["luid"], vizql, context, question, limit=spec.limit or 100)
+            return _normalize_mcp_data(result, spec, ds_info)
 
-    registry = default_registry()
-    semantic_operator = registry.get(operator)
-    ctx = _query_plan_context(spec, ds_info, context, question)
-    steps = semantic_operator.build_steps(ctx)
-    step_results: dict[str, dict[str, Any]] = {}
-    for step in steps:
-        step_results[step.name] = await _execute_vizql(
-            ds_info["luid"],
-            step.vizql_json,
-            context,
-            question,
-            limit=step.mcp_limit(),
-        )
-    reduced = semantic_operator.reduce(ctx, step_results)
-    return _operator_result_to_data(reduced, ds_info, spec, step_results)
+        registry = default_registry()
+        semantic_operator = registry.get(operator)
+        ctx = _query_plan_context(spec, ds_info, context, question)
+        steps = semantic_operator.build_steps(ctx)
+        step_results: dict[str, dict[str, Any]] = {}
+        for step in steps:
+            step_results[step.name] = await _execute_vizql(
+                ds_info["luid"],
+                step.vizql_json,
+                context,
+                question,
+                limit=step.mcp_limit(),
+            )
+        reduced = semantic_operator.reduce(ctx, step_results)
+        return _operator_result_to_data(reduced, ds_info, spec, step_results)
+    finally:
+        _QUERYABLE_FIELDS_CONTEXT.reset(token)
 
 
 async def _execute_vizql(
@@ -1315,20 +1517,52 @@ async def _execute_vizql(
     *,
     limit: int,
 ) -> dict[str, Any]:
+    from services.data_agent.mcp_args_guardrail import (
+        McpArgsGuardrailRejected,
+        validate_query_datasource_args,
+    )
     from services.data_agent.tools.query_tool import _execute_query_with_date_fallback
 
-    result, _effective_vizql, substitutions = await _execute_query_with_date_fallback(
+    queryable_fields = list(_QUERYABLE_FIELDS_CONTEXT.get()) or _field_names_from_vizql(vizql_json)
+    guardrail = validate_query_datasource_args(
+        question=question,
         datasource_luid=datasource_luid,
-        vizql_json=vizql_json,
+        query=vizql_json,
+        limit=limit,
+        timeout=None,
+        connection_id=context.connection_id,
+        queryable_fields=queryable_fields,
+        current_datasource={
+            "luid": datasource_luid,
+            "connection_id": context.connection_id,
+        },
+        user_context={
+            "user_id": context.user_id,
+            "connection_id": context.connection_id,
+            "accessible_datasource_luids": [datasource_luid],
+            **({"accessible_connection_ids": [context.connection_id]} if context.connection_id is not None else {}),
+        },
+    )
+    if guardrail.decision == "reject":
+        raise McpArgsGuardrailRejected(guardrail)
+
+    safe_args = guardrail.args or {}
+    safe_query = safe_args.get("query") if isinstance(safe_args.get("query"), dict) else vizql_json
+    safe_limit = int(safe_args.get("limit") or limit)
+    result, _effective_vizql, substitutions = await _execute_query_with_date_fallback(
+        datasource_luid=str(safe_args.get("datasourceLuid") or datasource_luid),
+        vizql_json=safe_query,
         connection_id=context.connection_id,
         question=question,
-        limit=limit,
+        limit=safe_limit,
     )
     if substitutions:
         result = dict(result)
         result["field_substitutions"] = substitutions
     if inspect.isawaitable(result):
         result = await result
+    if isinstance(result, dict):
+        result.setdefault("mcp_args_guardrail", guardrail.to_dict())
     return result
 
 
@@ -1340,6 +1574,34 @@ def _vizql_from_queryspec(spec: QuerySpec) -> dict[str, Any]:
     metric_fields = [_metric_to_vizql(metric, _effective_sorts(spec)) for metric in spec.metrics]
     fields.extend(metric_fields)
     return {"fields": fields, "filters": _filters_from_queryspec(spec)}
+
+
+def _field_names_from_vizql(vizql_json: Mapping[str, Any]) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: Any) -> None:
+        name = str(value or "").strip()
+        if name and name not in seen:
+            seen.add(name)
+            names.append(name)
+
+    def visit(node: Any) -> None:
+        if isinstance(node, Mapping):
+            for key in ("fieldCaption", "fieldName", "field", "name", "caption"):
+                add(node.get(key))
+            for value in node.values():
+                if isinstance(value, (Mapping, list)):
+                    visit(value)
+        elif isinstance(node, list):
+            for item in node:
+                if isinstance(item, str):
+                    add(item)
+                else:
+                    visit(item)
+
+    visit(vizql_json)
+    return names
 
 
 def _effective_sorts(spec: QuerySpec) -> list[SortSpec]:
@@ -1486,9 +1748,7 @@ def _clause_filters(clause: Any) -> list[dict[str, Any]]:
 def _normalize_mcp_data(result: Mapping[str, Any], spec: QuerySpec, ds_info: Mapping[str, Any]) -> dict[str, Any]:
     fields = list(result.get("fields") or [])
     rows = [list(row) if isinstance(row, list) else row for row in list(result.get("rows") or [])]
-    derived_result = _append_derived_metric_columns(fields, rows, spec)
-    fields = derived_result.fields
-    rows = derived_result.rows
+    dce_shadow = _derived_metric_shadow_diagnostics(fields, rows, spec)
     rows = _sort_result_rows(fields, rows, spec)
     payload = {
         "fields": fields,
@@ -1506,12 +1766,11 @@ def _normalize_mcp_data(result: Mapping[str, Any], spec: QuerySpec, ds_info: Map
             metric_names=_table_metric_names(spec),
         ),
         **({"field_substitutions": result["field_substitutions"]} if result.get("field_substitutions") else {}),
+        **({"mcp_args_guardrail": result["mcp_args_guardrail"]} if result.get("mcp_args_guardrail") else {}),
     }
-    if derived_result.metadata:
-        payload["derived_columns"] = derived_result.metadata
-    if derived_result.diagnostics:
+    if dce_shadow:
         diagnostics = dict(result.get("diagnostics") or {})
-        diagnostics["derived_columns"] = derived_result.diagnostics
+        diagnostics["dynamic_column_engine_shadow"] = dce_shadow
         payload["diagnostics"] = diagnostics
     return payload
 
@@ -1529,11 +1788,50 @@ def _append_derived_metric_columns(
     rows: list[Any],
     spec: QuerySpec,
 ):
+    if not _dce_shadow_enabled():
+        return append_derived_columns(
+            fields,
+            rows,
+            requested_metric_names=[],
+        )
     return append_derived_columns(
         fields,
         rows,
         requested_metric_names=_requested_derived_metrics(spec),
     )
+
+
+def _derived_metric_shadow_diagnostics(
+    fields: list[Any],
+    rows: list[Any],
+    spec: QuerySpec,
+) -> dict[str, Any] | None:
+    requested = _requested_derived_metrics(spec)
+    if not requested or not _dce_shadow_enabled():
+        return None
+    result = append_derived_columns(
+        fields,
+        rows,
+        requested_metric_names=requested,
+    )
+    return {
+        "enabled": True,
+        "requested_metric_names": sorted(requested),
+        "metadata": result.metadata,
+        "diagnostics": result.diagnostics,
+        "shadow_fields": result.fields,
+        "shadow_rows_sample": result.rows[:5],
+        "authoritative": False,
+    }
+
+
+def _dce_shadow_enabled() -> bool:
+    return str(os.getenv(ENV_DCE_SHADOW_ENABLED, "false")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _requested_derived_metrics(spec: QuerySpec) -> set[str]:
@@ -1609,6 +1907,7 @@ def _operator_result_to_data(
             name: {
                 "fields": value.get("fields"),
                 "row_count": len(value.get("rows") or []),
+                **({"mcp_args_guardrail": value["mcp_args_guardrail"]} if value.get("mcp_args_guardrail") else {}),
             }
             for name, value in step_results.items()
             if isinstance(value, Mapping)
@@ -1627,6 +1926,2023 @@ def _skill_result_summary(result: Any) -> dict[str, Any]:
         "source_path": result.source_path,
         "error": result.error,
     }
+
+
+async def _run_mcp_main_route(
+    *,
+    question: str,
+    context: ToolContext,
+    intent_result: IntentClassification,
+    datasource: Mapping[str, Any],
+    analysis_context: Optional[Mapping[str, Any]],
+    llm_service: Optional[LLMService] = None,
+    chain_mode: str = MCP_MAIN_CHAIN_MODE,
+) -> _McpMainAttempt:
+    attempt = await _run_mcp_host_route(
+        question=question,
+        context=context,
+        intent_result=intent_result,
+        datasource=datasource,
+        analysis_context=analysis_context,
+        llm_service=llm_service,
+        chain_mode=chain_mode,
+    )
+    if attempt.success or not _mcp_host_thin_fallback_enabled():
+        return attempt
+
+    fallback_events = list(attempt.events)
+    fallback_events.append(AgentEvent(type="tool_call", content={
+        "tool": "mcp_host_thin_fallback",
+        "params": {
+            "chain_mode": chain_mode,
+            "reason": attempt.reason or attempt.error_code,
+            "fallback_enabled": True,
+        },
+    }))
+    thin_attempt = await _run_thin_mcp_passthrough_route(
+        question=question,
+        context=context,
+        intent_result=intent_result,
+        datasource=datasource,
+        analysis_context=analysis_context,
+        chain_mode=chain_mode,
+    )
+    fallback_events.append(AgentEvent(type="tool_result", content={
+        "tool": "mcp_host_thin_fallback",
+        "result": {
+            "success": thin_attempt.success,
+            "data": {
+                "chain_mode": chain_mode,
+                "fallback_mode": "thin_mcp_passthrough",
+                "original_error": _queryspec_original_error(attempt.original_error),
+            },
+        },
+    }))
+    fallback_events.extend(thin_attempt.events)
+    if thin_attempt.success:
+        return _McpMainAttempt(success=True, events=fallback_events)
+    return _McpMainAttempt(
+        success=False,
+        events=fallback_events,
+        reason=thin_attempt.reason or attempt.reason,
+        error_code=thin_attempt.error_code or attempt.error_code,
+        original_error={
+            "host_error": _queryspec_original_error(attempt.original_error),
+            "thin_error": _queryspec_original_error(thin_attempt.original_error),
+        },
+        message=thin_attempt.message,
+        user_hint=thin_attempt.user_hint,
+    )
+
+
+async def _run_thin_mcp_passthrough_route(
+    *,
+    question: str,
+    context: ToolContext,
+    intent_result: IntentClassification,
+    datasource: Mapping[str, Any],
+    analysis_context: Optional[Mapping[str, Any]],
+    chain_mode: str = MCP_MAIN_CHAIN_MODE,
+) -> _McpMainAttempt:
+    events: list[AgentEvent] = []
+    events.append(AgentEvent(type="tool_call", content={
+        "tool": "mcp_nl_tool_discovery",
+        "params": {
+            "datasource": {"name": datasource.get("name"), "luid": datasource.get("luid")},
+            "chain_mode": chain_mode,
+        },
+    }))
+
+    tool_name = await _discover_mcp_nl_query_tool(context)
+    if not tool_name:
+        events.append(AgentEvent(type="tool_result", content={
+            "tool": "mcp_nl_tool_discovery",
+            "result": {
+                "success": False,
+                "error": MCP_NL_TOOL_UNAVAILABLE,
+                "data": {
+                    "available": False,
+                    "configured_tool": _configured_mcp_nl_tool_name(),
+                    "chain_mode": chain_mode,
+                },
+            },
+        }))
+        return _McpMainAttempt(
+            success=False,
+            events=events,
+            reason=MCP_NL_TOOL_UNAVAILABLE,
+            error_code=MCP_NL_TOOL_UNAVAILABLE,
+            original_error={"configured_tool": _configured_mcp_nl_tool_name()},
+            message="当前 Tableau MCP 未提供自然语言查询工具。",
+            user_hint="请启用或配置 Tableau MCP 自然语言查询工具后重试。",
+        )
+
+    events.append(AgentEvent(type="tool_result", content={
+        "tool": "mcp_nl_tool_discovery",
+        "result": {
+            "success": True,
+            "data": {
+                "available": True,
+                "tool": tool_name,
+                "chain_mode": chain_mode,
+            },
+        },
+    }))
+
+    arguments = _mcp_nl_tool_arguments(question=question, datasource=datasource)
+    events.append(AgentEvent(type="tool_call", content={
+        "tool": "tableau_mcp_nl",
+        "params": {
+            "mcp_tool": tool_name,
+            "datasource_luid": datasource.get("luid"),
+            "chain_mode": chain_mode,
+            "question_passthrough": True,
+        },
+    }))
+    try:
+        mcp_result = await _call_mcp_nl_query_tool(tool_name, arguments, context)
+    except Exception as exc:
+        logger.exception("MCP natural-language route execution failed")
+        events.append(AgentEvent(type="tool_result", content={
+            "tool": "tableau_mcp_nl",
+            "result": {"success": False, "error": str(exc), "data": {"error": str(exc)}},
+        }))
+        return _McpMainAttempt(
+            success=False,
+            events=events,
+            reason="mcp_nl_execution_failed",
+            error_code="MCP_NL_EXECUTION_FAILED",
+            original_error=exc,
+            message="Tableau MCP 自然语言查询失败。",
+            user_hint="请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+        )
+
+    response_data = _normalize_mcp_nl_response_data(
+        mcp_result,
+        ds_info=datasource,
+        tool_name=tool_name,
+        chain_mode=chain_mode,
+        question=question,
+        analysis_context=analysis_context,
+    )
+    events.append(AgentEvent(type="tool_result", content={
+        "tool": "tableau_mcp_nl",
+        "result": {"data": response_data},
+    }))
+
+    rendered = _render_thin_mcp_answer(response_data)
+    events.append(AgentEvent(type="tool_call", content={
+        "tool": "answer_renderer",
+        "params": {
+            "renderer": "deterministic_table",
+            "chain_mode": chain_mode,
+            "row_count": len(response_data.get("rows") or []),
+        },
+    }))
+    events.append(AgentEvent(type="tool_result", content={
+        "tool": "answer_renderer",
+        "result": {
+            "data": response_data,
+            "renderer": "deterministic_table",
+            "calculation_performed": False,
+        },
+    }))
+    events.append(AgentEvent(type="answer", content=rendered))
+    return _McpMainAttempt(success=True, events=events)
+
+
+async def _run_mcp_host_route(
+    *,
+    question: str,
+    context: ToolContext,
+    intent_result: IntentClassification,
+    datasource: Mapping[str, Any],
+    analysis_context: Optional[Mapping[str, Any]],
+    llm_service: Optional[LLMService],
+    chain_mode: str,
+) -> _McpMainAttempt:
+    events: list[AgentEvent] = []
+    components: Optional[_McpHostComponents] = None
+    try:
+        components = await _load_mcp_host_components(context=context, datasource=datasource, llm_service=llm_service)
+    except Exception as exc:
+        logger.debug("MCP Host components unavailable", exc_info=True)
+        events.append(AgentEvent(type="tool_call", content={
+            "tool": "mcp_host_catalog",
+            "params": {"chain_mode": chain_mode, "datasource": _datasource_trace_payload(datasource)},
+        }))
+        events.append(AgentEvent(type="tool_result", content={
+            "tool": "mcp_host_catalog",
+            "result": {
+                "success": False,
+                "error": MCP_HOST_RUNTIME_UNAVAILABLE,
+                "data": {"chain_mode": chain_mode, "error": str(exc)},
+            },
+        }))
+        return _McpMainAttempt(
+            success=False,
+            events=events,
+            reason=MCP_HOST_RUNTIME_UNAVAILABLE,
+            error_code=MCP_HOST_RUNTIME_UNAVAILABLE,
+            original_error=exc,
+            message="MCP Host runtime 尚不可用。",
+            user_hint="请等待 MCP Host runtime/planner 完成部署，或显式开启 thin MCP fallback。",
+        )
+
+    events.append(AgentEvent(type="tool_call", content={
+        "tool": "mcp_host_catalog",
+        "params": {"chain_mode": chain_mode, "datasource": _datasource_trace_payload(datasource)},
+    }))
+    try:
+        catalog_payload = await _discover_host_catalog(components.catalog, context=context)
+    except Exception as exc:
+        logger.exception("MCP Host catalog discovery failed")
+        events.append(AgentEvent(type="tool_result", content={
+            "tool": "mcp_host_catalog",
+            "result": {
+                "success": False,
+                "error": MCP_HOST_CATALOG_UNAVAILABLE,
+                "data": {"chain_mode": chain_mode, "error": str(exc)},
+            },
+        }))
+        return _McpMainAttempt(
+            success=False,
+            events=events,
+            reason=MCP_HOST_CATALOG_UNAVAILABLE,
+            error_code=MCP_HOST_CATALOG_UNAVAILABLE,
+            original_error=exc,
+            message="MCP Host 无法获取 Tableau MCP tool catalog。",
+            user_hint="请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 MCP tools/list。",
+        )
+
+    catalog_tools = _catalog_tools(catalog_payload)
+    events.append(AgentEvent(type="tool_result", content={
+        "tool": "mcp_host_catalog",
+        "result": {
+            "success": True,
+            "data": {
+                "chain_mode": chain_mode,
+                "tool_count": len(catalog_tools),
+                "tools": [_tool_trace_summary(tool) for tool in catalog_tools],
+            },
+        },
+    }))
+
+    metadata = None
+    metadata_tool = _find_catalog_tool(catalog_payload, MCP_HOST_METADATA_TOOL_NAME)
+    history: list[dict[str, Any]] = []
+    if metadata_tool:
+        metadata_args = _metadata_tool_arguments(metadata_tool, datasource)
+        events.append(_mcp_host_tool_call_event(
+            tool_name=_tool_name(metadata_tool) or MCP_HOST_METADATA_TOOL_NAME,
+            arguments=metadata_args,
+            datasource=datasource,
+            chain_mode=chain_mode,
+            phase="metadata",
+        ))
+        metadata_result = await _execute_host_tool(
+            components.executor,
+            tool_name=_tool_name(metadata_tool) or MCP_HOST_METADATA_TOOL_NAME,
+            arguments=metadata_args,
+            context=context,
+            catalog=components.catalog,
+        )
+        events.append(_mcp_host_tool_result_event(
+            tool_name=_tool_name(metadata_tool) or MCP_HOST_METADATA_TOOL_NAME,
+            result=metadata_result,
+            chain_mode=chain_mode,
+            phase="metadata",
+        ))
+        if not metadata_result.success:
+            return _McpMainAttempt(
+                success=False,
+                events=events,
+                reason="metadata_tool_failed",
+                error_code=metadata_result.error_code or MCP_HOST_TOOL_EXECUTION_FAILED,
+                original_error=metadata_result.error,
+                message="Tableau MCP 数据源元数据读取失败。",
+                user_hint="请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 元数据工具。",
+            )
+        metadata = metadata_result.data
+        history.append({
+            "tool": _tool_name(metadata_tool) or MCP_HOST_METADATA_TOOL_NAME,
+            "arguments": metadata_args,
+            "result": _redact_large(metadata),
+        })
+
+    previous_response_data = _previous_response_data(analysis_context)
+    last_query_result: Any = None
+    last_query_tool: Optional[str] = None
+    last_query_args: Mapping[str, Any] = {}
+    planner_error: Optional[dict[str, Any]] = None
+    repair_budget = _mcp_host_repair_budget()
+    max_tool_calls = _mcp_host_max_tool_calls()
+
+    for step in range(max_tool_calls):
+        events.append(AgentEvent(type="tool_call", content={
+            "tool": "mcp_host_planner",
+            "params": {
+                "chain_mode": chain_mode,
+                "step": step + 1,
+                "catalog_tool_count": len(catalog_tools),
+                "has_metadata": metadata is not None,
+                "repair_budget_remaining": repair_budget,
+            },
+        }))
+        try:
+            planner_output = await _invoke_host_planner(
+                components.planner,
+                question=question,
+                datasource=_datasource_trace_payload(datasource),
+                catalog=catalog_payload,
+                tool_schemas=catalog_tools,
+                metadata=metadata,
+                previous_response_data=previous_response_data,
+                history=history,
+                error=planner_error,
+                repair_budget_remaining=repair_budget,
+                intent=intent_result.intent,
+                context=context,
+            )
+        except Exception as exc:
+            logger.exception("MCP Host planner failed")
+            events.append(AgentEvent(type="tool_result", content={
+                "tool": "mcp_host_planner",
+                "result": {
+                    "success": False,
+                    "error": MCP_HOST_PLANNER_UNAVAILABLE,
+                    "data": {"chain_mode": chain_mode, "error": str(exc)},
+                },
+            }))
+            if repair_budget > 0:
+                planner_error = {
+                    "error_code": MCP_HOST_PLANNER_UNAVAILABLE,
+                    "message": str(exc),
+                }
+                repair_budget -= 1
+                events.extend(_mcp_host_repair_events(
+                    chain_mode=chain_mode,
+                    reason=MCP_HOST_PLANNER_UNAVAILABLE,
+                    error=planner_error,
+                    repair_budget_remaining=repair_budget,
+                ))
+                continue
+            return _McpMainAttempt(
+                success=False,
+                events=events,
+                reason=MCP_HOST_PLANNER_UNAVAILABLE,
+                error_code=MCP_HOST_PLANNER_UNAVAILABLE,
+                original_error=exc,
+                message="MCP Host planner 未能生成下一步动作。",
+                user_hint="请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 planner 日志。",
+            )
+
+        action = _planner_action(planner_output)
+        events.append(AgentEvent(type="tool_result", content={
+            "tool": "mcp_host_planner",
+            "result": {
+                "success": bool(action),
+                "data": _redact_large({
+                    "chain_mode": chain_mode,
+                    "action": action,
+                    "planner_output": _planner_trace_payload(planner_output),
+                }),
+            },
+        }))
+
+        if action == "final" and last_query_result is None:
+            rescue_arguments = _context_followup_trend_arguments(
+                question=question,
+                datasource=datasource,
+                metadata=metadata,
+                previous_response_data=previous_response_data,
+                analysis_context=analysis_context,
+            )
+            if rescue_arguments is not None:
+                planner_output = {
+                    "action": "tool_call",
+                    "tool": MCP_HOST_QUERY_TOOL_NAME,
+                    "arguments": rescue_arguments,
+                    "source": "context_followup_final_repair",
+                    "planner_final_without_query_result": _planner_trace_payload(planner_output),
+                }
+                action = "tool_call"
+            else:
+                return _McpMainAttempt(
+                    success=False,
+                    events=events,
+                    reason="planner_final_without_query_result",
+                    error_code=MCP_HOST_NO_QUERY_RESULT,
+                    original_error=planner_output,
+                    message="MCP Host planner 没有可用于回答的查询结果。",
+                    user_hint="请换一种更明确的问法，补充指标、维度或时间范围。",
+                )
+
+        if action == "final":
+            response_data = _normalize_mcp_host_response_data(
+                last_query_result,
+                ds_info=datasource,
+                tool_name=last_query_tool or MCP_HOST_QUERY_TOOL_NAME,
+                tool_args=last_query_args,
+                chain_mode=chain_mode,
+                question=question,
+                analysis_context=analysis_context,
+                planner_output=planner_output,
+                datasource_metadata=metadata,
+            )
+            rendered = _render_mcp_host_answer(response_data)
+            events.append(AgentEvent(type="tool_call", content={
+                "tool": "mcp_host_final_response",
+                "params": {
+                    "chain_mode": chain_mode,
+                    "row_count": len(response_data.get("rows") or []),
+                    "mcp_tool": response_data.get("mcp_tool"),
+                },
+            }))
+            events.append(AgentEvent(type="tool_result", content={
+                "tool": "mcp_host_final_response",
+                "result": {
+                    "success": True,
+                    "data": response_data,
+                    "calculation_performed": False,
+                },
+            }))
+            events.append(AgentEvent(type="answer", content=rendered))
+            return _McpMainAttempt(success=True, events=events)
+
+        if action == "repair_unavailable":
+            rescue_arguments = _context_followup_trend_arguments(
+                question=question,
+                datasource=datasource,
+                metadata=metadata,
+                previous_response_data=previous_response_data,
+                analysis_context=analysis_context,
+            )
+            if rescue_arguments is None:
+                return _McpMainAttempt(
+                    success=False,
+                    events=events,
+                    reason="planner_repair_unavailable",
+                    error_code=MCP_HOST_TOOL_EXECUTION_FAILED,
+                    original_error=planner_output,
+                    message="MCP Host planner 无法修复 MCP tool 参数。",
+                    user_hint="请换一种更明确的问法，补充指标、维度或时间范围。",
+                )
+            planner_output = {
+                "action": "tool_call",
+                "tool": MCP_HOST_QUERY_TOOL_NAME,
+                "arguments": rescue_arguments,
+                "source": "context_followup_repair",
+                "planner_repair_unavailable": _planner_trace_payload(planner_output),
+            }
+            action = "tool_call"
+
+        if action != "tool_call":
+            return _McpMainAttempt(
+                success=False,
+                events=events,
+                reason="planner_action_invalid",
+                error_code=MCP_HOST_PLANNER_UNAVAILABLE,
+                original_error=planner_output,
+                message="MCP Host planner 返回了无效动作。",
+                user_hint="请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 planner 输出。",
+            )
+
+        tool_name, arguments = _planner_tool_call(planner_output)
+        if not tool_name or not _catalog_contains_tool(catalog_payload, tool_name):
+            planner_error = {
+                "error_code": MCP_HOST_TOOL_NOT_IN_CATALOG,
+                "message": "Planner selected a tool that is not present in MCP tools/list.",
+                "tool": tool_name,
+            }
+            if repair_budget <= 0:
+                return _McpMainAttempt(
+                    success=False,
+                    events=events,
+                    reason="tool_not_in_catalog",
+                    error_code=MCP_HOST_TOOL_NOT_IN_CATALOG,
+                    original_error=planner_error,
+                    message="MCP Host planner 选择了 catalog 中不存在的工具。",
+                    user_hint="请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 planner 输出。",
+                )
+            repair_budget -= 1
+            events.extend(_mcp_host_repair_events(
+                chain_mode=chain_mode,
+                reason=MCP_HOST_TOOL_NOT_IN_CATALOG,
+                error=planner_error,
+                repair_budget_remaining=repair_budget,
+            ))
+            continue
+
+        arguments = _sanitize_mcp_host_tool_arguments(
+            tool_name=tool_name,
+            arguments=arguments,
+            catalog_payload=catalog_payload,
+            metadata=metadata,
+            question=question,
+            previous_response_data=previous_response_data,
+            analysis_context=analysis_context,
+        )
+        events.append(_mcp_host_tool_call_event(
+            tool_name=tool_name,
+            arguments=arguments,
+            datasource=datasource,
+            chain_mode=chain_mode,
+            phase="query" if not _is_metadata_tool_name(tool_name) else "metadata",
+        ))
+        tool_result = await _execute_host_tool(
+            components.executor,
+            tool_name=tool_name,
+            arguments=arguments,
+            context=context,
+            catalog=components.catalog,
+        )
+        events.append(_mcp_host_tool_result_event(
+            tool_name=tool_name,
+            result=tool_result,
+            chain_mode=chain_mode,
+            phase="query" if not _is_metadata_tool_name(tool_name) else "metadata",
+        ))
+        if not tool_result.success and repair_budget > 0 and _is_transient_mcp_error(tool_result.error):
+            retry_error = {
+                "error_code": tool_result.error_code or MCP_HOST_TOOL_EXECUTION_FAILED,
+                "message": _queryspec_original_error(tool_result.error),
+                "tool": tool_name,
+            }
+            repair_budget -= 1
+            events.extend(_mcp_host_repair_events(
+                chain_mode=chain_mode,
+                reason="transient_mcp_tool_error",
+                error=retry_error,
+                repair_budget_remaining=repair_budget,
+            ))
+            tool_result = await _execute_host_tool(
+                components.executor,
+                tool_name=tool_name,
+                arguments=arguments,
+                context=context,
+                catalog=components.catalog,
+            )
+            events.append(_mcp_host_tool_result_event(
+                tool_name=tool_name,
+                result=tool_result,
+                chain_mode=chain_mode,
+                phase="query" if not _is_metadata_tool_name(tool_name) else "metadata",
+            ))
+
+        if not tool_result.success:
+            planner_error = {
+                "error_code": tool_result.error_code or MCP_HOST_TOOL_EXECUTION_FAILED,
+                "message": _queryspec_original_error(tool_result.error),
+                "tool": tool_name,
+                "arguments": _redact_large(arguments),
+            }
+            if repair_budget > 0 and _is_repairable_mcp_error(planner_error):
+                repair_budget -= 1
+                events.extend(_mcp_host_repair_events(
+                    chain_mode=chain_mode,
+                    reason=str(planner_error.get("error_code") or "mcp_argument_error"),
+                    error=planner_error,
+                    repair_budget_remaining=repair_budget,
+                ))
+                history.append({
+                    "tool": tool_name,
+                    "arguments": _redact_large(arguments),
+                    "error": planner_error,
+                })
+                continue
+            return _McpMainAttempt(
+                success=False,
+                events=events,
+                reason="mcp_tool_execution_failed",
+                error_code=tool_result.error_code or MCP_HOST_TOOL_EXECUTION_FAILED,
+                original_error=tool_result.error,
+                message="Tableau MCP 工具调用失败，本次不输出结论。",
+                user_hint="请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+            )
+
+        history.append({
+            "tool": tool_name,
+            "arguments": _redact_large(arguments),
+            "result": _redact_large(tool_result.data),
+        })
+        planner_error = None
+        if _is_metadata_tool_name(tool_name):
+            metadata = tool_result.data
+        else:
+            last_query_result = tool_result.data
+            last_query_tool = tool_name
+            last_query_args = dict(arguments)
+            response_data = _normalize_mcp_host_response_data(
+                last_query_result,
+                ds_info=datasource,
+                tool_name=last_query_tool,
+                tool_args=last_query_args,
+                chain_mode=chain_mode,
+                question=question,
+                analysis_context=analysis_context,
+                planner_output={"action": "final", "source": "auto_final_after_successful_query"},
+                datasource_metadata=metadata,
+            )
+            rendered = _render_mcp_host_answer(response_data)
+            events.append(AgentEvent(type="tool_call", content={
+                "tool": "mcp_host_final_response",
+                "params": {
+                    "chain_mode": chain_mode,
+                    "row_count": len(response_data.get("rows") or []),
+                    "mcp_tool": response_data.get("mcp_tool"),
+                },
+            }))
+            events.append(AgentEvent(type="tool_result", content={
+                "tool": "mcp_host_final_response",
+                "result": {
+                    "success": True,
+                    "data": response_data,
+                    "calculation_performed": False,
+                },
+            }))
+            events.append(AgentEvent(type="answer", content=rendered))
+            return _McpMainAttempt(success=True, events=events)
+
+    return _McpMainAttempt(
+        success=False,
+        events=events,
+        reason="mcp_host_loop_budget_exhausted",
+        error_code=MCP_HOST_LOOP_BUDGET_EXHAUSTED,
+        original_error={"max_tool_calls": max_tool_calls},
+        message="MCP Host 查询循环超过预算。",
+        user_hint="请换一种更明确的问法，减少一次问题中的查询步骤。",
+    )
+
+
+async def _load_mcp_host_components(
+    *,
+    context: ToolContext,
+    datasource: Mapping[str, Any],
+    llm_service: Optional[LLMService],
+) -> _McpHostComponents:
+    runtime = importlib.import_module("services.data_agent.mcp_host.runtime")
+    planner_module = importlib.import_module("services.data_agent.mcp_host.planner")
+    client = _tableau_mcp_client_for_context(context)
+
+    runtime_class = getattr(runtime, "MCPHostRuntime", None)
+    if inspect.isclass(runtime_class):
+        host_runtime = _call_with_compatible_kwargs(
+            runtime_class,
+            client=client,
+            context=context,
+            connection_id=context.connection_id,
+            datasource_luid=datasource.get("luid") or datasource.get("datasource_luid"),
+        )
+        planner = _instantiate_public_component(
+            planner_module,
+            ("MCPHostPlanner", "HostPlanner"),
+            llm_service=llm_service or LLMService(),
+            context=context,
+        )
+        return _McpHostComponents(catalog=host_runtime, executor=host_runtime, planner=planner)
+
+    catalog = _instantiate_public_component(
+        runtime,
+        ("MCPToolCatalog", "ToolCatalog"),
+        client=client,
+        context=context,
+        connection_id=context.connection_id,
+    )
+    executor = _instantiate_public_component(
+        runtime,
+        ("MCPToolExecutor", "ToolExecutor"),
+        client=client,
+        catalog=catalog,
+        context=context,
+        connection_id=context.connection_id,
+    )
+    planner = _instantiate_public_component(
+        planner_module,
+        ("MCPHostPlanner", "HostPlanner"),
+        llm_service=llm_service or LLMService(),
+        catalog=catalog,
+        context=context,
+    )
+    return _McpHostComponents(catalog=catalog, executor=executor, planner=planner)
+
+
+def _instantiate_public_component(module: Any, names: tuple[str, ...], **kwargs: Any) -> Any:
+    for name in names:
+        component = getattr(module, name, None)
+        if component is None:
+            continue
+        if inspect.isclass(component):
+            return _call_with_compatible_kwargs(component, **kwargs)
+        if callable(component):
+            return _call_with_compatible_kwargs(component, **kwargs)
+        return component
+    return module
+
+
+async def _discover_host_catalog(catalog: Any, *, context: ToolContext) -> Any:
+    for method_name in ("load_catalog", "discover", "load", "refresh", "list_tools", "tools_list", "get_tools", "to_dict"):
+        method = getattr(catalog, method_name, None)
+        if callable(method):
+            return await _maybe_await(_call_with_compatible_kwargs(method, context=context, connection_id=context.connection_id))
+    if isinstance(catalog, Mapping) or isinstance(catalog, list):
+        return catalog
+    tools_attr = getattr(catalog, "tools", None)
+    if tools_attr is not None:
+        return {"tools": tools_attr() if callable(tools_attr) else tools_attr}
+    raise RuntimeError("MCP Host catalog has no public discovery API")
+
+
+async def _invoke_host_planner(planner: Any, **kwargs: Any) -> Any:
+    for method_name in ("plan", "next_action", "decide", "run"):
+        method = getattr(planner, method_name, None)
+        if callable(method):
+            return await _maybe_await(_call_planner_method(method, **kwargs))
+    if callable(planner):
+        return await _maybe_await(_call_planner_method(planner, **kwargs))
+    raise RuntimeError("MCP Host planner has no public planning API")
+
+
+def _call_planner_method(method: Any, **kwargs: Any) -> Any:
+    try:
+        signature = inspect.signature(method)
+    except (TypeError, ValueError):
+        return method(**kwargs)
+    parameters = signature.parameters
+    if "request" in parameters and not any(param.kind == inspect.Parameter.VAR_KEYWORD for param in parameters.values()):
+        return method(_planner_request_for_method(method, **kwargs))
+    return _call_with_compatible_kwargs(method, **kwargs)
+
+
+def _planner_request_for_method(method: Any, **kwargs: Any) -> Any:
+    module_name = getattr(method, "__module__", "")
+    try:
+        planner_module = importlib.import_module(module_name)
+        request_class = getattr(planner_module, "MCPHostPlannerInput")
+    except Exception:
+        request_class = None
+
+    repair_context = kwargs.get("error")
+    request_payload = {
+        "original_question": kwargs.get("question"),
+        "selected_datasource": kwargs.get("datasource"),
+        "mcp_tool_schemas": kwargs.get("catalog") or kwargs.get("tool_schemas"),
+        "datasource_metadata": kwargs.get("metadata"),
+        "previous_response_data": kwargs.get("previous_response_data"),
+        "repair_context": repair_context,
+    }
+    if request_class is not None:
+        return _call_with_compatible_kwargs(request_class, **request_payload)
+    return request_payload
+
+
+async def _execute_host_tool(
+    executor: Any,
+    *,
+    tool_name: str,
+    arguments: Mapping[str, Any],
+    context: ToolContext,
+    catalog: Any,
+) -> _McpHostToolResult:
+    try:
+        raw_result = None
+        for method_name in ("execute_tool", "call_tool", "execute", "call", "run"):
+            method = getattr(executor, method_name, None)
+            if not callable(method):
+                continue
+            raw_result = await _maybe_await(_call_tool_executor_method(
+                method,
+                tool_name=tool_name,
+                arguments=arguments,
+                context=context,
+                catalog=catalog,
+            ))
+            break
+        else:
+            if callable(executor):
+                raw_result = await _maybe_await(_call_tool_executor_method(
+                    executor,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    context=context,
+                    catalog=catalog,
+                ))
+            else:
+                raise RuntimeError("MCP Host executor has no public execution API")
+        return _normalize_host_tool_result(raw_result)
+    except Exception as exc:
+        return _McpHostToolResult(
+            success=False,
+            error_code=_exception_error_code(exc),
+            error=exc,
+            raw=exc,
+        )
+
+
+def _call_tool_executor_method(method: Any, **kwargs: Any) -> Any:
+    try:
+        return _call_with_compatible_kwargs(method, **kwargs)
+    except TypeError:
+        try:
+            return method(kwargs["tool_name"], dict(kwargs["arguments"]), kwargs["context"])
+        except TypeError:
+            return method({"tool": kwargs["tool_name"], "arguments": dict(kwargs["arguments"])})
+
+
+def _call_with_compatible_kwargs(callable_obj: Any, **kwargs: Any) -> Any:
+    try:
+        signature = inspect.signature(callable_obj)
+    except (TypeError, ValueError):
+        return callable_obj(**kwargs)
+    parameters = signature.parameters
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in parameters.values()):
+        return callable_obj(**kwargs)
+    filtered = {key: value for key, value in kwargs.items() if key in parameters}
+    try:
+        return callable_obj(**filtered)
+    except TypeError:
+        if filtered != kwargs:
+            return callable_obj(**kwargs)
+        raise
+
+
+async def _maybe_await(value: Any) -> Any:
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+def _normalize_host_tool_result(result: Any) -> _McpHostToolResult:
+    if isinstance(result, _McpHostToolResult):
+        return result
+    if isinstance(result, Mapping):
+        explicit_success = result.get("success")
+        if explicit_success is None:
+            explicit_success = result.get("ok")
+        if explicit_success is False:
+            return _McpHostToolResult(
+                success=False,
+                data=result.get("data") or result.get("result"),
+                error_code=str(result.get("error_code") or result.get("code") or MCP_HOST_TOOL_EXECUTION_FAILED),
+                error=result.get("error") or result.get("message") or result,
+                raw=result,
+            )
+        if explicit_success is True:
+            return _McpHostToolResult(success=True, data=result.get("data") if "data" in result else result, raw=result)
+        return _McpHostToolResult(success=True, data=result, raw=result)
+    success = getattr(result, "success", None)
+    if success is None:
+        success = getattr(result, "ok", None)
+    if success is False:
+        return _McpHostToolResult(
+            success=False,
+            data=getattr(result, "data", None),
+            error_code=str(getattr(result, "error_code", None) or getattr(result, "code", None) or MCP_HOST_TOOL_EXECUTION_FAILED),
+            error=getattr(result, "error", None) or getattr(result, "message", None) or result,
+            raw=result,
+        )
+    data = getattr(result, "data", result)
+    return _McpHostToolResult(success=True, data=data, raw=result)
+
+
+def _planner_action(output: Any) -> Optional[str]:
+    if isinstance(output, Mapping):
+        action = output.get("action")
+    else:
+        action = getattr(output, "action", None)
+    if isinstance(action, str):
+        return action.strip().lower()
+    return None
+
+
+def _planner_tool_call(output: Any) -> tuple[Optional[str], dict[str, Any]]:
+    payload = output if isinstance(output, Mapping) else getattr(output, "tool_call", None)
+    if isinstance(output, Mapping) and isinstance(output.get("tool_call"), Mapping):
+        payload = output["tool_call"]
+    if not isinstance(output, Mapping) and payload is None:
+        tool_name = getattr(output, "tool", None)
+        arguments = getattr(output, "arguments", None) or {}
+        return (str(tool_name).strip() if tool_name else None, dict(arguments) if isinstance(arguments, Mapping) else {})
+    if not isinstance(payload, Mapping):
+        return None, {}
+    tool_name = payload.get("tool") or payload.get("name") or payload.get("tool_name")
+    arguments = payload.get("arguments") or payload.get("args") or payload.get("input") or payload.get("params") or {}
+    return (str(tool_name).strip() if tool_name else None, dict(arguments) if isinstance(arguments, Mapping) else {})
+
+
+def _planner_trace_payload(output: Any) -> Any:
+    if isinstance(output, Mapping):
+        payload = dict(output)
+        if isinstance(payload.get("tool_call"), Mapping):
+            tool_call = dict(payload["tool_call"])
+            if isinstance(tool_call.get("arguments"), Mapping):
+                tool_call["arguments"] = _redact_large(tool_call["arguments"])
+            payload["tool_call"] = tool_call
+        return payload
+    to_dict = getattr(output, "to_dict", None)
+    if callable(to_dict):
+        return to_dict()
+    model_dump = getattr(output, "model_dump", None)
+    if callable(model_dump):
+        return model_dump()
+    return repr(output)
+
+
+def _catalog_tools(catalog_payload: Any) -> list[Any]:
+    if isinstance(catalog_payload, Mapping):
+        raw_tools = (
+            catalog_payload.get("tools")
+            or catalog_payload.get("catalog")
+            or catalog_payload.get("data")
+            or catalog_payload.get("entries")
+            or []
+        )
+    else:
+        raw_tools = catalog_payload
+    if isinstance(raw_tools, Mapping):
+        return list(raw_tools.values())
+    if isinstance(raw_tools, list):
+        return list(raw_tools)
+    for attr_name in ("tools", "as_mcp_tools", "tool_schemas", "schemas", "entries"):
+        if hasattr(catalog_payload, attr_name):
+            value = getattr(catalog_payload, attr_name)
+            resolved = value() if callable(value) else value
+            if resolved is catalog_payload:
+                continue
+            return _catalog_tools(resolved)
+    return []
+
+
+def _find_catalog_tool(catalog_payload: Any, tool_name: str) -> Optional[Any]:
+    for tool in _catalog_tools(catalog_payload):
+        if _tool_name(tool) == tool_name:
+            return tool
+    return None
+
+
+def _catalog_contains_tool(catalog_payload: Any, tool_name: str) -> bool:
+    return _find_catalog_tool(catalog_payload, tool_name) is not None
+
+
+def _tool_name(tool: Any) -> Optional[str]:
+    if isinstance(tool, str) and tool.strip():
+        return tool.strip()
+    if isinstance(tool, Mapping):
+        for key in ("name", "tool", "tool_name"):
+            value = tool.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    for attr in ("name", "tool", "tool_name"):
+        value = getattr(tool, attr, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _tool_input_schema(tool: Any) -> Mapping[str, Any]:
+    if isinstance(tool, Mapping):
+        schema = tool.get("inputSchema") or tool.get("input_schema") or tool.get("schema") or {}
+    else:
+        schema = getattr(tool, "inputSchema", None) or getattr(tool, "input_schema", None) or getattr(tool, "schema", None) or {}
+    return schema if isinstance(schema, Mapping) else {}
+
+
+def _tool_trace_summary(tool: Any) -> dict[str, Any]:
+    schema = _tool_input_schema(tool)
+    return {
+        "name": _tool_name(tool),
+        "required": list(schema.get("required") or []) if isinstance(schema, Mapping) else [],
+        "has_input_schema": bool(schema),
+    }
+
+
+def _metadata_tool_arguments(tool: Any, datasource: Mapping[str, Any]) -> dict[str, Any]:
+    schema = _tool_input_schema(tool)
+    properties = schema.get("properties") if isinstance(schema, Mapping) else {}
+    if not isinstance(properties, Mapping):
+        properties = {}
+    luid = str(datasource.get("luid") or datasource.get("datasource_luid") or "")
+    preferred_keys = ("datasourceLuid", "datasource_luid", "luid")
+    for key in preferred_keys:
+        if key in properties:
+            return {key: luid}
+    required = [str(item) for item in schema.get("required") or []] if isinstance(schema, Mapping) else []
+    for key in required:
+        if "datasource" in key.lower() or key.lower() == "luid":
+            return {key: luid}
+    return {"datasourceLuid": luid}
+
+
+def _sanitize_mcp_host_tool_arguments(
+    *,
+    tool_name: str,
+    arguments: Mapping[str, Any],
+    catalog_payload: Any,
+    metadata: Any,
+    question: str = "",
+    previous_response_data: Any = None,
+    analysis_context: Optional[Mapping[str, Any]] = None,
+) -> dict[str, Any]:
+    """Apply generic MCP schema and metadata cleanup before tools/call."""
+
+    sanitized = _json_roundtrip(dict(arguments))
+    tool = _find_catalog_tool(catalog_payload, tool_name)
+    schema = _tool_input_schema(tool) if tool is not None else {}
+    if schema:
+        sanitized = _prune_additional_properties(sanitized, schema)
+    if tool_name != MCP_HOST_QUERY_TOOL_NAME:
+        return sanitized
+
+    query = sanitized.get("query")
+    if not isinstance(query, dict):
+        return sanitized
+
+    query_schema = _nested_object_schema(schema, "query")
+    if query_schema:
+        sanitized["query"] = _prune_additional_properties(query, query_schema)
+        query = sanitized["query"]
+
+    _inherit_mcp_host_followup_dimensions(
+        query=query,
+        question=question,
+        previous_response_data=previous_response_data,
+        analysis_context=analysis_context,
+        metadata=metadata,
+    )
+    _inherit_mcp_host_followup_metrics(
+        query=query,
+        question=question,
+        previous_response_data=previous_response_data,
+        analysis_context=analysis_context,
+        metadata=metadata,
+    )
+    _remove_unmentioned_set_filters(query=query, question=question)
+
+    fields = query.get("fields")
+    if isinstance(fields, list):
+        allowed_field_keys = _allowed_field_keys_from_schema(query_schema)
+        metadata_by_caption = _metadata_fields_by_caption(metadata)
+        cleaned_fields: list[Any] = []
+        for field in fields:
+            if not isinstance(field, Mapping):
+                cleaned_fields.append(field)
+                continue
+            cleaned = dict(field)
+            if allowed_field_keys:
+                cleaned = {key: value for key, value in cleaned.items() if key in allowed_field_keys}
+            cleaned.pop("fieldAlias", None)
+            caption = str(cleaned.get("fieldCaption") or "").strip()
+            field_meta = metadata_by_caption.get(caption)
+            if field_meta is not None:
+                cleaned.pop("calculation", None)
+            if field_meta is not None and _metadata_field_is_calculation(field_meta):
+                cleaned.pop("function", None)
+            if str(cleaned.get("function") or "").upper() == "AGG":
+                cleaned.pop("function", None)
+            if metadata_by_caption and caption and field_meta is None and not cleaned.get("calculation"):
+                continue
+            cleaned_fields.append(cleaned)
+        query["fields"] = cleaned_fields
+    return sanitized
+
+
+def _context_followup_trend_arguments(
+    *,
+    question: str,
+    datasource: Mapping[str, Any],
+    metadata: Any,
+    previous_response_data: Any,
+    analysis_context: Optional[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    if not _looks_like_followup_metric_question(question):
+        return None
+
+    metadata_by_caption = _metadata_fields_by_caption(metadata)
+    if not metadata_by_caption:
+        return None
+
+    fields: list[dict[str, Any]] = []
+    time_field = _year_grouping_field_from_metadata(metadata_by_caption)
+    if time_field is not None:
+        fields.append(time_field)
+
+    metric_fields = _metric_fields_from_previous_response(previous_response_data)
+    if not metric_fields and isinstance(analysis_context, Mapping):
+        metric_fields = _metric_fields_from_context_names(analysis_context, metadata_by_caption)
+    fields.extend(metric_fields)
+
+    unique_fields: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for field in fields:
+        identity = _query_field_output_identity(field, metadata_by_caption)
+        if not identity or identity in seen:
+            continue
+        unique_fields.append(field)
+        seen.add(identity)
+
+    if len(unique_fields) < 2 or time_field is None:
+        return None
+    return {
+        "datasourceLuid": datasource.get("luid"),
+        "query": {"fields": unique_fields},
+    }
+
+
+def _year_grouping_field_from_metadata(metadata_by_caption: Mapping[str, Mapping[str, Any]]) -> dict[str, Any] | None:
+    for caption, field_meta in metadata_by_caption.items():
+        canonical = _canonical_output_label_from_formula(field_meta)
+        if canonical and str(canonical.get("label") or "").upper().startswith("YEAR("):
+            return {"fieldCaption": caption, "sortDirection": "ASC", "sortPriority": 1}
+    for caption, field_meta in metadata_by_caption.items():
+        data_type = str(field_meta.get("dataType") or field_meta.get("data_type") or "").upper()
+        if data_type in {"DATE", "DATETIME"}:
+            return {"fieldCaption": caption, "function": "YEAR", "sortDirection": "ASC", "sortPriority": 1}
+    return None
+
+
+def _metric_fields_from_previous_response(previous_response_data: Any) -> list[dict[str, Any]]:
+    fields: list[dict[str, Any]] = []
+    for field_name in _response_data_fields(previous_response_data):
+        field = _query_field_from_aggregate_output_label(field_name)
+        if field is not None:
+            fields.append(field)
+    return fields
+
+
+def _metric_fields_from_context_names(
+    analysis_context: Mapping[str, Any],
+    metadata_by_caption: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    fields: list[dict[str, Any]] = []
+    for name in analysis_context.get("metric_names") or []:
+        caption = _query_field_caption({"fieldCaption": name})
+        if not caption:
+            continue
+        field_meta = metadata_by_caption.get(caption)
+        if field_meta is None:
+            continue
+        if _metadata_field_is_dimension(field_meta):
+            fields.append({"fieldCaption": caption, "function": "COUNTD"})
+            continue
+        if _metadata_field_is_calculation(field_meta):
+            fields.append({"fieldCaption": caption})
+            continue
+        aggregation = str(field_meta.get("defaultAggregation") or field_meta.get("default_aggregation") or "").upper()
+        if not aggregation or aggregation == "AGG":
+            aggregation = "SUM"
+        fields.append({"fieldCaption": caption, "function": aggregation})
+    return fields
+
+
+def _inherit_mcp_host_followup_dimensions(
+    *,
+    query: dict[str, Any],
+    question: str,
+    previous_response_data: Any,
+    analysis_context: Optional[Mapping[str, Any]],
+    metadata: Any,
+) -> None:
+    if not _looks_like_followup_breakdown(question):
+        return
+    fields = query.get("fields")
+    if not isinstance(fields, list):
+        return
+    previous_fields = _response_data_fields(previous_response_data)
+    if not previous_fields and isinstance(analysis_context, Mapping):
+        previous_fields = _context_dimension_names(analysis_context)
+    if not previous_fields:
+        return
+
+    metadata_by_caption = _metadata_fields_by_caption(metadata)
+    current_captions = {_query_field_caption(field) for field in fields if isinstance(field, Mapping)}
+    inherited: list[dict[str, Any]] = []
+    for field_name in previous_fields:
+        caption = str(field_name or "").strip()
+        if not caption or caption in current_captions or _is_aggregate_output_label(caption):
+            continue
+        field_meta = metadata_by_caption.get(caption)
+        if field_meta is not None and not _metadata_field_is_dimension(field_meta):
+            continue
+        if field_meta is None and _is_calculated_output_label(caption):
+            continue
+        inherited.append({"fieldCaption": caption})
+        current_captions.add(caption)
+    if inherited:
+        query["fields"] = inherited + fields
+
+
+def _inherit_mcp_host_followup_metrics(
+    *,
+    query: dict[str, Any],
+    question: str,
+    previous_response_data: Any,
+    analysis_context: Optional[Mapping[str, Any]],
+    metadata: Any,
+) -> None:
+    if not _looks_like_followup_metric_question(question):
+        return
+    fields = query.get("fields")
+    if not isinstance(fields, list):
+        return
+
+    metadata_by_caption = _metadata_fields_by_caption(metadata)
+    existing = {
+        _query_field_output_identity(field, metadata_by_caption)
+        for field in fields
+        if isinstance(field, Mapping)
+    }
+    candidate_fields = _metric_fields_from_previous_response(previous_response_data)
+    if isinstance(analysis_context, Mapping):
+        candidate_fields.extend(_metric_fields_from_context_names(analysis_context, metadata_by_caption))
+    if not candidate_fields:
+        return
+
+    inherited: list[dict[str, Any]] = []
+    for field in candidate_fields:
+        identity = _query_field_output_identity(field, metadata_by_caption)
+        if identity in existing:
+            continue
+        inherited.append(field)
+        existing.add(identity)
+    if inherited:
+        query["fields"] = fields + inherited
+
+
+def _remove_unmentioned_set_filters(*, query: dict[str, Any], question: str) -> None:
+    filters = query.get("filters")
+    if not isinstance(filters, list) or not filters:
+        return
+    retained: list[Any] = []
+    for filter_spec in filters:
+        if not isinstance(filter_spec, Mapping):
+            retained.append(filter_spec)
+            continue
+        filter_type = str(filter_spec.get("filterType") or filter_spec.get("type") or "").upper()
+        values = filter_spec.get("values")
+        if filter_type == "SET" and isinstance(values, list) and not _filter_values_mentioned(question, values):
+            continue
+        retained.append(filter_spec)
+    query["filters"] = retained
+
+
+def _looks_like_followup_breakdown(question: str) -> bool:
+    normalized = str(question or "").strip().lower()
+    return any(token in normalized for token in ("继续", "进一步", "拆分", "break down", "breakdown", "continue", "drill"))
+
+
+def _looks_like_followup_metric_question(question: str) -> bool:
+    normalized = str(question or "").strip().lower()
+    return bool(_FOLLOWUP_REFERENCE_RE.search(normalized)) or any(
+        token in normalized for token in ("trend", "趋势", "过去", "历年", "每年")
+    )
+
+
+def _response_data_fields(response_data: Any) -> list[str]:
+    if not isinstance(response_data, Mapping):
+        return []
+    fields = response_data.get("fields")
+    if isinstance(fields, list):
+        return [str(field) for field in fields if str(field or "").strip()]
+    records = response_data.get("data")
+    if isinstance(records, list) and records and isinstance(records[0], Mapping):
+        return [str(field) for field in records[0].keys() if str(field or "").strip()]
+    return []
+
+
+def _query_field_caption(field: Mapping[str, Any]) -> str:
+    return str(
+        field.get("fieldCaption")
+        or field.get("fieldName")
+        or field.get("field")
+        or field.get("name")
+        or field.get("caption")
+        or ""
+    ).strip()
+
+
+def _query_field_from_aggregate_output_label(value: Any) -> dict[str, Any] | None:
+    text = str(value or "").strip()
+    match = re.match(r"^\s*([A-Z][A-Z0-9_]*)\s*\(\s*([^)]+?)\s*\)\s*$", text, flags=re.I)
+    if not match:
+        return None
+    return {"fieldCaption": match.group(2).strip(), "function": match.group(1).upper()}
+
+
+def _query_field_output_identity(
+    field: Mapping[str, Any],
+    metadata_by_caption: Mapping[str, Mapping[str, Any]],
+) -> str:
+    caption = _query_field_caption(field)
+    function = str(field.get("function") or "").strip().upper()
+    if function:
+        return f"{function}({caption})"
+    field_meta = metadata_by_caption.get(caption)
+    canonical = _canonical_output_label_from_formula(field_meta)
+    if canonical:
+        return str(canonical["label"])
+    return caption
+
+
+def _is_aggregate_output_label(value: str) -> bool:
+    return bool(re.match(r"^\s*[A-Z][A-Z0-9_]*\s*\(", str(value or "").strip(), flags=re.I))
+
+
+def _is_calculated_output_label(value: str) -> bool:
+    text = str(value or "").strip()
+    return bool(text and ("/" in text or re.search(r"\b(rate|ratio|率)\b", text, flags=re.I)))
+
+
+def _metadata_field_is_dimension(field_meta: Mapping[str, Any]) -> bool:
+    role = str(field_meta.get("role") or field_meta.get("dataCategory") or "").upper()
+    return role == "DIMENSION" or role in {"NOMINAL", "ORDINAL"}
+
+
+def _filter_values_mentioned(question: str, values: list[Any]) -> bool:
+    question_text = str(question or "")
+    normalized_question = re.sub(r"\s+", "", question_text)
+    for value in values:
+        value_text = str(value or "").strip()
+        if value_text and value_text in normalized_question:
+            return True
+    return False
+
+
+def _json_roundtrip(value: Any) -> Any:
+    try:
+        return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+    except Exception:
+        return value
+
+
+def _nested_object_schema(schema: Mapping[str, Any], property_name: str) -> dict[str, Any]:
+    properties = schema.get("properties") if isinstance(schema, Mapping) else {}
+    nested = properties.get(property_name) if isinstance(properties, Mapping) else None
+    return dict(nested) if isinstance(nested, Mapping) else {}
+
+
+def _prune_additional_properties(value: Any, schema: Mapping[str, Any]) -> Any:
+    if not isinstance(value, dict) or schema.get("additionalProperties") is not False:
+        return value
+    properties = schema.get("properties") if isinstance(schema, Mapping) else {}
+    if not isinstance(properties, Mapping):
+        return value
+    return {key: item for key, item in value.items() if key in properties}
+
+
+def _allowed_field_keys_from_schema(query_schema: Mapping[str, Any]) -> set[str]:
+    properties = query_schema.get("properties") if isinstance(query_schema, Mapping) else {}
+    fields_schema = properties.get("fields") if isinstance(properties, Mapping) else None
+    if not isinstance(fields_schema, Mapping):
+        return set()
+    item_schema = fields_schema.get("items")
+    if not isinstance(item_schema, Mapping):
+        return set()
+    variants = item_schema.get("anyOf") or item_schema.get("oneOf") or []
+    allowed: set[str] = set()
+    if isinstance(variants, list):
+        for variant in variants:
+            variant_props = variant.get("properties") if isinstance(variant, Mapping) else None
+            if isinstance(variant_props, Mapping):
+                allowed.update(str(key) for key in variant_props.keys())
+    item_props = item_schema.get("properties")
+    if isinstance(item_props, Mapping):
+        allowed.update(str(key) for key in item_props.keys())
+    return allowed
+
+
+def _metadata_fields_by_caption(metadata: Any) -> dict[str, Mapping[str, Any]]:
+    fields: list[Mapping[str, Any]] = []
+    if isinstance(metadata, Mapping):
+        raw_fields = metadata.get("fields")
+        if isinstance(raw_fields, list):
+            fields.extend(item for item in raw_fields if isinstance(item, Mapping))
+        raw_groups = metadata.get("fieldGroups")
+        if isinstance(raw_groups, list):
+            for group in raw_groups:
+                group_fields = group.get("fields") if isinstance(group, Mapping) else None
+                if isinstance(group_fields, list):
+                    fields.extend(item for item in group_fields if isinstance(item, Mapping))
+        datasource = metadata.get("datasource")
+        datasource_fields = datasource.get("fields") if isinstance(datasource, Mapping) else None
+        if isinstance(datasource_fields, list):
+            fields.extend(item for item in datasource_fields if isinstance(item, Mapping))
+    output: dict[str, Mapping[str, Any]] = {}
+    for item in fields:
+        caption = str(
+            item.get("name")
+            or item.get("fieldCaption")
+            or item.get("caption")
+            or item.get("remoteFieldName")
+            or ""
+        ).strip()
+        if caption and caption not in output:
+            output[caption] = item
+    return output
+
+
+def _metadata_field_is_calculation(field_meta: Mapping[str, Any]) -> bool:
+    column_class = str(field_meta.get("columnClass") or field_meta.get("column_class") or "").upper()
+    if column_class == "CALCULATION":
+        return True
+    return bool(field_meta.get("calculation") or field_meta.get("formula"))
+
+
+def _mcp_host_tool_call_event(
+    *,
+    tool_name: str,
+    arguments: Mapping[str, Any],
+    datasource: Mapping[str, Any],
+    chain_mode: str,
+    phase: str,
+) -> AgentEvent:
+    return AgentEvent(type="tool_call", content={
+        "tool": "tableau_mcp",
+        "params": {
+            "mcp_tool": tool_name,
+            "datasource_luid": datasource.get("luid"),
+            "chain_mode": chain_mode,
+            "host_phase": phase,
+            "arguments": _redact_large(dict(arguments)),
+        },
+    })
+
+
+def _mcp_host_tool_result_event(
+    *,
+    tool_name: str,
+    result: _McpHostToolResult,
+    chain_mode: str,
+    phase: str,
+) -> AgentEvent:
+    payload: dict[str, Any] = {
+        "success": result.success,
+        "mcp_tool": tool_name,
+        "chain_mode": chain_mode,
+        "host_phase": phase,
+    }
+    if result.success:
+        payload["data"] = _redact_large(result.data)
+    else:
+        payload.update({
+            "error": result.error_code or MCP_HOST_TOOL_EXECUTION_FAILED,
+            "data": {"error": _queryspec_original_error(result.error)},
+        })
+    return AgentEvent(type="tool_result", content={"tool": "tableau_mcp", "result": payload})
+
+
+def _mcp_host_repair_events(
+    *,
+    chain_mode: str,
+    reason: str,
+    error: Mapping[str, Any],
+    repair_budget_remaining: int,
+) -> list[AgentEvent]:
+    params = {
+        "chain_mode": chain_mode,
+        "reason": reason,
+        "repair_budget_remaining": repair_budget_remaining,
+    }
+    return [
+        AgentEvent(type="tool_call", content={"tool": "mcp_host_repair", "params": params}),
+        AgentEvent(type="tool_result", content={
+            "tool": "mcp_host_repair",
+            "result": {"success": True, "data": {"error": _redact_large(dict(error)), **params}},
+        }),
+    ]
+
+
+def _canonicalize_mcp_host_response_fields(payload: dict[str, Any], metadata: Any) -> dict[str, Any]:
+    metadata_by_caption = _metadata_fields_by_caption(metadata)
+    if not metadata_by_caption:
+        return payload
+
+    rename_map: dict[str, str] = {}
+    converters: dict[str, str] = {}
+    for field_name in _payload_field_names(payload):
+        field_meta = metadata_by_caption.get(str(field_name))
+        canonical = _canonical_output_label_from_formula(field_meta)
+        if not canonical:
+            continue
+        rename_map[str(field_name)] = canonical["label"]
+        if canonical.get("converter"):
+            converters[str(field_name)] = str(canonical["converter"])
+    if not rename_map:
+        return payload
+
+    normalized = dict(payload)
+    records = normalized.get("data")
+    if isinstance(records, list):
+        normalized["data"] = [
+            _rename_record_fields(record, rename_map, converters) if isinstance(record, Mapping) else record
+            for record in records
+        ]
+
+    fields = normalized.get("fields")
+    rows = normalized.get("rows")
+    if isinstance(fields, list):
+        original_fields = [str(field) for field in fields]
+        normalized["fields"] = [rename_map.get(field, field) for field in original_fields]
+        if isinstance(rows, list):
+            normalized["rows"] = [
+                _convert_row_values(row, original_fields, converters) if isinstance(row, list) else row
+                for row in rows
+            ]
+    return normalized
+
+
+def _payload_field_names(payload: Mapping[str, Any]) -> list[str]:
+    fields = payload.get("fields")
+    if isinstance(fields, list) and fields:
+        return [str(field) for field in fields]
+    records = payload.get("data")
+    if isinstance(records, list) and records and isinstance(records[0], Mapping):
+        return [str(field) for field in records[0].keys()]
+    return []
+
+
+def _canonical_output_label_from_formula(field_meta: Mapping[str, Any] | None) -> dict[str, str] | None:
+    if not field_meta or not _metadata_field_is_calculation(field_meta):
+        return None
+    formula = str(field_meta.get("formula") or field_meta.get("calculation") or "").strip()
+    aggregate = re.match(
+        r"^\s*(COUNTD|COUNT|SUM|AVG|MIN|MAX)\s*\(\s*\[([^\]]+)\]\s*\)\s*$",
+        formula,
+        flags=re.I,
+    )
+    if aggregate:
+        return {"label": f"{aggregate.group(1).upper()}({aggregate.group(2).strip()})"}
+
+    year = re.match(r"^\s*(?:STR\s*\(\s*)?YEAR\s*\(\s*\[([^\]]+)\]\s*\)\s*\)?\s*$", formula, flags=re.I)
+    if year:
+        return {"label": f"YEAR({year.group(1).strip()})", "converter": "year_int"}
+    return None
+
+
+def _rename_record_fields(
+    record: Mapping[str, Any],
+    rename_map: Mapping[str, str],
+    converters: Mapping[str, str],
+) -> dict[str, Any]:
+    renamed: dict[str, Any] = {}
+    for key, value in record.items():
+        old_key = str(key)
+        new_key = rename_map.get(old_key, old_key)
+        renamed[new_key] = _convert_canonical_value(value, converters.get(old_key))
+    return renamed
+
+
+def _convert_row_values(row: list[Any], fields: list[str], converters: Mapping[str, str]) -> list[Any]:
+    converted: list[Any] = []
+    for index, value in enumerate(row):
+        field_name = fields[index] if index < len(fields) else ""
+        converted.append(_convert_canonical_value(value, converters.get(field_name)))
+    return converted
+
+
+def _convert_canonical_value(value: Any, converter: str | None) -> Any:
+    if converter != "year_int":
+        return value
+    if isinstance(value, str) and re.fullmatch(r"\d{4}", value.strip()):
+        return int(value.strip())
+    return value
+
+
+def _normalize_mcp_host_response_data(
+    result: Any,
+    *,
+    ds_info: Mapping[str, Any],
+    tool_name: str,
+    tool_args: Mapping[str, Any],
+    chain_mode: str,
+    question: str,
+    analysis_context: Optional[Mapping[str, Any]],
+    planner_output: Any,
+    datasource_metadata: Any = None,
+) -> dict[str, Any]:
+    source = result.get("response_data") if isinstance(result, Mapping) and isinstance(result.get("response_data"), Mapping) else result
+    payload = dict(source) if isinstance(source, Mapping) else {"raw_result": source}
+    payload = _canonicalize_mcp_host_response_fields(payload, datasource_metadata)
+    fields, rows = _tabular_shape_from_mcp_result(payload)
+    payload.update({
+        "fields": fields,
+        "rows": rows,
+        "datasource_name": ds_info.get("name"),
+        "datasource_luid": ds_info.get("luid"),
+        "chain_mode": chain_mode,
+        "main_chain_mode": chain_mode,
+        "mcp_tool": tool_name,
+        "mcp_host": True,
+        "mcp_args": _redact_large(dict(tool_args)),
+        "context_trace": _context_trace_payload(question, analysis_context),
+        "planner_final": _planner_trace_payload(planner_output),
+        "table_display": infer_table_display_schema(fields, rows, operator="mcp_host"),
+    })
+    return payload
+
+
+def _render_mcp_host_answer(response_data: Mapping[str, Any]) -> str:
+    return _render_thin_mcp_answer(response_data)
+
+
+def _datasource_trace_payload(datasource: Mapping[str, Any]) -> dict[str, Any]:
+    return {"name": datasource.get("name"), "luid": datasource.get("luid")}
+
+
+def _previous_response_data(analysis_context: Optional[Mapping[str, Any]]) -> Any:
+    if not isinstance(analysis_context, Mapping):
+        return None
+    response_data = analysis_context.get("response_data")
+    if response_data is not None:
+        return response_data
+    return analysis_context.get("previous_response_data")
+
+
+def _is_metadata_tool_name(tool_name: str) -> bool:
+    return "metadata" in (tool_name or "").lower()
+
+
+def _is_repairable_mcp_error(error: Mapping[str, Any]) -> bool:
+    text = json.dumps(
+        {
+            "error_code": error.get("error_code"),
+            "message": error.get("message"),
+        },
+        ensure_ascii=False,
+        default=str,
+    ).lower()
+    return any(token in text for token in ("schema", "argument", "arguments", "validation", "invalid", "required"))
+
+
+def _is_transient_mcp_error(error: Any) -> bool:
+    text = json.dumps(error, ensure_ascii=False, default=str).lower()
+    return any(
+        token in text
+        for token in (
+            "socket disconnected",
+            "tls connection",
+            "connection reset",
+            "econnreset",
+            "etimedout",
+            "timeout",
+            "temporarily unavailable",
+            "network",
+        )
+    )
+
+
+def _exception_error_code(exc: Exception) -> str:
+    for attr in ("error_code", "code"):
+        value = getattr(exc, attr, None)
+        if value:
+            return str(value)
+    return exc.__class__.__name__
+
+
+def _mcp_host_thin_fallback_enabled() -> bool:
+    return str(os.getenv(ENV_MCP_HOST_THIN_FALLBACK_ENABLED, "false")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _mcp_host_max_tool_calls() -> int:
+    return _positive_int_env("DATA_AGENT_MCP_HOST_MAX_TOOL_CALLS", MCP_HOST_MAX_TOOL_CALLS)
+
+
+def _mcp_host_repair_budget() -> int:
+    return _positive_int_env("DATA_AGENT_MCP_HOST_REPAIR_BUDGET", MCP_HOST_REPAIR_BUDGET, allow_zero=True)
+
+
+def _positive_int_env(name: str, default: int, *, allow_zero: bool = False) -> int:
+    try:
+        value = int(str(os.getenv(name, str(default))).strip())
+    except (TypeError, ValueError):
+        return default
+    minimum = 0 if allow_zero else 1
+    return max(minimum, value)
+
+
+def _resolve_explicit_datasource(
+    *,
+    context: ToolContext,
+    datasource_name_hint: Optional[str],
+    analysis_context: Optional[Mapping[str, Any]],
+) -> Optional[dict[str, Any]]:
+    """Resolve only a datasource explicitly supplied by request/context."""
+
+    _ = datasource_name_hint
+    for candidate in _explicit_datasource_candidates(context, analysis_context):
+        resolved = _datasource_payload_from_candidate(candidate)
+        if resolved:
+            return resolved
+
+    return None
+
+
+def _explicit_datasource_candidates(
+    context: ToolContext,
+    analysis_context: Optional[Mapping[str, Any]],
+) -> list[Any]:
+    candidates: list[Any] = []
+    for attr in ("selected_datasource", "datasource"):
+        if hasattr(context, attr):
+            candidates.append(getattr(context, attr))
+    for attr in ("selected_datasource_luid", "datasource_luid", "tableau_datasource_luid"):
+        if hasattr(context, attr):
+            candidates.append({
+                "luid": getattr(context, attr),
+                "name": getattr(context, "datasource_name", None),
+            })
+
+    if isinstance(analysis_context, Mapping):
+        for key in (
+            "selected_datasource",
+            "datasource",
+            "selected_datasource_luid",
+            "datasource_luid",
+            "tableau_datasource_luid",
+        ):
+            if key in analysis_context:
+                candidates.append(analysis_context.get(key))
+        for key in ("scope", "request_context"):
+            nested = analysis_context.get(key)
+            if isinstance(nested, Mapping):
+                candidates.append(nested)
+    return candidates
+
+
+def _datasource_payload_from_candidate(candidate: Any) -> Optional[dict[str, Any]]:
+    if isinstance(candidate, Mapping):
+        luid = (
+            candidate.get("luid")
+            or candidate.get("datasource_luid")
+            or candidate.get("selected_datasource_luid")
+            or candidate.get("tableau_datasource_luid")
+        )
+        if not luid:
+            return None
+        payload = {
+            "luid": str(luid),
+            "name": candidate.get("name") or candidate.get("datasource_name") or candidate.get("caption") or str(luid),
+        }
+        for key in ("asset_id", "metadata_fields", "fields"):
+            if key in candidate:
+                payload[key] = candidate[key]
+        return payload
+
+    if isinstance(candidate, str) and candidate.strip():
+        return {"luid": candidate.strip(), "name": candidate.strip()}
+
+    return None
+
+
+async def _discover_mcp_nl_query_tool(context: ToolContext) -> Optional[str]:
+    client = _tableau_mcp_client_for_context(context)
+    if client is None:
+        return None
+
+    for method_name in (
+        "discover_natural_language_query_tool",
+        "get_natural_language_query_tool",
+        "find_natural_language_query_tool",
+    ):
+        method = getattr(client, method_name, None)
+        if not callable(method):
+            continue
+        result = method()
+        if inspect.isawaitable(result):
+            result = await result
+        tool_name = _mcp_nl_tool_name_from_result(result)
+        configured = _configured_mcp_nl_tool_name()
+        if tool_name and (not configured or tool_name == configured):
+            return tool_name
+
+    configured = _configured_mcp_nl_tool_name()
+    if not configured:
+        return None
+
+    tools = await _list_mcp_tools_from_client(client)
+    return configured if _mcp_tool_list_contains(tools, configured) else None
+
+
+def _configured_mcp_nl_tool_name() -> Optional[str]:
+    for env_name in (ENV_MCP_NL_QUERY_TOOL_NAME, ENV_TABLEAU_MCP_NL_QUERY_TOOL_NAME):
+        value = os.getenv(env_name)
+        if value and value.strip():
+            return value.strip()
+    return None
+
+
+def _tableau_mcp_client_for_context(context: ToolContext) -> Any:
+    if context.connection_id is None:
+        return None
+    try:
+        from services.tableau.mcp_client import get_tableau_mcp_client
+
+        return get_tableau_mcp_client(connection_id=context.connection_id)
+    except Exception:
+        logger.debug("Tableau MCP client unavailable for NL tool discovery", exc_info=True)
+        return None
+
+
+async def _list_mcp_tools_from_client(client: Any) -> Any:
+    for method_name in ("list_tools", "tools_list", "list_mcp_tools"):
+        method = getattr(client, method_name, None)
+        if not callable(method):
+            continue
+        result = method()
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+    return None
+
+
+def _mcp_tool_list_contains(tools: Any, tool_name: str) -> bool:
+    if isinstance(tools, Mapping):
+        raw_tools = tools.get("tools") or tools.get("data") or []
+    else:
+        raw_tools = tools
+    if not isinstance(raw_tools, list):
+        return False
+    for item in raw_tools:
+        if isinstance(item, Mapping) and item.get("name") == tool_name:
+            return True
+        if isinstance(item, str) and item == tool_name:
+            return True
+    return False
+
+
+def _mcp_nl_tool_name_from_result(result: Any) -> Optional[str]:
+    if isinstance(result, str) and result.strip():
+        return result.strip()
+    if isinstance(result, Mapping):
+        for key in ("name", "tool", "tool_name"):
+            value = result.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _mcp_nl_tool_arguments(*, question: str, datasource: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "question": question,
+        "datasourceLuid": str(datasource.get("luid") or datasource.get("datasource_luid") or ""),
+    }
+
+
+async def _call_mcp_nl_query_tool(
+    tool_name: str,
+    arguments: Mapping[str, Any],
+    context: ToolContext,
+) -> Mapping[str, Any]:
+    client = _tableau_mcp_client_for_context(context)
+    if client is None:
+        raise RuntimeError(MCP_NL_TOOL_UNAVAILABLE)
+
+    for method_name in ("call_natural_language_query_tool", "call_nl_query_tool"):
+        method = getattr(client, method_name, None)
+        if not callable(method):
+            continue
+        try:
+            result = method(tool_name, dict(arguments), timeout=30, connection_id=context.connection_id)
+        except TypeError:
+            result = method(tool_name, dict(arguments))
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
+    method = getattr(client, "call_tool", None)
+    if callable(method):
+        try:
+            result = method(tool_name, dict(arguments), timeout=30, connection_id=context.connection_id)
+        except TypeError:
+            result = method(tool_name, dict(arguments))
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
+    raise RuntimeError(MCP_NL_TOOL_UNAVAILABLE)
+
+
+def _normalize_mcp_nl_response_data(
+    result: Mapping[str, Any],
+    *,
+    ds_info: Mapping[str, Any],
+    tool_name: str,
+    chain_mode: str,
+    question: str,
+    analysis_context: Optional[Mapping[str, Any]],
+) -> dict[str, Any]:
+    source = result.get("response_data") if isinstance(result.get("response_data"), Mapping) else result
+    payload = dict(source)
+    fields, rows = _tabular_shape_from_mcp_result(payload)
+    payload.update({
+        "fields": fields,
+        "rows": rows,
+        "datasource_name": ds_info.get("name"),
+        "datasource_luid": ds_info.get("luid"),
+        "chain_mode": chain_mode,
+        "main_chain_mode": chain_mode,
+        "mcp_tool": tool_name,
+        "mcp_passthrough": True,
+        "context_trace": _context_trace_payload(question, analysis_context),
+        "table_display": infer_table_display_schema(fields, rows, operator="mcp_nl_passthrough"),
+    })
+    return payload
+
+
+def _tabular_shape_from_mcp_result(result: Mapping[str, Any]) -> tuple[list[Any], list[Any]]:
+    fields = list(result.get("fields") or [])
+    rows = [list(row) if isinstance(row, list) else row for row in list(result.get("rows") or [])]
+    if fields or rows:
+        return fields, rows
+
+    records = result.get("data")
+    if not isinstance(records, list) or not all(isinstance(record, Mapping) for record in records):
+        return fields, rows
+    if not records:
+        return [], []
+
+    field_names = list(records[0].keys())
+    record_rows = [[record.get(field) for field in field_names] for record in records]
+    return field_names, record_rows
+
+
+def _render_thin_mcp_answer(response_data: Mapping[str, Any]) -> str:
+    rows = response_data.get("rows") if isinstance(response_data, Mapping) else []
+    row_count = len(rows) if isinstance(rows, list) else 0
+    if row_count == 0:
+        return "查询已完成，未返回数据行。"
+    return f"查询已完成，返回 {row_count} 行结果。"
+
+
+def _mcp_passthrough_error_payload(
+    error_code: str,
+    message: str,
+    user_hint: str,
+    trace_id: str,
+    intent_result: IntentClassification,
+    *,
+    chain_mode: str,
+    detail: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    return {
+        "fallback_type": "mcp_nl_passthrough_unavailable",
+        "fallback_trace_event": WARN_EVENT,
+        "error_code": error_code,
+        "message": message,
+        "user_hint": user_hint,
+        "trace_id": trace_id,
+        "retryable": True,
+        "suggested_actions": ["请选择数据源，并确认 Tableau MCP 自然语言查询工具已启用。"],
+        "tools_used": ["intent_classifier", "mcp_nl_tool_discovery"],
+        "intent_classifier": intent_result.to_dict(),
+        "controlled_chain": {"status": "failed", "detail": detail or {"chain_mode": chain_mode}},
+    }
+
+
+async def _emit_mcp_main_queryspec_fallback(
+    *,
+    context: ToolContext,
+    intent_result: IntentClassification,
+    attempt: _McpMainAttempt,
+) -> AsyncGenerator[AgentEvent, None]:
+    detail = {
+        "phase": "mcp_main",
+        "reason": attempt.reason or "mcp_main_failed",
+        "fallback_reason": attempt.reason or "mcp_main_failed",
+        "fallback_trace_event": FALLBACK_TRIGGERED_EVENT,
+        "original_error": _queryspec_original_error(attempt.original_error),
+        "fallback_mode": "queryspec",
+        "chain_mode": MCP_MAIN_QUERYSPEC_FALLBACK_CHAIN_MODE,
+        "intent_classifier": intent_result.to_dict(),
+    }
+    logger.warning(
+        "%s mcp_main_queryspec_fallback trace_id=%s reason=%s original_error=%s",
+        FALLBACK_TRIGGERED_EVENT,
+        context.trace_id,
+        detail["reason"],
+        detail["original_error"],
+    )
+    yield AgentEvent(type="tool_call", content={
+        "tool": "mcp_main_queryspec_fallback",
+        "params": {
+            "event": FALLBACK_TRIGGERED_EVENT,
+            "phase": "mcp_main",
+            "reason": detail["reason"],
+            "fallback_mode": "queryspec",
+        },
+    })
+    yield AgentEvent(type="tool_result", content={
+        "tool": "mcp_main_queryspec_fallback",
+        "result": {
+            "success": True,
+            "event": FALLBACK_TRIGGERED_EVENT,
+            "data": detail,
+        },
+    })
 
 
 async def _run_queryspec_mcp_fallback(
@@ -1680,6 +3996,7 @@ async def _run_queryspec_mcp_fallback(
     if not _queryspec_mcp_fallback_enabled():
         disabled_detail = dict(fallback_detail)
         disabled_detail["fallback_disabled"] = True
+        disabled_detail["fallback_trace_event"] = WARN_EVENT
         logger.warning(
             "%s queryspec_mcp_fallback disabled trace_id=%s phase=%s reason=%s original_error=%s",
             WARN_EVENT,
@@ -1727,6 +4044,7 @@ async def _run_queryspec_mcp_fallback(
 
     tool_description = mcp_proxy_main._mcp_tool_description(datasource, queryable_fields)
     tool_schema = mcp_proxy_main._query_datasource_tool_schema()
+    current_datasource_context = mcp_proxy_main._current_datasource(datasource, context)
     yield AgentEvent(type="tool_call", content={
         "tool": "mcp_tool_description_loader",
         "params": {
@@ -1787,7 +4105,13 @@ async def _run_queryspec_mcp_fallback(
         ))
         return
 
-    raw_args = llm_result["json"]
+    raw_args, context_additions = mcp_proxy_main._apply_followup_context_to_mcp_args(
+        llm_result["json"],
+        question=question,
+        datasource=current_datasource_context,
+        queryable_fields=queryable_fields,
+        analysis_context=analysis_context or {},
+    )
     yield AgentEvent(type="tool_result", content={
         "tool": "llm_mcp_args",
         "result": {
@@ -1795,6 +4119,7 @@ async def _run_queryspec_mcp_fallback(
                 "args": _redact_large(raw_args),
                 "chain_mode": QUERYSPEC_MCP_FALLBACK_CHAIN_MODE,
                 "fallback_reason": reason,
+                **({"context_additions": context_additions} if context_additions else {}),
             },
         },
     })
@@ -1806,7 +4131,7 @@ async def _run_queryspec_mcp_fallback(
             tool_schema=tool_schema,
             args=raw_args,
             queryable_fields=queryable_fields,
-            current_datasource=mcp_proxy_main._current_datasource(datasource, context),
+            current_datasource=current_datasource_context,
             user_context=mcp_proxy_main._user_context(datasource, context),
         )
     )
@@ -1905,9 +4230,24 @@ def _queryspec_fallback_detail(
         "phase": phase,
         "reason": reason,
         "fallback_reason": reason,
+        "fallback_trace_event": FALLBACK_TRIGGERED_EVENT if fallback_mode == "mcp_proxy" else WARN_EVENT,
         "original_error": _queryspec_original_error(original_error),
         "fallback_mode": fallback_mode,
         "chain_mode": QUERYSPEC_MCP_FALLBACK_CHAIN_MODE if fallback_mode == "mcp_proxy" else fallback_mode,
+    }
+
+
+def _context_trace_payload(question: str, analysis_context: Optional[Mapping[str, Any]]) -> dict[str, Any]:
+    context = dict(analysis_context or {})
+    unresolved = bool(_FOLLOWUP_REFERENCE_RE.search(question or "") and not context)
+    return {
+        "status": "unresolved" if unresolved else ("resolved" if context else "empty"),
+        "datasource_name": context.get("datasource_name"),
+        "metric_names": list(context.get("metric_names") or []),
+        "dimension_names": list(context.get("dimension_names") or []),
+        "filter_names": list(context.get("filter_names") or []),
+        "unresolved_references": unresolved,
+        "calculation_performed": False,
     }
 
 
@@ -1958,6 +4298,7 @@ def _fallback_payload(
         ]
     return {
         "fallback_type": fallback_type,
+        "fallback_trace_event": WARN_EVENT,
         "error_code": error_code,
         "message": message,
         "user_hint": user_hint,
@@ -1986,6 +4327,18 @@ def _queryspec_mcp_fallback_enabled() -> bool:
         "no",
         "off",
     }
+
+
+def _normalize_queryspec_for_mcp(
+    spec: QuerySpec,
+    question: str,
+    queryable_fields: Optional[list[Any]] = None,
+    datasource: Optional[Mapping[str, Any]] = None,
+    analysis_context: Optional[Mapping[str, Any]] = None,
+) -> QuerySpec:
+    normalized = _normalize_mcp_handled_metrics(spec, question, queryable_fields)
+    normalized = _normalize_period_calculated_fields(normalized, datasource or {})
+    return _inherit_context_dimensions(normalized, question, datasource or {}, analysis_context)
 
 
 def _normalize_mcp_handled_metrics(
@@ -2025,6 +4378,174 @@ def _normalize_mcp_handled_metrics(
     answer_contract["must_include"] = must_include
     payload["answer_contract"] = answer_contract
     return QuerySpec.model_validate(payload)
+
+
+def _normalize_period_calculated_fields(spec: QuerySpec, datasource: Mapping[str, Any]) -> QuerySpec:
+    metadata = _field_metadata_by_caption(datasource)
+    if not metadata:
+        return spec
+
+    payload = spec.model_dump(mode="json")
+    changed = False
+
+    changed = _normalize_time_payload(payload.get("time"), metadata) or changed
+
+    dimensions: list[str] = []
+    for dimension in payload.get("dimensions") or []:
+        period_source = _period_source_for_field(str(dimension), metadata)
+        if period_source:
+            time_payload = payload.get("time")
+            if isinstance(time_payload, dict):
+                if _same_period_time(time_payload, period_source):
+                    changed = True
+                    continue
+            else:
+                payload["time"] = {
+                    "field": period_source["field"],
+                    "grain": period_source["grain"],
+                    "range": {},
+                }
+                changed = True
+                continue
+        dimensions.append(dimension)
+    if dimensions != list(payload.get("dimensions") or []):
+        payload["dimensions"] = dimensions
+        changed = True
+
+    for key in ("universe", "occurred"):
+        clause = payload.get(key)
+        if isinstance(clause, dict):
+            changed = _normalize_time_payload(clause.get("time"), metadata) or changed
+
+    return QuerySpec.model_validate(payload) if changed else spec
+
+
+def _same_period_time(time_payload: Mapping[str, Any], period_source: Mapping[str, str]) -> bool:
+    return (
+        _compact_text(time_payload.get("field")) == _compact_text(period_source.get("field"))
+        and str(time_payload.get("grain") or "").upper() == str(period_source.get("grain") or "").upper()
+    )
+
+
+def _inherit_context_dimensions(
+    spec: QuerySpec,
+    question: str,
+    datasource: Mapping[str, Any],
+    analysis_context: Optional[Mapping[str, Any]],
+) -> QuerySpec:
+    if spec.effective_operator != "aggregate" or not analysis_context:
+        return spec
+    if not re.search(r"(继续|拆分|每个|各)", question or ""):
+        return spec
+
+    metadata = _field_metadata_by_caption(datasource)
+    if not metadata:
+        return spec
+
+    payload = spec.model_dump(mode="json")
+    dimensions = list(payload.get("dimensions") or [])
+    existing = {_compact_text(item) for item in dimensions}
+    if payload.get("time"):
+        existing.add(_compact_text((payload.get("time") or {}).get("field")))
+
+    inherited: list[str] = []
+    for candidate in _context_dimension_names(analysis_context):
+        if _compact_text(candidate) in existing:
+            continue
+        if not _is_safe_context_dimension(candidate, metadata):
+            continue
+        inherited.append(candidate)
+        existing.add(_compact_text(candidate))
+
+    if not inherited:
+        return spec
+
+    payload["dimensions"] = [*inherited, *dimensions]
+    return QuerySpec.model_validate(payload)
+
+
+def _context_dimension_names(analysis_context: Mapping[str, Any]) -> list[str]:
+    names: list[str] = []
+    for key in ("dimension_names", "dimensions"):
+        value = analysis_context.get(key)
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            if isinstance(item, Mapping):
+                name = _field_caption(item)
+            else:
+                name = str(item or "").strip()
+            if name:
+                names.append(name)
+    return names
+
+
+def _is_safe_context_dimension(candidate: str, metadata: Mapping[str, Mapping[str, Any]]) -> bool:
+    item = metadata.get(_compact_text(candidate))
+    if not item:
+        return False
+    role = _metadata_value(item, "role").upper()
+    if role and role != "DIMENSION":
+        return False
+    return _period_source_for_field(candidate, metadata) is None
+
+
+def _normalize_time_payload(value: Any, metadata: Mapping[str, Mapping[str, Any]]) -> bool:
+    if not isinstance(value, dict):
+        return False
+    period_source = _period_source_for_field(str(value.get("field") or ""), metadata)
+    if not period_source:
+        return False
+    value["field"] = period_source["field"]
+    value["grain"] = value.get("grain") or period_source["grain"]
+    return True
+
+
+def _field_metadata_by_caption(datasource: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    metadata_fields = datasource.get("metadata_fields") or datasource.get("fields") or []
+    indexed: dict[str, Mapping[str, Any]] = {}
+    for item in metadata_fields:
+        if not isinstance(item, Mapping):
+            continue
+        caption = _field_caption(item)
+        if caption:
+            indexed.setdefault(_compact_text(caption), item)
+    return indexed
+
+
+def _period_source_for_field(
+    field: str,
+    metadata: Mapping[str, Mapping[str, Any]],
+) -> Optional[dict[str, str]]:
+    field_metadata = metadata.get(_compact_text(field))
+    if not field_metadata:
+        return None
+    formula = _metadata_value(field_metadata, "formula")
+    if not formula:
+        return None
+    match = re.search(r"\b(YEAR|QUARTER|MONTH|WEEK|DAY)\s*\(\s*\[([^\]]+)\]\s*\)", formula, flags=re.IGNORECASE)
+    if not match:
+        return None
+    grain = match.group(1).upper()
+    source_field = match.group(2).strip()
+    source_metadata = metadata.get(_compact_text(source_field))
+    if not source_metadata or "DATE" not in _metadata_value(source_metadata, "dataType", "data_type").upper():
+        return None
+    return {"field": _field_caption(source_metadata) or source_field, "grain": grain}
+
+
+def _metadata_value(metadata: Mapping[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = metadata.get(key)
+        if value is not None:
+            return str(value).strip()
+    mcp = metadata.get("mcp")
+    if isinstance(mcp, Mapping):
+        for key in keys:
+            value = mcp.get(key)
+            if value is not None:
+                return str(value).strip()
+    return ""
 
 
 def _explicit_mcp_handled_metrics_in_question(question: str) -> set[str]:

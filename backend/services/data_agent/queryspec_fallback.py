@@ -1,16 +1,38 @@
-"""Deprecated deterministic QuerySpec fallback builders for legacy Data Agent routing.
+"""Fallback helpers for controlled Data Agent routing.
 
-This module is kept only for rollback behind
-DATA_AGENT_QUERYSPEC_FALLBACK_ENABLED=true. New code should reject unsafe or
-invalid plans instead of synthesizing replacement QuerySpecs.
+The legacy deterministic QuerySpec builders are kept only for rollback behind
+DATA_AGENT_QUERYSPEC_FALLBACK_ENABLED=true. The MCP set-difference helpers
+below are QuerySpec-free and route MCP execution through mcp_args_guardrail.
 """
 
 from __future__ import annotations
 
+import inspect
+import json
+import logging
 import re
+from collections.abc import AsyncGenerator, Callable
 from typing import Any, Mapping, Optional
 
 from services.data_agent.intent_classifier import IntentClassification
+from services.data_agent.mcp_args_guardrail import (
+    MCP_ARGS_GUARDRAIL_PASS,
+    MCP_ARGS_GUARDRAIL_REJECT,
+    MCP_QUERY_DATASOURCE_TOOL_NAME,
+    McpArgsGuardrailInput,
+    query_datasource_tool_schema,
+    validate_mcp_args,
+)
+from services.data_agent.response import AgentEvent
+from services.data_agent.semantic_operators.set_difference import build_set_difference_response_data
+from services.data_agent.tool_base import ToolContext
+
+
+logger = logging.getLogger(__name__)
+
+FALLBACK_TRIGGERED_EVENT = "FALLBACK_TRIGGERED"
+WARN_EVENT = "WARN"
+SET_DIFFERENCE_MCP_FALLBACK_CHAIN_MODE = "mcp_set_difference_fallback"
 
 
 _PROVINCES = (
@@ -67,6 +89,402 @@ def build_fallback_queryspec(
     if intent == "ranking":
         return _ranking_spec(base, question, fields)
     return _aggregate_spec(base, question, fields, context)
+
+
+def build_set_difference_mcp_query_args(
+    *,
+    datasource_luid: str,
+    target_dimension: str,
+    universe_filters: list[Mapping[str, Any]] | None = None,
+    occurred_filters: list[Mapping[str, Any]] | None = None,
+    limit: int = 100,
+) -> dict[str, dict[str, Any]]:
+    """Build QuerySpec-free MCP args for deterministic set difference.
+
+    The args only request returned dimension values. The caller supplies the
+    generic target dimension and filters; this helper does not infer business
+    fields or formulas from the question text.
+    """
+
+    datasource = str(datasource_luid or "").strip()
+    dimension = str(target_dimension or "").strip()
+    if not datasource:
+        raise ValueError("datasource_luid is required")
+    if not dimension:
+        raise ValueError("target_dimension is required")
+
+    safe_limit = _bounded_limit(limit)
+    fields = [{"fieldCaption": dimension}]
+    return {
+        "universe_keys": {
+            "datasourceLuid": datasource,
+            "query": {
+                "fields": list(fields),
+                "filters": _copy_filter_list(universe_filters),
+            },
+            "limit": safe_limit,
+        },
+        "occurred_keys": {
+            "datasourceLuid": datasource,
+            "query": {
+                "fields": list(fields),
+                "filters": _copy_filter_list(occurred_filters),
+            },
+            "limit": safe_limit,
+        },
+    }
+
+
+async def run_set_difference_mcp_fallback(
+    *,
+    question: str,
+    context: ToolContext,
+    intent_result: IntentClassification,
+    datasource: Mapping[str, Any],
+    queryable_fields: list[str],
+    target_dimension: str,
+    universe_filters: list[Mapping[str, Any]] | None = None,
+    occurred_filters: list[Mapping[str, Any]] | None = None,
+    analysis_context: Optional[Mapping[str, Any]] = None,
+    reason: str = "mcp_proxy_unanswered",
+    original_error: Any = None,
+    limit: int = 100,
+    sample_limit: int = 100,
+    execute: Callable[[Mapping[str, Any], ToolContext], Any] | None = None,
+) -> AsyncGenerator[AgentEvent, None]:
+    """Run a controlled non-QuerySpec MCP set-difference fallback.
+
+    This path performs only:
+    1. guardrailed MCP query for the universe dimension values;
+    2. guardrailed MCP query for the occurred dimension values;
+    3. deterministic set difference on those returned values.
+    """
+
+    fallback_detail = _set_difference_fallback_detail(
+        question=question,
+        analysis_context=analysis_context,
+        target_dimension=target_dimension,
+        reason=reason,
+        original_error=original_error,
+    )
+    yield AgentEvent(type="tool_call", content={
+        "tool": "set_difference_mcp_fallback",
+        "params": {
+            "event": FALLBACK_TRIGGERED_EVENT,
+            "reason": reason,
+            "chain_mode": SET_DIFFERENCE_MCP_FALLBACK_CHAIN_MODE,
+        },
+    })
+
+    try:
+        query_args_by_step = build_set_difference_mcp_query_args(
+            datasource_luid=str(datasource.get("luid") or datasource.get("datasource_luid") or ""),
+            target_dimension=target_dimension,
+            universe_filters=universe_filters,
+            occurred_filters=occurred_filters,
+            limit=limit,
+        )
+    except ValueError as exc:
+        detail = dict(fallback_detail)
+        detail["fallback_trace_event"] = WARN_EVENT
+        detail["error"] = str(exc)
+        yield AgentEvent(type="tool_result", content={
+            "tool": "set_difference_mcp_fallback",
+            "result": {"success": False, "event": WARN_EVENT, "error": str(exc), "data": detail},
+        })
+        yield AgentEvent(type="error", content=_set_difference_error_payload(
+            "SET_DIFF_FALLBACK_PLAN_INVALID",
+            "缺少可安全执行集合差集的字段或数据源。",
+            "请明确要比较的维度、数据源和筛选条件后重试。",
+            context.trace_id,
+            intent_result,
+            detail=detail,
+        ))
+        return
+
+    logger.warning(
+        "%s set_difference_mcp_fallback trace_id=%s reason=%s target_dimension=%s",
+        FALLBACK_TRIGGERED_EVENT,
+        context.trace_id,
+        reason,
+        str(target_dimension or ""),
+    )
+    yield AgentEvent(type="tool_result", content={
+        "tool": "set_difference_mcp_fallback",
+        "result": {"success": True, "event": FALLBACK_TRIGGERED_EVENT, "data": fallback_detail},
+    })
+
+    guardrail_payloads: dict[str, dict[str, Any]] = {}
+    safe_args_by_step: dict[str, dict[str, Any]] = {}
+    step_results: dict[str, dict[str, Any]] = {}
+    for step_name, raw_args in query_args_by_step.items():
+        yield AgentEvent(type="tool_call", content={
+            "tool": "mcp_args_guardrail",
+            "params": {
+                "tool": MCP_QUERY_DATASOURCE_TOOL_NAME,
+                "chain_mode": SET_DIFFERENCE_MCP_FALLBACK_CHAIN_MODE,
+                "step": step_name,
+            },
+        })
+        guardrail = validate_mcp_args(
+            McpArgsGuardrailInput(
+                question=question,
+                tool_name=MCP_QUERY_DATASOURCE_TOOL_NAME,
+                tool_schema=query_datasource_tool_schema(),
+                args=raw_args,
+                queryable_fields=queryable_fields,
+                current_datasource=_current_datasource_for_guardrail(datasource, context),
+                user_context=_user_context_for_guardrail(datasource, context),
+            )
+        )
+        guardrail_payload = guardrail.to_dict()
+        guardrail_payloads[step_name] = guardrail_payload
+        yield AgentEvent(type="tool_result", content={
+            "tool": "mcp_args_guardrail",
+            "result": {
+                "success": guardrail.decision != "reject",
+                "event": MCP_ARGS_GUARDRAIL_REJECT if guardrail.decision == "reject" else MCP_ARGS_GUARDRAIL_PASS,
+                "data": {**guardrail_payload, "step": step_name},
+            },
+        })
+        if guardrail.decision == "reject":
+            detail = dict(fallback_detail)
+            detail.update({
+                "guardrail_decision": guardrail.decision,
+                "guardrail_step": step_name,
+                "guardrail_reject_code": guardrail.reject_code,
+            })
+            yield AgentEvent(type="error", content=_set_difference_error_payload(
+                guardrail.reject_code or "MCP_ARGS_REJECTED",
+                guardrail.message,
+                guardrail.user_hint,
+                context.trace_id,
+                intent_result,
+                detail=detail,
+            ))
+            return
+
+        safe_args = guardrail.args or {}
+        safe_args_by_step[step_name] = safe_args
+        yield AgentEvent(type="tool_call", content={
+            "tool": "tableau_mcp",
+            "params": {
+                "mcp_tool": MCP_QUERY_DATASOURCE_TOOL_NAME,
+                "datasource_luid": safe_args.get("datasourceLuid"),
+                "chain_mode": SET_DIFFERENCE_MCP_FALLBACK_CHAIN_MODE,
+                "step": step_name,
+                "guardrail_decision": guardrail.decision,
+                "guardrail_repairs": [repair.to_dict() for repair in guardrail.repairs],
+            },
+        })
+        try:
+            result = await _execute_set_difference_mcp_args(safe_args, context, execute)
+        except Exception as exc:
+            logger.exception("set-difference MCP fallback step failed")
+            detail = dict(fallback_detail)
+            detail.update({
+                "guardrail_decision": guardrail.decision,
+                "execution_step": step_name,
+                "execution_error": _trace_value(exc),
+            })
+            yield AgentEvent(type="tool_result", content={
+                "tool": "tableau_mcp",
+                "result": {"success": False, "error": str(exc), "data": {"step": step_name, "error": str(exc)}},
+            })
+            yield AgentEvent(type="error", content=_set_difference_error_payload(
+                "SET_DIFF_FALLBACK_MCP_EXECUTION_FAILED",
+                "Tableau MCP 查询失败，本次不输出集合差集结论。",
+                "请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 Tableau/MCP 执行日志。",
+                context.trace_id,
+                intent_result,
+                detail=detail,
+            ))
+            return
+
+        result = dict(result or {})
+        step_results[step_name] = result
+        yield AgentEvent(type="tool_result", content={
+            "tool": "tableau_mcp",
+            "result": {
+                "success": True,
+                "data": {
+                    "step": step_name,
+                    "chain_mode": SET_DIFFERENCE_MCP_FALLBACK_CHAIN_MODE,
+                    "field_count": len(result.get("fields") or []),
+                    "row_count": len(result.get("rows") or []),
+                    "mcp_args_guardrail": guardrail_payload,
+                },
+            },
+        })
+
+    mcp_steps = {
+        step_name: {
+            "field_count": len(result.get("fields") or []),
+            "row_count": len(result.get("rows") or []),
+            "mcp_args_guardrail": guardrail_payloads.get(step_name),
+        }
+        for step_name, result in step_results.items()
+    }
+    response_data = build_set_difference_response_data(
+        target_dimension=target_dimension,
+        universe_result=step_results.get("universe_keys") or {},
+        occurred_result=step_results.get("occurred_keys") or {},
+        datasource_name=str(datasource.get("name") or ""),
+        datasource_luid=str(datasource.get("luid") or datasource.get("datasource_luid") or ""),
+        definition="returned universe values minus returned occurred values",
+        sample_limit=sample_limit,
+        fallback_detail=fallback_detail,
+        mcp_steps=mcp_steps,
+        chain_mode=SET_DIFFERENCE_MCP_FALLBACK_CHAIN_MODE,
+    )
+    response_data["mcp_args"] = safe_args_by_step
+    response_data["queryspec_used"] = False
+
+    yield AgentEvent(type="tool_call", content={
+        "tool": "set_difference_operator",
+        "params": {
+            "chain_mode": SET_DIFFERENCE_MCP_FALLBACK_CHAIN_MODE,
+            "target_dimension": target_dimension,
+            "universe_step": "universe_keys",
+            "occurred_step": "occurred_keys",
+        },
+    })
+    yield AgentEvent(type="tool_result", content={
+        "tool": "set_difference_operator",
+        "result": {"success": True, "data": response_data},
+    })
+    yield AgentEvent(type="answer", content=_render_set_difference_fallback_answer(response_data))
+
+
+def _copy_filter_list(value: list[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
+    if not value:
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def _bounded_limit(value: Any) -> int:
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        limit = 100
+    return min(max(limit, 1), 100)
+
+
+def _set_difference_fallback_detail(
+    *,
+    question: str,
+    analysis_context: Optional[Mapping[str, Any]],
+    target_dimension: str,
+    reason: str,
+    original_error: Any,
+) -> dict[str, Any]:
+    context = dict(analysis_context or {})
+    return {
+        "phase": "mcp_set_difference",
+        "reason": reason,
+        "fallback_reason": reason,
+        "fallback_trace_event": FALLBACK_TRIGGERED_EVENT,
+        "fallback_mode": SET_DIFFERENCE_MCP_FALLBACK_CHAIN_MODE,
+        "chain_mode": SET_DIFFERENCE_MCP_FALLBACK_CHAIN_MODE,
+        "target_dimension": str(target_dimension or ""),
+        "operation": "returned_universe_values_minus_returned_occurred_values",
+        "queryspec_used": False,
+        "context_status": "resolved" if context else "empty",
+        "question_preview": str(question or "")[:200],
+        "original_error": _trace_value(original_error),
+    }
+
+
+def _current_datasource_for_guardrail(datasource: Mapping[str, Any], context: ToolContext) -> dict[str, Any]:
+    payload = {
+        "name": datasource.get("name"),
+        "luid": datasource.get("luid") or datasource.get("datasource_luid"),
+        "connection_id": context.connection_id,
+    }
+    metadata_fields = datasource.get("metadata_fields") or datasource.get("fields")
+    if isinstance(metadata_fields, list):
+        payload["fields"] = [dict(item) for item in metadata_fields if isinstance(item, Mapping)]
+    if isinstance(datasource.get("field_synonyms"), Mapping):
+        payload["field_synonyms"] = dict(datasource["field_synonyms"])
+    if isinstance(datasource.get("safe_field_synonyms"), Mapping):
+        payload["safe_field_synonyms"] = dict(datasource["safe_field_synonyms"])
+    return payload
+
+
+def _user_context_for_guardrail(datasource: Mapping[str, Any], context: ToolContext) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "user_id": context.user_id,
+        "connection_id": context.connection_id,
+    }
+    datasource_luid = datasource.get("luid") or datasource.get("datasource_luid")
+    if datasource_luid:
+        payload["accessible_datasource_luids"] = [datasource_luid]
+    if context.connection_id is not None:
+        payload["accessible_connection_ids"] = [context.connection_id]
+    if context.tenant_id:
+        payload["tenant_id"] = context.tenant_id
+    return payload
+
+
+async def _execute_set_difference_mcp_args(
+    args: Mapping[str, Any],
+    context: ToolContext,
+    execute: Callable[[Mapping[str, Any], ToolContext], Any] | None,
+) -> dict[str, Any]:
+    if execute is None:
+        from services.data_agent import mcp_proxy_main
+
+        result = mcp_proxy_main._execute_query_datasource_args(args, context)
+    else:
+        result = execute(args, context)
+    if inspect.isawaitable(result):
+        result = await result
+    return dict(result or {})
+
+
+def _set_difference_error_payload(
+    error_code: str,
+    message: str,
+    user_hint: str,
+    trace_id: str,
+    intent_result: IntentClassification,
+    *,
+    detail: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "fallback_type": "query_plan_unavailable",
+        "fallback_trace_event": WARN_EVENT,
+        "error_code": error_code,
+        "message": message,
+        "user_hint": user_hint,
+        "trace_id": trace_id,
+        "retryable": True,
+        "suggested_actions": ["请明确比较维度、范围和发生条件后重试。"],
+        "tools_used": ["mcp_args_guardrail", "tableau_mcp", "set_difference_operator"],
+        "intent_classifier": intent_result.to_dict(),
+        "controlled_chain": {"status": "failed", "detail": detail},
+    }
+
+
+def _render_set_difference_fallback_answer(response_data: Mapping[str, Any]) -> str:
+    rows = response_data.get("rows") if isinstance(response_data, Mapping) else []
+    fields = response_data.get("fields") if isinstance(response_data, Mapping) else []
+    row_count = len(rows) if isinstance(rows, list) else 0
+    dimension = str(fields[0]) if isinstance(fields, list) and fields else "对象"
+    if row_count == 0:
+        return f"集合差集查询已完成，没有返回符合条件的{dimension}。"
+    return f"集合差集查询已完成，返回 {row_count} 行{dimension}。"
+
+
+def _trace_value(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, BaseException):
+        return {"type": value.__class__.__name__, "message": str(value)[:500]}
+    try:
+        return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+    except (TypeError, ValueError):
+        return str(value)[:500]
 
 
 class _FieldCatalog:
@@ -504,6 +922,8 @@ def _time_spec(question: str, fields: _FieldCatalog) -> Optional[dict[str, Any]]
     if year:
         return {"field": fields.date, "grain": "YEAR", "range": {"type": "year", "value": year}}
     if _mentions_year(question) or any(token in question for token in ("过去", "历年", "趋势", "每年", "持续", "一直")):
+        if not any(token in question for token in ("每年都", "持续增长", "持续下降", "连续增长", "连续下降", "一直亏", "始终亏", "一直没挣到钱", "一致没挣到钱", "每年都亏")):
+            return {"field": fields.date, "grain": "YEAR", "range": {"type": "range", "start": 2021, "end": 2025}}
         return {"field": fields.date, "grain": "YEAR", "range": _complete_period_range(question)}
     return None
 

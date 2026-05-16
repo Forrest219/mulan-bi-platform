@@ -42,6 +42,84 @@ def _valid_queryspec(metric: str = "指标Y") -> dict:
     }
 
 
+def _selected_context(trace_id: str) -> ToolContext:
+    return ToolContext(
+        session_id="s1",
+        user_id=1,
+        connection_id=2,
+        trace_id=trace_id,
+        selected_datasource_luid="ds-1",
+        datasource_name="测试数据源",
+    )
+
+
+class _FakeHostCatalog:
+    async def load_catalog(self, **kwargs):
+        return {
+            "tools": [
+                {
+                    "name": "get-datasource-metadata",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"datasourceLuid": {"type": "string"}},
+                        "required": ["datasourceLuid"],
+                    },
+                },
+                {
+                    "name": "query-datasource",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "datasourceLuid": {"type": "string"},
+                            "query": {"type": "object"},
+                            "limit": {"type": "integer"},
+                        },
+                        "required": ["datasourceLuid", "query"],
+                    },
+                },
+            ]
+        }
+
+
+class _FakeHostExecutor:
+    async def execute_tool(self, tool_name, arguments, context):
+        if tool_name == "get-datasource-metadata":
+            return {"fields": [{"name": "指标Y", "dataType": "REAL"}]}
+        return {"fields": ["SUM(指标Y)"], "rows": [[100]]}
+
+
+class _FakeHostPlanner:
+    def __init__(self):
+        self.actions = [
+            {
+                "action": "tool_call",
+                "tool_call": {
+                    "tool": "query-datasource",
+                    "arguments": {
+                        "datasourceLuid": "ds-1",
+                        "query": {"fields": [{"fieldCaption": "指标Y", "function": "SUM"}]},
+                        "limit": 20,
+                    },
+                },
+            },
+            {"action": "final"},
+        ]
+
+    async def plan(self, **kwargs):
+        return self.actions.pop(0)
+
+
+def _patch_host(monkeypatch) -> None:
+    async def _load_components(**kwargs):
+        return mcp_first_main._McpHostComponents(
+            catalog=_FakeHostCatalog(),
+            executor=_FakeHostExecutor(),
+            planner=_FakeHostPlanner(),
+        )
+
+    monkeypatch.setattr(mcp_first_main, "_load_mcp_host_components", _load_components)
+
+
 def _config() -> MagicMock:
     cfg = MagicMock()
     cfg.provider = "minimax"
@@ -235,59 +313,41 @@ class _ProviderTimeoutLLM:
         raise AssertionError(f"unexpected purpose: {purpose}")
 
 
+class _ProviderTimeoutThenMcpArgsLLM:
+    def __init__(self):
+        self.queryspec_calls = 0
+
+    async def complete(self, *, prompt, system=None, timeout=None, purpose=None):
+        if purpose == "data_agent_queryspec":
+            self.queryspec_calls += 1
+            return {"error": "LLM provider 调用超时", "error_code": LLM_PROVIDER_TIMEOUT}
+        if purpose == "data_agent_mcp_proxy_args":
+            return {
+                "content": json.dumps(
+                    {
+                        "datasourceLuid": "ds-1",
+                        "query": {"fields": [{"fieldCaption": "指标Y", "function": "SUM"}]},
+                        "limit": 20,
+                    },
+                    ensure_ascii=False,
+                )
+            }
+        if purpose == "data_agent_answer":
+            return {"content": ""}
+        raise AssertionError(f"unexpected purpose: {purpose}")
+
+
 @pytest.mark.asyncio
 async def test_queryspec_model_invalid_triggers_one_repair(monkeypatch):
     monkeypatch.delenv("DATA_AGENT_QUERYSPEC_FALLBACK_ENABLED", raising=False)
-    monkeypatch.setattr(
-        mcp_first_main,
-        "_resolve_datasource",
-        lambda question, context, datasource_name_hint: {"name": "测试数据源", "luid": "ds-1", "asset_id": 1},
-    )
-    monkeypatch.setattr(mcp_first_main, "_queryable_fields", lambda ds_info, connection_id=None: ["指标Y"])
-
-    async def _fake_execute_vizql(datasource_luid, vizql_json, context, question, *, limit):
-        return {"fields": ["SUM(指标Y)"], "rows": [[100]]}
-
-    monkeypatch.setattr(mcp_first_main, "_execute_vizql", _fake_execute_vizql)
+    _patch_host(monkeypatch)
     llm = _ModelInvalidThenRepairLLM()
 
     events = [
         event
         async for event in mcp_first_main.run_mcp_first_main_path(
             question="指标Y 总量是多少？",
-            context=ToolContext(session_id="s1", user_id=1, connection_id=2, trace_id="trace-repair"),
-            intent_result=IntentClassification(intent="aggregate", confidence=0.9, route_reason="test"),
-            llm_service=llm,
-        )
-    ]
-
-    repair_results = [
-        event for event in events
-        if event.type == "tool_result" and isinstance(event.content, dict) and event.content.get("tool") == "llm_queryspec_repair"
-    ]
-    assert llm.queryspec_calls == 2
-    assert len(repair_results) == 1
-    assert repair_results[0].content["result"]["success"] is True
-    assert events[-1].type == "answer"
-
-
-@pytest.mark.asyncio
-async def test_provider_timeout_does_not_trigger_queryspec_repair(monkeypatch):
-    monkeypatch.delenv("DATA_AGENT_QUERYSPEC_FALLBACK_ENABLED", raising=False)
-    monkeypatch.setenv("DATA_AGENT_QUERYSPEC_MCP_FALLBACK_ENABLED", "false")
-    monkeypatch.setattr(
-        mcp_first_main,
-        "_resolve_datasource",
-        lambda question, context, datasource_name_hint: {"name": "测试数据源", "luid": "ds-1", "asset_id": 1},
-    )
-    monkeypatch.setattr(mcp_first_main, "_queryable_fields", lambda ds_info, connection_id=None: ["指标Y"])
-    llm = _ProviderTimeoutLLM()
-
-    events = [
-        event
-        async for event in mcp_first_main.run_mcp_first_main_path(
-            question="指标Y 总量是多少？",
-            context=ToolContext(session_id="s1", user_id=1, connection_id=2, trace_id="trace-timeout"),
+            context=_selected_context("trace-repair"),
             intent_result=IntentClassification(intent="aggregate", confidence=0.9, route_reason="test"),
             llm_service=llm,
         )
@@ -298,8 +358,71 @@ async def test_provider_timeout_does_not_trigger_queryspec_repair(monkeypatch):
         for event in events
         if event.type in {"tool_call", "tool_result"} and isinstance(event.content, dict)
     ]
-    assert llm.queryspec_calls == 1
+    assert llm.queryspec_calls == 0
+    assert "llm_queryspec" not in tool_names
     assert "llm_queryspec_repair" not in tool_names
-    assert events[-1].type == "error"
-    assert events[-1].content["error_code"] == LLM_PROVIDER_TIMEOUT
-    assert events[-1].content["controlled_chain"]["detail"]["fallback_reason"] == LLM_PROVIDER_TIMEOUT
+    assert "mcp_host_planner" in tool_names
+    assert events[-1].type == "answer"
+
+
+@pytest.mark.asyncio
+async def test_provider_timeout_does_not_trigger_queryspec_repair(monkeypatch):
+    monkeypatch.delenv("DATA_AGENT_QUERYSPEC_FALLBACK_ENABLED", raising=False)
+    monkeypatch.setenv("DATA_AGENT_QUERYSPEC_MCP_FALLBACK_ENABLED", "false")
+    _patch_host(monkeypatch)
+    llm = _ProviderTimeoutLLM()
+
+    events = [
+        event
+        async for event in mcp_first_main.run_mcp_first_main_path(
+            question="指标Y 总量是多少？",
+            context=_selected_context("trace-timeout"),
+            intent_result=IntentClassification(intent="aggregate", confidence=0.9, route_reason="test"),
+            llm_service=llm,
+        )
+    ]
+
+    tool_names = [
+        event.content["tool"]
+        for event in events
+        if event.type in {"tool_call", "tool_result"} and isinstance(event.content, dict)
+    ]
+    assert llm.queryspec_calls == 0
+    assert "llm_queryspec_repair" not in tool_names
+    assert "llm_queryspec" not in tool_names
+    assert "mcp_host_planner" in tool_names
+    assert events[-1].type == "answer"
+
+
+@pytest.mark.asyncio
+async def test_mcp_main_route_uses_guarded_mcp_without_queryspec(monkeypatch):
+    from services.data_agent import mcp_proxy_main
+
+    monkeypatch.delenv("DATA_AGENT_QUERYSPEC_FALLBACK_ENABLED", raising=False)
+    monkeypatch.delenv("DATA_AGENT_QUERYSPEC_MCP_FALLBACK_ENABLED", raising=False)
+    _patch_host(monkeypatch)
+    llm = _ProviderTimeoutThenMcpArgsLLM()
+
+    events = [
+        event
+        async for event in mcp_first_main.run_mcp_first_main_path(
+            question="指标Y 总量是多少？",
+            context=_selected_context("trace-timeout-mcp"),
+            intent_result=IntentClassification(intent="aggregate", confidence=0.9, route_reason="test"),
+            llm_service=llm,
+        )
+    ]
+
+    tool_names = [
+        event.content["tool"]
+        for event in events
+        if event.type in {"tool_call", "tool_result"} and isinstance(event.content, dict)
+    ]
+    assert llm.queryspec_calls == 0
+    assert "llm_queryspec" not in tool_names
+    assert "llm_queryspec_repair" not in tool_names
+    assert "mcp_args_guardrail" not in tool_names
+    assert "mcp_host_planner" in tool_names
+    assert "tableau_mcp" in tool_names
+    assert "queryspec_mcp_fallback" not in tool_names
+    assert events[-1].type == "answer"

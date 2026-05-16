@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import asdict, dataclass
@@ -148,7 +149,21 @@ def query_datasource_tool_schema() -> dict[str, Any]:
             "query": {
                 "type": "object",
                 "properties": {
-                    "fields": {"type": "array", "items": {"type": ["object", "string"]}},
+                    "fields": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "fieldCaption": {"type": "string", "minLength": 1},
+                                "function": {"type": "string"},
+                                "sortDirection": {"type": "string"},
+                                "sortPriority": {"type": "integer"},
+                                "fieldAlias": {"type": "string"},
+                            },
+                            "required": ["fieldCaption"],
+                            "additionalProperties": False,
+                        },
+                    },
                     "filters": {"type": "array", "items": {"type": "object"}},
                 },
                 "additionalProperties": True,
@@ -377,6 +392,10 @@ def validate_mcp_args(request: McpArgsGuardrailInput) -> McpArgsGuardrailResult:
     filter_sort_error = _repair_and_validate_filter_sort_enums(args, repairs)
     if filter_sort_error:
         return _reject(*filter_sort_error)
+
+    field_shape_error = _repair_and_validate_query_field_shapes(args, request.current_datasource, repairs)
+    if field_shape_error:
+        return _reject(*field_shape_error)
 
     field_error = _repair_and_validate_fields(args, request.queryable_fields, request.current_datasource, repairs)
     if field_error:
@@ -729,6 +748,184 @@ def _repair_and_validate_fields(
             "请改用当前数据源中可查询的字段。",
         )
     return None
+
+
+def _repair_and_validate_query_field_shapes(
+    args: dict[str, Any],
+    current_datasource: dict[str, Any],
+    repairs: list[McpArgsRepair],
+) -> tuple[str, str, str] | None:
+    """Reject ambiguous official MCP query.fields strings and normalize safe object keys."""
+
+    query = args.get("query")
+    if not isinstance(query, dict):
+        return None
+    fields = query.get("fields")
+    if fields is None:
+        return None
+    if not isinstance(fields, list):
+        return (
+            "MCP_ARGS_FIELD_SCHEMA_INVALID",
+            "MCP query.fields 必须是字段对象数组。",
+            "请重新生成符合 MCP tool schema 的字段对象参数。",
+        )
+
+    for index, item in enumerate(fields):
+        path = ("query", "fields", index)
+        if isinstance(item, str):
+            return (
+                "MCP_ARGS_FIELD_SCHEMA_INVALID",
+                "MCP query.fields 不接受字符串数组。",
+                "请使用包含 fieldCaption 或 fieldName 的字段对象数组后重试。",
+            )
+        if not isinstance(item, dict):
+            return (
+                "MCP_ARGS_FIELD_SCHEMA_INVALID",
+                "MCP query.fields 只能包含字段对象。",
+                "请重新生成符合 MCP tool schema 的字段对象参数。",
+            )
+        if "fieldCaption" not in item:
+            for source_key in ("caption", "name", "fieldName", "field"):
+                value = item.get(source_key)
+                if isinstance(value, str) and value.strip():
+                    item["fieldCaption"] = value
+                    item.pop(source_key, None)
+                    repairs.append(
+                        McpArgsRepair(
+                            type="field_object_key",
+                            path=_format_path((*path, "fieldCaption")),
+                            before={source_key: value},
+                            after={"fieldCaption": value},
+                            reason="normalized safe field object key to MCP fieldCaption",
+                        )
+                    )
+                    break
+        for alias_key in ("caption", "name", "fieldName", "field"):
+            if alias_key in item:
+                before = item.pop(alias_key)
+                repairs.append(
+                    McpArgsRepair(
+                        type="field_object_alias_removed",
+                        path=_format_path((*path, alias_key)),
+                        before={alias_key: before},
+                        after=None,
+                        reason="removed non-MCP field object alias after fieldCaption normalization",
+                    )
+                )
+        function_error = _normalize_query_field_function_key(item, path, repairs)
+        if function_error:
+            return function_error
+        _repair_aggregate_calculation_function(item, current_datasource, path, repairs)
+        if "fieldCaption" not in item:
+            return (
+                "MCP_ARGS_FIELD_SCHEMA_INVALID",
+                "MCP query.fields 字段对象缺少 fieldCaption。",
+                "请重新生成符合 MCP tool schema 的字段对象参数。",
+            )
+    return None
+
+
+def _repair_aggregate_calculation_function(
+    item: dict[str, Any],
+    current_datasource: dict[str, Any],
+    path: tuple[Any, ...],
+    repairs: list[McpArgsRepair],
+) -> None:
+    caption = str(item.get("fieldCaption") or "").strip()
+    if not caption or "function" not in item:
+        return
+    if not _field_is_aggregate_calculation(caption, current_datasource):
+        return
+    before = item.pop("function")
+    repairs.append(
+        McpArgsRepair(
+            type="aggregate_calculation_function_removed",
+            path=_format_path((*path, "function")),
+            before=before,
+            after=None,
+            reason="removed outer MCP function from an already-aggregated calculated field",
+        )
+    )
+
+
+def _normalize_query_field_function_key(
+    item: dict[str, Any],
+    path: tuple[Any, ...],
+    repairs: list[McpArgsRepair],
+) -> tuple[str, str, str] | None:
+    function_value = item.get("function")
+    for source_key in ("aggregation", "agg"):
+        if source_key not in item:
+            continue
+        source_value = item.pop(source_key)
+        if function_value is None:
+            item["function"] = source_value
+            function_value = source_value
+            repairs.append(
+                McpArgsRepair(
+                    type="field_object_function_key",
+                    path=_format_path((*path, "function")),
+                    before={source_key: source_value},
+                    after={"function": source_value},
+                    reason="normalized aggregation alias to MCP function key",
+                )
+            )
+            continue
+        if _normalize_token(function_value) != _normalize_token(source_value):
+            return (
+                "MCP_ARGS_ILLEGAL_AGGREGATION",
+                "字段对象包含冲突的聚合函数。",
+                "请只使用 function 指定一个受支持的聚合函数。",
+            )
+        repairs.append(
+            McpArgsRepair(
+                type="field_object_function_alias_removed",
+                path=_format_path((*path, source_key)),
+                before={source_key: source_value},
+                after=None,
+                reason="removed duplicate aggregation alias after function normalization",
+            )
+        )
+    return None
+
+
+def _field_is_aggregate_calculation(caption: str, current_datasource: dict[str, Any]) -> bool:
+    metadata = _field_metadata_by_caption(current_datasource).get(_normalize_field(caption))
+    if not metadata:
+        return False
+    formula = _metadata_string(metadata, "formula")
+    mcp = metadata.get("mcp")
+    if isinstance(mcp, Mapping):
+        formula = formula or _metadata_string(mcp, "formula")
+    if not formula:
+        return False
+    return _formula_contains_aggregate_function(formula)
+
+
+def _field_metadata_by_caption(current_datasource: dict[str, Any]) -> dict[str, Mapping[str, Any]]:
+    fields = current_datasource.get("fields") or current_datasource.get("metadata_fields") or []
+    indexed: dict[str, Mapping[str, Any]] = {}
+    for item in fields:
+        if not isinstance(item, Mapping):
+            continue
+        for key in ("field_caption", "caption", "fieldCaption", "name", "field_name", "fieldName"):
+            value = str(item.get(key) or "").strip()
+            if value:
+                indexed.setdefault(_normalize_field(value), item)
+    return indexed
+
+
+def _metadata_string(metadata: Mapping[str, Any], key: str) -> str:
+    value = metadata.get(key)
+    return str(value or "").strip() if value is not None else ""
+
+
+def _formula_contains_aggregate_function(formula: str) -> bool:
+    normalized = formula.upper()
+    return any(
+        re.search(rf"(?<![A-Z0-9_]){re.escape(function)}\s*\(", normalized)
+        for function in ALLOWED_AGGREGATIONS - {"NONE"}
+    )
 
 
 def _field_synonyms(current_datasource: dict[str, Any]) -> dict[str, list[str]]:

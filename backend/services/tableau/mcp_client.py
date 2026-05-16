@@ -23,7 +23,7 @@ import json
 import logging
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 import requests
 
@@ -96,6 +96,35 @@ _TRANSPORT_RETRY_MAX_ATTEMPTS = 3
 _READ_TIMEOUT_RETRY_MAX_ATTEMPTS = 2
 _RETRY_BACKOFF_SECONDS = (0.5, 1.5)
 _MIN_RETRY_REMAINING_SECONDS = 1.0
+MCP_NL_TOOL_UNAVAILABLE = "MCP_NL_TOOL_UNAVAILABLE"
+_STRUCTURED_QUERY_DATASOURCE_TOOL_NAMES = frozenset({"query-datasource"})
+_DEFAULT_NL_QUERY_TOOL_NAMES = (
+    "query-datasource-nl",
+    "query-datasource-natural-language",
+    "natural-language-query-datasource",
+    "ask-datasource",
+    "ask-data-source",
+)
+_NL_QUESTION_ARGUMENT_NAMES = (
+    "question",
+    "naturalLanguageQuery",
+    "natural_language_query",
+    "queryText",
+    "query_text",
+    "query",
+    "message",
+    "prompt",
+)
+_NL_DATASOURCE_ARGUMENT_NAMES = (
+    "datasourceLuid",
+    "dataSourceLuid",
+    "datasource_luid",
+    "datasourceId",
+    "datasource_id",
+    "datasourceIdentifier",
+    "datasource_identifier",
+)
+_NL_LIMIT_ARGUMENT_NAMES = ("limit", "rowLimit", "row_limit")
 
 
 def extract_datasource_metadata_fields(raw: Any) -> list[Dict[str, Any]]:
@@ -872,6 +901,103 @@ class TableauMCPClient:
         self._ds_connection_cache[cache_key] = cached_conn
         return cached_conn
 
+    def _get_connection_by_id(self, connection_id: int) -> "_CachedTableauConnection":
+        """Load a TableauConnection by id for generic MCP host operations."""
+        cache_key = f"{connection_id}:__connection__"
+        cached = self._ds_connection_cache.get(cache_key)
+        if isinstance(cached, _CachedTableauConnection):
+            return cached
+
+        from services.tableau.models import TableauConnection as _TableauConnection
+
+        db = TableauDatabase()
+        session = db.session
+        try:
+            conn = session.query(_TableauConnection).filter(
+                _TableauConnection.id == connection_id,
+            ).first()
+
+            if not conn:
+                raise TableauMCPError(
+                    code="NLQ_009",
+                    message="Tableau 连接不存在",
+                    details={"connection_id": connection_id},
+                )
+
+            conn_attrs = {
+                "id": conn.id,
+                "server_url": conn.server_url,
+                "site": conn.site,
+                "token_name": conn.token_name,
+                "token_encrypted": conn.token_encrypted,
+                "is_active": conn.is_active,
+                "last_test_success": conn.last_test_success,
+                "mcp_direct_enabled": getattr(conn, "mcp_direct_enabled", False),
+                "mcp_server_url": getattr(conn, "mcp_server_url", None),
+            }
+        finally:
+            session.close()
+
+        if len(self._ds_connection_cache) >= self._MAX_CACHE_SIZE:
+            keys_to_remove = list(self._ds_connection_cache.keys())[: len(self._ds_connection_cache) // 2]
+            for key in keys_to_remove:
+                del self._ds_connection_cache[key]
+            logger.warning("连接缓存超限，已清理 %d 条旧缓存", len(keys_to_remove))
+
+        cached_conn = _CachedTableauConnection(**conn_attrs)
+        self._ds_connection_cache[cache_key] = cached_conn
+        return cached_conn
+
+    def _resolve_mcp_connection_id(self, connection_id: Optional[int]) -> int:
+        resolved = connection_id if connection_id is not None else self._connection_id
+        if resolved is None:
+            raise TableauMCPError(
+                code="NLQ_009",
+                message="connection_id 为必填参数（MCP 查询禁止空上下文）",
+                details={},
+            )
+        return resolved
+
+    def _get_connection_for_mcp_context(
+        self,
+        *,
+        connection_id: int,
+        datasource_luid: Optional[str] = None,
+    ) -> "TableauConnection|_CachedTableauConnection":
+        if datasource_luid:
+            return self._get_connection_by_luid(datasource_luid, connection_id)
+        return self._get_connection_by_id(connection_id)
+
+    def _validate_mcp_context_connection(
+        self,
+        conn: "TableauConnection|_CachedTableauConnection",
+        *,
+        connection_id: int,
+        datasource_luid: Optional[str] = None,
+    ) -> None:
+        details: Dict[str, Any] = {"connection_id": connection_id}
+        if datasource_luid:
+            details["datasource_luid"] = datasource_luid
+
+        if not conn.is_active:
+            raise TableauMCPError(
+                code="NLQ_009",
+                message="Tableau 连接已禁用",
+                details=details,
+            )
+        if conn.last_test_success is False:
+            raise TableauMCPError(
+                code="NLQ_009",
+                message="Tableau 连接测试失败，请联系管理员",
+                details=details,
+            )
+        if not getattr(conn, "mcp_direct_enabled", False):
+            raise TableauMCPError(
+                code="MCP_010",
+                message="连接未开启 V2 直连模式，请使用 V1 API",
+                details={"connection_id": connection_id},
+            )
+
     # ─────────────────────────────────────────────────────────────────────────
     # 公开 API
     # ─────────────────────────────────────────────────────────────────────────
@@ -964,6 +1090,213 @@ class TableauMCPClient:
         finally:
             _connection_id_var.reset(token)
 
+    def list_tools(
+        self,
+        timeout: int = 30,
+        connection_id: Optional[int] = None,
+        datasource_luid: Optional[str] = None,
+        jwt_token: Optional[str] = None,
+    ) -> list[Dict[str, Any]]:
+        """Public MCP tools/list API for host runtimes."""
+        resolved_connection_id = self._resolve_mcp_connection_id(connection_id)
+        token = _connection_id_var.set(resolved_connection_id)
+        try:
+            conn = self._get_connection_for_mcp_context(
+                connection_id=resolved_connection_id,
+                datasource_luid=datasource_luid,
+            )
+            self._validate_mcp_context_connection(
+                conn,
+                connection_id=resolved_connection_id,
+                datasource_luid=datasource_luid,
+            )
+            site_key = _get_site_key(conn)
+            session_state = _get_or_create_session_state(site_key)
+            effective_base_url = _get_effective_mcp_base_url(conn)
+            return self._list_mcp_tools(
+                timeout=timeout,
+                site_key=site_key,
+                session_state=session_state,
+                base_url=effective_base_url,
+                jwt_token=jwt_token,
+            )
+        finally:
+            _connection_id_var.reset(token)
+
+    def call_tool(
+        self,
+        tool_name: str,
+        arguments: Optional[Dict[str, Any]] = None,
+        timeout: int = 30,
+        connection_id: Optional[int] = None,
+        datasource_luid: Optional[str] = None,
+        jwt_token: Optional[str] = None,
+    ) -> Any:
+        """Public generic MCP tools/call API for host runtimes."""
+        name = str(tool_name or "").strip()
+        if not name:
+            raise TableauMCPError(
+                code="NLQ_006",
+                message="MCP tool name 不能为空",
+                details={},
+            )
+        if arguments is None:
+            call_arguments: Dict[str, Any] = {}
+        elif isinstance(arguments, dict):
+            call_arguments = arguments
+        else:
+            raise TableauMCPError(
+                code="NLQ_006",
+                message="MCP tool arguments 必须是对象",
+                details={"argument_type": type(arguments).__name__},
+            )
+
+        resolved_connection_id = self._resolve_mcp_connection_id(connection_id)
+        token = _connection_id_var.set(resolved_connection_id)
+        try:
+            conn = self._get_connection_for_mcp_context(
+                connection_id=resolved_connection_id,
+                datasource_luid=datasource_luid,
+            )
+            self._validate_mcp_context_connection(
+                conn,
+                connection_id=resolved_connection_id,
+                datasource_luid=datasource_luid,
+            )
+            site_key = _get_site_key(conn)
+            session_state = _get_or_create_session_state(site_key)
+            effective_base_url = _get_effective_mcp_base_url(conn)
+            payload = {
+                "jsonrpc": "2.0",
+                "id": _next_id(),
+                "method": "tools/call",
+                "params": {
+                    "name": name,
+                    "arguments": call_arguments,
+                },
+            }
+            response = self._send_jsonrpc(
+                payload,
+                timeout=timeout,
+                site_key=site_key,
+                session_state=session_state,
+                base_url=effective_base_url,
+                jwt_token=jwt_token,
+            )
+            return _parse_tool_json_text(response, tool_name=name)
+        finally:
+            _connection_id_var.reset(token)
+
+    def query_datasource_natural_language(
+        self,
+        datasource_luid: str,
+        question: str,
+        limit: int = 1000,
+        timeout: int = 30,
+        connection_id: int = None,
+        jwt_token: Optional[str] = None,
+        allowed_tool_names: Optional[Iterable[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Invoke an explicitly allowlisted Tableau MCP natural-language query tool.
+
+        This method intentionally does not construct fields, aggregations, filters,
+        or any business query plan. It discovers MCP tools via tools/list, selects
+        only an allowed NL tool name, and forwards the original question plus the
+        selected datasource identifier.
+        """
+        if connection_id is None:
+            raise TableauMCPError(
+                code="NLQ_009",
+                message="connection_id 为必填参数（MCP 查询禁止空上下文）",
+                details={"datasource_luid": datasource_luid},
+            )
+
+        token = _connection_id_var.set(connection_id)
+        try:
+            conn = self._get_connection_by_luid(datasource_luid, connection_id)
+
+            if not conn.is_active:
+                raise TableauMCPError(
+                    code="NLQ_009",
+                    message="Tableau 连接已禁用",
+                    details={"datasource_luid": datasource_luid},
+                )
+            if conn.last_test_success is False:
+                raise TableauMCPError(
+                    code="NLQ_009",
+                    message="Tableau 连接测试失败，请联系管理员",
+                    details={"datasource_luid": datasource_luid},
+                )
+            if not getattr(conn, "mcp_direct_enabled", False):
+                raise TableauMCPError(
+                    code="MCP_010",
+                    message="连接未开启 V2 直连模式，请使用 V1 API",
+                    details={"connection_id": connection_id},
+                )
+
+            site_key = _get_site_key(conn)
+            session_state = _get_or_create_session_state(site_key)
+            effective_base_url = _get_effective_mcp_base_url(conn)
+
+            tools = self._list_mcp_tools(
+                timeout=timeout,
+                site_key=site_key,
+                session_state=session_state,
+                base_url=effective_base_url,
+                jwt_token=jwt_token,
+            )
+            selected_tool = _select_nl_query_tool(
+                tools,
+                allowed_tool_names=allowed_tool_names,
+            )
+            if selected_tool is None:
+                available_tool_names = [_mcp_tool_name(tool) for tool in tools]
+                raise TableauMCPError(
+                    code=MCP_NL_TOOL_UNAVAILABLE,
+                    message="Tableau MCP 未暴露已配置的自然语言查询工具",
+                    details={
+                        "datasource_luid": datasource_luid,
+                        "available_tools": available_tool_names,
+                        "allowed_tools": list(_allowed_nl_query_tool_names(allowed_tool_names)),
+                        "structured_query_datasource_available": (
+                            "query-datasource" in available_tool_names
+                        ),
+                    },
+                )
+
+            tool_name = _mcp_tool_name(selected_tool)
+            arguments = _build_nl_query_tool_arguments(
+                tool=selected_tool,
+                datasource_luid=datasource_luid,
+                question=question,
+                limit=limit,
+            )
+            payload = {
+                "jsonrpc": "2.0",
+                "id": _next_id(),
+                "method": "tools/call",
+                "params": {
+                    "name": tool_name,
+                    "arguments": arguments,
+                },
+            }
+
+            response = self._send_jsonrpc(
+                payload,
+                timeout=timeout,
+                site_key=site_key,
+                session_state=session_state,
+                base_url=effective_base_url,
+                jwt_token=jwt_token,
+            )
+            data = _parse_tool_json_text(response, tool_name=tool_name)
+            if isinstance(data, dict):
+                return _normalize_query_datasource_result(data)
+            return {"data": data}
+        finally:
+            _connection_id_var.reset(token)
+
     def _query_datasource_with_retry(
         self,
         *,
@@ -1035,6 +1368,32 @@ class TableauMCPClient:
                     error_summary,
                 )
                 time.sleep(backoff)
+
+    def _list_mcp_tools(
+        self,
+        *,
+        timeout: int,
+        site_key: Optional[str],
+        session_state: "_MCPSessionState",
+        base_url: Optional[str],
+        jwt_token: Optional[str],
+    ) -> list[Dict[str, Any]]:
+        """Discover MCP tools through tools/list for the prepared connection context."""
+        payload = {
+            "jsonrpc": "2.0",
+            "id": _next_id(),
+            "method": "tools/list",
+            "params": {},
+        }
+        response = self._send_jsonrpc(
+            payload,
+            timeout=timeout,
+            site_key=site_key,
+            session_state=session_state,
+            base_url=base_url,
+            jwt_token=jwt_token,
+        )
+        return _parse_tools_list_response(response)
 
     def list_datasources(
         self,
@@ -1378,6 +1737,140 @@ def _parse_tool_json_text(body: dict, tool_name: str) -> Any:
             message=f"{tool_name} 返回非 JSON 文本",
             details={"raw": text_payload[:500], "json_error": str(e)},
         )
+
+
+def _parse_tools_list_response(body: dict) -> list[Dict[str, Any]]:
+    """Parse standard MCP tools/list response without inferring tool semantics."""
+    if "error" in body:
+        err = body["error"]
+        message = err.get("message", "MCP 返回错误")
+        raise TableauMCPError(
+            code=_map_mcp_error(err.get("code"), message=message),
+            message=message,
+            details=err.get("data", {}),
+        )
+
+    result = body.get("result", body)
+    tools = result.get("tools") if isinstance(result, dict) else None
+    if not isinstance(tools, list):
+        raise TableauMCPError(
+            code="NLQ_006",
+            message="MCP tools/list 返回值缺少 tools 数组",
+            details={"raw": body},
+        )
+
+    normalized_tools: list[Dict[str, Any]] = []
+    for tool in tools:
+        if isinstance(tool, dict):
+            name = str(tool.get("name") or "").strip()
+            if name:
+                normalized_tools.append(tool)
+        elif isinstance(tool, str):
+            name = tool.strip()
+            if name:
+                normalized_tools.append({"name": name})
+    return normalized_tools
+
+
+def _mcp_tool_name(tool: Any) -> str:
+    if isinstance(tool, dict):
+        return str(tool.get("name") or "").strip()
+    return str(tool or "").strip()
+
+
+def _allowed_nl_query_tool_names(
+    allowed_tool_names: Optional[Iterable[str]] = None,
+) -> tuple[str, ...]:
+    if isinstance(allowed_tool_names, str):
+        raw_names = (allowed_tool_names,)
+    else:
+        raw_names = (
+            allowed_tool_names
+            if allowed_tool_names is not None
+            else _DEFAULT_NL_QUERY_TOOL_NAMES
+        )
+    names: list[str] = []
+    seen: set[str] = set()
+    for raw_name in raw_names:
+        name = str(raw_name or "").strip()
+        if not name or name in seen:
+            continue
+        names.append(name)
+        seen.add(name)
+    return tuple(names)
+
+
+def _select_nl_query_tool(
+    tools: list[Dict[str, Any]],
+    *,
+    allowed_tool_names: Optional[Iterable[str]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Select an exact allowlisted NL tool name; never select structured query-datasource."""
+    tools_by_name = {_mcp_tool_name(tool): tool for tool in tools}
+    for tool_name in _allowed_nl_query_tool_names(allowed_tool_names):
+        if tool_name in _STRUCTURED_QUERY_DATASOURCE_TOOL_NAMES:
+            continue
+        tool = tools_by_name.get(tool_name)
+        if tool is not None:
+            return tool
+    return None
+
+
+def _build_nl_query_tool_arguments(
+    *,
+    tool: Dict[str, Any],
+    datasource_luid: str,
+    question: str,
+    limit: int,
+) -> Dict[str, Any]:
+    """Build only passthrough NL arguments from the tool schema when available."""
+    properties = _tool_schema_properties(tool)
+    question_key = _pick_schema_property(properties, _NL_QUESTION_ARGUMENT_NAMES)
+    datasource_key = _pick_schema_property(properties, _NL_DATASOURCE_ARGUMENT_NAMES)
+    if properties and (question_key is None or datasource_key is None):
+        raise TableauMCPError(
+            code=MCP_NL_TOOL_UNAVAILABLE,
+            message="已配置的 MCP 自然语言查询工具缺少问题或数据源入参",
+            details={
+                "tool": _mcp_tool_name(tool),
+                "schema_properties": sorted(properties.keys()),
+            },
+        )
+
+    arguments = {
+        question_key or _NL_QUESTION_ARGUMENT_NAMES[0]: question,
+        datasource_key or _NL_DATASOURCE_ARGUMENT_NAMES[0]: datasource_luid,
+    }
+
+    limit_key = _pick_schema_property(properties, _NL_LIMIT_ARGUMENT_NAMES)
+    if limit_key is not None:
+        arguments[limit_key] = limit
+    return arguments
+
+
+def _tool_schema_properties(tool: Dict[str, Any]) -> Dict[str, Any]:
+    schema = tool.get("inputSchema") or tool.get("input_schema") or {}
+    if not isinstance(schema, dict):
+        return {}
+    properties = schema.get("properties") or {}
+    return properties if isinstance(properties, dict) else {}
+
+
+def _pick_schema_property(
+    properties: Dict[str, Any],
+    candidates: tuple[str, ...],
+) -> Optional[str]:
+    if not properties:
+        return None
+    for candidate in candidates:
+        if candidate in properties:
+            return candidate
+    properties_by_lower = {key.lower(): key for key in properties}
+    for candidate in candidates:
+        matched = properties_by_lower.get(candidate.lower())
+        if matched:
+            return matched
+    return None
 
 
 def _normalize_query_datasource_result(data: Dict[str, Any]) -> Dict[str, Any]:

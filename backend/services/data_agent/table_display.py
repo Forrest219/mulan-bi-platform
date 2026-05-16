@@ -38,15 +38,14 @@ def infer_table_display_schema(
     operator: str | None = None,
     metric_names: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Infer the optional table_display contract from fields and sample rows."""
+    """Infer display metadata without changing returned MCP field names."""
 
     sample_rows = rows or []
-    metrics = {_compact(name) for name in (metric_names or []) if str(name or "").strip()}
     columns: list[dict[str, Any]] = []
     for index, field in enumerate(fields):
         raw_name = _field_name(field)
         aggregate = _aggregate_parts(raw_name)
-        label = _display_label(field, raw_name, aggregate)
+        label = _display_label(field, raw_name)
         values = _column_values(sample_rows, index)
         semantic_type = _semantic_type(
             raw_name=raw_name,
@@ -54,7 +53,6 @@ def infer_table_display_schema(
             aggregate=aggregate,
             values=values,
             operator=operator,
-            metric_names=metrics,
         )
         value_type = _value_type(raw_name=raw_name, label=label, aggregate=aggregate, values=values)
         column_format = _format_for(semantic_type, value_type, values)
@@ -78,19 +76,15 @@ def _field_name(field: Any) -> str:
     return str(field or "")
 
 
-def _display_label(field: Any, raw_name: str, aggregate: tuple[str, str] | None) -> str:
+def _display_label(field: Any, raw_name: str) -> str:
     if isinstance(field, dict):
         alias = str(field.get("fieldAlias") or "").strip()
         if alias:
             return alias
-        caption = str(field.get("fieldCaption") or field.get("caption") or "").strip()
-        function = str(field.get("function") or "").upper()
-        if caption and function in AGGREGATE_FUNCTIONS:
-            return _aggregate_label(function, caption)
-        if caption:
-            return caption
-    if aggregate:
-        return _aggregate_label(*aggregate)
+        for key in ("label", "fieldCaption", "caption", "name", "key"):
+            value = str(field.get(key) or "").strip()
+            if value:
+                return value
     return raw_name.strip() or "column"
 
 
@@ -131,7 +125,6 @@ def _semantic_type(
     aggregate: tuple[str, str] | None,
     values: list[Any],
     operator: str | None,
-    metric_names: set[str],
 ) -> str:
     text = _compact(f"{raw_name} {label}")
     if _has_token(text, RANK_TOKENS):
@@ -143,8 +136,6 @@ def _semantic_type(
     if _is_percent_column(raw_name, label, values):
         return "derived_metric"
     if aggregate and aggregate[0] in AGGREGATE_FUNCTIONS:
-        return "metric"
-    if _compact(label) in metric_names or _compact(raw_name) in metric_names:
         return "metric"
     if _numeric_ratio(values) >= 0.8 and values:
         return "metric"

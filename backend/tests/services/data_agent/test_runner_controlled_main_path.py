@@ -96,11 +96,14 @@ async def test_data_intent_returns_guarded_error_instead_of_schema_fallback(monk
 
     assert [event.type for event in events] == ["metadata", "thinking", "error"]
     error_payload = events[-1].content
-    assert error_payload["fallback_type"] == "query_plan_unavailable"
+    assert error_payload["fallback_type"] == "mcp_nl_passthrough_unavailable"
     assert error_payload["intent_classifier"]["intent"] == "ranking"
     assert error_payload["controlled_chain"]["status"] == "failed"
     assert "schema" not in error_payload.get("tools_used", [])
-    assert not session_mgr.messages
+    assert len(session_mgr.messages) == 1
+    assert session_mgr.messages[0]["role"] == "assistant"
+    assert session_mgr.messages[0]["response_type"] == "fallback"
+    assert session_mgr.messages[0]["response_data"]["fallback_type"] == "mcp_nl_passthrough_unavailable"
 
     intent_steps = [
         obj
@@ -167,7 +170,11 @@ async def test_controlled_transient_failure_records_tools_without_chat_message(m
     assert db.updates[-1][BiAgentRun.status] == "failed"
     assert db.updates[-1][BiAgentRun.tools_used] == ["tableau_mcp"]
     assert db.updates[-1][BiAgentRun.steps_count] == 1
-    assert not session_mgr.messages
+    assert len(session_mgr.messages) == 1
+    assert session_mgr.messages[0]["role"] == "assistant"
+    assert session_mgr.messages[0]["content"] == "Tableau MCP 查询失败，本次不输出结论。"
+    assert session_mgr.messages[0]["response_type"] == "fallback"
+    assert session_mgr.messages[0]["tools_used"] == ["tableau_mcp"]
 
 
 @pytest.mark.asyncio

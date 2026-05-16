@@ -71,6 +71,19 @@ class _CapturingEngine:
         yield AgentEvent(type="answer", content="ok")
 
 
+class _ErrorEngine:
+    async def run(self, query, context, session=None, **kwargs):
+        yield AgentEvent(
+            type="error",
+            content={
+                "error_code": "AGENT_001",
+                "message": "查询超时",
+                "fallback_type": "query_timeout",
+                "user_hint": "请缩小时间范围后重试。",
+            },
+        )
+
+
 class _FakeMessage:
     def __init__(self, role="assistant", tools_used=None, content="", response_data=None):
         self.role = role
@@ -132,6 +145,52 @@ async def test_failed_tool_result_persists_error_summary(monkeypatch):
     assert tool_result_steps[0].tool_name == "schema"
     assert tool_result_steps[0].tool_result_summary == "Tableau asset fields are unavailable"
     assert db.updates[-1][BiAgentRun.status] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_error_event_persists_assistant_history_message(monkeypatch):
+    """回归：错误事件也必须落成 assistant 历史消息，刷新后可见。"""
+    monkeypatch.setattr("services.data_agent.runner.is_direct_query", lambda question: False)
+    monkeypatch.setattr("services.data_agent.runner.persist_structured_error", lambda *args, **kwargs: None)
+
+    db = _FakeDb()
+    session_mgr = _FakeSessionManager()
+    session = AgentSession(conversation_id=uuid.uuid4(), user_id=7)
+    context = ToolContext(
+        session_id=str(session.conversation_id),
+        user_id=7,
+        connection_id=1,
+        connection_name="Tableau",
+        trace_id="t-error",
+    )
+
+    events = [
+        event
+        async for event in run_agent(
+            engine=_ErrorEngine(),
+            context=context,
+            session_mgr=session_mgr,
+            session=session,
+            question="会超时的问题",
+            trace_id="t-error",
+            current_user={"id": 7},
+            db=db,
+            connection_id=1,
+        )
+    ]
+
+    assert [event.type for event in events] == ["metadata", "error"]
+    assert db.updates[-1][BiAgentRun.status] == "failed"
+    assert db.updates[-1][BiAgentRun.response_type] == "fallback"
+    assert len(session_mgr.messages) == 1
+    message = session_mgr.messages[0]
+    assert message["role"] == "assistant"
+    assert message["content"] == "查询超时"
+    assert message["response_type"] == "fallback"
+    assert message["response_data"]["error_code"] == "AGENT_001"
+    assert message["trace_id"] == "t-error"
+    assert message["sources_count"] == 1
+    assert message["top_sources"] == ["Tableau"]
 
 
 @pytest.mark.asyncio

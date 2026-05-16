@@ -25,6 +25,7 @@ import pytest
 
 import services.tableau.mcp_client as mcp_mod
 from services.tableau.mcp_client import (
+    MCP_NL_TOOL_UNAVAILABLE,
     TableauMCPClient,
     TableauMCPError,
     extract_datasource_metadata_fields,
@@ -503,6 +504,210 @@ class TestOfficialMcpDataShape:
         assert normalized["fields"] == ["YEAR(订单日期)", "销售额", "利润"]
         assert normalized["rows"] == [[2025, 150036, 81736]]
         assert normalized["data"] == raw["data"]
+
+
+class TestNaturalLanguageQueryTool:
+    def _patch_active_connection(self):
+        conn = mock.Mock()
+        conn.is_active = True
+        conn.last_test_success = True
+        conn.mcp_direct_enabled = True
+        conn.server_url = "https://tableau.example"
+        conn.site = "default"
+        conn.mcp_server_url = None
+        return mock.patch.object(
+            TableauMCPClient,
+            "_get_connection_by_luid",
+            return_value=conn,
+        )
+
+    def test_invokes_allowlisted_nl_tool_with_original_question_and_datasource(self):
+        question = "Show the current result"
+        calls = []
+
+        def mock_send(self, payload, timeout, **kwargs):
+            calls.append(payload)
+            if payload["method"] == "tools/list":
+                return {
+                    "result": {
+                        "tools": [
+                            {"name": "query-datasource"},
+                            {
+                                "name": "query-datasource-nl",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "question": {"type": "string"},
+                                        "datasourceLuid": {"type": "string"},
+                                        "limit": {"type": "integer"},
+                                    },
+                                },
+                            },
+                        ]
+                    }
+                }
+            assert payload["params"]["name"] == "query-datasource-nl"
+            return {
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps({"data": [{"label": "ok", "value": 1}]}),
+                        }
+                    ],
+                    "isError": False,
+                }
+            }
+
+        with self._patch_active_connection():
+            with mock.patch.object(TableauMCPClient, "_send_jsonrpc", mock_send):
+                client = TableauMCPClient(connection_id=1)
+                result = client.query_datasource_natural_language(
+                    datasource_luid="ds-1",
+                    question=question,
+                    limit=25,
+                    timeout=30,
+                    connection_id=1,
+                )
+
+        assert result["fields"] == ["label", "value"]
+        assert result["rows"] == [["ok", 1]]
+        assert [call["method"] for call in calls] == ["tools/list", "tools/call"]
+        call_args = calls[1]["params"]["arguments"]
+        assert call_args == {
+            "question": question,
+            "datasourceLuid": "ds-1",
+            "limit": 25,
+        }
+        assert "fields" not in json.dumps(call_args)
+        assert calls[1]["params"]["name"] != "query-datasource"
+
+    def test_structured_query_datasource_only_reports_nl_tool_unavailable(self):
+        calls = []
+
+        def mock_send(self, payload, timeout, **kwargs):
+            calls.append(payload)
+            if payload["method"] == "tools/list":
+                return {
+                    "result": {
+                        "tools": [
+                            {
+                                "name": "query-datasource",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "datasourceLuid": {"type": "string"},
+                                        "query": {"type": "object"},
+                                        "limit": {"type": "integer"},
+                                    },
+                                },
+                            }
+                        ]
+                    }
+                }
+            raise AssertionError(
+                "structured query-datasource must not be invoked as an NL tool"
+            )
+
+        with self._patch_active_connection():
+            with mock.patch.object(TableauMCPClient, "_send_jsonrpc", mock_send):
+                client = TableauMCPClient(connection_id=1)
+                with pytest.raises(TableauMCPError) as exc_info:
+                    client.query_datasource_natural_language(
+                        datasource_luid="ds-1",
+                        question="Show the current result",
+                        timeout=30,
+                        connection_id=1,
+                        allowed_tool_names=("query-datasource", "query-datasource-nl"),
+                    )
+
+        assert exc_info.value.code == MCP_NL_TOOL_UNAVAILABLE
+        assert exc_info.value.details["available_tools"] == ["query-datasource"]
+        assert exc_info.value.details["structured_query_datasource_available"] is True
+        assert [call["method"] for call in calls] == ["tools/list"]
+
+
+class TestGenericMCPToolAPI:
+    def _patch_active_connection(self):
+        conn = mock.Mock()
+        conn.is_active = True
+        conn.last_test_success = True
+        conn.mcp_direct_enabled = True
+        conn.server_url = "https://tableau.example"
+        conn.site = "default"
+        conn.mcp_server_url = None
+        return mock.patch.object(
+            TableauMCPClient,
+            "_get_connection_by_luid",
+            return_value=conn,
+        )
+
+    def test_public_list_tools_uses_mcp_tools_list(self):
+        calls = []
+
+        def mock_send(self, payload, timeout, **kwargs):
+            calls.append(payload)
+            assert payload["method"] == "tools/list"
+            return {
+                "result": {
+                    "tools": [
+                        {
+                            "name": "sample-tool",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {"payload": {"type": "object"}},
+                            },
+                        }
+                    ]
+                }
+            }
+
+        with self._patch_active_connection():
+            with mock.patch.object(TableauMCPClient, "_send_jsonrpc", mock_send):
+                client = TableauMCPClient(connection_id=1)
+                tools = client.list_tools(
+                    timeout=12,
+                    connection_id=1,
+                    datasource_luid="ds-1",
+                )
+
+        assert [tool["name"] for tool in tools] == ["sample-tool"]
+        assert calls[0]["params"] == {}
+
+    def test_public_call_tool_uses_generic_tools_call_and_parses_json(self):
+        calls = []
+
+        def mock_send(self, payload, timeout, **kwargs):
+            calls.append(payload)
+            assert payload["method"] == "tools/call"
+            return {
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps({"ok": True, "items": [1]}),
+                        }
+                    ],
+                    "isError": False,
+                }
+            }
+
+        with self._patch_active_connection():
+            with mock.patch.object(TableauMCPClient, "_send_jsonrpc", mock_send):
+                client = TableauMCPClient(connection_id=1)
+                result = client.call_tool(
+                    tool_name="sample-tool",
+                    arguments={"payload": {"value": 1}},
+                    timeout=12,
+                    connection_id=1,
+                    datasource_luid="ds-1",
+                )
+
+        assert result == {"ok": True, "items": [1]}
+        assert calls[0]["params"] == {
+            "name": "sample-tool",
+            "arguments": {"payload": {"value": 1}},
+        }
 
 
 class TestGatewayTimeoutBudget:
