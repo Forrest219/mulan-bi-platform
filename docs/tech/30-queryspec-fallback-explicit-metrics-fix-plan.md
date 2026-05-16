@@ -2,9 +2,13 @@
 
 Updated: 2026-05-14 CST
 
+> 2026-05-15 boundary update: this plan is now legacy-only. Under `mulan-boundary-contraction`, QuerySpec fallback must not be a primary planning or calculation path for MCP-answerable queries. MCP/Tableau owns facts and derived metrics; QuerySpec may remain advisory/diagnostic, and no Python code may hardcode business field names, metric names, or formulas in the primary path.
+
 ## Goal
 
 Fix aggregate QuerySpec fallback so that when LLM QuerySpec generation fails, fallback still covers the metrics explicitly mentioned in the current user question.
+
+Legacy scope: this applies only when `DATA_AGENT_QUERYSPEC_FALLBACK_ENABLED=true` is used as an explicit rollback mode. It must not override MCP-first guarded execution.
 
 Acceptance case:
 
@@ -26,6 +30,8 @@ The request must continue to `queryspec_validator` and `tableau_mcp`, not fail w
 - Do not modify frontend code.
 - Do not modify table display contract behavior except verifying existing derived column handling still works.
 - Do not hardcode by run id, datasource, customer, field value, or this exact question.
+- Do not compute business metrics in Python primary `response_data`.
+- Do not let QuerySpec fallback block a MCP-answerable query that has safe guarded MCP args.
 
 ## Root Cause
 
@@ -86,7 +92,7 @@ File:
 
 - `backend/services/data_agent/queryspec_fallback.py`
 
-Implement a fallback helper that extracts explicit metric intent from the current question.
+Legacy-only fallback helper that extracts explicit metric intent from the current question.
 
 It must recognize at least:
 
@@ -109,6 +115,7 @@ Implementation requirements:
 - Preserve field matching through `_FieldCatalog`.
 - Deduplicate metrics.
 - Do not treat ordinary customer dimension mentions as customer count. Only map to `客户数` when the wording explicitly implies count, such as `客户数`, `多少客户`, `客户数量`.
+- Keep this logic out of the MCP-first primary path unless explicit rollback mode is enabled.
 
 ## Task 2: Build Derived Metrics in Aggregate Fallback
 
@@ -116,7 +123,7 @@ File:
 
 - `backend/services/data_agent/queryspec_fallback.py`
 
-When the current question mentions a derived metric:
+When explicit rollback mode is enabled and the current question mentions a derived metric:
 
 ### 利润率
 
@@ -198,13 +205,15 @@ For the acceptance case, fallback QuerySpec must include:
 }
 ```
 
-## Task 4: Verify Derived Column Post-Processing
+## Task 4: Legacy Derived Column Post-Processing
 
 File:
 
 - `backend/services/data_agent/mcp_first_main.py`
 
-Verify existing `_append_derived_metric_columns()` detects requested derived metrics through both:
+This task is superseded for the primary response path. `_append_derived_metric_columns()` must not add or overwrite user-visible facts by default. If retained, it may only emit shadow diagnostics unless explicit rollback mode is enabled.
+
+Legacy verification, only when rollback mode is enabled, may inspect requested derived metrics through:
 
 - `spec.derived_metrics`
 - `spec.answer_contract.must_include`

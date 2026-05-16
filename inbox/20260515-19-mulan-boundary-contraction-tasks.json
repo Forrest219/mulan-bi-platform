@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "source_plan": "inbox/20260515-19-mulan-boundary-contraction-plan.md",
-  "status": "draft_pending_approval",
+  "status": "approved",
   "global_constraints": {
     "approval_required_before_code": true,
     "mcp_authoritative_for_facts": true,

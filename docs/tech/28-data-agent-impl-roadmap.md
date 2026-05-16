@@ -1,6 +1,8 @@
 # Data Agent 实现路线图
 
 > 状态：待启动 | 日期：2026-04-20 | 依赖：Spec 28 (Data Agent), Spec 29 (SQL Agent)
+>
+> 2026-05-15 scope note: for homepage Tableau Q&A, implementation must follow Specs 36/54 boundary contraction. Tableau MCP owns facts/calculations; Data Agent code must not compute or overwrite primary `response_data` business metrics.
 
 ---
 

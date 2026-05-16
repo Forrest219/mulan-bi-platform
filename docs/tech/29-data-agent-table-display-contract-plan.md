@@ -58,6 +58,7 @@ Rules:
 - `table_display.columns[i]` corresponds to `fields[i]`.
 - If `table_display` is absent, frontend must keep the existing fallback behavior.
 - The display contract must be generic across operators, not specific to ranking.
+- The display contract must not add, remove, override, or calculate business facts. MCP/Tableau response fields and rows remain authoritative.
 
 ## Display Rules
 
@@ -107,6 +108,7 @@ Docs:
 - Do not remove existing fallback behavior for historical messages.
 - Do not hardcode behavior for a single run id, customer, datasource, field value, or question.
 - Do not introduce a new frontend table component unless the existing one cannot support the contract.
+- Do not use renderer, frontend formatting, or table display metadata as a business calculation path.
 
 ## Tasks
 

@@ -1,6 +1,6 @@
 # Data Agent Transparent MCP Proxy 大减负迁移计划
 
-> 版本：v0.1 | 状态：Ready for Review | 日期：2026-05-14 | 目标：将 Data Agent 从 QuerySpec 独裁链路迁移为 Transparent MCP Proxy + Guardrail
+> 版本：v0.2 | 状态：Approved Boundary Update | 日期：2026-05-15 | 目标：将 Data Agent 从 QuerySpec 独裁链路迁移为 Transparent MCP Proxy + Guardrail，并收缩 Mulan 事实/计算边界
 
 ---
 
@@ -27,6 +27,7 @@
 新的架构定位：
 
 > LLM 负责基于 MCP Tool Description 生成 MCP 参数；Mulan 只在参数发往底层前做底线安全检查。
+> Tableau MCP 是事实、聚合、筛选、字段语义和派生指标权威；Mulan 只包装、审计、追踪并解释 MCP response data。
 
 目标链路：
 
@@ -47,10 +48,12 @@ Mulan packages result as table / chart / text / download
 Mulan 不再主动：
 
 - 教 LLM 选业务指标。
-- 自动补销售额、利润、客户数。
+- 自动补业务指标。
 - 强制中间 QuerySpec。
 - 自动改 operator。
 - 自动把失败计划替换成 deterministic QuerySpec。
+- 自动拆分或计算派生指标。
+- 用 DCE、renderer 或 response assembler 覆盖 MCP 返回事实。
 
 Mulan 保留：
 
@@ -62,6 +65,7 @@ Mulan 保留：
 - 危险操作阻断。
 - MCP 超时 / 连续失败熔断。
 - 结果包装和可解释展示。
+- 多轮上下文承接，但不得在上下文解析中计算事实或指标。
 
 ---
 
@@ -76,14 +80,17 @@ Mulan 保留：
 3. **QuerySpec 降级，不立刻删除**  
    QuerySpec 从主链路 contract 降级为 legacy adapter / observability snapshot。
 
-4. **Validator 降级为被动安检员**  
-   只做安全、权限、字段、规模、方向性底线检查，不做业务规划。
+4. **QuerySpec/Validator 降级为 advisory/diagnostic**
+   对 MCP-answerable query，QuerySpec 失败、超时或 validator reject 不得阻断已通过 guardrail 的 Tableau MCP 执行。
 
 5. **Repair 必须克制**  
    只允许确定性、低风险修补，不允许添加业务指标或重写用户意图。
 
 6. **Reject 必须可理解**  
    Guardrail 拒绝时返回用户可理解的错误和下一步建议，不返回 500。
+
+7. **DCE 和 Renderer 不在事实链路中**
+   DCE 只允许显式 shadow diagnostics；renderer 只解释和格式化 MCP 数据，不能做业务计算。
 
 ---
 
@@ -105,7 +112,7 @@ sequenceDiagram
     G-->>G: schema / field / permission / safety checks
     alt allow or repaired
         G->>M: safe args
-        M-->>R: result JSON
+        M-->>R: MCP fields / rows / metadata
         R-->>F: table/chart/text/download payload
     else reject
         G-->>F: guardrail fallback
@@ -191,6 +198,8 @@ Legacy policy：
 }
 ```
 
+所有 Tableau MCP 调用都必须进入该输入契约，包括 direct、proxy、legacy wrapper 和 fallback 路径。
+
 ### 4.2 Guardrail 输出
 
 ```python
@@ -213,6 +222,7 @@ Legacy policy：
 | 字段大小写修正 | 只差大小写或空格 | `sales -> Sales` |
 | 明确同义字段映射 | queryable_fields 中有唯一近义字段 | `订单日期 -> 发货日期` |
 | enum 大小写修正 | schema enum 明确 | `desc -> DESC` |
+| schema-safe field object normalization | 输入字段已经包含 schema 所需属性但包装层级不一致 | `{"name": "Region", "aggregation": "SUM"} -> {"fieldName": "Region", "aggregation": "SUM"}`（仅当 tool schema 明确允许） |
 
 Repair 必须记录到 explainability：
 
@@ -241,6 +251,7 @@ Repair 必须记录到 explainability：
 | 场景 | 错误码 |
 |---|---|
 | JSON schema 不合法且无法克制修复 | `MCP_ARGS_SCHEMA_INVALID` |
+| `query.fields` 为字符串数组，无法无歧义转换为 MCP tool schema 允许的字段对象 | `MCP_ARGS_FIELD_SCHEMA_INVALID` |
 | 字段不存在且无唯一安全映射 | `MCP_ARGS_UNKNOWN_FIELD` |
 | datasource / connection 越权 | `MCP_ARGS_DATASOURCE_FORBIDDEN` |
 | 请求 DDL / DML / 任意 SQL 危险操作 | `MCP_ARGS_UNSAFE_OPERATION` |

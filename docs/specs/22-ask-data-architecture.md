@@ -4,6 +4,8 @@
 > 作者: Forrest
 > 日期: 2026-04-16
 > 依赖: Spec 14 (NL-to-Query Pipeline), Spec 21 (首页重构), Spec 13 (MCP V2 直连), Spec 08 (LLM 能力层)
+>
+> 2026-05-15 scope note: this document records the historical `/api/search/query` architecture. Homepage `/api/agent/stream` Tableau Q&A now follows Specs 36/54 and `openspec/changes/mulan-boundary-contraction`: Tableau MCP owns facts/calculations, Mulan only wraps, traces, routes, and explains MCP output.
 
 ---
 

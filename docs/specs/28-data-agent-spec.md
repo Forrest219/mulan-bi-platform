@@ -3,12 +3,15 @@
 > 版本：v0.3 | 状态：Engineering Spec — minimax 可开发（业务用例已冻结于 §1.1） | 日期：2026-04-28 | 关联 PRD：本期用例集见 §1.1，PRD 仅做范围裁剪不影响开发启动
 >
 > **变更记录**
+> - v0.3a（2026-05-15）— Scope note: homepage Tableau Q&A follows Specs 36/54 boundary contraction. Tableau MCP owns facts/calculations; Mulan Data Agent wraps, traces, routes, and explains MCP output only.
 > - v0.3（2026-04-28）— 0.5c 补丁 + minimax 收口：§4.4 11 工具 IO 契约、§4.5 编排约束、§9.4 归因六步↔状态机映射、§1.1 冻结 3 条业务用例、§9.5 UC-1 端到端 walkthrough、§4.3 工具缺失风险处置（scoped / mock / out-of-scope）；与 Spec 29 v0.3 actor 契约对齐
 > - v0.1（2026-04-20）— 初版草稿
 
 ---
 
 ## 1. 概述
+
+> Scope note（2026-05-15）：本规格仍描述广义 Data Agent 分析能力。首页 Tableau 问数链路以 `docs/specs/36-data-agent-architecture-spec.md` 与 `docs/specs/54-data-agent-transparent-mcp-proxy-plan.md` 为准：Tableau MCP 是事实、聚合、筛选、字段语义和派生指标权威；Mulan 不在 primary response path 计算或覆盖业务指标。
 
 ### 1.1 目的
 

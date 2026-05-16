@@ -1,6 +1,6 @@
 # Mulan Boundary Contraction Repair Plan
 
-Status: draft_pending_approval
+Status: approved
 Owner after approval: coder
 Source evidence:
 - `run_id=b062713c-3b5e-4f1c-9823-7388589395f5`
