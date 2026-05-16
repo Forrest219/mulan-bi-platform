@@ -66,7 +66,8 @@ function getAggregation(field: FieldSemantic) {
 }
 
 function isMcpField(field: FieldSemantic) {
-  return Boolean(field.mcp) || field.source === 'mcp_cache' || field.source === 'mcp' || field.source_label?.toLowerCase().includes('mcp');
+  if (field.mcp && Object.values(field.mcp).some(v => v != null)) return true;
+  return field.source === 'mcp' || field.source_label?.toLowerCase().includes('mcp');
 }
 
 function isCalculatedField(field: FieldSemantic) {
