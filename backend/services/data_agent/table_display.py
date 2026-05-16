@@ -85,6 +85,9 @@ def _display_label(field: Any, raw_name: str) -> str:
             value = str(field.get(key) or "").strip()
             if value:
                 return value
+    aggregate = _aggregate_parts(raw_name)
+    if aggregate and aggregate[0] in AGGREGATE_FUNCTIONS:
+        return _aggregate_label(*aggregate)
     return raw_name.strip() or "column"
 
 

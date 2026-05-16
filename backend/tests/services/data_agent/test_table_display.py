@@ -1,4 +1,8 @@
+import pytest
+
 from services.data_agent.table_display import infer_table_display_schema
+
+pytestmark = pytest.mark.skip_db
 
 
 def _column(schema, label):

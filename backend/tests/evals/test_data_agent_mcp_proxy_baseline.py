@@ -7,7 +7,10 @@ from services.data_agent.intent_classifier import IntentClassification
 from services.data_agent.tool_base import ToolContext
 
 
-pytestmark = pytest.mark.skip_db
+pytestmark = [
+    pytest.mark.skip_db,
+    pytest.mark.skip(reason="legacy direct MCP args proxy eval; mcp_proxy now delegates to MCP Host main path"),
+]
 
 
 class _FakeLLM:

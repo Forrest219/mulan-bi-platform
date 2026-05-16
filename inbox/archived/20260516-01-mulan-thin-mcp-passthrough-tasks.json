@@ -1,0 +1,95 @@
+{
+  "schema_version": "1.0",
+  "plan": "20260516-01-mulan-thin-mcp-passthrough-plan.md",
+  "tasks": [
+    {
+      "id": "THIN-MCP-ROUTE",
+      "owner": "coder-route",
+      "status": "completed",
+      "write_scope": [
+        "backend/services/data_agent/mcp_first_main.py",
+        "backend/services/data_agent/mcp_proxy_main.py",
+        "backend/services/data_agent/tool_base.py",
+        "backend/app/api/agent.py",
+        "backend/tests/services/data_agent/test_mcp_first_main.py",
+        "backend/tests/services/data_agent/test_mcp_proxy_main.py"
+      ],
+      "goal": "Replace the main data-question route with a thin MCP passthrough route.",
+      "requirements": [
+        "Do not call LLM-generated MCP args on the main route.",
+        "Do not call QuerySpec generation, repair, validation, or fallback on the main route.",
+        "Require an explicit frontend-selected datasource/datasource_luid; do not infer datasource.",
+        "If an MCP natural-language query tool is not available, return MCP_NL_TOOL_UNAVAILABLE.",
+        "Do not construct query-datasource fields from the natural-language question."
+      ],
+      "acceptance": [
+        "Tests prove Q1-Q4-like questions do not emit llm_queryspec, llm_mcp_args, or queryspec fallback events.",
+        "Tests prove missing MCP NL tool returns MCP_NL_TOOL_UNAVAILABLE."
+      ]
+    },
+    {
+      "id": "THIN-MCP-CLIENT",
+      "owner": "coder-client",
+      "status": "completed",
+      "write_scope": [
+        "backend/services/tableau/mcp_client.py",
+        "backend/tests/services/tableau",
+        "backend/tests/services/data_agent/test_mcp_first_main.py"
+      ],
+      "goal": "Add minimal support for discovering and invoking a Tableau MCP natural-language query tool if one exists.",
+      "requirements": [
+        "Discover MCP tools by tools/list or existing client capability if already present.",
+        "Select only an explicit configured/allowlisted natural-language query tool name.",
+        "Pass original user question and selected datasource identifier without rewriting.",
+        "If only structured query-datasource exists, report no NL tool available.",
+        "Do not add business terms or field mappings."
+      ],
+      "acceptance": [
+        "Unit tests cover NL tool available and unavailable branches.",
+        "No business query planning appears in the client."
+      ]
+    },
+    {
+      "id": "THIN-MCP-RESPONSE",
+      "owner": "coder-response",
+      "status": "completed",
+      "write_scope": [
+        "backend/services/data_agent/answer_prompt_builder.py",
+        "backend/services/data_agent/table_display.py",
+        "backend/tests/services/data_agent/test_queryspec_fallback.py",
+        "backend/tests/services/data_agent/test_dynamic_column_engine.py"
+      ],
+      "goal": "Keep only response_data normalization and renderer restatement behavior.",
+      "requirements": [
+        "Renderer input must treat MCP response_data as the only fact source.",
+        "Do not calculate, derive, add, remove, or rewrite business fields.",
+        "DCE must not mutate primary response_data.",
+        "Structured MCP errors must be surfaced without query fallback."
+      ],
+      "acceptance": [
+        "Tests prove renderer cannot calculate missing metrics.",
+        "Tests prove DCE shadow, if present, does not modify primary response_data."
+      ]
+    },
+    {
+      "id": "THIN-MCP-LIVE-Q1-Q4",
+      "owner": "coder-live",
+      "status": "completed",
+      "write_scope": [
+        "inbox/20260516-01-mulan-thin-mcp-q1-q4-probe.json",
+        "inbox/20260516-01-mulan-thin-mcp-validation.md"
+      ],
+      "goal": "Run live Q1-Q4 verification after implementation.",
+      "requirements": [
+        "Use the current Tableau MCP server tool list as evidence.",
+        "Run Q1-Q4 through Mulan on current code.",
+        "Record whether each run used an MCP NL tool or returned MCP_NL_TOOL_UNAVAILABLE.",
+        "Confirm no QuerySpec/LLM MCP args events appear."
+      ],
+      "acceptance": [
+        "Live artifact is written under inbox.",
+        "Validation summary states pass/fail for Q1-Q4 under the contracted boundary."
+      ]
+    }
+  ]
+}

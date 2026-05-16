@@ -1,0 +1,97 @@
+{
+  "schema_version": "1.0",
+  "plan": "20260515-20-mcp-first-q4-q5-parallel-repair-plan.md",
+  "tasks": [
+    {
+      "id": "MCP-FIRST-CORE",
+      "owner": "coder-core",
+      "status": "ready",
+      "write_scope": [
+        "backend/services/data_agent/mcp_first_main.py",
+        "backend/tests/services/data_agent/test_mcp_first_main.py"
+      ],
+      "goal": "Make MCP direct/proxy the main route for MCP-answerable data questions; QuerySpec must not block Q4/Q5.",
+      "requirements": [
+        "Bypass QuerySpec main path for Tableau MCP-answerable query intents.",
+        "Keep datasource resolution, context trace, response_data normalization, renderer contract, and fallback trace.",
+        "Preserve optional QuerySpec shadow/fallback behind explicit control only.",
+        "Do not hardcode business names in Python code."
+      ],
+      "acceptance": [
+        "A QuerySpec generation/validation/repair failure cannot prevent MCP main route execution.",
+        "Tests cover that Q4/Q5-like requests do not enter QuerySpec-blocked error path."
+      ]
+    },
+    {
+      "id": "MCP-FIRST-CONTEXT",
+      "owner": "coder-context",
+      "status": "ready",
+      "write_scope": [
+        "backend/services/data_agent/mcp_proxy_main.py",
+        "backend/services/data_agent/skill_prompts",
+        "backend/tests/services/data_agent/test_mcp_proxy_main.py"
+      ],
+      "goal": "Pass conversation context and datasource metadata into MCP args generation for follow-up breakdown questions.",
+      "requirements": [
+        "Use prior structured context to preserve prior dimensions and executable metrics for follow-up breakdowns.",
+        "Generate MCP query args that guardrail can validate.",
+        "Do not compute business metrics in prompt or Python code.",
+        "Do not hardcode Q4 field names."
+      ],
+      "acceptance": [
+        "A generic follow-up such as continuing by a time grain keeps the prior breakdown dimension.",
+        "Generated args use field object contracts accepted by mcp_args_guardrail.py."
+      ]
+    },
+    {
+      "id": "MCP-FIRST-SET-DIFF",
+      "owner": "coder-setdiff",
+      "status": "ready",
+      "write_scope": [
+        "backend/services/data_agent/queryspec_fallback.py",
+        "backend/services/data_agent/semantic_operators",
+        "backend/tests/services/data_agent/test_queryspec_fallback.py"
+      ],
+      "goal": "Provide a non-QuerySpec deterministic MCP orchestration path for missing-record/set-difference questions if MCP proxy cannot answer directly.",
+      "requirements": [
+        "Use MCP query results as the only factual source.",
+        "Perform only deterministic set difference on returned dimension values.",
+        "Route all MCP queries through guardrail.",
+        "Do not hardcode Q5 field names."
+      ],
+      "acceptance": [
+        "A generic missing-record question can return a one-column set difference table.",
+        "Trace records controlled fallback when this path is used."
+      ]
+    },
+    {
+      "id": "MCP-FIRST-GUARDRAIL",
+      "owner": "coder-guardrail",
+      "status": "ready",
+      "write_scope": [
+        "backend/services/data_agent/mcp_args_guardrail.py",
+        "backend/tests/services/data_agent/test_mcp_args_guardrail.py"
+      ],
+      "goal": "Ensure the new MCP-first route remains guarded and traceable.",
+      "requirements": [
+        "Validate/repair structured query-datasource args used by the MCP-first route.",
+        "Reject unsafe detail scans and invalid field contracts.",
+        "Preserve calculation-field aggregate handling.",
+        "Do not add business-specific repairs."
+      ],
+      "acceptance": [
+        "All new MCP-first structured args pass through guardrail.",
+        "Unsafe or malformed args are rejected before Tableau MCP execution."
+      ]
+    }
+  ],
+  "integration_gate": {
+    "required": [
+      "backend/.venv/bin/python -m pytest backend/tests/services/data_agent/test_mcp_first_main.py backend/tests/services/data_agent/test_mcp_proxy_main.py backend/tests/services/data_agent/test_mcp_args_guardrail.py backend/tests/services/data_agent/test_queryspec_fallback.py backend/tests/services/data_agent/test_llm_queryspec_stability.py",
+      "live Q0-Q5 probe against current code",
+      "Batch 2 baseline gate"
+    ],
+    "commit_allowed": false,
+    "commit_condition": "Batch 2 baseline gate passes"
+  }
+}

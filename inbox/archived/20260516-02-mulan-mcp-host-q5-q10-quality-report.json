@@ -1,0 +1,643 @@
+{
+  "schema_version": "mcp_host_quality_gate.v1",
+  "status": "block",
+  "generated_at": "2026-05-16T03:31:46.345872+00:00",
+  "baseline_path": "inbox/20260515-13-abtest-raw.json",
+  "live_artifact_path": "inbox/20260516-02-mulan-mcp-host-q5-q10-trace.json",
+  "qids": [
+    "Q5",
+    "Q6",
+    "Q7",
+    "Q8",
+    "Q9",
+    "Q10"
+  ],
+  "cases": [
+    {
+      "qid": "Q5",
+      "status": "block",
+      "checks": [
+        {
+          "qid": "Q5",
+          "name": "live_artifact_present",
+          "status": "pass",
+          "message": "live artifact is present",
+          "details": {}
+        },
+        {
+          "qid": "Q5",
+          "name": "direct_mcp_baseline_present",
+          "status": "pass",
+          "message": "direct MCP baseline is present",
+          "details": {}
+        },
+        {
+          "qid": "Q5",
+          "name": "mcp_backed_response_data",
+          "status": "pass",
+          "message": "MCP-backed response_data is present",
+          "details": {
+            "has_response_table": true,
+            "has_mcp_evidence": true
+          }
+        },
+        {
+          "qid": "Q5",
+          "name": "forbidden_queryspec_markers_absent",
+          "status": "pass",
+          "message": "forbidden QuerySpec markers absent",
+          "details": {
+            "markers": []
+          }
+        },
+        {
+          "qid": "Q5",
+          "name": "direct_mcp_baseline_table",
+          "status": "block",
+          "message": "direct MCP baseline table is missing",
+          "details": {}
+        },
+        {
+          "qid": "Q5",
+          "name": "correctness_not_weaker_than_direct_mcp",
+          "status": "block",
+          "message": "live response_data is weaker than the direct MCP baseline",
+          "details": {}
+        }
+      ]
+    },
+    {
+      "qid": "Q6",
+      "status": "pass",
+      "checks": [
+        {
+          "qid": "Q6",
+          "name": "live_artifact_present",
+          "status": "pass",
+          "message": "live artifact is present",
+          "details": {}
+        },
+        {
+          "qid": "Q6",
+          "name": "direct_mcp_baseline_present",
+          "status": "pass",
+          "message": "direct MCP baseline is present",
+          "details": {}
+        },
+        {
+          "qid": "Q6",
+          "name": "mcp_backed_response_data",
+          "status": "pass",
+          "message": "MCP-backed response_data is present",
+          "details": {
+            "has_response_table": true,
+            "has_mcp_evidence": true
+          }
+        },
+        {
+          "qid": "Q6",
+          "name": "forbidden_queryspec_markers_absent",
+          "status": "pass",
+          "message": "forbidden QuerySpec markers absent",
+          "details": {
+            "markers": []
+          }
+        },
+        {
+          "qid": "Q6",
+          "name": "baseline_required_fields",
+          "status": "pass",
+          "message": "baseline fields are present",
+          "details": {
+            "missing": [],
+            "expected": [
+              "客户名称",
+              "SUM(销售额)"
+            ],
+            "actual": [
+              "客户名称",
+              "SUM(销售额)"
+            ]
+          }
+        },
+        {
+          "qid": "Q6",
+          "name": "baseline_row_count",
+          "status": "pass",
+          "message": "row count matches",
+          "details": {
+            "expected": 10,
+            "actual": 10
+          }
+        },
+        {
+          "qid": "Q6",
+          "name": "baseline_rows",
+          "status": "pass",
+          "message": "rows match direct MCP baseline",
+          "details": {
+            "missing": [],
+            "extra": [],
+            "missing_count": 0,
+            "extra_count": 0,
+            "numeric_rel_tolerance": 1e-06,
+            "numeric_abs_tolerance": 1e-06
+          }
+        },
+        {
+          "qid": "Q6",
+          "name": "correctness_not_weaker_than_direct_mcp",
+          "status": "pass",
+          "message": "live response_data is not weaker than the direct MCP baseline",
+          "details": {}
+        }
+      ]
+    },
+    {
+      "qid": "Q7",
+      "status": "block",
+      "checks": [
+        {
+          "qid": "Q7",
+          "name": "live_artifact_present",
+          "status": "pass",
+          "message": "live artifact is present",
+          "details": {}
+        },
+        {
+          "qid": "Q7",
+          "name": "direct_mcp_baseline_present",
+          "status": "pass",
+          "message": "direct MCP baseline is present",
+          "details": {}
+        },
+        {
+          "qid": "Q7",
+          "name": "mcp_backed_response_data",
+          "status": "pass",
+          "message": "MCP-backed response_data is present",
+          "details": {
+            "has_response_table": true,
+            "has_mcp_evidence": true
+          }
+        },
+        {
+          "qid": "Q7",
+          "name": "forbidden_queryspec_markers_absent",
+          "status": "pass",
+          "message": "forbidden QuerySpec markers absent",
+          "details": {
+            "markers": []
+          }
+        },
+        {
+          "qid": "Q7",
+          "name": "baseline_required_fields",
+          "status": "pass",
+          "message": "baseline fields are present",
+          "details": {
+            "missing": [],
+            "expected": [
+              "YEAR(发货日期)",
+              "SUM(销售额)",
+              "SUM(利润)"
+            ],
+            "actual": [
+              "客户名称",
+              "YEAR(发货日期)",
+              "MONTH(发货日期)",
+              "SUM(销售额)",
+              "SUM(利润)",
+              "子类别"
+            ]
+          }
+        },
+        {
+          "qid": "Q7",
+          "name": "baseline_row_count",
+          "status": "block",
+          "message": "row count differs from direct MCP baseline",
+          "details": {
+            "expected": 2,
+            "actual": 13
+          }
+        },
+        {
+          "qid": "Q7",
+          "name": "baseline_rows",
+          "status": "block",
+          "message": "rows differ from direct MCP baseline",
+          "details": {
+            "missing": [
+              [
+                2022,
+                4187.484,
+                314.0612999999997
+              ],
+              [
+                2021,
+                20194.0021,
+                -2612.6795999999995
+              ]
+            ],
+            "extra": [
+              [
+                "2022-01-01T00:00:00",
+                4187.484,
+                314.0612999999997
+              ],
+              [
+                "2021-01-01T00:00:00",
+                436.50800000000004,
+                143.67325
+              ],
+              [
+                "2021-01-01T00:00:00",
+                4088.5649999999996,
+                817.7130000000001
+              ],
+              [
+                "2021-01-01T00:00:00",
+                197.20000000000005,
+                69.02000000000001
+              ],
+              [
+                "2021-01-01T00:00:00",
+                24.591999999999995,
+                -36.888000000000005
+              ],
+              [
+                "2021-01-01T00:00:00",
+                3693.7880000000005,
+                -923.4470000000001
+              ],
+              [
+                "2021-01-01T00:00:00",
+                28.275,
+                11.027249999999999
+              ],
+              [
+                "2021-01-01T00:00:00",
+                207.93,
+                93.56849999999999
+              ],
+              [
+                "2021-01-01T00:00:00",
+                1461.484,
+                146.1484000000001
+              ],
+              [
+                "2021-01-01T00:00:00",
+                1281.5969999999998,
+                -3332.1522000000004
+              ]
+            ],
+            "missing_count": 2,
+            "extra_count": 13,
+            "numeric_rel_tolerance": 1e-06,
+            "numeric_abs_tolerance": 1e-06
+          }
+        },
+        {
+          "qid": "Q7",
+          "name": "correctness_not_weaker_than_direct_mcp",
+          "status": "block",
+          "message": "live response_data is weaker than the direct MCP baseline",
+          "details": {}
+        }
+      ]
+    },
+    {
+      "qid": "Q8",
+      "status": "block",
+      "checks": [
+        {
+          "qid": "Q8",
+          "name": "live_artifact_present",
+          "status": "pass",
+          "message": "live artifact is present",
+          "details": {}
+        },
+        {
+          "qid": "Q8",
+          "name": "direct_mcp_baseline_present",
+          "status": "pass",
+          "message": "direct MCP baseline is present",
+          "details": {}
+        },
+        {
+          "qid": "Q8",
+          "name": "mcp_backed_response_data",
+          "status": "pass",
+          "message": "MCP-backed response_data is present",
+          "details": {
+            "has_response_table": true,
+            "has_mcp_evidence": true
+          }
+        },
+        {
+          "qid": "Q8",
+          "name": "forbidden_queryspec_markers_absent",
+          "status": "pass",
+          "message": "forbidden QuerySpec markers absent",
+          "details": {
+            "markers": []
+          }
+        },
+        {
+          "qid": "Q8",
+          "name": "direct_mcp_baseline_table",
+          "status": "block",
+          "message": "direct MCP baseline table is missing",
+          "details": {}
+        },
+        {
+          "qid": "Q8",
+          "name": "correctness_not_weaker_than_direct_mcp",
+          "status": "block",
+          "message": "live response_data is weaker than the direct MCP baseline",
+          "details": {}
+        }
+      ]
+    },
+    {
+      "qid": "Q9",
+      "status": "block",
+      "checks": [
+        {
+          "qid": "Q9",
+          "name": "live_artifact_present",
+          "status": "pass",
+          "message": "live artifact is present",
+          "details": {}
+        },
+        {
+          "qid": "Q9",
+          "name": "direct_mcp_baseline_present",
+          "status": "pass",
+          "message": "direct MCP baseline is present",
+          "details": {}
+        },
+        {
+          "qid": "Q9",
+          "name": "mcp_backed_response_data",
+          "status": "pass",
+          "message": "MCP-backed response_data is present",
+          "details": {
+            "has_response_table": true,
+            "has_mcp_evidence": true
+          }
+        },
+        {
+          "qid": "Q9",
+          "name": "forbidden_queryspec_markers_absent",
+          "status": "pass",
+          "message": "forbidden QuerySpec markers absent",
+          "details": {
+            "markers": []
+          }
+        },
+        {
+          "qid": "Q9",
+          "name": "direct_mcp_baseline_table",
+          "status": "block",
+          "message": "direct MCP baseline table is missing",
+          "details": {}
+        },
+        {
+          "qid": "Q9",
+          "name": "correctness_not_weaker_than_direct_mcp",
+          "status": "block",
+          "message": "live response_data is weaker than the direct MCP baseline",
+          "details": {}
+        }
+      ]
+    },
+    {
+      "qid": "Q10",
+      "status": "block",
+      "checks": [
+        {
+          "qid": "Q10",
+          "name": "live_artifact_present",
+          "status": "pass",
+          "message": "live artifact is present",
+          "details": {}
+        },
+        {
+          "qid": "Q10",
+          "name": "direct_mcp_baseline_present",
+          "status": "pass",
+          "message": "direct MCP baseline is present",
+          "details": {}
+        },
+        {
+          "qid": "Q10",
+          "name": "mcp_backed_response_data",
+          "status": "block",
+          "message": "MCP-backed response_data is missing",
+          "details": {
+            "has_response_table": false,
+            "has_mcp_evidence": true
+          }
+        },
+        {
+          "qid": "Q10",
+          "name": "forbidden_queryspec_markers_absent",
+          "status": "pass",
+          "message": "forbidden QuerySpec markers absent",
+          "details": {
+            "markers": []
+          }
+        },
+        {
+          "qid": "Q10",
+          "name": "direct_mcp_baseline_table",
+          "status": "block",
+          "message": "direct MCP baseline table is missing",
+          "details": {}
+        },
+        {
+          "qid": "Q10",
+          "name": "correctness_not_weaker_than_direct_mcp",
+          "status": "block",
+          "message": "live response_data is weaker than the direct MCP baseline",
+          "details": {}
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "case_count": 6,
+    "passed_count": 1,
+    "blocked_count": 5,
+    "blocker_count": 12
+  },
+  "blockers": [
+    {
+      "qid": "Q5",
+      "name": "direct_mcp_baseline_table",
+      "status": "block",
+      "message": "direct MCP baseline table is missing",
+      "details": {}
+    },
+    {
+      "qid": "Q5",
+      "name": "correctness_not_weaker_than_direct_mcp",
+      "status": "block",
+      "message": "live response_data is weaker than the direct MCP baseline",
+      "details": {}
+    },
+    {
+      "qid": "Q7",
+      "name": "baseline_row_count",
+      "status": "block",
+      "message": "row count differs from direct MCP baseline",
+      "details": {
+        "expected": 2,
+        "actual": 13
+      }
+    },
+    {
+      "qid": "Q7",
+      "name": "baseline_rows",
+      "status": "block",
+      "message": "rows differ from direct MCP baseline",
+      "details": {
+        "missing": [
+          [
+            2022,
+            4187.484,
+            314.0612999999997
+          ],
+          [
+            2021,
+            20194.0021,
+            -2612.6795999999995
+          ]
+        ],
+        "extra": [
+          [
+            "2022-01-01T00:00:00",
+            4187.484,
+            314.0612999999997
+          ],
+          [
+            "2021-01-01T00:00:00",
+            436.50800000000004,
+            143.67325
+          ],
+          [
+            "2021-01-01T00:00:00",
+            4088.5649999999996,
+            817.7130000000001
+          ],
+          [
+            "2021-01-01T00:00:00",
+            197.20000000000005,
+            69.02000000000001
+          ],
+          [
+            "2021-01-01T00:00:00",
+            24.591999999999995,
+            -36.888000000000005
+          ],
+          [
+            "2021-01-01T00:00:00",
+            3693.7880000000005,
+            -923.4470000000001
+          ],
+          [
+            "2021-01-01T00:00:00",
+            28.275,
+            11.027249999999999
+          ],
+          [
+            "2021-01-01T00:00:00",
+            207.93,
+            93.56849999999999
+          ],
+          [
+            "2021-01-01T00:00:00",
+            1461.484,
+            146.1484000000001
+          ],
+          [
+            "2021-01-01T00:00:00",
+            1281.5969999999998,
+            -3332.1522000000004
+          ]
+        ],
+        "missing_count": 2,
+        "extra_count": 13,
+        "numeric_rel_tolerance": 1e-06,
+        "numeric_abs_tolerance": 1e-06
+      }
+    },
+    {
+      "qid": "Q7",
+      "name": "correctness_not_weaker_than_direct_mcp",
+      "status": "block",
+      "message": "live response_data is weaker than the direct MCP baseline",
+      "details": {}
+    },
+    {
+      "qid": "Q8",
+      "name": "direct_mcp_baseline_table",
+      "status": "block",
+      "message": "direct MCP baseline table is missing",
+      "details": {}
+    },
+    {
+      "qid": "Q8",
+      "name": "correctness_not_weaker_than_direct_mcp",
+      "status": "block",
+      "message": "live response_data is weaker than the direct MCP baseline",
+      "details": {}
+    },
+    {
+      "qid": "Q9",
+      "name": "direct_mcp_baseline_table",
+      "status": "block",
+      "message": "direct MCP baseline table is missing",
+      "details": {}
+    },
+    {
+      "qid": "Q9",
+      "name": "correctness_not_weaker_than_direct_mcp",
+      "status": "block",
+      "message": "live response_data is weaker than the direct MCP baseline",
+      "details": {}
+    },
+    {
+      "qid": "Q10",
+      "name": "mcp_backed_response_data",
+      "status": "block",
+      "message": "MCP-backed response_data is missing",
+      "details": {
+        "has_response_table": false,
+        "has_mcp_evidence": true
+      }
+    },
+    {
+      "qid": "Q10",
+      "name": "direct_mcp_baseline_table",
+      "status": "block",
+      "message": "direct MCP baseline table is missing",
+      "details": {}
+    },
+    {
+      "qid": "Q10",
+      "name": "correctness_not_weaker_than_direct_mcp",
+      "status": "block",
+      "message": "live response_data is weaker than the direct MCP baseline",
+      "details": {}
+    }
+  ],
+  "rules": [
+    "Q1-Q4 live artifacts must be present.",
+    "Each live artifact must include MCP-backed response_data.",
+    "Each live artifact must be free of forbidden QuerySpec markers.",
+    "Each live response_data table must be no weaker than the direct MCP baseline table for the same QID."
+  ]
+}

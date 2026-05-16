@@ -8,6 +8,10 @@ from typing import Any, Optional
 
 
 TraceSink = MutableSequence[dict[str, Any]]
+QUERY_DATASOURCE_TOOL = "query-datasource"
+RESOURCE_CAP_MAX_ROWS = 1000
+RESOURCE_CAP_MAX_BYTES = 5 * 1024 * 1024
+RESOURCE_CAP_TIMEOUT_MS = 30000
 
 
 class MCPHostRuntimeError(Exception):
@@ -213,11 +217,16 @@ class MCPToolExecutor:
             "mcp_host.tool_call",
             {"tool": name, "arguments": call_arguments},
         )
+        if name == QUERY_DATASOURCE_TOOL:
+            call_arguments = _inject_resource_cap(call_arguments)
         try:
+            effective_timeout = timeout if timeout is not None else self.timeout
+            if name == QUERY_DATASOURCE_TOOL:
+                effective_timeout = min(int(effective_timeout), max(1, RESOURCE_CAP_TIMEOUT_MS // 1000))
             result = self.client.call_tool(
                 tool_name=name,
                 arguments=call_arguments,
-                timeout=timeout if timeout is not None else self.timeout,
+                timeout=effective_timeout,
                 connection_id=self.connection_id,
                 datasource_luid=self.datasource_luid,
                 jwt_token=self.jwt_token,
@@ -239,6 +248,8 @@ class MCPToolExecutor:
             "mcp_host.tool_result",
             {"tool": name, "result": result},
         )
+        if name == QUERY_DATASOURCE_TOOL:
+            result = _decorate_resource_cap_result(result, call_arguments)
         return result
 
     def _reject(
@@ -344,3 +355,33 @@ def _json_safe(value: Any) -> Any:
             return json.loads(json.dumps(value, ensure_ascii=False, default=str))
         except (TypeError, ValueError):
             return str(value)
+
+
+def _inject_resource_cap(arguments: Mapping[str, Any]) -> dict[str, Any]:
+    patched = dict(arguments)
+    max_rows = int(patched.get("max_rows") or patched.get("limit") or RESOURCE_CAP_MAX_ROWS)
+    patched["max_rows"] = min(max_rows, RESOURCE_CAP_MAX_ROWS)
+    patched["limit"] = min(int(patched.get("limit") or patched["max_rows"]), patched["max_rows"])
+    patched["max_bytes"] = int(patched.get("max_bytes") or RESOURCE_CAP_MAX_BYTES)
+    timeout_ms = int(patched.get("timeout_ms") or RESOURCE_CAP_TIMEOUT_MS)
+    patched["timeout_ms"] = min(timeout_ms, RESOURCE_CAP_TIMEOUT_MS)
+    return patched
+
+
+def _decorate_resource_cap_result(result: Any, arguments: Mapping[str, Any]) -> Any:
+    if not isinstance(result, Mapping):
+        return result
+    payload = dict(result)
+    rows = payload.get("rows")
+    row_count = len(rows) if isinstance(rows, list) else None
+    max_rows = int(arguments.get("max_rows") or arguments.get("limit") or RESOURCE_CAP_MAX_ROWS)
+    truncated = bool(row_count is not None and row_count >= max_rows)
+    metadata = dict(payload.get("metadata") or {})
+    metadata["truncated_by_guardrail"] = truncated
+    metadata["guardrail_resource_cap"] = {
+        "max_rows": max_rows,
+        "max_bytes": int(arguments.get("max_bytes") or RESOURCE_CAP_MAX_BYTES),
+        "timeout_ms": int(arguments.get("timeout_ms") or RESOURCE_CAP_TIMEOUT_MS),
+    }
+    payload["metadata"] = metadata
+    return payload

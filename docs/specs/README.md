@@ -90,6 +90,7 @@
 | 53 | [首页查询结果 CSV 下载](53-home-query-result-csv-download-plan.md) | 查询结果导出功能 | :clipboard: |
 | 54 | [Data Agent 透明 MCP 代理](54-data-agent-transparent-mcp-proxy-plan.md) | MCP 代理透明化改造 | :clipboard: |
 | 55 | [Help Agent 页面上下文注册](55-help-agent-page-context-registry-plan.md) | 页面级上下文注入方案 | :clipboard: |
+| 56 | [首页问数 Data QA 与结果质量门禁](56-homepage-data-qa-guardrails-spec.md) | Golden Set、Result Guardrail、语义状态与上下文回归 | :next_track_button: Ready for Implementation |
 
 ## 附录 — 测试用例文件
 
@@ -99,6 +100,7 @@
 |------|-----------|
 | [testcases/31-governance-dqc-pipeline-test-cases.md](testcases/31-governance-dqc-pipeline-test-cases.md) | Spec 31 DQC Pipeline |
 | [testcases/36-data-agent-architecture-test-cases.md](testcases/36-data-agent-architecture-test-cases.md) | Spec 36 Data Agent 架构 |
+| [testcases/56-homepage-data-qa-golden-set-test-cases.md](testcases/56-homepage-data-qa-golden-set-test-cases.md) | Spec 56 首页问数 Data QA |
 | [testcases/qa-llm-config-test-cases.md](testcases/qa-llm-config-test-cases.md) | LLM 配置 QA |
 
 ## 附录 — 编号歧义说明

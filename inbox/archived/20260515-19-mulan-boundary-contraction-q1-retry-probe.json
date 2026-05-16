@@ -1,0 +1,864 @@
+{
+  "mulan": {
+    "Q1": {
+      "duration": 80.4606087920256,
+      "status_code": 200,
+      "conversation_id": "59136a87-9f38-4b58-870a-50a878d97983",
+      "done": {
+        "type": "done",
+        "answer": "查询已完成，返回 1 行结果。",
+        "trace_id": "t-1b418fdc",
+        "run_id": "f4d661ae-db49-44ed-aab3-e68c9b22fd5e",
+        "tools_used": [
+          "context_resolver",
+          "planning_skill_loader",
+          "llm_queryspec",
+          "queryspec_validator",
+          "tableau_mcp",
+          "queryspec_mcp_fallback",
+          "mcp_tool_description_loader",
+          "llm_mcp_args",
+          "mcp_args_guardrail"
+        ],
+        "response_type": "table",
+        "response_data": {
+          "data": [
+            {
+              "SUM(销售额)": 16867374.06867518,
+              "SUM(利润)": 2119151.905850007,
+              "利润率": 0.12563614805848985,
+              "客户数": 771,
+              "客单价": 21877.268571563138
+            }
+          ],
+          "fields": [
+            "SUM(销售额)",
+            "SUM(利润)",
+            "利润率",
+            "客户数",
+            "客单价"
+          ],
+          "rows": [
+            [
+              16867374.06867518,
+              2119151.905850007,
+              0.12563614805848985,
+              771,
+              21877.268571563138
+            ]
+          ],
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "chain_mode": "mcp_proxy",
+          "guardrail_decision": "repair",
+          "guardrail_repairs": [
+            {
+              "type": "aggregate_calculation_function_removed",
+              "path": "query.fields.2.function",
+              "before": "AVG",
+              "after": null,
+              "reason": "removed outer MCP function from an already-aggregated calculated field"
+            },
+            {
+              "type": "aggregate_calculation_function_removed",
+              "path": "query.fields.3.function",
+              "before": "COUNT",
+              "after": null,
+              "reason": "removed outer MCP function from an already-aggregated calculated field"
+            },
+            {
+              "type": "aggregate_calculation_function_removed",
+              "path": "query.fields.4.function",
+              "before": "AVG",
+              "after": null,
+              "reason": "removed outer MCP function from an already-aggregated calculated field"
+            }
+          ],
+          "mcp_args": {
+            "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "query": {
+              "fields": [
+                {
+                  "fieldCaption": "销售额",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润率"
+                },
+                {
+                  "fieldCaption": "客户数"
+                },
+                {
+                  "fieldCaption": "客单价"
+                }
+              ]
+            },
+            "limit": 1
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "SUM(销售额)",
+                "label": "销售额",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "利润",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "利润率",
+                "label": "利润率",
+                "semantic_type": "derived_metric",
+                "value_type": "percent",
+                "align": "right",
+                "format": "percent"
+              },
+              {
+                "key": "客户数",
+                "label": "客户数",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "客单价",
+                "label": "客单价",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              }
+            ]
+          },
+          "fallback_chain_mode": "queryspec_mcp_fallback",
+          "queryspec_fallback": {
+            "phase": "queryspec_mcp_execution",
+            "reason": "mcp_execution_failed",
+            "fallback_reason": "mcp_execution_failed",
+            "fallback_trace_event": "FALLBACK_TRIGGERED",
+            "original_error": {
+              "type": "NLQError",
+              "message": "[NLQ_006] MCP 工具执行失败: The formula for calculation [ctd:Calculation_2698271683174403:qk] is invalid:\nAt position 0, length 6: Argument to COUNTD (an aggregate function) is already an aggregation, and cannot be further aggre"
+            },
+            "fallback_mode": "mcp_proxy",
+            "chain_mode": "queryspec_mcp_fallback",
+            "metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "mcp_execution_failed"
+            }
+          },
+          "queryspec_metrics": {
+            "queryspec_main_path_success": false,
+            "queryspec_fallback_triggered": true,
+            "queryspec_fallback_mode": "mcp_proxy",
+            "queryspec_fallback_reason": "mcp_execution_failed"
+          },
+          "col_types": [
+            "numeric",
+            "numeric",
+            "numeric",
+            "numeric",
+            "numeric"
+          ]
+        },
+        "steps_count": 10,
+        "execution_time_ms": 80258,
+        "sources_count": 1,
+        "top_sources": [
+          "Tableau-online"
+        ],
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "f4d661ae-db49-44ed-aab3-e68c9b22fd5e",
+          "trace_id": "t-1b418fdc",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "table",
+              "row_count": 1,
+              "displayed_row_count": 1,
+              "formatting": [
+                "markdown_summary"
+              ]
+            }
+          }
+        }
+      },
+      "error": null,
+      "row_count": 1,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.62,
+              "route_reason": "generic_business_data_context"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "59136a87-9f38-4b58-870a-50a878d97983",
+          "run_id": "f4d661ae-db49-44ed-aab3-e68c9b22fd5e",
+          "trace_id": "t-1b418fdc",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：aggregate。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "context_resolver",
+          "params": {
+            "chain_mode": "legacy_queryspec",
+            "intent": "aggregate"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "context_resolver",
+          "summary": "{'status': 'empty', 'datasource_name': None, 'metric_names': [], 'dimension_names': [], 'filter_names': [], 'unresolved_references': False, 'calculation_performed': False}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "aggregate",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'aggregate', 'kind': 'planning', 'checksum': '30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19', 'version': 'v1', 'source_path': '/Users/forrest/Projects/mula"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "aggregate",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'queryspec': {'intent': 'aggregate', 'operator': 'aggregate', 'datasource': {'luid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'name': '订单+ (示例 - 超市)'}, 'time': None, 'metrics': [{'field': '销售额', 'aggr"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_validator",
+          "params": {
+            "intent": "aggregate",
+            "operator": "aggregate"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_validator",
+          "summary": "{'passed': True, 'code': 'QS_VALID', 'message': 'QuerySpec 校验通过。', 'user_hint': '', 'detail': {'intent': 'aggregate', 'operator': 'aggregate', 'field_count': 5}}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "operator": "aggregate",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'error': '[NLQ_006] MCP 工具执行失败: The formula for calculation [ctd:Calculation_2698271683174403:qk] is invalid:\\nAt position 0, length 6: Argument to COUNTD (an aggregate function) is already an aggreg"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_mcp_fallback",
+          "params": {
+            "event": "FALLBACK_TRIGGERED",
+            "phase": "queryspec_mcp_execution",
+            "reason": "mcp_execution_failed",
+            "fallback_mode": "mcp_proxy"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_mcp_fallback",
+          "summary": "{'phase': 'queryspec_mcp_execution', 'reason': 'mcp_execution_failed', 'fallback_reason': 'mcp_execution_failed', 'fallback_trace_event': 'FALLBACK_TRIGGERED', 'original_error': {'type': 'NLQError', '"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_tool_description_loader",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_tool_description_loader",
+          "summary": "{'description': 'Tool: query-datasource\\nPurpose: read aggregated data from one Tableau published datasource.\\nArguments JSON shape: {\"datasourceLuid\": string, \"query\": {\"fields\": [...], \"filters\": [."
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_mcp_args",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "queryspec_mcp_fallback",
+            "fallback_reason": "mcp_execution_failed"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_mcp_args",
+          "summary": "{'args': {'datasourceLuid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'query': {'fields': [{'fieldCaption': '销售额', 'function': 'SUM'}, {'fieldCaption': '利润', 'function': 'SUM'}, {'fieldCaption': '利润率', "
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_args_guardrail",
+          "params": {
+            "tool": "query-datasource",
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_args_guardrail",
+          "summary": "{'decision': 'repair', 'args': {'datasourceLuid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'query': {'fields': [{'fieldCaption': '销售额', 'function': 'SUM'}, {'fieldCaption': '利润', 'function': 'SUM'}, {'"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "mcp_tool": "query-datasource",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "queryspec_mcp_fallback",
+            "guardrail_decision": "repair",
+            "guardrail_repairs": [
+              {
+                "type": "aggregate_calculation_function_removed",
+                "path": "query.fields.2.function",
+                "before": "AVG",
+                "after": null,
+                "reason": "removed outer MCP function from an already-aggregated calculated field"
+              },
+              {
+                "type": "aggregate_calculation_function_removed",
+                "path": "query.fields.3.function",
+                "before": "COUNT",
+                "after": null,
+                "reason": "removed outer MCP function from an already-aggregated calculated field"
+              },
+              {
+                "type": "aggregate_calculation_function_removed",
+                "path": "query.fields.4.function",
+                "before": "AVG",
+                "after": null,
+                "reason": "removed outer MCP function from an already-aggregated calculated field"
+              }
+            ],
+            "fallback_reason": "mcp_execution_failed"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'data': [{'SUM(销售额)': 16867374.06867518, 'SUM(利润)': 2119151.905850007, '利润率': 0.12563614805848985, '客户数': 771, '客单价': 21877.268571563138}], 'fields': ['SUM(销售额)', 'SUM(利润)', '利润率', '客户数', '客单价'], 'ro"
+        },
+        {
+          "data": [
+            {
+              "SUM(销售额)": 16867374.06867518,
+              "SUM(利润)": 2119151.905850007,
+              "利润率": 0.12563614805848985,
+              "客户数": 771,
+              "客单价": 21877.268571563138
+            }
+          ],
+          "fields": [
+            "SUM(销售额)",
+            "SUM(利润)",
+            "利润率",
+            "客户数",
+            "客单价"
+          ],
+          "rows": [
+            [
+              16867374.06867518,
+              2119151.905850007,
+              0.12563614805848985,
+              771,
+              21877.268571563138
+            ]
+          ],
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "chain_mode": "mcp_proxy",
+          "guardrail_decision": "repair",
+          "guardrail_repairs": [
+            {
+              "type": "aggregate_calculation_function_removed",
+              "path": "query.fields.2.function",
+              "before": "AVG",
+              "after": null,
+              "reason": "removed outer MCP function from an already-aggregated calculated field"
+            },
+            {
+              "type": "aggregate_calculation_function_removed",
+              "path": "query.fields.3.function",
+              "before": "COUNT",
+              "after": null,
+              "reason": "removed outer MCP function from an already-aggregated calculated field"
+            },
+            {
+              "type": "aggregate_calculation_function_removed",
+              "path": "query.fields.4.function",
+              "before": "AVG",
+              "after": null,
+              "reason": "removed outer MCP function from an already-aggregated calculated field"
+            }
+          ],
+          "mcp_args": {
+            "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "query": {
+              "fields": [
+                {
+                  "fieldCaption": "销售额",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润率"
+                },
+                {
+                  "fieldCaption": "客户数"
+                },
+                {
+                  "fieldCaption": "客单价"
+                }
+              ]
+            },
+            "limit": 1
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "SUM(销售额)",
+                "label": "销售额",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "利润",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "利润率",
+                "label": "利润率",
+                "semantic_type": "derived_metric",
+                "value_type": "percent",
+                "align": "right",
+                "format": "percent"
+              },
+              {
+                "key": "客户数",
+                "label": "客户数",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "客单价",
+                "label": "客单价",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              }
+            ]
+          },
+          "fallback_chain_mode": "queryspec_mcp_fallback",
+          "queryspec_fallback": {
+            "phase": "queryspec_mcp_execution",
+            "reason": "mcp_execution_failed",
+            "fallback_reason": "mcp_execution_failed",
+            "fallback_trace_event": "FALLBACK_TRIGGERED",
+            "original_error": {
+              "type": "NLQError",
+              "message": "[NLQ_006] MCP 工具执行失败: The formula for calculation [ctd:Calculation_2698271683174403:qk] is invalid:\nAt position 0, length 6: Argument to COUNTD (an aggregate function) is already an aggregation, and cannot be further aggre"
+            },
+            "fallback_mode": "mcp_proxy",
+            "chain_mode": "queryspec_mcp_fallback",
+            "metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "mcp_execution_failed"
+            }
+          },
+          "queryspec_metrics": {
+            "queryspec_main_path_success": false,
+            "queryspec_fallback_triggered": true,
+            "queryspec_fallback_mode": "mcp_proxy",
+            "queryspec_fallback_reason": "mcp_execution_failed"
+          },
+          "col_types": [
+            "numeric",
+            "numeric",
+            "numeric",
+            "numeric",
+            "numeric"
+          ],
+          "type": "table_data"
+        },
+        {
+          "type": "token",
+          "content": "查"
+        },
+        {
+          "type": "token",
+          "content": "询"
+        },
+        {
+          "type": "token",
+          "content": "已"
+        },
+        {
+          "type": "token",
+          "content": "完"
+        },
+        {
+          "type": "token",
+          "content": "成"
+        },
+        {
+          "type": "token",
+          "content": "，"
+        },
+        {
+          "type": "token",
+          "content": "返"
+        },
+        {
+          "type": "token",
+          "content": "回"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "1"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "行"
+        },
+        {
+          "type": "token",
+          "content": "结"
+        },
+        {
+          "type": "token",
+          "content": "果"
+        },
+        {
+          "type": "token",
+          "content": "。"
+        },
+        {
+          "type": "done",
+          "answer": "查询已完成，返回 1 行结果。",
+          "trace_id": "t-1b418fdc",
+          "run_id": "f4d661ae-db49-44ed-aab3-e68c9b22fd5e",
+          "tools_used": [
+            "context_resolver",
+            "planning_skill_loader",
+            "llm_queryspec",
+            "queryspec_validator",
+            "tableau_mcp",
+            "queryspec_mcp_fallback",
+            "mcp_tool_description_loader",
+            "llm_mcp_args",
+            "mcp_args_guardrail"
+          ],
+          "response_type": "table",
+          "response_data": {
+            "data": [
+              {
+                "SUM(销售额)": 16867374.06867518,
+                "SUM(利润)": 2119151.905850007,
+                "利润率": 0.12563614805848985,
+                "客户数": 771,
+                "客单价": 21877.268571563138
+              }
+            ],
+            "fields": [
+              "SUM(销售额)",
+              "SUM(利润)",
+              "利润率",
+              "客户数",
+              "客单价"
+            ],
+            "rows": [
+              [
+                16867374.06867518,
+                2119151.905850007,
+                0.12563614805848985,
+                771,
+                21877.268571563138
+              ]
+            ],
+            "datasource_name": "订单+ (示例 - 超市)",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "mcp_proxy",
+            "guardrail_decision": "repair",
+            "guardrail_repairs": [
+              {
+                "type": "aggregate_calculation_function_removed",
+                "path": "query.fields.2.function",
+                "before": "AVG",
+                "after": null,
+                "reason": "removed outer MCP function from an already-aggregated calculated field"
+              },
+              {
+                "type": "aggregate_calculation_function_removed",
+                "path": "query.fields.3.function",
+                "before": "COUNT",
+                "after": null,
+                "reason": "removed outer MCP function from an already-aggregated calculated field"
+              },
+              {
+                "type": "aggregate_calculation_function_removed",
+                "path": "query.fields.4.function",
+                "before": "AVG",
+                "after": null,
+                "reason": "removed outer MCP function from an already-aggregated calculated field"
+              }
+            ],
+            "mcp_args": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润率"
+                  },
+                  {
+                    "fieldCaption": "客户数"
+                  },
+                  {
+                    "fieldCaption": "客单价"
+                  }
+                ]
+              },
+              "limit": 1
+            },
+            "table_display": {
+              "columns": [
+                {
+                  "key": "SUM(销售额)",
+                  "label": "销售额",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                },
+                {
+                  "key": "SUM(利润)",
+                  "label": "利润",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                },
+                {
+                  "key": "利润率",
+                  "label": "利润率",
+                  "semantic_type": "derived_metric",
+                  "value_type": "percent",
+                  "align": "right",
+                  "format": "percent"
+                },
+                {
+                  "key": "客户数",
+                  "label": "客户数",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                },
+                {
+                  "key": "客单价",
+                  "label": "客单价",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                }
+              ]
+            },
+            "fallback_chain_mode": "queryspec_mcp_fallback",
+            "queryspec_fallback": {
+              "phase": "queryspec_mcp_execution",
+              "reason": "mcp_execution_failed",
+              "fallback_reason": "mcp_execution_failed",
+              "fallback_trace_event": "FALLBACK_TRIGGERED",
+              "original_error": {
+                "type": "NLQError",
+                "message": "[NLQ_006] MCP 工具执行失败: The formula for calculation [ctd:Calculation_2698271683174403:qk] is invalid:\nAt position 0, length 6: Argument to COUNTD (an aggregate function) is already an aggregation, and cannot be further aggre"
+              },
+              "fallback_mode": "mcp_proxy",
+              "chain_mode": "queryspec_mcp_fallback",
+              "metrics": {
+                "queryspec_main_path_success": false,
+                "queryspec_fallback_triggered": true,
+                "queryspec_fallback_mode": "mcp_proxy",
+                "queryspec_fallback_reason": "mcp_execution_failed"
+              }
+            },
+            "queryspec_metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "mcp_execution_failed"
+            },
+            "col_types": [
+              "numeric",
+              "numeric",
+              "numeric",
+              "numeric",
+              "numeric"
+            ]
+          },
+          "steps_count": 10,
+          "execution_time_ms": 80258,
+          "sources_count": 1,
+          "top_sources": [
+            "Tableau-online"
+          ],
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "f4d661ae-db49-44ed-aab3-e68c9b22fd5e",
+            "trace_id": "t-1b418fdc",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "table",
+                "row_count": 1,
+                "displayed_row_count": 1,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "alue_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}, {\"key\": \"利润率\", \"label\": \"利润率\", \"semantic_type\": \"derived_metric\", \"value_type\": \"percent\", \"align\": \"right\", \"format\": \"percent\"}, {\"key\": \"客户数\", \"label\": \"客户数\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}, {\"key\": \"客单价\", \"label\": \"客单价\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}]}, \"fallback_chain_mode\": \"queryspec_mcp_fallback\", \"queryspec_fallback\": {\"phase\": \"queryspec_mcp_execution\", \"reason\": \"mcp_execution_failed\", \"fallback_reason\": \"mcp_execution_failed\", \"fallback_trace_event\": \"FALLBACK_TRIGGERED\", \"original_error\": {\"type\": \"NLQError\", \"message\": \"[NLQ_006] MCP 工具执行失败: The formula for calculation [ctd:Calculation_2698271683174403:qk] is invalid:\\nAt position 0, length 6: Argument to COUNTD (an aggregate function) is already an aggregation, and cannot be further aggre\"}, \"fallback_mode\": \"mcp_proxy\", \"chain_mode\": \"queryspec_mcp_fallback\", \"metrics\": {\"queryspec_main_path_success\": false, \"queryspec_fallback_triggered\": true, \"queryspec_fallback_mode\": \"mcp_proxy\", \"queryspec_fallback_reason\": \"mcp_execution_failed\"}}, \"queryspec_metrics\": {\"queryspec_main_path_success\": false, \"queryspec_fallback_triggered\": true, \"queryspec_fallback_mode\": \"mcp_proxy\", \"queryspec_fallback_reason\": \"mcp_execution_failed\"}, \"col_types\": [\"numeric\", \"numeric\", \"numeric\", \"numeric\", \"numeric\"]}, \"steps_count\": 10, \"execution_time_ms\": 80258, \"sources_count\": 1, \"top_sources\": [\"Tableau-online\"], \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"f4d661ae-db49-44ed-aab3-e68c9b22fd5e\", \"trace_id\": \"t-1b418fdc\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"table\", \"row_count\": 1, \"displayed_row_count\": 1, \"formatting\": [\"markdown_summary\"]}}}}\n\n"
+    }
+  },
+  "target_base_url": "http://127.0.0.1:8001"
+}

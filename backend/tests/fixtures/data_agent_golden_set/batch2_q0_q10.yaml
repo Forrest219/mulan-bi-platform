@@ -1,0 +1,276 @@
+- id: Q0
+  priority: P1
+  question: "介绍数据源“订单+ (示例 - 超市)”"
+  session_group: batch2
+  turn_index: 1
+  expected_operator: asset_inventory
+  mcp_baseline:
+    source: inbox/20260515-13-abtest-raw.json
+    row_count: 11
+    core_fields: ["客单价", "利润率", "客户数", "子类别", "发货年份", "发货日期", "销售额", "利润", "客户名称", "省/自治区", "类别"]
+    core_values: ["客单价", "利润率", "客户数", "子类别", "发货年份", "发货日期", "销售额", "利润", "客户名称", "省/自治区", "类别"]
+    grain: datasource_fields
+  assertions:
+    row_count: {equals: 11}
+    required_fields: ["客单价", "利润率", "客户数", "子类别", "发货年份", "发货日期", "销售额", "利润", "客户名称", "省/自治区", "类别"]
+    forbidden_fields: []
+    semantic_rules: ["asset_inventory_fields_complete"]
+  failure_tags: []
+
+- id: Q1
+  priority: P1
+  question: "整体的销售额、利润、利润率、客户数、客单价是什么样子"
+  session_group: batch2
+  turn_index: 1
+  expected_operator: aggregate
+  mcp_baseline:
+    source: backend/tests/fixtures/data_agent/baseline/mcp_snapshots/superstore_2026_05_13.json
+    row_count: 1
+    core_fields: ["SUM(销售额)", "SUM(利润)", "COUNTD(客户名称)", "利润率", "客单价"]
+    core_values:
+      - [16867374.06867518, 2119151.905850007, 771, 0.12563614805848985, 21877.268571563138]
+    grain: overall
+  assertions:
+    row_count: {equals: 1}
+    required_fields: ["SUM(销售额)", "SUM(利润)", "COUNTD(客户名称)", "利润率", "客单价"]
+    forbidden_fields: []
+    semantic_rules: ["derived_metrics_present:利润率,客单价"]
+    numeric_rel_tolerance: 0.001
+  failure_tags: []
+
+- id: Q2
+  priority: P0
+  question: "这个指标过去几年的趋势是什么样子"
+  session_group: batch2
+  turn_index: 2
+  expected_operator: trend_condition
+  mcp_baseline:
+    source: backend/tests/fixtures/data_agent/baseline/mcp_snapshots/superstore_2026_05_13.json
+    row_count: 5
+    core_fields: ["YEAR(发货日期)", "SUM(销售额)", "SUM(利润)", "COUNTD(客户名称)"]
+    core_values:
+      - [2021, 3478604.9774749996, 357467.1333749987, 598]
+      - [2022, 3496306.322999994, 459655.05542499956, 585]
+      - [2023, 4466389.57874999, 607630.7156999997, 629]
+      - [2024, 5387286.408650015, 687150.8790999999, 676]
+      - [2025, 38786.7808, 7248.1222499999985, 23]
+    grain: year
+  assertions:
+    row_count: {equals: 5, max: 10}
+    required_fields: ["YEAR(发货日期)", "SUM(销售额)", "SUM(利润)", "COUNTD(客户名称)"]
+    forbidden_fields: []
+    identity_fields: ["YEAR(发货日期)"]
+    numeric_fields: ["SUM(销售额)", "SUM(利润)", "COUNTD(客户名称)"]
+    semantic_rules: ["context_inherits_metric_from_Q1", "time_grain:year"]
+    numeric_rel_tolerance: 0.001
+  failure_tags: [context_loss]
+
+- id: Q3
+  priority: P1
+  question: "统计一下每个子类别的销售额、利润和利润率"
+  session_group: batch2
+  turn_index: 1
+  expected_operator: aggregate
+  mcp_baseline:
+    source: inbox/20260515-13-abtest-raw.json
+    row_count: 17
+    core_fields: ["子类别", "SUM(销售额)", "SUM(利润)", "利润率"]
+    core_values:
+      top_sales:
+        - ["椅子", 2434319.8052499974, 197370.60917500002]
+        - ["电话", 2405859.139999997, 326618.4921249998]
+        - ["收纳具", 1628673.0164999971, 154317.0583749999]
+      negative_profit:
+        - ["桌子", 1508146.3195000004, -128710.74422500002]
+        - ["书架", 836368.7311749996, -26332.533600000028]
+        - ["用品", 338759.86049999995, -8492.610125000012]
+    grain: subcategory
+  assertions:
+    row_count: {equals: 17}
+    required_fields: ["子类别", "SUM(销售额)", "SUM(利润)"]
+    derived_fields: ["利润率"]
+    forbidden_fields: []
+    identity_fields: ["子类别"]
+    numeric_fields: ["SUM(销售额)", "SUM(利润)"]
+    semantic_rules: ["subcategory_grain", "derived_metrics_present_or_review:利润率"]
+    numeric_rel_tolerance: 0.001
+  failure_tags: []
+
+- id: Q4
+  priority: P0
+  question: "继续拆分到每个年份"
+  session_group: batch2
+  turn_index: 2
+  expected_operator: trend_condition
+  mcp_baseline:
+    source: backend/tests/fixtures/data_agent/baseline/mcp_snapshots/superstore_2026_05_13.json
+    row_count: 80
+    core_fields: ["子类别", "YEAR(发货日期)", "SUM(销售额)", "SUM(利润)"]
+    core_values:
+      sample:
+        - ["装订机", 2024, 534041.79325, 58323.36595]
+        - ["椅子", 2022, 532948.4062499997, 47243.29752500002]
+        - ["复印机", 2023, 359595.7225, 128635.24634999999]
+    grain: subcategory_year
+  assertions:
+    row_count: {equals: 80, max: 100}
+    required_fields: ["子类别", "YEAR(发货日期)", "SUM(销售额)", "SUM(利润)"]
+    forbidden_fields: []
+    identity_fields: ["子类别", "YEAR(发货日期)"]
+    numeric_fields: ["SUM(销售额)", "SUM(利润)"]
+    semantic_rules: ["context_inherits_subcategory_from_Q3", "time_grain:year"]
+    numeric_rel_tolerance: 0.001
+  failure_tags: [context_loss]
+
+- id: Q5
+  priority: P0
+  question: "2025 年没有销售记录的子类别有哪些？"
+  session_group: batch2
+  turn_index: 1
+  expected_operator: set_difference
+  mcp_baseline:
+    source: backend/tests/fixtures/data_agent/baseline/mcp_snapshots/superstore_2026_05_13.json
+    row_count: 5
+    core_fields: ["子类别"]
+    core_values: ["信封", "复印机", "桌子", "设备", "配件"]
+    grain: subcategory
+  assertions:
+    row_count: {equals: 5, max: 100}
+    required_fields: ["子类别"]
+    forbidden_fields: ["SUM(销售额)", "销售额"]
+    identity_fields: ["子类别"]
+    semantic_rules: ["set_difference:all_subcategories_minus_2025_sales", "no_reverse_topn"]
+  failure_tags: [semantic_reversal]
+
+- id: Q6
+  priority: P1
+  question: "Top 10 大客户是谁？请列出客户名称和销售金额及占比"
+  session_group: batch2
+  turn_index: 1
+  expected_operator: ranking
+  mcp_baseline:
+    source: backend/tests/fixtures/data_agent/baseline/mcp_snapshots/superstore_2026_05_13.json
+    row_count: 10
+    core_fields: ["客户名称", "SUM(销售额)", "销售额占比"]
+    core_values:
+      - ["李丽丽", 181562.1125, "1.08%"]
+      - ["潘锦", 138128.58049999998, "0.82%"]
+      - ["袁丽美", 109600.70774999999, "0.65%"]
+      - ["罗平", 105818.245, "0.63%"]
+      - ["贺宁", 104933.38975, "0.62%"]
+      - ["曾锦", 102770.41025000002, "0.61%"]
+      - ["黄岱", 102531.9215, "0.61%"]
+      - ["廖乐", 99158.81550000001, "0.59%"]
+      - ["贺虹", 93757.8555, "0.56%"]
+      - ["巩嫒", 88518.42550000001, "0.52%"]
+    grain: customer
+  assertions:
+    row_count: {equals: 10, max: 10}
+    required_fields: ["客户名称", "SUM(销售额)", "销售额占比"]
+    forbidden_fields: []
+    identity_fields: ["客户名称"]
+    numeric_fields: ["SUM(销售额)", "销售额占比"]
+    order: {field: "SUM(销售额)", direction: desc, top_n: 10}
+    semantic_rules: ["topn:10", "share_metric_present:销售额占比"]
+    numeric_rel_tolerance: 0.001
+  failure_tags: []
+
+- id: Q7
+  priority: P1
+  question: "“邓保”这个客户的合作记录是什么样？最近还有合作吗？"
+  session_group: batch2
+  turn_index: 1
+  expected_operator: customer_record
+  mcp_baseline:
+    source: backend/tests/fixtures/data_agent/baseline/mcp_snapshots/superstore_2026_05_13.json
+    row_count: 2
+    core_fields: ["YEAR(发货日期)", "SUM(销售额)", "SUM(利润)"]
+    core_values:
+      - [2021, 20194.0021, -2612.6795999999995]
+      - [2022, 4187.484, 314.0612999999997]
+    grain: customer_year
+  assertions:
+    row_count: {equals: 2, max: 100}
+    required_fields: ["YEAR(发货日期)", "SUM(销售额)", "SUM(利润)"]
+    forbidden_fields: []
+    identity_fields: ["YEAR(发货日期)"]
+    numeric_fields: ["SUM(销售额)", "SUM(利润)"]
+    semantic_rules: ["customer_filter:邓保", "latest_year:2022"]
+    numeric_rel_tolerance: 0.001
+  failure_tags: []
+
+- id: Q8
+  priority: P0
+  question: "哪个子类别的利润每年都在持续增长？"
+  session_group: batch2
+  turn_index: 1
+  expected_operator: consecutive_growth
+  mcp_baseline:
+    source: backend/tests/fixtures/data_agent/baseline/mcp_snapshots/superstore_2026_05_13.json
+    row_count: 5
+    core_fields: ["子类别", "is_increasing"]
+    core_values: ["器具", "复印机", "用具", "系固件", "纸张"]
+    grain: subcategory
+  assertions:
+    row_count: {equals: 5, max: 5}
+    required_fields: ["子类别", "is_increasing"]
+    forbidden_fields: []
+    identity_fields: ["子类别"]
+    semantic_rules: ["consecutive_growth:all_adjacent_years", "no_first_last_shortcut", "no_topn_growth_substitute"]
+  failure_tags: [semantic_reversal]
+
+- id: Q9
+  priority: P0
+  question: "我计划关闭一些区域，止损。哪些省份一致没挣到钱？利润是亏的"
+  session_group: batch2
+  turn_index: 1
+  expected_operator: all_period_condition
+  mcp_baseline:
+    source: backend/tests/fixtures/data_agent/baseline/mcp_snapshots/superstore_2026_05_13.json
+    row_count: 1
+    core_fields: ["省/自治区", "all_periods_match"]
+    core_values: ["重庆"]
+    grain: province
+  assertions:
+    row_count: {equals: 1, max: 100}
+    required_fields: ["省/自治区", "all_periods_match"]
+    forbidden_fields: []
+    identity_fields: ["省/自治区"]
+    semantic_rules: ["all_period_condition:profit_less_than_zero_all_years", "no_any_period_match"]
+  failure_tags: [semantic_reversal]
+
+- id: Q10
+  priority: P0
+  question: "为什么辽宁、福建在 2024 年出现了巨亏？请看看是什么产品线和客户导致的"
+  session_group: batch2
+  turn_index: 1
+  expected_operator: root_cause
+  mcp_baseline:
+    source: backend/tests/fixtures/data_agent/baseline/mcp_snapshots/superstore_2026_05_13.json
+    row_count: 20
+    core_fields:
+      product: ["省/自治区", "子类别", "SUM(利润)"]
+      customer: ["省/自治区", "客户名称", "SUM(利润)"]
+    core_values:
+      product_top3:
+        - ["辽宁", "装订机", -30791.9477]
+        - ["福建", "设备", -27839.93039999999]
+        - ["辽宁", "设备", -27390.047600000005]
+      customer_top3:
+        - ["福建", "殷丽雪", -27733.71064999999]
+        - ["辽宁", "黄涛", -24826.570850000007]
+        - ["辽宁", "柯巧", -21238.762625000003]
+    grain: province_product_and_province_customer
+  assertions:
+    row_count: {equals: 20, product: 10, customer: 10}
+    required_fields:
+      product: ["省/自治区", "子类别", "SUM(利润)"]
+      customer: ["省/自治区", "客户名称", "SUM(利润)"]
+    forbidden_fields: []
+    identity_fields:
+      product: ["省/自治区", "子类别"]
+      customer: ["省/自治区", "客户名称"]
+    numeric_fields: ["SUM(利润)"]
+    order: {field: "SUM(利润)", direction: asc, top_n: 10}
+    semantic_rules: ["must_preserve_province_dimension", "root_cause_product_and_customer", "filter_province:辽宁,福建", "filter_year:2024"]
+  failure_tags: [detail_scan, grain_mismatch]

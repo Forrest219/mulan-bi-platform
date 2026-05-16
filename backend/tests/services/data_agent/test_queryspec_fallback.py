@@ -216,8 +216,8 @@ def test_table_display_preserves_returned_business_field_names():
     )
 
     assert [column["key"] for column in schema["columns"]] == ["SUM(销售额)", "COUNTD(客户名称)", "利润率"]
-    assert [column["label"] for column in schema["columns"]] == ["SUM(销售额)", "COUNTD(客户名称)", "利润率"]
-    assert "客户数" not in json.dumps(schema, ensure_ascii=False)
+    assert [column["label"] for column in schema["columns"]] == ["销售额", "客户数", "利润率"]
+    assert "COUNTD(客户名称)" in json.dumps(schema, ensure_ascii=False)
 
 
 def _build(
@@ -944,7 +944,8 @@ def test_grouped_aggregate_does_not_compute_missing_profit_rate_and_sorts_rows()
     assert data["fields"] == ["子类别", "SUM(销售额)", "SUM(利润)"]
     assert data["rows"] == [["大计", 200, 50], ["小计", 100, 10]]
     assert data["table_display"]["columns"][0]["align"] == "left"
-    assert data["table_display"]["columns"][1]["label"] == "SUM(销售额)"
+    assert data["table_display"]["columns"][1]["key"] == "SUM(销售额)"
+    assert data["table_display"]["columns"][1]["label"] == "销售额"
     assert data["table_display"]["columns"][1]["align"] == "right"
     answer = mcp_first_main._render_deterministic_answer(data, spec)
     assert "子类别" in answer

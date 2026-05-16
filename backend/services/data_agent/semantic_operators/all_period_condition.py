@@ -17,7 +17,7 @@ from services.data_agent.query_plan import (
     normalize_result_table,
     numeric_value,
 )
-from services.data_agent.semantic_operators.base import BaseSemanticOperator
+from services.data_agent.semantic_operators.base import BaseSemanticOperator, DataContinuityError
 
 
 class AllPeriodConditionOperator(BaseSemanticOperator):
@@ -71,13 +71,9 @@ class AllPeriodConditionOperator(BaseSemanticOperator):
         dimension_idx = _field_index(names, dimension)
         predicate = _predicate_spec(ctx)
         if time_idx is None or metric_idx is None or dimension_idx is None:
-            return OperatorResult(
-                fields=["dimension", "condition_met", "period_count", "failed_periods"],
-                rows=[],
-                summary="all_period_condition could not infer time/dimension/metric columns",
-                intent=self.name,
-                confidence=0.4,
-                diagnostics={"fields": names},
+            raise DataContinuityError(
+                "all_period_condition could not infer time/dimension/metric columns",
+                detail={"fields": names, "time_idx": time_idx, "metric_idx": metric_idx, "dimension_idx": dimension_idx},
             )
 
         grouped: dict[Any, list[tuple[Any, float]]] = {}
@@ -88,12 +84,19 @@ class AllPeriodConditionOperator(BaseSemanticOperator):
             if value is None:
                 continue
             grouped.setdefault(row[dimension_idx], []).append((row[time_idx], value))
+        if rows and not grouped:
+            raise DataContinuityError(
+                "all_period_condition could not read any numeric metric values",
+                detail={"fields": names, "input_rows": len(rows)},
+            )
 
         output_rows: list[list[Any]] = []
         evidence: list[dict[str, Any]] = []
         min_periods = int(ctx.params.get("min_periods") or 2)
         expected_periods = _expected_periods(ctx, rows, time_idx)
         require_complete = _requires_complete_periods(ctx, expected_periods)
+        if require_complete:
+            _assert_global_period_coverage(rows, time_idx, expected_periods, operator=self.name)
         for dimension, points in sorted(grouped.items(), key=lambda item: str(item[0])):
             ordered = sorted(points, key=lambda item: item[0])
             missing_periods = _missing_periods(ordered, expected_periods) if require_complete else []
@@ -205,3 +208,13 @@ def _requires_complete_periods(ctx: QueryPlanContext, expected_periods: list[Any
 def _missing_periods(points: list[tuple[Any, float]], expected_periods: list[Any]) -> list[Any]:
     present = {period for period, _value in points}
     return [period for period in expected_periods if period not in present]
+
+
+def _assert_global_period_coverage(rows: list[list[Any]], time_idx: int, expected_periods: list[Any], *, operator: str) -> None:
+    present = {row[time_idx] for row in rows if len(row) > time_idx}
+    missing = [period for period in expected_periods if period not in present]
+    if missing:
+        raise DataContinuityError(
+            f"{operator} result is missing required periods",
+            detail={"expected_periods": expected_periods, "missing_periods": missing},
+        )

@@ -1,0 +1,5980 @@
+{
+  "questions": [
+    [
+      "Q0",
+      "介绍数据源“订单+ (示例 - 超市)”"
+    ],
+    [
+      "Q1",
+      "整体的销售额、利润、利润率、客户数、客单价是什么样子"
+    ],
+    [
+      "Q2",
+      "这个指标过去几年的趋势是什么样子"
+    ],
+    [
+      "Q3",
+      "统计一下每个子类别的销售额、利润和利润率"
+    ],
+    [
+      "Q4",
+      "继续拆分到每个年份"
+    ]
+  ],
+  "mulan": {
+    "Q0": {
+      "duration": 2.3599815409979783,
+      "status_code": 200,
+      "conversation_id": "0dacee14-30b2-4a5b-bc04-3e16d9736c14",
+      "done": {
+        "type": "done",
+        "answer": "数据资产 **订单+ (示例 - 超市)** 返回了 **11 个字段**：\n\n| 序号 | 字段名称 | 类型 | 角色 | 计算字段 |\n|---:|---|---|---|---|\n| 1 | 客单价 | REAL | measure | 是 |\n| 2 | 利润率 | REAL | measure | 是 |\n| 3 | 客户数 | INTEGER | measure | 是 |\n| 4 | 子类别 | STRING | dimension | 否 |\n| 5 | 发货年份 | STRING | dimension | 是 |\n| 6 | 发货日期 | DATE | dimension | 否 |\n| 7 | 销售额 | REAL | measure | 否 |\n| 8 | 利润 | REAL | measure | 否 |\n| 9 | 客户名称 | STRING | dimension | 否 |\n| 10 | 省/自治区 | STRING | dimension | 否 |\n| 11 | 类别 | STRING | dimension | 否 |",
+        "trace_id": "t-aeeea5bf",
+        "run_id": "ebd5f819-12ea-4f30-a034-12f376cf13ac",
+        "tools_used": [
+          "schema"
+        ],
+        "response_type": "schema_inventory",
+        "response_data": {
+          "connection_id": 2,
+          "connection_name": "Tableau-online",
+          "db_type": "tableau",
+          "mode": "fields",
+          "requested_table_name": "“订单+ (示例 - 超市)”",
+          "matched_asset": {
+            "name": "订单+ (示例 - 超市)",
+            "asset_type": "datasource",
+            "project": "default",
+            "web_url": "https://online.tableau.com/#/site/zy_bi/datasources/8902076",
+            "tableau_id": "f4290485-26d3-428f-aa8d-ccc33862a411"
+          },
+          "field_count": 11,
+          "raw_field_count": 11,
+          "fields": [
+            {
+              "name": "客单价",
+              "caption": "客单价",
+              "display_name": "客单价",
+              "data_type": "REAL",
+              "role": "measure",
+              "is_calculated": true
+            },
+            {
+              "name": "利润率",
+              "caption": "利润率",
+              "display_name": "利润率",
+              "data_type": "REAL",
+              "role": "measure",
+              "is_calculated": true
+            },
+            {
+              "name": "客户数",
+              "caption": "客户数",
+              "display_name": "客户数",
+              "data_type": "INTEGER",
+              "role": "measure",
+              "is_calculated": true
+            },
+            {
+              "name": "子类别",
+              "caption": "子类别",
+              "display_name": "子类别",
+              "data_type": "STRING",
+              "role": "dimension",
+              "is_calculated": false
+            },
+            {
+              "name": "发货年份",
+              "caption": "发货年份",
+              "display_name": "发货年份",
+              "data_type": "STRING",
+              "role": "dimension",
+              "is_calculated": true
+            },
+            {
+              "name": "发货日期",
+              "caption": "发货日期",
+              "display_name": "发货日期",
+              "data_type": "DATE",
+              "role": "dimension",
+              "is_calculated": false
+            },
+            {
+              "name": "销售额",
+              "caption": "销售额",
+              "display_name": "销售额",
+              "data_type": "REAL",
+              "role": "measure",
+              "is_calculated": false
+            },
+            {
+              "name": "利润",
+              "caption": "利润",
+              "display_name": "利润",
+              "data_type": "REAL",
+              "role": "measure",
+              "is_calculated": false
+            },
+            {
+              "name": "客户名称",
+              "caption": "客户名称",
+              "display_name": "客户名称",
+              "data_type": "STRING",
+              "role": "dimension",
+              "is_calculated": false
+            },
+            {
+              "name": "省/自治区",
+              "caption": "省/自治区",
+              "display_name": "省/自治区",
+              "data_type": "STRING",
+              "role": "dimension",
+              "is_calculated": false
+            },
+            {
+              "name": "类别",
+              "caption": "类别",
+              "display_name": "类别",
+              "data_type": "STRING",
+              "role": "dimension",
+              "is_calculated": false
+            }
+          ],
+          "warning": null
+        },
+        "steps_count": 4,
+        "execution_time_ms": 2334,
+        "sources_count": 0,
+        "top_sources": [],
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "ebd5f819-12ea-4f30-a034-12f376cf13ac",
+          "trace_id": "t-aeeea5bf",
+          "phases": {
+            "intent": {
+              "intent": "schema_inventory",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "asset_metadata_pattern",
+                "message": "asset_metadata_pattern"
+              }
+            },
+            "postprocess": {
+              "response_type": "schema_inventory",
+              "row_count": 0,
+              "displayed_row_count": 0,
+              "formatting": [
+                "markdown_summary"
+              ]
+            }
+          }
+        }
+      },
+      "error": null,
+      "row_count": 11,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "asset_question",
+          "confidence": 0.95,
+          "route": "schema_inventory",
+          "allowed_tools": [
+            "schema"
+          ],
+          "forbidden_tools": [
+            "query"
+          ],
+          "fallback_policy": "schema_only",
+          "reason": "asset_metadata_pattern",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "schema_inventory",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "asset_metadata_pattern",
+              "message": "asset_metadata_pattern"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.62,
+              "route_reason": "generic_business_data_context"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "0dacee14-30b2-4a5b-bc04-3e16d9736c14",
+          "run_id": "ebd5f819-12ea-4f30-a034-12f376cf13ac",
+          "trace_id": "t-aeeea5bf",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "识别为数据源清单问题，准备读取当前连接的 schema 信息。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "schema",
+          "params": {
+            "table_name": "“订单+ (示例 - 超市)”"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "schema",
+          "summary": "mode=fields, asset=订单+ (示例 - 超市), fields=11, raw_fields=11"
+        },
+        {
+          "type": "token",
+          "content": "数据资产 **订单+ (示例 - 超市)** 返回了 **11 个字段**：\n\n| 序号 | 字段名称 | 类型 | 角色 | 计算字段 |\n|---:|---|---|---|---|\n| 1 | 客单价 | REAL | measure | 是 |\n| 2 | 利润率 | REAL | measure | 是 |\n| 3 | 客户数 | INTEGER | measure | 是 |\n| 4 | 子类别 | STRING | dimension | 否 |\n| 5 | 发货年份 | STRING | dimension | 是 |\n| 6 | 发货日期 | DATE | dimension | 否 |\n| 7 | 销售额 | REAL | measure | 否 |\n| 8 | 利润 | REAL | measure | 否 |\n| 9 | 客户名称 | STRING | dimension | 否 |\n| 10 | 省/自治区 | STRING | dimension | 否 |\n| 11 | 类别 | STRING | dimension | 否 |"
+        },
+        {
+          "type": "done",
+          "answer": "数据资产 **订单+ (示例 - 超市)** 返回了 **11 个字段**：\n\n| 序号 | 字段名称 | 类型 | 角色 | 计算字段 |\n|---:|---|---|---|---|\n| 1 | 客单价 | REAL | measure | 是 |\n| 2 | 利润率 | REAL | measure | 是 |\n| 3 | 客户数 | INTEGER | measure | 是 |\n| 4 | 子类别 | STRING | dimension | 否 |\n| 5 | 发货年份 | STRING | dimension | 是 |\n| 6 | 发货日期 | DATE | dimension | 否 |\n| 7 | 销售额 | REAL | measure | 否 |\n| 8 | 利润 | REAL | measure | 否 |\n| 9 | 客户名称 | STRING | dimension | 否 |\n| 10 | 省/自治区 | STRING | dimension | 否 |\n| 11 | 类别 | STRING | dimension | 否 |",
+          "trace_id": "t-aeeea5bf",
+          "run_id": "ebd5f819-12ea-4f30-a034-12f376cf13ac",
+          "tools_used": [
+            "schema"
+          ],
+          "response_type": "schema_inventory",
+          "response_data": {
+            "connection_id": 2,
+            "connection_name": "Tableau-online",
+            "db_type": "tableau",
+            "mode": "fields",
+            "requested_table_name": "“订单+ (示例 - 超市)”",
+            "matched_asset": {
+              "name": "订单+ (示例 - 超市)",
+              "asset_type": "datasource",
+              "project": "default",
+              "web_url": "https://online.tableau.com/#/site/zy_bi/datasources/8902076",
+              "tableau_id": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "raw_field_count": 11,
+            "fields": [
+              {
+                "name": "客单价",
+                "caption": "客单价",
+                "display_name": "客单价",
+                "data_type": "REAL",
+                "role": "measure",
+                "is_calculated": true
+              },
+              {
+                "name": "利润率",
+                "caption": "利润率",
+                "display_name": "利润率",
+                "data_type": "REAL",
+                "role": "measure",
+                "is_calculated": true
+              },
+              {
+                "name": "客户数",
+                "caption": "客户数",
+                "display_name": "客户数",
+                "data_type": "INTEGER",
+                "role": "measure",
+                "is_calculated": true
+              },
+              {
+                "name": "子类别",
+                "caption": "子类别",
+                "display_name": "子类别",
+                "data_type": "STRING",
+                "role": "dimension",
+                "is_calculated": false
+              },
+              {
+                "name": "发货年份",
+                "caption": "发货年份",
+                "display_name": "发货年份",
+                "data_type": "STRING",
+                "role": "dimension",
+                "is_calculated": true
+              },
+              {
+                "name": "发货日期",
+                "caption": "发货日期",
+                "display_name": "发货日期",
+                "data_type": "DATE",
+                "role": "dimension",
+                "is_calculated": false
+              },
+              {
+                "name": "销售额",
+                "caption": "销售额",
+                "display_name": "销售额",
+                "data_type": "REAL",
+                "role": "measure",
+                "is_calculated": false
+              },
+              {
+                "name": "利润",
+                "caption": "利润",
+                "display_name": "利润",
+                "data_type": "REAL",
+                "role": "measure",
+                "is_calculated": false
+              },
+              {
+                "name": "客户名称",
+                "caption": "客户名称",
+                "display_name": "客户名称",
+                "data_type": "STRING",
+                "role": "dimension",
+                "is_calculated": false
+              },
+              {
+                "name": "省/自治区",
+                "caption": "省/自治区",
+                "display_name": "省/自治区",
+                "data_type": "STRING",
+                "role": "dimension",
+                "is_calculated": false
+              },
+              {
+                "name": "类别",
+                "caption": "类别",
+                "display_name": "类别",
+                "data_type": "STRING",
+                "role": "dimension",
+                "is_calculated": false
+              }
+            ],
+            "warning": null
+          },
+          "steps_count": 4,
+          "execution_time_ms": 2334,
+          "sources_count": 0,
+          "top_sources": [],
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "ebd5f819-12ea-4f30-a034-12f376cf13ac",
+            "trace_id": "t-aeeea5bf",
+            "phases": {
+              "intent": {
+                "intent": "schema_inventory",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "asset_metadata_pattern",
+                  "message": "asset_metadata_pattern"
+                }
+              },
+              "postprocess": {
+                "response_type": "schema_inventory",
+                "row_count": 0,
+                "displayed_row_count": 0,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "eld_count\": 11, \"raw_field_count\": 11, \"fields\": [{\"name\": \"客单价\", \"caption\": \"客单价\", \"display_name\": \"客单价\", \"data_type\": \"REAL\", \"role\": \"measure\", \"is_calculated\": true}, {\"name\": \"利润率\", \"caption\": \"利润率\", \"display_name\": \"利润率\", \"data_type\": \"REAL\", \"role\": \"measure\", \"is_calculated\": true}, {\"name\": \"客户数\", \"caption\": \"客户数\", \"display_name\": \"客户数\", \"data_type\": \"INTEGER\", \"role\": \"measure\", \"is_calculated\": true}, {\"name\": \"子类别\", \"caption\": \"子类别\", \"display_name\": \"子类别\", \"data_type\": \"STRING\", \"role\": \"dimension\", \"is_calculated\": false}, {\"name\": \"发货年份\", \"caption\": \"发货年份\", \"display_name\": \"发货年份\", \"data_type\": \"STRING\", \"role\": \"dimension\", \"is_calculated\": true}, {\"name\": \"发货日期\", \"caption\": \"发货日期\", \"display_name\": \"发货日期\", \"data_type\": \"DATE\", \"role\": \"dimension\", \"is_calculated\": false}, {\"name\": \"销售额\", \"caption\": \"销售额\", \"display_name\": \"销售额\", \"data_type\": \"REAL\", \"role\": \"measure\", \"is_calculated\": false}, {\"name\": \"利润\", \"caption\": \"利润\", \"display_name\": \"利润\", \"data_type\": \"REAL\", \"role\": \"measure\", \"is_calculated\": false}, {\"name\": \"客户名称\", \"caption\": \"客户名称\", \"display_name\": \"客户名称\", \"data_type\": \"STRING\", \"role\": \"dimension\", \"is_calculated\": false}, {\"name\": \"省/自治区\", \"caption\": \"省/自治区\", \"display_name\": \"省/自治区\", \"data_type\": \"STRING\", \"role\": \"dimension\", \"is_calculated\": false}, {\"name\": \"类别\", \"caption\": \"类别\", \"display_name\": \"类别\", \"data_type\": \"STRING\", \"role\": \"dimension\", \"is_calculated\": false}], \"warning\": null}, \"steps_count\": 4, \"execution_time_ms\": 2334, \"sources_count\": 0, \"top_sources\": [], \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"ebd5f819-12ea-4f30-a034-12f376cf13ac\", \"trace_id\": \"t-aeeea5bf\", \"phases\": {\"intent\": {\"intent\": \"schema_inventory\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"asset_metadata_pattern\", \"message\": \"asset_metadata_pattern\"}}, \"postprocess\": {\"response_type\": \"schema_inventory\", \"row_count\": 0, \"displayed_row_count\": 0, \"formatting\": [\"markdown_summary\"]}}}}\n\n"
+    },
+    "Q1": {
+      "duration": 87.42842229100643,
+      "status_code": 200,
+      "conversation_id": "0dacee14-30b2-4a5b-bc04-3e16d9736c14",
+      "done": {
+        "type": "done",
+        "answer": "查询已完成，返回 1 行结果。",
+        "trace_id": "t-c3fdd430",
+        "run_id": "cc5317d2-83e3-40bb-a247-1dd469f4d818",
+        "tools_used": [
+          "context_resolver",
+          "planning_skill_loader",
+          "llm_queryspec",
+          "queryspec_validator",
+          "llm_queryspec_repair",
+          "queryspec_mcp_fallback",
+          "mcp_tool_description_loader",
+          "llm_mcp_args",
+          "mcp_args_guardrail",
+          "tableau_mcp"
+        ],
+        "response_type": "table",
+        "response_data": {
+          "data": [
+            {
+              "SUM(销售额)": 16867374.06867518,
+              "SUM(利润)": 2119151.905850007,
+              "利润率": 0.12563614805848985,
+              "客户数": 771,
+              "客单价": 21877.268571563138
+            }
+          ],
+          "fields": [
+            "SUM(销售额)",
+            "SUM(利润)",
+            "利润率",
+            "客户数",
+            "客单价"
+          ],
+          "rows": [
+            [
+              16867374.06867518,
+              2119151.905850007,
+              0.12563614805848985,
+              771,
+              21877.268571563138
+            ]
+          ],
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "chain_mode": "mcp_proxy",
+          "guardrail_decision": "repair",
+          "guardrail_repairs": [
+            {
+              "type": "aggregate_calculation_function_removed",
+              "path": "query.fields.2.function",
+              "before": "AVG",
+              "after": null,
+              "reason": "removed outer MCP function from an already-aggregated calculated field"
+            },
+            {
+              "type": "aggregate_calculation_function_removed",
+              "path": "query.fields.3.function",
+              "before": "COUNT",
+              "after": null,
+              "reason": "removed outer MCP function from an already-aggregated calculated field"
+            },
+            {
+              "type": "aggregate_calculation_function_removed",
+              "path": "query.fields.4.function",
+              "before": "AVG",
+              "after": null,
+              "reason": "removed outer MCP function from an already-aggregated calculated field"
+            }
+          ],
+          "mcp_args": {
+            "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "query": {
+              "fields": [
+                {
+                  "fieldCaption": "销售额",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润率"
+                },
+                {
+                  "fieldCaption": "客户数"
+                },
+                {
+                  "fieldCaption": "客单价"
+                }
+              ]
+            },
+            "limit": 1
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "SUM(销售额)",
+                "label": "销售额",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "利润",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "利润率",
+                "label": "利润率",
+                "semantic_type": "derived_metric",
+                "value_type": "percent",
+                "align": "right",
+                "format": "percent"
+              },
+              {
+                "key": "客户数",
+                "label": "客户数",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "客单价",
+                "label": "客单价",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              }
+            ]
+          },
+          "fallback_chain_mode": "queryspec_mcp_fallback",
+          "queryspec_fallback": {
+            "phase": "queryspec_repair",
+            "reason": "QS_VALIDATION_FAILED",
+            "fallback_reason": "QS_VALIDATION_FAILED",
+            "fallback_trace_event": "FALLBACK_TRIGGERED",
+            "original_error": {
+              "question_metrics": [
+                "利润",
+                "利润率",
+                "客单价",
+                "客户数",
+                "销售额"
+              ],
+              "covered_metrics": [
+                "利润",
+                "利润率",
+                "客单价",
+                "销售额"
+              ],
+              "missing": [
+                "客户数"
+              ],
+              "fallback_reason": "QS_VALIDATION_FAILED",
+              "validator_code": "QS_SEMANTIC_METRIC_MISSING",
+              "initial_validation": {
+                "passed": false,
+                "code": "QS_SEMANTIC_METRIC_MISSING",
+                "message": "QuerySpec 未覆盖用户明确提到的指标。",
+                "user_hint": "请重新生成查询计划，确保显式指标出现在 metrics 或 derived_metrics 中。",
+                "detail": {
+                  "question_metrics": [
+                    "利润",
+                    "利润率",
+                    "客单价",
+                    "客户数",
+                    "销售额"
+                  ],
+                  "covered_metrics": [
+                    "利润",
+                    "利润率",
+                    "客单价",
+                    "销售额"
+                  ],
+                  "missing": [
+                    "客户数"
+                  ]
+                }
+              }
+            },
+            "fallback_mode": "mcp_proxy",
+            "chain_mode": "queryspec_mcp_fallback",
+            "metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "QS_VALIDATION_FAILED"
+            }
+          },
+          "queryspec_metrics": {
+            "queryspec_main_path_success": false,
+            "queryspec_fallback_triggered": true,
+            "queryspec_fallback_mode": "mcp_proxy",
+            "queryspec_fallback_reason": "QS_VALIDATION_FAILED"
+          },
+          "col_types": [
+            "numeric",
+            "numeric",
+            "numeric",
+            "numeric",
+            "numeric"
+          ]
+        },
+        "steps_count": 10,
+        "execution_time_ms": 87205,
+        "sources_count": 1,
+        "top_sources": [
+          "Tableau-online"
+        ],
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "cc5317d2-83e3-40bb-a247-1dd469f4d818",
+          "trace_id": "t-c3fdd430",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "table",
+              "row_count": 1,
+              "displayed_row_count": 1,
+              "formatting": [
+                "markdown_summary"
+              ]
+            }
+          }
+        }
+      },
+      "error": null,
+      "row_count": 1,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.62,
+              "route_reason": "generic_business_data_context"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "0dacee14-30b2-4a5b-bc04-3e16d9736c14",
+          "run_id": "cc5317d2-83e3-40bb-a247-1dd469f4d818",
+          "trace_id": "t-c3fdd430",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：aggregate。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "context_resolver",
+          "params": {
+            "chain_mode": "legacy_queryspec",
+            "intent": "aggregate"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "context_resolver",
+          "summary": "{'status': 'empty', 'datasource_name': None, 'metric_names': [], 'dimension_names': [], 'filter_names': [], 'unresolved_references': False, 'calculation_performed': False}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "aggregate",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'aggregate', 'kind': 'planning', 'checksum': '30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19', 'version': 'v1', 'source_path': '/Users/forrest/Projects/mula"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "aggregate",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'queryspec': {'intent': 'aggregate', 'operator': 'aggregate', 'datasource': {'luid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'name': '订单+ (示例 - 超市)'}, 'time': None, 'metrics': [{'field': '销售额', 'aggr"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_validator",
+          "params": {
+            "intent": "aggregate",
+            "operator": "aggregate"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_validator",
+          "summary": "{'passed': False, 'code': 'QS_SEMANTIC_METRIC_MISSING', 'message': 'QuerySpec 未覆盖用户明确提到的指标。', 'user_hint': '请重新生成查询计划，确保显式指标出现在 metrics 或 derived_metrics 中。', 'detail': {'question_metrics': ['利润', '利润"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec_repair",
+          "params": {
+            "reason": "QS_VALIDATION_FAILED",
+            "intent": "aggregate",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "validator_code": "QS_SEMANTIC_METRIC_MISSING"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec_repair",
+          "summary": "{'ok': False, 'error': 'LLM_PROVIDER_TIMEOUT', 'error_code': 'LLM_PROVIDER_TIMEOUT', 'message': '所有 LLM 配置均不可用', 'detail': {'attempts': [{'provider': 'minimax', 'model': 'MiniMax-M2.7', 'latency_ms': "
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_mcp_fallback",
+          "params": {
+            "event": "FALLBACK_TRIGGERED",
+            "phase": "queryspec_repair",
+            "reason": "QS_VALIDATION_FAILED",
+            "fallback_mode": "mcp_proxy"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_mcp_fallback",
+          "summary": "{'phase': 'queryspec_repair', 'reason': 'QS_VALIDATION_FAILED', 'fallback_reason': 'QS_VALIDATION_FAILED', 'fallback_trace_event': 'FALLBACK_TRIGGERED', 'original_error': {'question_metrics': ['利润', '"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_tool_description_loader",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_tool_description_loader",
+          "summary": "{'description': 'Tool: query-datasource\\nPurpose: read aggregated data from one Tableau published datasource.\\nArguments JSON shape: {\"datasourceLuid\": string, \"query\": {\"fields\": [...], \"filters\": [."
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_mcp_args",
+          "params": {
+            "tool": "query-datasource",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "queryspec_mcp_fallback",
+            "fallback_reason": "QS_VALIDATION_FAILED"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_mcp_args",
+          "summary": "{'args': {'datasourceLuid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'query': {'fields': [{'fieldCaption': '销售额', 'function': 'SUM'}, {'fieldCaption': '利润', 'function': 'SUM'}, {'fieldCaption': '利润率', "
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_args_guardrail",
+          "params": {
+            "tool": "query-datasource",
+            "chain_mode": "queryspec_mcp_fallback"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_args_guardrail",
+          "summary": "{'decision': 'repair', 'args': {'datasourceLuid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'query': {'fields': [{'fieldCaption': '销售额', 'function': 'SUM'}, {'fieldCaption': '利润', 'function': 'SUM'}, {'"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "mcp_tool": "query-datasource",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "queryspec_mcp_fallback",
+            "guardrail_decision": "repair",
+            "guardrail_repairs": [
+              {
+                "type": "aggregate_calculation_function_removed",
+                "path": "query.fields.2.function",
+                "before": "AVG",
+                "after": null,
+                "reason": "removed outer MCP function from an already-aggregated calculated field"
+              },
+              {
+                "type": "aggregate_calculation_function_removed",
+                "path": "query.fields.3.function",
+                "before": "COUNT",
+                "after": null,
+                "reason": "removed outer MCP function from an already-aggregated calculated field"
+              },
+              {
+                "type": "aggregate_calculation_function_removed",
+                "path": "query.fields.4.function",
+                "before": "AVG",
+                "after": null,
+                "reason": "removed outer MCP function from an already-aggregated calculated field"
+              }
+            ],
+            "fallback_reason": "QS_VALIDATION_FAILED"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'data': [{'SUM(销售额)': 16867374.06867518, 'SUM(利润)': 2119151.905850007, '利润率': 0.12563614805848985, '客户数': 771, '客单价': 21877.268571563138}], 'fields': ['SUM(销售额)', 'SUM(利润)', '利润率', '客户数', '客单价'], 'ro"
+        },
+        {
+          "data": [
+            {
+              "SUM(销售额)": 16867374.06867518,
+              "SUM(利润)": 2119151.905850007,
+              "利润率": 0.12563614805848985,
+              "客户数": 771,
+              "客单价": 21877.268571563138
+            }
+          ],
+          "fields": [
+            "SUM(销售额)",
+            "SUM(利润)",
+            "利润率",
+            "客户数",
+            "客单价"
+          ],
+          "rows": [
+            [
+              16867374.06867518,
+              2119151.905850007,
+              0.12563614805848985,
+              771,
+              21877.268571563138
+            ]
+          ],
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "chain_mode": "mcp_proxy",
+          "guardrail_decision": "repair",
+          "guardrail_repairs": [
+            {
+              "type": "aggregate_calculation_function_removed",
+              "path": "query.fields.2.function",
+              "before": "AVG",
+              "after": null,
+              "reason": "removed outer MCP function from an already-aggregated calculated field"
+            },
+            {
+              "type": "aggregate_calculation_function_removed",
+              "path": "query.fields.3.function",
+              "before": "COUNT",
+              "after": null,
+              "reason": "removed outer MCP function from an already-aggregated calculated field"
+            },
+            {
+              "type": "aggregate_calculation_function_removed",
+              "path": "query.fields.4.function",
+              "before": "AVG",
+              "after": null,
+              "reason": "removed outer MCP function from an already-aggregated calculated field"
+            }
+          ],
+          "mcp_args": {
+            "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "query": {
+              "fields": [
+                {
+                  "fieldCaption": "销售额",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润率"
+                },
+                {
+                  "fieldCaption": "客户数"
+                },
+                {
+                  "fieldCaption": "客单价"
+                }
+              ]
+            },
+            "limit": 1
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "SUM(销售额)",
+                "label": "销售额",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "利润",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "利润率",
+                "label": "利润率",
+                "semantic_type": "derived_metric",
+                "value_type": "percent",
+                "align": "right",
+                "format": "percent"
+              },
+              {
+                "key": "客户数",
+                "label": "客户数",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "客单价",
+                "label": "客单价",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              }
+            ]
+          },
+          "fallback_chain_mode": "queryspec_mcp_fallback",
+          "queryspec_fallback": {
+            "phase": "queryspec_repair",
+            "reason": "QS_VALIDATION_FAILED",
+            "fallback_reason": "QS_VALIDATION_FAILED",
+            "fallback_trace_event": "FALLBACK_TRIGGERED",
+            "original_error": {
+              "question_metrics": [
+                "利润",
+                "利润率",
+                "客单价",
+                "客户数",
+                "销售额"
+              ],
+              "covered_metrics": [
+                "利润",
+                "利润率",
+                "客单价",
+                "销售额"
+              ],
+              "missing": [
+                "客户数"
+              ],
+              "fallback_reason": "QS_VALIDATION_FAILED",
+              "validator_code": "QS_SEMANTIC_METRIC_MISSING",
+              "initial_validation": {
+                "passed": false,
+                "code": "QS_SEMANTIC_METRIC_MISSING",
+                "message": "QuerySpec 未覆盖用户明确提到的指标。",
+                "user_hint": "请重新生成查询计划，确保显式指标出现在 metrics 或 derived_metrics 中。",
+                "detail": {
+                  "question_metrics": [
+                    "利润",
+                    "利润率",
+                    "客单价",
+                    "客户数",
+                    "销售额"
+                  ],
+                  "covered_metrics": [
+                    "利润",
+                    "利润率",
+                    "客单价",
+                    "销售额"
+                  ],
+                  "missing": [
+                    "客户数"
+                  ]
+                }
+              }
+            },
+            "fallback_mode": "mcp_proxy",
+            "chain_mode": "queryspec_mcp_fallback",
+            "metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "QS_VALIDATION_FAILED"
+            }
+          },
+          "queryspec_metrics": {
+            "queryspec_main_path_success": false,
+            "queryspec_fallback_triggered": true,
+            "queryspec_fallback_mode": "mcp_proxy",
+            "queryspec_fallback_reason": "QS_VALIDATION_FAILED"
+          },
+          "col_types": [
+            "numeric",
+            "numeric",
+            "numeric",
+            "numeric",
+            "numeric"
+          ],
+          "type": "table_data"
+        },
+        {
+          "type": "token",
+          "content": "查"
+        },
+        {
+          "type": "token",
+          "content": "询"
+        },
+        {
+          "type": "token",
+          "content": "已"
+        },
+        {
+          "type": "token",
+          "content": "完"
+        },
+        {
+          "type": "token",
+          "content": "成"
+        },
+        {
+          "type": "token",
+          "content": "，"
+        },
+        {
+          "type": "token",
+          "content": "返"
+        },
+        {
+          "type": "token",
+          "content": "回"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "1"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "行"
+        },
+        {
+          "type": "token",
+          "content": "结"
+        },
+        {
+          "type": "token",
+          "content": "果"
+        },
+        {
+          "type": "token",
+          "content": "。"
+        },
+        {
+          "type": "done",
+          "answer": "查询已完成，返回 1 行结果。",
+          "trace_id": "t-c3fdd430",
+          "run_id": "cc5317d2-83e3-40bb-a247-1dd469f4d818",
+          "tools_used": [
+            "context_resolver",
+            "planning_skill_loader",
+            "llm_queryspec",
+            "queryspec_validator",
+            "llm_queryspec_repair",
+            "queryspec_mcp_fallback",
+            "mcp_tool_description_loader",
+            "llm_mcp_args",
+            "mcp_args_guardrail",
+            "tableau_mcp"
+          ],
+          "response_type": "table",
+          "response_data": {
+            "data": [
+              {
+                "SUM(销售额)": 16867374.06867518,
+                "SUM(利润)": 2119151.905850007,
+                "利润率": 0.12563614805848985,
+                "客户数": 771,
+                "客单价": 21877.268571563138
+              }
+            ],
+            "fields": [
+              "SUM(销售额)",
+              "SUM(利润)",
+              "利润率",
+              "客户数",
+              "客单价"
+            ],
+            "rows": [
+              [
+                16867374.06867518,
+                2119151.905850007,
+                0.12563614805848985,
+                771,
+                21877.268571563138
+              ]
+            ],
+            "datasource_name": "订单+ (示例 - 超市)",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "mcp_proxy",
+            "guardrail_decision": "repair",
+            "guardrail_repairs": [
+              {
+                "type": "aggregate_calculation_function_removed",
+                "path": "query.fields.2.function",
+                "before": "AVG",
+                "after": null,
+                "reason": "removed outer MCP function from an already-aggregated calculated field"
+              },
+              {
+                "type": "aggregate_calculation_function_removed",
+                "path": "query.fields.3.function",
+                "before": "COUNT",
+                "after": null,
+                "reason": "removed outer MCP function from an already-aggregated calculated field"
+              },
+              {
+                "type": "aggregate_calculation_function_removed",
+                "path": "query.fields.4.function",
+                "before": "AVG",
+                "after": null,
+                "reason": "removed outer MCP function from an already-aggregated calculated field"
+              }
+            ],
+            "mcp_args": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润率"
+                  },
+                  {
+                    "fieldCaption": "客户数"
+                  },
+                  {
+                    "fieldCaption": "客单价"
+                  }
+                ]
+              },
+              "limit": 1
+            },
+            "table_display": {
+              "columns": [
+                {
+                  "key": "SUM(销售额)",
+                  "label": "销售额",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                },
+                {
+                  "key": "SUM(利润)",
+                  "label": "利润",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                },
+                {
+                  "key": "利润率",
+                  "label": "利润率",
+                  "semantic_type": "derived_metric",
+                  "value_type": "percent",
+                  "align": "right",
+                  "format": "percent"
+                },
+                {
+                  "key": "客户数",
+                  "label": "客户数",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                },
+                {
+                  "key": "客单价",
+                  "label": "客单价",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                }
+              ]
+            },
+            "fallback_chain_mode": "queryspec_mcp_fallback",
+            "queryspec_fallback": {
+              "phase": "queryspec_repair",
+              "reason": "QS_VALIDATION_FAILED",
+              "fallback_reason": "QS_VALIDATION_FAILED",
+              "fallback_trace_event": "FALLBACK_TRIGGERED",
+              "original_error": {
+                "question_metrics": [
+                  "利润",
+                  "利润率",
+                  "客单价",
+                  "客户数",
+                  "销售额"
+                ],
+                "covered_metrics": [
+                  "利润",
+                  "利润率",
+                  "客单价",
+                  "销售额"
+                ],
+                "missing": [
+                  "客户数"
+                ],
+                "fallback_reason": "QS_VALIDATION_FAILED",
+                "validator_code": "QS_SEMANTIC_METRIC_MISSING",
+                "initial_validation": {
+                  "passed": false,
+                  "code": "QS_SEMANTIC_METRIC_MISSING",
+                  "message": "QuerySpec 未覆盖用户明确提到的指标。",
+                  "user_hint": "请重新生成查询计划，确保显式指标出现在 metrics 或 derived_metrics 中。",
+                  "detail": {
+                    "question_metrics": [
+                      "利润",
+                      "利润率",
+                      "客单价",
+                      "客户数",
+                      "销售额"
+                    ],
+                    "covered_metrics": [
+                      "利润",
+                      "利润率",
+                      "客单价",
+                      "销售额"
+                    ],
+                    "missing": [
+                      "客户数"
+                    ]
+                  }
+                }
+              },
+              "fallback_mode": "mcp_proxy",
+              "chain_mode": "queryspec_mcp_fallback",
+              "metrics": {
+                "queryspec_main_path_success": false,
+                "queryspec_fallback_triggered": true,
+                "queryspec_fallback_mode": "mcp_proxy",
+                "queryspec_fallback_reason": "QS_VALIDATION_FAILED"
+              }
+            },
+            "queryspec_metrics": {
+              "queryspec_main_path_success": false,
+              "queryspec_fallback_triggered": true,
+              "queryspec_fallback_mode": "mcp_proxy",
+              "queryspec_fallback_reason": "QS_VALIDATION_FAILED"
+            },
+            "col_types": [
+              "numeric",
+              "numeric",
+              "numeric",
+              "numeric",
+              "numeric"
+            ]
+          },
+          "steps_count": 10,
+          "execution_time_ms": 87205,
+          "sources_count": 1,
+          "top_sources": [
+            "Tableau-online"
+          ],
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "cc5317d2-83e3-40bb-a247-1dd469f4d818",
+            "trace_id": "t-c3fdd430",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "table",
+                "row_count": 1,
+                "displayed_row_count": 1,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "ber\", \"align\": \"right\", \"format\": \"number\"}, {\"key\": \"客单价\", \"label\": \"客单价\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}]}, \"fallback_chain_mode\": \"queryspec_mcp_fallback\", \"queryspec_fallback\": {\"phase\": \"queryspec_repair\", \"reason\": \"QS_VALIDATION_FAILED\", \"fallback_reason\": \"QS_VALIDATION_FAILED\", \"fallback_trace_event\": \"FALLBACK_TRIGGERED\", \"original_error\": {\"question_metrics\": [\"利润\", \"利润率\", \"客单价\", \"客户数\", \"销售额\"], \"covered_metrics\": [\"利润\", \"利润率\", \"客单价\", \"销售额\"], \"missing\": [\"客户数\"], \"fallback_reason\": \"QS_VALIDATION_FAILED\", \"validator_code\": \"QS_SEMANTIC_METRIC_MISSING\", \"initial_validation\": {\"passed\": false, \"code\": \"QS_SEMANTIC_METRIC_MISSING\", \"message\": \"QuerySpec 未覆盖用户明确提到的指标。\", \"user_hint\": \"请重新生成查询计划，确保显式指标出现在 metrics 或 derived_metrics 中。\", \"detail\": {\"question_metrics\": [\"利润\", \"利润率\", \"客单价\", \"客户数\", \"销售额\"], \"covered_metrics\": [\"利润\", \"利润率\", \"客单价\", \"销售额\"], \"missing\": [\"客户数\"]}}}, \"fallback_mode\": \"mcp_proxy\", \"chain_mode\": \"queryspec_mcp_fallback\", \"metrics\": {\"queryspec_main_path_success\": false, \"queryspec_fallback_triggered\": true, \"queryspec_fallback_mode\": \"mcp_proxy\", \"queryspec_fallback_reason\": \"QS_VALIDATION_FAILED\"}}, \"queryspec_metrics\": {\"queryspec_main_path_success\": false, \"queryspec_fallback_triggered\": true, \"queryspec_fallback_mode\": \"mcp_proxy\", \"queryspec_fallback_reason\": \"QS_VALIDATION_FAILED\"}, \"col_types\": [\"numeric\", \"numeric\", \"numeric\", \"numeric\", \"numeric\"]}, \"steps_count\": 10, \"execution_time_ms\": 87205, \"sources_count\": 1, \"top_sources\": [\"Tableau-online\"], \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"cc5317d2-83e3-40bb-a247-1dd469f4d818\", \"trace_id\": \"t-c3fdd430\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"table\", \"row_count\": 1, \"displayed_row_count\": 1, \"formatting\": [\"markdown_summary\"]}}}}\n\n"
+    },
+    "Q2": {
+      "duration": 36.44300187501358,
+      "status_code": 200,
+      "conversation_id": "0dacee14-30b2-4a5b-bc04-3e16d9736c14",
+      "done": {
+        "type": "done",
+        "answer": "共有 4 个对象满足持续趋势条件：2022、2023、2021、2024。详细数据见下方表格。",
+        "trace_id": "t-31c4a6ca",
+        "run_id": "ae5c253b-3fb1-4e72-b6cf-15c3025a4065",
+        "tools_used": [
+          "context_resolver",
+          "planning_skill_loader",
+          "llm_queryspec",
+          "queryspec_validator",
+          "tableau_mcp",
+          "rendering_skill_loader",
+          "answer_renderer"
+        ],
+        "response_type": "table",
+        "response_data": {
+          "fields": [
+            "YEAR(发货日期)",
+            "SUM(销售额)",
+            "SUM(利润)"
+          ],
+          "rows": [
+            [
+              2022,
+              3496306.322999994,
+              459655.05542499956
+            ],
+            [
+              2023,
+              4466389.57874999,
+              607630.7156999997
+            ],
+            [
+              2021,
+              3478604.9774749996,
+              357467.1333749987
+            ],
+            [
+              2024,
+              5387286.408650015,
+              687150.8790999999
+            ]
+          ],
+          "intent": "trend_condition",
+          "operator": "trend_condition",
+          "confidence": 0.95,
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "queryspec": {
+            "intent": "trend_condition",
+            "source": null,
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "operator": "trend_condition",
+            "time": {
+              "field": "发货日期",
+              "grain": "YEAR",
+              "range": {
+                "type": "range",
+                "start": 2021,
+                "end": 2024
+              },
+              "timezone": null
+            },
+            "metrics": [
+              {
+                "field": "销售额",
+                "aggregation": "SUM",
+                "alias": null
+              },
+              {
+                "field": "利润",
+                "aggregation": "SUM",
+                "alias": null
+              }
+            ],
+            "derived_metrics": [],
+            "dimensions": [],
+            "breakdown_dimensions": [],
+            "focus_dimension": null,
+            "filters": [],
+            "sort": [],
+            "limit": 100,
+            "direction": "increasing",
+            "operator_spec": {
+              "condition": "strict_increase",
+              "period_completeness_required": true
+            },
+            "universe": null,
+            "occurred": null,
+            "result_shape": null,
+            "raw_rows": false,
+            "detail_scan": false,
+            "allow_detail_scan": false,
+            "answer_contract": {
+              "max_chars": 120,
+              "must_include": [
+                "趋势条件",
+                "年份粒度"
+              ],
+              "forbid": [
+                "明细列表",
+                "LLM心算",
+                "缺期仍判定通过"
+              ]
+            },
+            "params": {}
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "YEAR(发货日期)",
+                "label": "发货日期",
+                "semantic_type": "period",
+                "value_type": "date",
+                "align": "right",
+                "format": "date"
+              },
+              {
+                "key": "SUM(销售额)",
+                "label": "销售额",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "利润",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              }
+            ]
+          },
+          "mcp_args_guardrail": {
+            "decision": "allow",
+            "args": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "发货日期",
+                    "function": "YEAR"
+                  },
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  }
+                ],
+                "filters": [
+                  {
+                    "field": {
+                      "fieldCaption": "发货日期"
+                    },
+                    "filterType": "QUANTITATIVE_DATE",
+                    "quantitativeFilterType": "RANGE",
+                    "minDate": "2021-01-01",
+                    "maxDate": "2024-12-31"
+                  }
+                ]
+              },
+              "limit": 100,
+              "timeout": 30,
+              "connection_id": 2
+            },
+            "repairs": [],
+            "reject_code": null,
+            "message": "MCP 参数通过安全检查。",
+            "user_hint": ""
+          },
+          "col_types": [
+            "numeric",
+            "numeric",
+            "numeric"
+          ]
+        },
+        "steps_count": 7,
+        "execution_time_ms": 35880,
+        "sources_count": 1,
+        "top_sources": [
+          "Tableau-online"
+        ],
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "ae5c253b-3fb1-4e72-b6cf-15c3025a4065",
+          "trace_id": "t-31c4a6ca",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.8500000000000001,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "data_action_pattern",
+                "message": "data_action_pattern"
+              }
+            },
+            "postprocess": {
+              "response_type": "table",
+              "row_count": 4,
+              "displayed_row_count": 4,
+              "formatting": [
+                "markdown_summary"
+              ]
+            }
+          }
+        }
+      },
+      "error": null,
+      "row_count": 4,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "trend_condition",
+          "confidence": 0.82,
+          "route_reason": "trend_condition_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.8500000000000001,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "data_action_pattern",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.8500000000000001,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "data_action_pattern",
+              "message": "data_action_pattern"
+            },
+            "intent_classifier": {
+              "intent": "trend_condition",
+              "confidence": 0.82,
+              "route_reason": "trend_condition_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "0dacee14-30b2-4a5b-bc04-3e16d9736c14",
+          "run_id": "ae5c253b-3fb1-4e72-b6cf-15c3025a4065",
+          "trace_id": "t-31c4a6ca",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：trend_condition。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "context_resolver",
+          "params": {
+            "chain_mode": "legacy_queryspec",
+            "intent": "trend_condition"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "context_resolver",
+          "summary": "{'status': 'resolved', 'datasource_name': '订单+ (示例 - 超市)', 'metric_names': ['销售额', '利润'], 'dimension_names': ['利润率', '客户数', '客单价'], 'filter_names': [], 'unresolved_references': False, 'calculation_per"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "trend_condition",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'trend_condition', 'kind': 'planning', 'checksum': '9e5fbaf844ed7b16b4c5cf3b8909e84c67249db5c9944537908a098e43240b97', 'version': 'v1', 'source_path': '/Users/forrest/Project"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "trend_condition",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "9e5fbaf844ed7b16b4c5cf3b8909e84c67249db5c9944537908a098e43240b97"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'queryspec': {'intent': 'trend_condition', 'operator': 'trend_condition', 'datasource': {'luid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'name': '订单+ (示例 - 超市)'}, 'time': {'field': '发货年份', 'grain': '"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_validator",
+          "params": {
+            "intent": "trend_condition",
+            "operator": "trend_condition"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_validator",
+          "summary": "{'passed': True, 'code': 'QS_VALID', 'message': 'QuerySpec 校验通过。', 'user_hint': '', 'detail': {'intent': 'trend_condition', 'operator': 'trend_condition', 'field_count': 3}}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "operator": "trend_condition",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'fields': ['YEAR(发货日期)', 'SUM(销售额)', 'SUM(利润)'], 'rows': [[2022, 3496306.322999994, 459655.05542499956], [2023, 4466389.57874999, 607630.7156999997], [2021, 3478604.9774749996, 357467.1333749987], [2"
+        },
+        {
+          "fields": [
+            "YEAR(发货日期)",
+            "SUM(销售额)",
+            "SUM(利润)"
+          ],
+          "rows": [
+            [
+              2022,
+              3496306.322999994,
+              459655.05542499956
+            ],
+            [
+              2023,
+              4466389.57874999,
+              607630.7156999997
+            ],
+            [
+              2021,
+              3478604.9774749996,
+              357467.1333749987
+            ],
+            [
+              2024,
+              5387286.408650015,
+              687150.8790999999
+            ]
+          ],
+          "intent": "trend_condition",
+          "operator": "trend_condition",
+          "confidence": 0.95,
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "queryspec": {
+            "intent": "trend_condition",
+            "source": null,
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "operator": "trend_condition",
+            "time": {
+              "field": "发货日期",
+              "grain": "YEAR",
+              "range": {
+                "type": "range",
+                "start": 2021,
+                "end": 2024
+              },
+              "timezone": null
+            },
+            "metrics": [
+              {
+                "field": "销售额",
+                "aggregation": "SUM",
+                "alias": null
+              },
+              {
+                "field": "利润",
+                "aggregation": "SUM",
+                "alias": null
+              }
+            ],
+            "derived_metrics": [],
+            "dimensions": [],
+            "breakdown_dimensions": [],
+            "focus_dimension": null,
+            "filters": [],
+            "sort": [],
+            "limit": 100,
+            "direction": "increasing",
+            "operator_spec": {
+              "condition": "strict_increase",
+              "period_completeness_required": true
+            },
+            "universe": null,
+            "occurred": null,
+            "result_shape": null,
+            "raw_rows": false,
+            "detail_scan": false,
+            "allow_detail_scan": false,
+            "answer_contract": {
+              "max_chars": 120,
+              "must_include": [
+                "趋势条件",
+                "年份粒度"
+              ],
+              "forbid": [
+                "明细列表",
+                "LLM心算",
+                "缺期仍判定通过"
+              ]
+            },
+            "params": {}
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "YEAR(发货日期)",
+                "label": "发货日期",
+                "semantic_type": "period",
+                "value_type": "date",
+                "align": "right",
+                "format": "date"
+              },
+              {
+                "key": "SUM(销售额)",
+                "label": "销售额",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "利润",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              }
+            ]
+          },
+          "mcp_args_guardrail": {
+            "decision": "allow",
+            "args": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "发货日期",
+                    "function": "YEAR"
+                  },
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  }
+                ],
+                "filters": [
+                  {
+                    "field": {
+                      "fieldCaption": "发货日期"
+                    },
+                    "filterType": "QUANTITATIVE_DATE",
+                    "quantitativeFilterType": "RANGE",
+                    "minDate": "2021-01-01",
+                    "maxDate": "2024-12-31"
+                  }
+                ]
+              },
+              "limit": 100,
+              "timeout": 30,
+              "connection_id": 2
+            },
+            "repairs": [],
+            "reject_code": null,
+            "message": "MCP 参数通过安全检查。",
+            "user_hint": ""
+          },
+          "col_types": [
+            "numeric",
+            "numeric",
+            "numeric"
+          ],
+          "type": "table_data"
+        },
+        {
+          "type": "tool_call",
+          "tool": "rendering_skill_loader",
+          "params": {
+            "skill_key": "answer_renderer",
+            "kind": "rendering"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "rendering_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'answer_renderer', 'kind': 'rendering', 'checksum': 'dbc01fd30e8f40764b490535d2533b2b2a017d26a62ac940f83dd357470c1114', 'version': 'v1', 'source_path': '/Users/forrest/Projec"
+        },
+        {
+          "type": "tool_call",
+          "tool": "answer_renderer",
+          "params": {
+            "skill_checksum": "dbc01fd30e8f40764b490535d2533b2b2a017d26a62ac940f83dd357470c1114",
+            "row_count": 4
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "answer_renderer",
+          "summary": "{'fields': ['YEAR(发货日期)', 'SUM(销售额)', 'SUM(利润)'], 'rows': [[2022, 3496306.322999994, 459655.05542499956], [2023, 4466389.57874999, 607630.7156999997], [2021, 3478604.9774749996, 357467.1333749987], [2"
+        },
+        {
+          "fields": [
+            "YEAR(发货日期)",
+            "SUM(销售额)",
+            "SUM(利润)"
+          ],
+          "rows": [
+            [
+              2022,
+              3496306.322999994,
+              459655.05542499956
+            ],
+            [
+              2023,
+              4466389.57874999,
+              607630.7156999997
+            ],
+            [
+              2021,
+              3478604.9774749996,
+              357467.1333749987
+            ],
+            [
+              2024,
+              5387286.408650015,
+              687150.8790999999
+            ]
+          ],
+          "intent": "trend_condition",
+          "operator": "trend_condition",
+          "confidence": 0.95,
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "queryspec": {
+            "intent": "trend_condition",
+            "source": null,
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "operator": "trend_condition",
+            "time": {
+              "field": "发货日期",
+              "grain": "YEAR",
+              "range": {
+                "type": "range",
+                "start": 2021,
+                "end": 2024
+              },
+              "timezone": null
+            },
+            "metrics": [
+              {
+                "field": "销售额",
+                "aggregation": "SUM",
+                "alias": null
+              },
+              {
+                "field": "利润",
+                "aggregation": "SUM",
+                "alias": null
+              }
+            ],
+            "derived_metrics": [],
+            "dimensions": [],
+            "breakdown_dimensions": [],
+            "focus_dimension": null,
+            "filters": [],
+            "sort": [],
+            "limit": 100,
+            "direction": "increasing",
+            "operator_spec": {
+              "condition": "strict_increase",
+              "period_completeness_required": true
+            },
+            "universe": null,
+            "occurred": null,
+            "result_shape": null,
+            "raw_rows": false,
+            "detail_scan": false,
+            "allow_detail_scan": false,
+            "answer_contract": {
+              "max_chars": 120,
+              "must_include": [
+                "趋势条件",
+                "年份粒度"
+              ],
+              "forbid": [
+                "明细列表",
+                "LLM心算",
+                "缺期仍判定通过"
+              ]
+            },
+            "params": {}
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "YEAR(发货日期)",
+                "label": "发货日期",
+                "semantic_type": "period",
+                "value_type": "date",
+                "align": "right",
+                "format": "date"
+              },
+              {
+                "key": "SUM(销售额)",
+                "label": "销售额",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "利润",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              }
+            ]
+          },
+          "mcp_args_guardrail": {
+            "decision": "allow",
+            "args": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "发货日期",
+                    "function": "YEAR"
+                  },
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  }
+                ],
+                "filters": [
+                  {
+                    "field": {
+                      "fieldCaption": "发货日期"
+                    },
+                    "filterType": "QUANTITATIVE_DATE",
+                    "quantitativeFilterType": "RANGE",
+                    "minDate": "2021-01-01",
+                    "maxDate": "2024-12-31"
+                  }
+                ]
+              },
+              "limit": 100,
+              "timeout": 30,
+              "connection_id": 2
+            },
+            "repairs": [],
+            "reject_code": null,
+            "message": "MCP 参数通过安全检查。",
+            "user_hint": ""
+          },
+          "col_types": [
+            "numeric",
+            "numeric",
+            "numeric"
+          ],
+          "type": "table_data"
+        },
+        {
+          "type": "token",
+          "content": "共"
+        },
+        {
+          "type": "token",
+          "content": "有"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "4"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "个"
+        },
+        {
+          "type": "token",
+          "content": "对"
+        },
+        {
+          "type": "token",
+          "content": "象"
+        },
+        {
+          "type": "token",
+          "content": "满"
+        },
+        {
+          "type": "token",
+          "content": "足"
+        },
+        {
+          "type": "token",
+          "content": "持"
+        },
+        {
+          "type": "token",
+          "content": "续"
+        },
+        {
+          "type": "token",
+          "content": "趋"
+        },
+        {
+          "type": "token",
+          "content": "势"
+        },
+        {
+          "type": "token",
+          "content": "条"
+        },
+        {
+          "type": "token",
+          "content": "件"
+        },
+        {
+          "type": "token",
+          "content": "："
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "0"
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "、"
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "0"
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "3"
+        },
+        {
+          "type": "token",
+          "content": "、"
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "0"
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "1"
+        },
+        {
+          "type": "token",
+          "content": "、"
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "0"
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "4"
+        },
+        {
+          "type": "token",
+          "content": "。"
+        },
+        {
+          "type": "token",
+          "content": "详"
+        },
+        {
+          "type": "token",
+          "content": "细"
+        },
+        {
+          "type": "token",
+          "content": "数"
+        },
+        {
+          "type": "token",
+          "content": "据"
+        },
+        {
+          "type": "token",
+          "content": "见"
+        },
+        {
+          "type": "token",
+          "content": "下"
+        },
+        {
+          "type": "token",
+          "content": "方"
+        },
+        {
+          "type": "token",
+          "content": "表"
+        },
+        {
+          "type": "token",
+          "content": "格"
+        },
+        {
+          "type": "token",
+          "content": "。"
+        },
+        {
+          "type": "done",
+          "answer": "共有 4 个对象满足持续趋势条件：2022、2023、2021、2024。详细数据见下方表格。",
+          "trace_id": "t-31c4a6ca",
+          "run_id": "ae5c253b-3fb1-4e72-b6cf-15c3025a4065",
+          "tools_used": [
+            "context_resolver",
+            "planning_skill_loader",
+            "llm_queryspec",
+            "queryspec_validator",
+            "tableau_mcp",
+            "rendering_skill_loader",
+            "answer_renderer"
+          ],
+          "response_type": "table",
+          "response_data": {
+            "fields": [
+              "YEAR(发货日期)",
+              "SUM(销售额)",
+              "SUM(利润)"
+            ],
+            "rows": [
+              [
+                2022,
+                3496306.322999994,
+                459655.05542499956
+              ],
+              [
+                2023,
+                4466389.57874999,
+                607630.7156999997
+              ],
+              [
+                2021,
+                3478604.9774749996,
+                357467.1333749987
+              ],
+              [
+                2024,
+                5387286.408650015,
+                687150.8790999999
+              ]
+            ],
+            "intent": "trend_condition",
+            "operator": "trend_condition",
+            "confidence": 0.95,
+            "datasource_name": "订单+ (示例 - 超市)",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "queryspec": {
+              "intent": "trend_condition",
+              "source": null,
+              "datasource": {
+                "name": "订单+ (示例 - 超市)",
+                "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+              },
+              "operator": "trend_condition",
+              "time": {
+                "field": "发货日期",
+                "grain": "YEAR",
+                "range": {
+                  "type": "range",
+                  "start": 2021,
+                  "end": 2024
+                },
+                "timezone": null
+              },
+              "metrics": [
+                {
+                  "field": "销售额",
+                  "aggregation": "SUM",
+                  "alias": null
+                },
+                {
+                  "field": "利润",
+                  "aggregation": "SUM",
+                  "alias": null
+                }
+              ],
+              "derived_metrics": [],
+              "dimensions": [],
+              "breakdown_dimensions": [],
+              "focus_dimension": null,
+              "filters": [],
+              "sort": [],
+              "limit": 100,
+              "direction": "increasing",
+              "operator_spec": {
+                "condition": "strict_increase",
+                "period_completeness_required": true
+              },
+              "universe": null,
+              "occurred": null,
+              "result_shape": null,
+              "raw_rows": false,
+              "detail_scan": false,
+              "allow_detail_scan": false,
+              "answer_contract": {
+                "max_chars": 120,
+                "must_include": [
+                  "趋势条件",
+                  "年份粒度"
+                ],
+                "forbid": [
+                  "明细列表",
+                  "LLM心算",
+                  "缺期仍判定通过"
+                ]
+              },
+              "params": {}
+            },
+            "table_display": {
+              "columns": [
+                {
+                  "key": "YEAR(发货日期)",
+                  "label": "发货日期",
+                  "semantic_type": "period",
+                  "value_type": "date",
+                  "align": "right",
+                  "format": "date"
+                },
+                {
+                  "key": "SUM(销售额)",
+                  "label": "销售额",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                },
+                {
+                  "key": "SUM(利润)",
+                  "label": "利润",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                }
+              ]
+            },
+            "mcp_args_guardrail": {
+              "decision": "allow",
+              "args": {
+                "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+                "query": {
+                  "fields": [
+                    {
+                      "fieldCaption": "发货日期",
+                      "function": "YEAR"
+                    },
+                    {
+                      "fieldCaption": "销售额",
+                      "function": "SUM"
+                    },
+                    {
+                      "fieldCaption": "利润",
+                      "function": "SUM"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "field": {
+                        "fieldCaption": "发货日期"
+                      },
+                      "filterType": "QUANTITATIVE_DATE",
+                      "quantitativeFilterType": "RANGE",
+                      "minDate": "2021-01-01",
+                      "maxDate": "2024-12-31"
+                    }
+                  ]
+                },
+                "limit": 100,
+                "timeout": 30,
+                "connection_id": 2
+              },
+              "repairs": [],
+              "reject_code": null,
+              "message": "MCP 参数通过安全检查。",
+              "user_hint": ""
+            },
+            "col_types": [
+              "numeric",
+              "numeric",
+              "numeric"
+            ]
+          },
+          "steps_count": 7,
+          "execution_time_ms": 35880,
+          "sources_count": 1,
+          "top_sources": [
+            "Tableau-online"
+          ],
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "ae5c253b-3fb1-4e72-b6cf-15c3025a4065",
+            "trace_id": "t-31c4a6ca",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.8500000000000001,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "data_action_pattern",
+                  "message": "data_action_pattern"
+                }
+              },
+              "postprocess": {
+                "response_type": "table",
+                "row_count": 4,
+                "displayed_row_count": 4,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": " \"filters\": [], \"sort\": [], \"limit\": 100, \"direction\": \"increasing\", \"operator_spec\": {\"condition\": \"strict_increase\", \"period_completeness_required\": true}, \"universe\": null, \"occurred\": null, \"result_shape\": null, \"raw_rows\": false, \"detail_scan\": false, \"allow_detail_scan\": false, \"answer_contract\": {\"max_chars\": 120, \"must_include\": [\"趋势条件\", \"年份粒度\"], \"forbid\": [\"明细列表\", \"LLM心算\", \"缺期仍判定通过\"]}, \"params\": {}}, \"table_display\": {\"columns\": [{\"key\": \"YEAR(发货日期)\", \"label\": \"发货日期\", \"semantic_type\": \"period\", \"value_type\": \"date\", \"align\": \"right\", \"format\": \"date\"}, {\"key\": \"SUM(销售额)\", \"label\": \"销售额\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}, {\"key\": \"SUM(利润)\", \"label\": \"利润\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}]}, \"mcp_args_guardrail\": {\"decision\": \"allow\", \"args\": {\"datasourceLuid\": \"f4290485-26d3-428f-aa8d-ccc33862a411\", \"query\": {\"fields\": [{\"fieldCaption\": \"发货日期\", \"function\": \"YEAR\"}, {\"fieldCaption\": \"销售额\", \"function\": \"SUM\"}, {\"fieldCaption\": \"利润\", \"function\": \"SUM\"}], \"filters\": [{\"field\": {\"fieldCaption\": \"发货日期\"}, \"filterType\": \"QUANTITATIVE_DATE\", \"quantitativeFilterType\": \"RANGE\", \"minDate\": \"2021-01-01\", \"maxDate\": \"2024-12-31\"}]}, \"limit\": 100, \"timeout\": 30, \"connection_id\": 2}, \"repairs\": [], \"reject_code\": null, \"message\": \"MCP 参数通过安全检查。\", \"user_hint\": \"\"}, \"col_types\": [\"numeric\", \"numeric\", \"numeric\"]}, \"steps_count\": 7, \"execution_time_ms\": 35880, \"sources_count\": 1, \"top_sources\": [\"Tableau-online\"], \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"ae5c253b-3fb1-4e72-b6cf-15c3025a4065\", \"trace_id\": \"t-31c4a6ca\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.8500000000000001, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"data_action_pattern\", \"message\": \"data_action_pattern\"}}, \"postprocess\": {\"response_type\": \"table\", \"row_count\": 4, \"displayed_row_count\": 4, \"formatting\": [\"markdown_summary\"]}}}}\n\n"
+    },
+    "Q3": {
+      "duration": 28.395791957969777,
+      "status_code": 200,
+      "conversation_id": "0dacee14-30b2-4a5b-bc04-3e16d9736c14",
+      "done": {
+        "type": "done",
+        "answer": "从当前返回的数据看，17个子类别中利润率最高的是**标签**43.9%、**纸张**43.4%、**信封**42.3%；利润率最低的是**桌子**-8.5%、**书架**-3.1%、**用品**-2.5%。销售额最大的是**椅子**约243万元（利润约19.7万），其次**电话**约240.6万元（利润约32.7万）。亏损的类别仅有桌子、书架和用品三个，其中桌子亏损约12.9万元。",
+        "trace_id": "t-1ec8661a",
+        "run_id": "20fcf7aa-9192-488a-a67c-88d5e51323a2",
+        "tools_used": [
+          "context_resolver",
+          "planning_skill_loader",
+          "llm_queryspec",
+          "queryspec_validator",
+          "tableau_mcp",
+          "rendering_skill_loader",
+          "answer_renderer"
+        ],
+        "response_type": "table",
+        "response_data": {
+          "fields": [
+            "子类别",
+            "SUM(销售额)",
+            "SUM(利润)",
+            "利润率"
+          ],
+          "rows": [
+            [
+              "椅子",
+              2434319.8052499974,
+              197370.60917500002,
+              0.08107834013811124
+            ],
+            [
+              "电话",
+              2405859.139999997,
+              326618.4921249998,
+              0.13575960732472486
+            ],
+            [
+              "收纳具",
+              1628673.0164999971,
+              154317.0583749999,
+              0.09475017809690603
+            ],
+            [
+              "桌子",
+              1508146.3195000004,
+              -128710.74422500002,
+              -0.08534367160586369
+            ],
+            [
+              "装订机",
+              1503322.8872500008,
+              227839.22717499963,
+              0.15155708005735313
+            ],
+            [
+              "设备",
+              1376956.4747499996,
+              25099.332524999885,
+              0.01822812339043391
+            ],
+            [
+              "配件",
+              1213507.3054999972,
+              304040.6088249999,
+              0.2505469950176584
+            ],
+            [
+              "复印机",
+              1092903.3524999996,
+              406681.0396249999,
+              0.37211070740585
+            ],
+            [
+              "书架",
+              836368.7311749996,
+              -26332.533600000028,
+              -0.03148435925265393
+            ],
+            [
+              "器具",
+              784545.5912499998,
+              132888.76189999998,
+              0.16938309689341463
+            ],
+            [
+              "用具",
+              693086.4135000005,
+              100715.13675000002,
+              0.14531396776543498
+            ],
+            [
+              "纸张",
+              576668.9005,
+              250208.42574999938,
+              0.43388576275408036
+            ],
+            [
+              "用品",
+              338759.86049999995,
+              -8492.610125000012,
+              -0.02506970605214313
+            ],
+            [
+              "美术",
+              200527.8515,
+              48235.672449999955,
+              0.240543505997719
+            ],
+            [
+              "信封",
+              119830.62449999998,
+              50663.179074999985,
+              0.4227899110631773
+            ],
+            [
+              "标签",
+              92039.05449999988,
+              40402.64049999998,
+              0.4389727895346864
+            ],
+            [
+              "系固件",
+              61858.73999999999,
+              17607.609549999994,
+              0.2846422275979109
+            ]
+          ],
+          "intent": "aggregate",
+          "operator": "aggregate",
+          "confidence": 0.95,
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "queryspec": {
+            "intent": "aggregate",
+            "source": null,
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "operator": "aggregate",
+            "time": null,
+            "metrics": [
+              {
+                "field": "销售额",
+                "aggregation": "SUM",
+                "alias": null
+              },
+              {
+                "field": "利润",
+                "aggregation": "SUM",
+                "alias": null
+              },
+              {
+                "field": "利润率",
+                "aggregation": null,
+                "alias": null
+              }
+            ],
+            "derived_metrics": [],
+            "dimensions": [
+              "子类别"
+            ],
+            "breakdown_dimensions": [],
+            "focus_dimension": null,
+            "filters": [],
+            "sort": [
+              {
+                "field": "SUM(销售额)",
+                "direction": "DESC"
+              }
+            ],
+            "limit": 100,
+            "direction": null,
+            "operator_spec": {},
+            "universe": null,
+            "occurred": null,
+            "result_shape": null,
+            "raw_rows": false,
+            "detail_scan": false,
+            "allow_detail_scan": false,
+            "answer_contract": {
+              "max_chars": 120,
+              "must_include": [
+                "销售额",
+                "利润",
+                "利润率"
+              ],
+              "forbid": [
+                "明细列表",
+                "猜测原因"
+              ]
+            },
+            "params": {}
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "子类别",
+                "label": "子类别",
+                "semantic_type": "dimension",
+                "value_type": "string",
+                "align": "left",
+                "format": "plain"
+              },
+              {
+                "key": "SUM(销售额)",
+                "label": "销售额",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "利润",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "利润率",
+                "label": "利润率",
+                "semantic_type": "derived_metric",
+                "value_type": "percent",
+                "align": "right",
+                "format": "percent"
+              }
+            ]
+          },
+          "mcp_args_guardrail": {
+            "decision": "allow",
+            "args": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "子类别"
+                  },
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM",
+                    "sortDirection": "DESC",
+                    "sortPriority": 1
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润率"
+                  }
+                ],
+                "filters": []
+              },
+              "limit": 100,
+              "timeout": 30,
+              "connection_id": 2
+            },
+            "repairs": [],
+            "reject_code": null,
+            "message": "MCP 参数通过安全检查。",
+            "user_hint": ""
+          },
+          "col_types": [
+            "string",
+            "numeric",
+            "numeric",
+            "numeric"
+          ]
+        },
+        "steps_count": 7,
+        "execution_time_ms": 26237,
+        "sources_count": 1,
+        "top_sources": [
+          "Tableau-online"
+        ],
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "20fcf7aa-9192-488a-a67c-88d5e51323a2",
+          "trace_id": "t-1ec8661a",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "table",
+              "row_count": 17,
+              "displayed_row_count": 17,
+              "formatting": [
+                "markdown_summary"
+              ]
+            }
+          }
+        }
+      },
+      "error": null,
+      "row_count": 17,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.78,
+          "route_reason": "aggregate_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.78,
+              "route_reason": "aggregate_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "0dacee14-30b2-4a5b-bc04-3e16d9736c14",
+          "run_id": "20fcf7aa-9192-488a-a67c-88d5e51323a2",
+          "trace_id": "t-1ec8661a",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：aggregate。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "context_resolver",
+          "params": {
+            "chain_mode": "legacy_queryspec",
+            "intent": "aggregate"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "context_resolver",
+          "summary": "{'status': 'resolved', 'datasource_name': '订单+ (示例 - 超市)', 'metric_names': ['销售额', '利润'], 'dimension_names': [], 'filter_names': [], 'unresolved_references': False, 'calculation_performed': False}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "aggregate",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'aggregate', 'kind': 'planning', 'checksum': '30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19', 'version': 'v1', 'source_path': '/Users/forrest/Projects/mula"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "aggregate",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'queryspec': {'intent': 'aggregate', 'operator': 'aggregate', 'datasource': {'luid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'name': '订单+ (示例 - 超市)'}, 'time': None, 'metrics': [{'field': '销售额', 'aggr"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_validator",
+          "params": {
+            "intent": "aggregate",
+            "operator": "aggregate"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_validator",
+          "summary": "{'passed': True, 'code': 'QS_VALID', 'message': 'QuerySpec 校验通过。', 'user_hint': '', 'detail': {'intent': 'aggregate', 'operator': 'aggregate', 'field_count': 4}}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "operator": "aggregate",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'fields': ['子类别', 'SUM(销售额)', 'SUM(利润)', '利润率'], 'rows': [['椅子', 2434319.8052499974, 197370.60917500002, 0.08107834013811124], ['电话', 2405859.139999997, 326618.4921249998, 0.13575960732472486], ['收纳具"
+        },
+        {
+          "fields": [
+            "子类别",
+            "SUM(销售额)",
+            "SUM(利润)",
+            "利润率"
+          ],
+          "rows": [
+            [
+              "椅子",
+              2434319.8052499974,
+              197370.60917500002,
+              0.08107834013811124
+            ],
+            [
+              "电话",
+              2405859.139999997,
+              326618.4921249998,
+              0.13575960732472486
+            ],
+            [
+              "收纳具",
+              1628673.0164999971,
+              154317.0583749999,
+              0.09475017809690603
+            ],
+            [
+              "桌子",
+              1508146.3195000004,
+              -128710.74422500002,
+              -0.08534367160586369
+            ],
+            [
+              "装订机",
+              1503322.8872500008,
+              227839.22717499963,
+              0.15155708005735313
+            ],
+            [
+              "设备",
+              1376956.4747499996,
+              25099.332524999885,
+              0.01822812339043391
+            ],
+            [
+              "配件",
+              1213507.3054999972,
+              304040.6088249999,
+              0.2505469950176584
+            ],
+            [
+              "复印机",
+              1092903.3524999996,
+              406681.0396249999,
+              0.37211070740585
+            ],
+            [
+              "书架",
+              836368.7311749996,
+              -26332.533600000028,
+              -0.03148435925265393
+            ],
+            [
+              "器具",
+              784545.5912499998,
+              132888.76189999998,
+              0.16938309689341463
+            ],
+            [
+              "用具",
+              693086.4135000005,
+              100715.13675000002,
+              0.14531396776543498
+            ],
+            [
+              "纸张",
+              576668.9005,
+              250208.42574999938,
+              0.43388576275408036
+            ],
+            [
+              "用品",
+              338759.86049999995,
+              -8492.610125000012,
+              -0.02506970605214313
+            ],
+            [
+              "美术",
+              200527.8515,
+              48235.672449999955,
+              0.240543505997719
+            ],
+            [
+              "信封",
+              119830.62449999998,
+              50663.179074999985,
+              0.4227899110631773
+            ],
+            [
+              "标签",
+              92039.05449999988,
+              40402.64049999998,
+              0.4389727895346864
+            ],
+            [
+              "系固件",
+              61858.73999999999,
+              17607.609549999994,
+              0.2846422275979109
+            ]
+          ],
+          "intent": "aggregate",
+          "operator": "aggregate",
+          "confidence": 0.95,
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "queryspec": {
+            "intent": "aggregate",
+            "source": null,
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "operator": "aggregate",
+            "time": null,
+            "metrics": [
+              {
+                "field": "销售额",
+                "aggregation": "SUM",
+                "alias": null
+              },
+              {
+                "field": "利润",
+                "aggregation": "SUM",
+                "alias": null
+              },
+              {
+                "field": "利润率",
+                "aggregation": null,
+                "alias": null
+              }
+            ],
+            "derived_metrics": [],
+            "dimensions": [
+              "子类别"
+            ],
+            "breakdown_dimensions": [],
+            "focus_dimension": null,
+            "filters": [],
+            "sort": [
+              {
+                "field": "SUM(销售额)",
+                "direction": "DESC"
+              }
+            ],
+            "limit": 100,
+            "direction": null,
+            "operator_spec": {},
+            "universe": null,
+            "occurred": null,
+            "result_shape": null,
+            "raw_rows": false,
+            "detail_scan": false,
+            "allow_detail_scan": false,
+            "answer_contract": {
+              "max_chars": 120,
+              "must_include": [
+                "销售额",
+                "利润",
+                "利润率"
+              ],
+              "forbid": [
+                "明细列表",
+                "猜测原因"
+              ]
+            },
+            "params": {}
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "子类别",
+                "label": "子类别",
+                "semantic_type": "dimension",
+                "value_type": "string",
+                "align": "left",
+                "format": "plain"
+              },
+              {
+                "key": "SUM(销售额)",
+                "label": "销售额",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "利润",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "利润率",
+                "label": "利润率",
+                "semantic_type": "derived_metric",
+                "value_type": "percent",
+                "align": "right",
+                "format": "percent"
+              }
+            ]
+          },
+          "mcp_args_guardrail": {
+            "decision": "allow",
+            "args": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "子类别"
+                  },
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM",
+                    "sortDirection": "DESC",
+                    "sortPriority": 1
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润率"
+                  }
+                ],
+                "filters": []
+              },
+              "limit": 100,
+              "timeout": 30,
+              "connection_id": 2
+            },
+            "repairs": [],
+            "reject_code": null,
+            "message": "MCP 参数通过安全检查。",
+            "user_hint": ""
+          },
+          "col_types": [
+            "string",
+            "numeric",
+            "numeric",
+            "numeric"
+          ],
+          "type": "table_data"
+        },
+        {
+          "type": "tool_call",
+          "tool": "rendering_skill_loader",
+          "params": {
+            "skill_key": "answer_renderer",
+            "kind": "rendering"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "rendering_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'answer_renderer', 'kind': 'rendering', 'checksum': 'dbc01fd30e8f40764b490535d2533b2b2a017d26a62ac940f83dd357470c1114', 'version': 'v1', 'source_path': '/Users/forrest/Projec"
+        },
+        {
+          "type": "tool_call",
+          "tool": "answer_renderer",
+          "params": {
+            "skill_checksum": "dbc01fd30e8f40764b490535d2533b2b2a017d26a62ac940f83dd357470c1114",
+            "row_count": 17
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "answer_renderer",
+          "summary": "{'fields': ['子类别', 'SUM(销售额)', 'SUM(利润)', '利润率'], 'rows': [['椅子', 2434319.8052499974, 197370.60917500002, 0.08107834013811124], ['电话', 2405859.139999997, 326618.4921249998, 0.13575960732472486], ['收纳具"
+        },
+        {
+          "fields": [
+            "子类别",
+            "SUM(销售额)",
+            "SUM(利润)",
+            "利润率"
+          ],
+          "rows": [
+            [
+              "椅子",
+              2434319.8052499974,
+              197370.60917500002,
+              0.08107834013811124
+            ],
+            [
+              "电话",
+              2405859.139999997,
+              326618.4921249998,
+              0.13575960732472486
+            ],
+            [
+              "收纳具",
+              1628673.0164999971,
+              154317.0583749999,
+              0.09475017809690603
+            ],
+            [
+              "桌子",
+              1508146.3195000004,
+              -128710.74422500002,
+              -0.08534367160586369
+            ],
+            [
+              "装订机",
+              1503322.8872500008,
+              227839.22717499963,
+              0.15155708005735313
+            ],
+            [
+              "设备",
+              1376956.4747499996,
+              25099.332524999885,
+              0.01822812339043391
+            ],
+            [
+              "配件",
+              1213507.3054999972,
+              304040.6088249999,
+              0.2505469950176584
+            ],
+            [
+              "复印机",
+              1092903.3524999996,
+              406681.0396249999,
+              0.37211070740585
+            ],
+            [
+              "书架",
+              836368.7311749996,
+              -26332.533600000028,
+              -0.03148435925265393
+            ],
+            [
+              "器具",
+              784545.5912499998,
+              132888.76189999998,
+              0.16938309689341463
+            ],
+            [
+              "用具",
+              693086.4135000005,
+              100715.13675000002,
+              0.14531396776543498
+            ],
+            [
+              "纸张",
+              576668.9005,
+              250208.42574999938,
+              0.43388576275408036
+            ],
+            [
+              "用品",
+              338759.86049999995,
+              -8492.610125000012,
+              -0.02506970605214313
+            ],
+            [
+              "美术",
+              200527.8515,
+              48235.672449999955,
+              0.240543505997719
+            ],
+            [
+              "信封",
+              119830.62449999998,
+              50663.179074999985,
+              0.4227899110631773
+            ],
+            [
+              "标签",
+              92039.05449999988,
+              40402.64049999998,
+              0.4389727895346864
+            ],
+            [
+              "系固件",
+              61858.73999999999,
+              17607.609549999994,
+              0.2846422275979109
+            ]
+          ],
+          "intent": "aggregate",
+          "operator": "aggregate",
+          "confidence": 0.95,
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "queryspec": {
+            "intent": "aggregate",
+            "source": null,
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "operator": "aggregate",
+            "time": null,
+            "metrics": [
+              {
+                "field": "销售额",
+                "aggregation": "SUM",
+                "alias": null
+              },
+              {
+                "field": "利润",
+                "aggregation": "SUM",
+                "alias": null
+              },
+              {
+                "field": "利润率",
+                "aggregation": null,
+                "alias": null
+              }
+            ],
+            "derived_metrics": [],
+            "dimensions": [
+              "子类别"
+            ],
+            "breakdown_dimensions": [],
+            "focus_dimension": null,
+            "filters": [],
+            "sort": [
+              {
+                "field": "SUM(销售额)",
+                "direction": "DESC"
+              }
+            ],
+            "limit": 100,
+            "direction": null,
+            "operator_spec": {},
+            "universe": null,
+            "occurred": null,
+            "result_shape": null,
+            "raw_rows": false,
+            "detail_scan": false,
+            "allow_detail_scan": false,
+            "answer_contract": {
+              "max_chars": 120,
+              "must_include": [
+                "销售额",
+                "利润",
+                "利润率"
+              ],
+              "forbid": [
+                "明细列表",
+                "猜测原因"
+              ]
+            },
+            "params": {}
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "子类别",
+                "label": "子类别",
+                "semantic_type": "dimension",
+                "value_type": "string",
+                "align": "left",
+                "format": "plain"
+              },
+              {
+                "key": "SUM(销售额)",
+                "label": "销售额",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "利润",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "利润率",
+                "label": "利润率",
+                "semantic_type": "derived_metric",
+                "value_type": "percent",
+                "align": "right",
+                "format": "percent"
+              }
+            ]
+          },
+          "mcp_args_guardrail": {
+            "decision": "allow",
+            "args": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "子类别"
+                  },
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM",
+                    "sortDirection": "DESC",
+                    "sortPriority": 1
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润率"
+                  }
+                ],
+                "filters": []
+              },
+              "limit": 100,
+              "timeout": 30,
+              "connection_id": 2
+            },
+            "repairs": [],
+            "reject_code": null,
+            "message": "MCP 参数通过安全检查。",
+            "user_hint": ""
+          },
+          "col_types": [
+            "string",
+            "numeric",
+            "numeric",
+            "numeric"
+          ],
+          "type": "table_data"
+        },
+        {
+          "type": "token",
+          "content": "从"
+        },
+        {
+          "type": "token",
+          "content": "当"
+        },
+        {
+          "type": "token",
+          "content": "前"
+        },
+        {
+          "type": "token",
+          "content": "返"
+        },
+        {
+          "type": "token",
+          "content": "回"
+        },
+        {
+          "type": "token",
+          "content": "的"
+        },
+        {
+          "type": "token",
+          "content": "数"
+        },
+        {
+          "type": "token",
+          "content": "据"
+        },
+        {
+          "type": "token",
+          "content": "看"
+        },
+        {
+          "type": "token",
+          "content": "，"
+        },
+        {
+          "type": "token",
+          "content": "1"
+        },
+        {
+          "type": "token",
+          "content": "7"
+        },
+        {
+          "type": "token",
+          "content": "个"
+        },
+        {
+          "type": "token",
+          "content": "子"
+        },
+        {
+          "type": "token",
+          "content": "类"
+        },
+        {
+          "type": "token",
+          "content": "别"
+        },
+        {
+          "type": "token",
+          "content": "中"
+        },
+        {
+          "type": "token",
+          "content": "利"
+        },
+        {
+          "type": "token",
+          "content": "润"
+        },
+        {
+          "type": "token",
+          "content": "率"
+        },
+        {
+          "type": "token",
+          "content": "最"
+        },
+        {
+          "type": "token",
+          "content": "高"
+        },
+        {
+          "type": "token",
+          "content": "的"
+        },
+        {
+          "type": "token",
+          "content": "是"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "标"
+        },
+        {
+          "type": "token",
+          "content": "签"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "4"
+        },
+        {
+          "type": "token",
+          "content": "3"
+        },
+        {
+          "type": "token",
+          "content": "."
+        },
+        {
+          "type": "token",
+          "content": "9"
+        },
+        {
+          "type": "token",
+          "content": "%"
+        },
+        {
+          "type": "token",
+          "content": "、"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "纸"
+        },
+        {
+          "type": "token",
+          "content": "张"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "4"
+        },
+        {
+          "type": "token",
+          "content": "3"
+        },
+        {
+          "type": "token",
+          "content": "."
+        },
+        {
+          "type": "token",
+          "content": "4"
+        },
+        {
+          "type": "token",
+          "content": "%"
+        },
+        {
+          "type": "token",
+          "content": "、"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "信"
+        },
+        {
+          "type": "token",
+          "content": "封"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "4"
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "."
+        },
+        {
+          "type": "token",
+          "content": "3"
+        },
+        {
+          "type": "token",
+          "content": "%"
+        },
+        {
+          "type": "token",
+          "content": "；"
+        },
+        {
+          "type": "token",
+          "content": "利"
+        },
+        {
+          "type": "token",
+          "content": "润"
+        },
+        {
+          "type": "token",
+          "content": "率"
+        },
+        {
+          "type": "token",
+          "content": "最"
+        },
+        {
+          "type": "token",
+          "content": "低"
+        },
+        {
+          "type": "token",
+          "content": "的"
+        },
+        {
+          "type": "token",
+          "content": "是"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "桌"
+        },
+        {
+          "type": "token",
+          "content": "子"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "-"
+        },
+        {
+          "type": "token",
+          "content": "8"
+        },
+        {
+          "type": "token",
+          "content": "."
+        },
+        {
+          "type": "token",
+          "content": "5"
+        },
+        {
+          "type": "token",
+          "content": "%"
+        },
+        {
+          "type": "token",
+          "content": "、"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "书"
+        },
+        {
+          "type": "token",
+          "content": "架"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "-"
+        },
+        {
+          "type": "token",
+          "content": "3"
+        },
+        {
+          "type": "token",
+          "content": "."
+        },
+        {
+          "type": "token",
+          "content": "1"
+        },
+        {
+          "type": "token",
+          "content": "%"
+        },
+        {
+          "type": "token",
+          "content": "、"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "用"
+        },
+        {
+          "type": "token",
+          "content": "品"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "-"
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "."
+        },
+        {
+          "type": "token",
+          "content": "5"
+        },
+        {
+          "type": "token",
+          "content": "%"
+        },
+        {
+          "type": "token",
+          "content": "。"
+        },
+        {
+          "type": "token",
+          "content": "销"
+        },
+        {
+          "type": "token",
+          "content": "售"
+        },
+        {
+          "type": "token",
+          "content": "额"
+        },
+        {
+          "type": "token",
+          "content": "最"
+        },
+        {
+          "type": "token",
+          "content": "大"
+        },
+        {
+          "type": "token",
+          "content": "的"
+        },
+        {
+          "type": "token",
+          "content": "是"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "椅"
+        },
+        {
+          "type": "token",
+          "content": "子"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "约"
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "4"
+        },
+        {
+          "type": "token",
+          "content": "3"
+        },
+        {
+          "type": "token",
+          "content": "万"
+        },
+        {
+          "type": "token",
+          "content": "元"
+        },
+        {
+          "type": "token",
+          "content": "（"
+        },
+        {
+          "type": "token",
+          "content": "利"
+        },
+        {
+          "type": "token",
+          "content": "润"
+        },
+        {
+          "type": "token",
+          "content": "约"
+        },
+        {
+          "type": "token",
+          "content": "1"
+        },
+        {
+          "type": "token",
+          "content": "9"
+        },
+        {
+          "type": "token",
+          "content": "."
+        },
+        {
+          "type": "token",
+          "content": "7"
+        },
+        {
+          "type": "token",
+          "content": "万"
+        },
+        {
+          "type": "token",
+          "content": "）"
+        },
+        {
+          "type": "token",
+          "content": "，"
+        },
+        {
+          "type": "token",
+          "content": "其"
+        },
+        {
+          "type": "token",
+          "content": "次"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "电"
+        },
+        {
+          "type": "token",
+          "content": "话"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "*"
+        },
+        {
+          "type": "token",
+          "content": "约"
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "4"
+        },
+        {
+          "type": "token",
+          "content": "0"
+        },
+        {
+          "type": "token",
+          "content": "."
+        },
+        {
+          "type": "token",
+          "content": "6"
+        },
+        {
+          "type": "token",
+          "content": "万"
+        },
+        {
+          "type": "token",
+          "content": "元"
+        },
+        {
+          "type": "token",
+          "content": "（"
+        },
+        {
+          "type": "token",
+          "content": "利"
+        },
+        {
+          "type": "token",
+          "content": "润"
+        },
+        {
+          "type": "token",
+          "content": "约"
+        },
+        {
+          "type": "token",
+          "content": "3"
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "."
+        },
+        {
+          "type": "token",
+          "content": "7"
+        },
+        {
+          "type": "token",
+          "content": "万"
+        },
+        {
+          "type": "token",
+          "content": "）"
+        },
+        {
+          "type": "token",
+          "content": "。"
+        },
+        {
+          "type": "token",
+          "content": "亏"
+        },
+        {
+          "type": "token",
+          "content": "损"
+        },
+        {
+          "type": "token",
+          "content": "的"
+        },
+        {
+          "type": "token",
+          "content": "类"
+        },
+        {
+          "type": "token",
+          "content": "别"
+        },
+        {
+          "type": "token",
+          "content": "仅"
+        },
+        {
+          "type": "token",
+          "content": "有"
+        },
+        {
+          "type": "token",
+          "content": "桌"
+        },
+        {
+          "type": "token",
+          "content": "子"
+        },
+        {
+          "type": "token",
+          "content": "、"
+        },
+        {
+          "type": "token",
+          "content": "书"
+        },
+        {
+          "type": "token",
+          "content": "架"
+        },
+        {
+          "type": "token",
+          "content": "和"
+        },
+        {
+          "type": "token",
+          "content": "用"
+        },
+        {
+          "type": "token",
+          "content": "品"
+        },
+        {
+          "type": "token",
+          "content": "三"
+        },
+        {
+          "type": "token",
+          "content": "个"
+        },
+        {
+          "type": "token",
+          "content": "，"
+        },
+        {
+          "type": "token",
+          "content": "其"
+        },
+        {
+          "type": "token",
+          "content": "中"
+        },
+        {
+          "type": "token",
+          "content": "桌"
+        },
+        {
+          "type": "token",
+          "content": "子"
+        },
+        {
+          "type": "token",
+          "content": "亏"
+        },
+        {
+          "type": "token",
+          "content": "损"
+        },
+        {
+          "type": "token",
+          "content": "约"
+        },
+        {
+          "type": "token",
+          "content": "1"
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "."
+        },
+        {
+          "type": "token",
+          "content": "9"
+        },
+        {
+          "type": "token",
+          "content": "万"
+        },
+        {
+          "type": "token",
+          "content": "元"
+        },
+        {
+          "type": "token",
+          "content": "。"
+        },
+        {
+          "type": "done",
+          "answer": "从当前返回的数据看，17个子类别中利润率最高的是**标签**43.9%、**纸张**43.4%、**信封**42.3%；利润率最低的是**桌子**-8.5%、**书架**-3.1%、**用品**-2.5%。销售额最大的是**椅子**约243万元（利润约19.7万），其次**电话**约240.6万元（利润约32.7万）。亏损的类别仅有桌子、书架和用品三个，其中桌子亏损约12.9万元。",
+          "trace_id": "t-1ec8661a",
+          "run_id": "20fcf7aa-9192-488a-a67c-88d5e51323a2",
+          "tools_used": [
+            "context_resolver",
+            "planning_skill_loader",
+            "llm_queryspec",
+            "queryspec_validator",
+            "tableau_mcp",
+            "rendering_skill_loader",
+            "answer_renderer"
+          ],
+          "response_type": "table",
+          "response_data": {
+            "fields": [
+              "子类别",
+              "SUM(销售额)",
+              "SUM(利润)",
+              "利润率"
+            ],
+            "rows": [
+              [
+                "椅子",
+                2434319.8052499974,
+                197370.60917500002,
+                0.08107834013811124
+              ],
+              [
+                "电话",
+                2405859.139999997,
+                326618.4921249998,
+                0.13575960732472486
+              ],
+              [
+                "收纳具",
+                1628673.0164999971,
+                154317.0583749999,
+                0.09475017809690603
+              ],
+              [
+                "桌子",
+                1508146.3195000004,
+                -128710.74422500002,
+                -0.08534367160586369
+              ],
+              [
+                "装订机",
+                1503322.8872500008,
+                227839.22717499963,
+                0.15155708005735313
+              ],
+              [
+                "设备",
+                1376956.4747499996,
+                25099.332524999885,
+                0.01822812339043391
+              ],
+              [
+                "配件",
+                1213507.3054999972,
+                304040.6088249999,
+                0.2505469950176584
+              ],
+              [
+                "复印机",
+                1092903.3524999996,
+                406681.0396249999,
+                0.37211070740585
+              ],
+              [
+                "书架",
+                836368.7311749996,
+                -26332.533600000028,
+                -0.03148435925265393
+              ],
+              [
+                "器具",
+                784545.5912499998,
+                132888.76189999998,
+                0.16938309689341463
+              ],
+              [
+                "用具",
+                693086.4135000005,
+                100715.13675000002,
+                0.14531396776543498
+              ],
+              [
+                "纸张",
+                576668.9005,
+                250208.42574999938,
+                0.43388576275408036
+              ],
+              [
+                "用品",
+                338759.86049999995,
+                -8492.610125000012,
+                -0.02506970605214313
+              ],
+              [
+                "美术",
+                200527.8515,
+                48235.672449999955,
+                0.240543505997719
+              ],
+              [
+                "信封",
+                119830.62449999998,
+                50663.179074999985,
+                0.4227899110631773
+              ],
+              [
+                "标签",
+                92039.05449999988,
+                40402.64049999998,
+                0.4389727895346864
+              ],
+              [
+                "系固件",
+                61858.73999999999,
+                17607.609549999994,
+                0.2846422275979109
+              ]
+            ],
+            "intent": "aggregate",
+            "operator": "aggregate",
+            "confidence": 0.95,
+            "datasource_name": "订单+ (示例 - 超市)",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "queryspec": {
+              "intent": "aggregate",
+              "source": null,
+              "datasource": {
+                "name": "订单+ (示例 - 超市)",
+                "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+              },
+              "operator": "aggregate",
+              "time": null,
+              "metrics": [
+                {
+                  "field": "销售额",
+                  "aggregation": "SUM",
+                  "alias": null
+                },
+                {
+                  "field": "利润",
+                  "aggregation": "SUM",
+                  "alias": null
+                },
+                {
+                  "field": "利润率",
+                  "aggregation": null,
+                  "alias": null
+                }
+              ],
+              "derived_metrics": [],
+              "dimensions": [
+                "子类别"
+              ],
+              "breakdown_dimensions": [],
+              "focus_dimension": null,
+              "filters": [],
+              "sort": [
+                {
+                  "field": "SUM(销售额)",
+                  "direction": "DESC"
+                }
+              ],
+              "limit": 100,
+              "direction": null,
+              "operator_spec": {},
+              "universe": null,
+              "occurred": null,
+              "result_shape": null,
+              "raw_rows": false,
+              "detail_scan": false,
+              "allow_detail_scan": false,
+              "answer_contract": {
+                "max_chars": 120,
+                "must_include": [
+                  "销售额",
+                  "利润",
+                  "利润率"
+                ],
+                "forbid": [
+                  "明细列表",
+                  "猜测原因"
+                ]
+              },
+              "params": {}
+            },
+            "table_display": {
+              "columns": [
+                {
+                  "key": "子类别",
+                  "label": "子类别",
+                  "semantic_type": "dimension",
+                  "value_type": "string",
+                  "align": "left",
+                  "format": "plain"
+                },
+                {
+                  "key": "SUM(销售额)",
+                  "label": "销售额",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                },
+                {
+                  "key": "SUM(利润)",
+                  "label": "利润",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                },
+                {
+                  "key": "利润率",
+                  "label": "利润率",
+                  "semantic_type": "derived_metric",
+                  "value_type": "percent",
+                  "align": "right",
+                  "format": "percent"
+                }
+              ]
+            },
+            "mcp_args_guardrail": {
+              "decision": "allow",
+              "args": {
+                "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+                "query": {
+                  "fields": [
+                    {
+                      "fieldCaption": "子类别"
+                    },
+                    {
+                      "fieldCaption": "销售额",
+                      "function": "SUM",
+                      "sortDirection": "DESC",
+                      "sortPriority": 1
+                    },
+                    {
+                      "fieldCaption": "利润",
+                      "function": "SUM"
+                    },
+                    {
+                      "fieldCaption": "利润率"
+                    }
+                  ],
+                  "filters": []
+                },
+                "limit": 100,
+                "timeout": 30,
+                "connection_id": 2
+              },
+              "repairs": [],
+              "reject_code": null,
+              "message": "MCP 参数通过安全检查。",
+              "user_hint": ""
+            },
+            "col_types": [
+              "string",
+              "numeric",
+              "numeric",
+              "numeric"
+            ]
+          },
+          "steps_count": 7,
+          "execution_time_ms": 26237,
+          "sources_count": 1,
+          "top_sources": [
+            "Tableau-online"
+          ],
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "20fcf7aa-9192-488a-a67c-88d5e51323a2",
+            "trace_id": "t-1ec8661a",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "table",
+                "row_count": 17,
+                "displayed_row_count": 17,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "ns\": [], \"focus_dimension\": null, \"filters\": [], \"sort\": [{\"field\": \"SUM(销售额)\", \"direction\": \"DESC\"}], \"limit\": 100, \"direction\": null, \"operator_spec\": {}, \"universe\": null, \"occurred\": null, \"result_shape\": null, \"raw_rows\": false, \"detail_scan\": false, \"allow_detail_scan\": false, \"answer_contract\": {\"max_chars\": 120, \"must_include\": [\"销售额\", \"利润\", \"利润率\"], \"forbid\": [\"明细列表\", \"猜测原因\"]}, \"params\": {}}, \"table_display\": {\"columns\": [{\"key\": \"子类别\", \"label\": \"子类别\", \"semantic_type\": \"dimension\", \"value_type\": \"string\", \"align\": \"left\", \"format\": \"plain\"}, {\"key\": \"SUM(销售额)\", \"label\": \"销售额\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}, {\"key\": \"SUM(利润)\", \"label\": \"利润\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}, {\"key\": \"利润率\", \"label\": \"利润率\", \"semantic_type\": \"derived_metric\", \"value_type\": \"percent\", \"align\": \"right\", \"format\": \"percent\"}]}, \"mcp_args_guardrail\": {\"decision\": \"allow\", \"args\": {\"datasourceLuid\": \"f4290485-26d3-428f-aa8d-ccc33862a411\", \"query\": {\"fields\": [{\"fieldCaption\": \"子类别\"}, {\"fieldCaption\": \"销售额\", \"function\": \"SUM\", \"sortDirection\": \"DESC\", \"sortPriority\": 1}, {\"fieldCaption\": \"利润\", \"function\": \"SUM\"}, {\"fieldCaption\": \"利润率\"}], \"filters\": []}, \"limit\": 100, \"timeout\": 30, \"connection_id\": 2}, \"repairs\": [], \"reject_code\": null, \"message\": \"MCP 参数通过安全检查。\", \"user_hint\": \"\"}, \"col_types\": [\"string\", \"numeric\", \"numeric\", \"numeric\"]}, \"steps_count\": 7, \"execution_time_ms\": 26237, \"sources_count\": 1, \"top_sources\": [\"Tableau-online\"], \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"20fcf7aa-9192-488a-a67c-88d5e51323a2\", \"trace_id\": \"t-1ec8661a\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"table\", \"row_count\": 17, \"displayed_row_count\": 17, \"formatting\": [\"markdown_summary\"]}}}}\n\n"
+    },
+    "Q4": {
+      "duration": 87.39905566599919,
+      "status_code": 200,
+      "conversation_id": "0dacee14-30b2-4a5b-bc04-3e16d9736c14",
+      "done": {
+        "type": "done",
+        "answer": "销售额从 2021 年的 3,478,604.98 下降到 2025 年的 38,786.78，变化 -3,439,818.20；最高年份是 2024 年，达到 5,387,286.41。详细数据见下方表格。",
+        "trace_id": "t-d9ca57c2",
+        "run_id": "4aed284d-44f7-40f6-b1f5-41121cd379bc",
+        "tools_used": [
+          "context_resolver",
+          "planning_skill_loader",
+          "llm_queryspec",
+          "llm_queryspec_repair",
+          "queryspec_validator",
+          "tableau_mcp",
+          "rendering_skill_loader",
+          "answer_renderer"
+        ],
+        "response_type": "table",
+        "response_data": {
+          "fields": [
+            "YEAR(发货日期)",
+            "发货年份",
+            "SUM(销售额)",
+            "SUM(利润)"
+          ],
+          "rows": [
+            [
+              2024,
+              "2024",
+              5387286.408650015,
+              687150.8790999999
+            ],
+            [
+              2023,
+              "2023",
+              4466389.57874999,
+              607630.7156999997
+            ],
+            [
+              2022,
+              "2022",
+              3496306.322999994,
+              459655.05542499956
+            ],
+            [
+              2021,
+              "2021",
+              3478604.9774749996,
+              357467.1333749987
+            ],
+            [
+              2025,
+              "2025",
+              38786.7808,
+              7248.1222499999985
+            ]
+          ],
+          "intent": "aggregate",
+          "operator": "aggregate",
+          "confidence": 0.95,
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "queryspec": {
+            "intent": "aggregate",
+            "source": null,
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "operator": "aggregate",
+            "time": {
+              "field": "发货日期",
+              "grain": "YEAR",
+              "range": {
+                "type": "year",
+                "value": "ALL"
+              },
+              "timezone": null
+            },
+            "metrics": [
+              {
+                "field": "销售额",
+                "aggregation": "SUM",
+                "alias": null
+              },
+              {
+                "field": "利润",
+                "aggregation": "SUM",
+                "alias": null
+              }
+            ],
+            "derived_metrics": [],
+            "dimensions": [
+              "发货年份"
+            ],
+            "breakdown_dimensions": [],
+            "focus_dimension": null,
+            "filters": [],
+            "sort": [
+              {
+                "field": "SUM(销售额)",
+                "direction": "DESC"
+              }
+            ],
+            "limit": 100,
+            "direction": null,
+            "operator_spec": {},
+            "universe": null,
+            "occurred": null,
+            "result_shape": null,
+            "raw_rows": false,
+            "detail_scan": false,
+            "allow_detail_scan": false,
+            "answer_contract": {
+              "max_chars": 120,
+              "must_include": [
+                "销售额",
+                "利润",
+                "发货年份"
+              ],
+              "forbid": [
+                "明细列表",
+                "猜测原因"
+              ]
+            },
+            "params": {}
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "YEAR(发货日期)",
+                "label": "发货日期",
+                "semantic_type": "period",
+                "value_type": "date",
+                "align": "right",
+                "format": "date"
+              },
+              {
+                "key": "发货年份",
+                "label": "发货年份",
+                "semantic_type": "period",
+                "value_type": "date",
+                "align": "right",
+                "format": "date"
+              },
+              {
+                "key": "SUM(销售额)",
+                "label": "销售额",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "利润",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              }
+            ]
+          },
+          "mcp_args_guardrail": {
+            "decision": "allow",
+            "args": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "发货日期",
+                    "function": "YEAR"
+                  },
+                  {
+                    "fieldCaption": "发货年份"
+                  },
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM",
+                    "sortDirection": "DESC",
+                    "sortPriority": 1
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  }
+                ],
+                "filters": []
+              },
+              "limit": 100,
+              "timeout": 30,
+              "connection_id": 2
+            },
+            "repairs": [],
+            "reject_code": null,
+            "message": "MCP 参数通过安全检查。",
+            "user_hint": ""
+          },
+          "col_types": [
+            "numeric",
+            "string",
+            "numeric",
+            "numeric"
+          ]
+        },
+        "steps_count": 8,
+        "execution_time_ms": 86212,
+        "sources_count": 1,
+        "top_sources": [
+          "Tableau-online"
+        ],
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "4aed284d-44f7-40f6-b1f5-41121cd379bc",
+          "trace_id": "t-d9ca57c2",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.75,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "data_action_pattern",
+                "message": "data_action_pattern"
+              }
+            },
+            "postprocess": {
+              "response_type": "table",
+              "row_count": 5,
+              "displayed_row_count": 5,
+              "formatting": [
+                "markdown_summary"
+              ]
+            }
+          }
+        }
+      },
+      "error": null,
+      "row_count": 5,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.75,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "data_action_pattern",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.75,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "data_action_pattern",
+              "message": "data_action_pattern"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.62,
+              "route_reason": "generic_business_data_context"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "0dacee14-30b2-4a5b-bc04-3e16d9736c14",
+          "run_id": "4aed284d-44f7-40f6-b1f5-41121cd379bc",
+          "trace_id": "t-d9ca57c2",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已识别为受控问数意图：aggregate。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "context_resolver",
+          "params": {
+            "chain_mode": "legacy_queryspec",
+            "intent": "aggregate"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "context_resolver",
+          "summary": "{'status': 'resolved', 'datasource_name': '订单+ (示例 - 超市)', 'metric_names': ['销售额', '利润'], 'dimension_names': ['子类别', '利润率'], 'filter_names': [], 'unresolved_references': False, 'calculation_performed'"
+        },
+        {
+          "type": "tool_call",
+          "tool": "planning_skill_loader",
+          "params": {
+            "skill_key": "aggregate",
+            "kind": "planning"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "planning_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'aggregate', 'kind': 'planning', 'checksum': '30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19', 'version': 'v1', 'source_path': '/Users/forrest/Projects/mula"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec",
+          "params": {
+            "intent": "aggregate",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "field_count": 11,
+            "skill_checksum": "30e8c2ad65855d7836bf67e68cee80022600be6a7826dc7adb33c5c885f21f19"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec",
+          "summary": "{'queryspec': {'intent': 'aggregate', 'operator': 'aggregate', 'datasource': {'luid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'name': '订单+ (示例 - 超市)'}, 'time': {'field': '发货年份', 'grain': 'YEAR', 'rang"
+        },
+        {
+          "type": "tool_call",
+          "tool": "llm_queryspec_repair",
+          "params": {
+            "reason": "QS_MODEL_INVALID",
+            "intent": "aggregate",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "llm_queryspec_repair",
+          "summary": "{'queryspec': {'intent': 'aggregate', 'operator': 'aggregate', 'datasource': {'luid': 'f4290485-26d3-428f-aa8d-ccc33862a411', 'name': '订单+ (示例 - 超市)'}, 'time': {'field': '发货年份', 'grain': 'YEAR', 'rang"
+        },
+        {
+          "type": "tool_call",
+          "tool": "queryspec_validator",
+          "params": {
+            "intent": "aggregate",
+            "operator": "aggregate"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "queryspec_validator",
+          "summary": "{'passed': True, 'code': 'QS_VALID', 'message': 'QuerySpec 校验通过。', 'user_hint': '', 'detail': {'intent': 'aggregate', 'operator': 'aggregate', 'field_count': 4}}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "operator": "aggregate",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'fields': ['YEAR(发货日期)', '发货年份', 'SUM(销售额)', 'SUM(利润)'], 'rows': [[2024, '2024', 5387286.408650015, 687150.8790999999], [2023, '2023', 4466389.57874999, 607630.7156999997], [2022, '2022', 3496306.322"
+        },
+        {
+          "fields": [
+            "YEAR(发货日期)",
+            "发货年份",
+            "SUM(销售额)",
+            "SUM(利润)"
+          ],
+          "rows": [
+            [
+              2024,
+              "2024",
+              5387286.408650015,
+              687150.8790999999
+            ],
+            [
+              2023,
+              "2023",
+              4466389.57874999,
+              607630.7156999997
+            ],
+            [
+              2022,
+              "2022",
+              3496306.322999994,
+              459655.05542499956
+            ],
+            [
+              2021,
+              "2021",
+              3478604.9774749996,
+              357467.1333749987
+            ],
+            [
+              2025,
+              "2025",
+              38786.7808,
+              7248.1222499999985
+            ]
+          ],
+          "intent": "aggregate",
+          "operator": "aggregate",
+          "confidence": 0.95,
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "queryspec": {
+            "intent": "aggregate",
+            "source": null,
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "operator": "aggregate",
+            "time": {
+              "field": "发货日期",
+              "grain": "YEAR",
+              "range": {
+                "type": "year",
+                "value": "ALL"
+              },
+              "timezone": null
+            },
+            "metrics": [
+              {
+                "field": "销售额",
+                "aggregation": "SUM",
+                "alias": null
+              },
+              {
+                "field": "利润",
+                "aggregation": "SUM",
+                "alias": null
+              }
+            ],
+            "derived_metrics": [],
+            "dimensions": [
+              "发货年份"
+            ],
+            "breakdown_dimensions": [],
+            "focus_dimension": null,
+            "filters": [],
+            "sort": [
+              {
+                "field": "SUM(销售额)",
+                "direction": "DESC"
+              }
+            ],
+            "limit": 100,
+            "direction": null,
+            "operator_spec": {},
+            "universe": null,
+            "occurred": null,
+            "result_shape": null,
+            "raw_rows": false,
+            "detail_scan": false,
+            "allow_detail_scan": false,
+            "answer_contract": {
+              "max_chars": 120,
+              "must_include": [
+                "销售额",
+                "利润",
+                "发货年份"
+              ],
+              "forbid": [
+                "明细列表",
+                "猜测原因"
+              ]
+            },
+            "params": {}
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "YEAR(发货日期)",
+                "label": "发货日期",
+                "semantic_type": "period",
+                "value_type": "date",
+                "align": "right",
+                "format": "date"
+              },
+              {
+                "key": "发货年份",
+                "label": "发货年份",
+                "semantic_type": "period",
+                "value_type": "date",
+                "align": "right",
+                "format": "date"
+              },
+              {
+                "key": "SUM(销售额)",
+                "label": "销售额",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "利润",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              }
+            ]
+          },
+          "mcp_args_guardrail": {
+            "decision": "allow",
+            "args": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "发货日期",
+                    "function": "YEAR"
+                  },
+                  {
+                    "fieldCaption": "发货年份"
+                  },
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM",
+                    "sortDirection": "DESC",
+                    "sortPriority": 1
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  }
+                ],
+                "filters": []
+              },
+              "limit": 100,
+              "timeout": 30,
+              "connection_id": 2
+            },
+            "repairs": [],
+            "reject_code": null,
+            "message": "MCP 参数通过安全检查。",
+            "user_hint": ""
+          },
+          "col_types": [
+            "numeric",
+            "string",
+            "numeric",
+            "numeric"
+          ],
+          "type": "table_data"
+        },
+        {
+          "type": "tool_call",
+          "tool": "rendering_skill_loader",
+          "params": {
+            "skill_key": "answer_renderer",
+            "kind": "rendering"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "rendering_skill_loader",
+          "summary": "{'ok': True, 'skill_key': 'answer_renderer', 'kind': 'rendering', 'checksum': 'dbc01fd30e8f40764b490535d2533b2b2a017d26a62ac940f83dd357470c1114', 'version': 'v1', 'source_path': '/Users/forrest/Projec"
+        },
+        {
+          "type": "tool_call",
+          "tool": "answer_renderer",
+          "params": {
+            "skill_checksum": "dbc01fd30e8f40764b490535d2533b2b2a017d26a62ac940f83dd357470c1114",
+            "row_count": 5
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "answer_renderer",
+          "summary": "{'fields': ['YEAR(发货日期)', '发货年份', 'SUM(销售额)', 'SUM(利润)'], 'rows': [[2024, '2024', 5387286.408650015, 687150.8790999999], [2023, '2023', 4466389.57874999, 607630.7156999997], [2022, '2022', 3496306.322"
+        },
+        {
+          "fields": [
+            "YEAR(发货日期)",
+            "发货年份",
+            "SUM(销售额)",
+            "SUM(利润)"
+          ],
+          "rows": [
+            [
+              2024,
+              "2024",
+              5387286.408650015,
+              687150.8790999999
+            ],
+            [
+              2023,
+              "2023",
+              4466389.57874999,
+              607630.7156999997
+            ],
+            [
+              2022,
+              "2022",
+              3496306.322999994,
+              459655.05542499956
+            ],
+            [
+              2021,
+              "2021",
+              3478604.9774749996,
+              357467.1333749987
+            ],
+            [
+              2025,
+              "2025",
+              38786.7808,
+              7248.1222499999985
+            ]
+          ],
+          "intent": "aggregate",
+          "operator": "aggregate",
+          "confidence": 0.95,
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "queryspec": {
+            "intent": "aggregate",
+            "source": null,
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "operator": "aggregate",
+            "time": {
+              "field": "发货日期",
+              "grain": "YEAR",
+              "range": {
+                "type": "year",
+                "value": "ALL"
+              },
+              "timezone": null
+            },
+            "metrics": [
+              {
+                "field": "销售额",
+                "aggregation": "SUM",
+                "alias": null
+              },
+              {
+                "field": "利润",
+                "aggregation": "SUM",
+                "alias": null
+              }
+            ],
+            "derived_metrics": [],
+            "dimensions": [
+              "发货年份"
+            ],
+            "breakdown_dimensions": [],
+            "focus_dimension": null,
+            "filters": [],
+            "sort": [
+              {
+                "field": "SUM(销售额)",
+                "direction": "DESC"
+              }
+            ],
+            "limit": 100,
+            "direction": null,
+            "operator_spec": {},
+            "universe": null,
+            "occurred": null,
+            "result_shape": null,
+            "raw_rows": false,
+            "detail_scan": false,
+            "allow_detail_scan": false,
+            "answer_contract": {
+              "max_chars": 120,
+              "must_include": [
+                "销售额",
+                "利润",
+                "发货年份"
+              ],
+              "forbid": [
+                "明细列表",
+                "猜测原因"
+              ]
+            },
+            "params": {}
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "YEAR(发货日期)",
+                "label": "发货日期",
+                "semantic_type": "period",
+                "value_type": "date",
+                "align": "right",
+                "format": "date"
+              },
+              {
+                "key": "发货年份",
+                "label": "发货年份",
+                "semantic_type": "period",
+                "value_type": "date",
+                "align": "right",
+                "format": "date"
+              },
+              {
+                "key": "SUM(销售额)",
+                "label": "销售额",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "利润",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              }
+            ]
+          },
+          "mcp_args_guardrail": {
+            "decision": "allow",
+            "args": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "发货日期",
+                    "function": "YEAR"
+                  },
+                  {
+                    "fieldCaption": "发货年份"
+                  },
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM",
+                    "sortDirection": "DESC",
+                    "sortPriority": 1
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  }
+                ],
+                "filters": []
+              },
+              "limit": 100,
+              "timeout": 30,
+              "connection_id": 2
+            },
+            "repairs": [],
+            "reject_code": null,
+            "message": "MCP 参数通过安全检查。",
+            "user_hint": ""
+          },
+          "col_types": [
+            "numeric",
+            "string",
+            "numeric",
+            "numeric"
+          ],
+          "type": "table_data"
+        },
+        {
+          "type": "token",
+          "content": "销"
+        },
+        {
+          "type": "token",
+          "content": "售"
+        },
+        {
+          "type": "token",
+          "content": "额"
+        },
+        {
+          "type": "token",
+          "content": "从"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "0"
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "1"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "年"
+        },
+        {
+          "type": "token",
+          "content": "的"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "3"
+        },
+        {
+          "type": "token",
+          "content": ","
+        },
+        {
+          "type": "token",
+          "content": "4"
+        },
+        {
+          "type": "token",
+          "content": "7"
+        },
+        {
+          "type": "token",
+          "content": "8"
+        },
+        {
+          "type": "token",
+          "content": ","
+        },
+        {
+          "type": "token",
+          "content": "6"
+        },
+        {
+          "type": "token",
+          "content": "0"
+        },
+        {
+          "type": "token",
+          "content": "4"
+        },
+        {
+          "type": "token",
+          "content": "."
+        },
+        {
+          "type": "token",
+          "content": "9"
+        },
+        {
+          "type": "token",
+          "content": "8"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "下"
+        },
+        {
+          "type": "token",
+          "content": "降"
+        },
+        {
+          "type": "token",
+          "content": "到"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "0"
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "5"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "年"
+        },
+        {
+          "type": "token",
+          "content": "的"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "3"
+        },
+        {
+          "type": "token",
+          "content": "8"
+        },
+        {
+          "type": "token",
+          "content": ","
+        },
+        {
+          "type": "token",
+          "content": "7"
+        },
+        {
+          "type": "token",
+          "content": "8"
+        },
+        {
+          "type": "token",
+          "content": "6"
+        },
+        {
+          "type": "token",
+          "content": "."
+        },
+        {
+          "type": "token",
+          "content": "7"
+        },
+        {
+          "type": "token",
+          "content": "8"
+        },
+        {
+          "type": "token",
+          "content": "，"
+        },
+        {
+          "type": "token",
+          "content": "变"
+        },
+        {
+          "type": "token",
+          "content": "化"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "-"
+        },
+        {
+          "type": "token",
+          "content": "3"
+        },
+        {
+          "type": "token",
+          "content": ","
+        },
+        {
+          "type": "token",
+          "content": "4"
+        },
+        {
+          "type": "token",
+          "content": "3"
+        },
+        {
+          "type": "token",
+          "content": "9"
+        },
+        {
+          "type": "token",
+          "content": ","
+        },
+        {
+          "type": "token",
+          "content": "8"
+        },
+        {
+          "type": "token",
+          "content": "1"
+        },
+        {
+          "type": "token",
+          "content": "8"
+        },
+        {
+          "type": "token",
+          "content": "."
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "0"
+        },
+        {
+          "type": "token",
+          "content": "；"
+        },
+        {
+          "type": "token",
+          "content": "最"
+        },
+        {
+          "type": "token",
+          "content": "高"
+        },
+        {
+          "type": "token",
+          "content": "年"
+        },
+        {
+          "type": "token",
+          "content": "份"
+        },
+        {
+          "type": "token",
+          "content": "是"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "0"
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "4"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "年"
+        },
+        {
+          "type": "token",
+          "content": "，"
+        },
+        {
+          "type": "token",
+          "content": "达"
+        },
+        {
+          "type": "token",
+          "content": "到"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "5"
+        },
+        {
+          "type": "token",
+          "content": ","
+        },
+        {
+          "type": "token",
+          "content": "3"
+        },
+        {
+          "type": "token",
+          "content": "8"
+        },
+        {
+          "type": "token",
+          "content": "7"
+        },
+        {
+          "type": "token",
+          "content": ","
+        },
+        {
+          "type": "token",
+          "content": "2"
+        },
+        {
+          "type": "token",
+          "content": "8"
+        },
+        {
+          "type": "token",
+          "content": "6"
+        },
+        {
+          "type": "token",
+          "content": "."
+        },
+        {
+          "type": "token",
+          "content": "4"
+        },
+        {
+          "type": "token",
+          "content": "1"
+        },
+        {
+          "type": "token",
+          "content": "。"
+        },
+        {
+          "type": "token",
+          "content": "详"
+        },
+        {
+          "type": "token",
+          "content": "细"
+        },
+        {
+          "type": "token",
+          "content": "数"
+        },
+        {
+          "type": "token",
+          "content": "据"
+        },
+        {
+          "type": "token",
+          "content": "见"
+        },
+        {
+          "type": "token",
+          "content": "下"
+        },
+        {
+          "type": "token",
+          "content": "方"
+        },
+        {
+          "type": "token",
+          "content": "表"
+        },
+        {
+          "type": "token",
+          "content": "格"
+        },
+        {
+          "type": "token",
+          "content": "。"
+        },
+        {
+          "type": "done",
+          "answer": "销售额从 2021 年的 3,478,604.98 下降到 2025 年的 38,786.78，变化 -3,439,818.20；最高年份是 2024 年，达到 5,387,286.41。详细数据见下方表格。",
+          "trace_id": "t-d9ca57c2",
+          "run_id": "4aed284d-44f7-40f6-b1f5-41121cd379bc",
+          "tools_used": [
+            "context_resolver",
+            "planning_skill_loader",
+            "llm_queryspec",
+            "llm_queryspec_repair",
+            "queryspec_validator",
+            "tableau_mcp",
+            "rendering_skill_loader",
+            "answer_renderer"
+          ],
+          "response_type": "table",
+          "response_data": {
+            "fields": [
+              "YEAR(发货日期)",
+              "发货年份",
+              "SUM(销售额)",
+              "SUM(利润)"
+            ],
+            "rows": [
+              [
+                2024,
+                "2024",
+                5387286.408650015,
+                687150.8790999999
+              ],
+              [
+                2023,
+                "2023",
+                4466389.57874999,
+                607630.7156999997
+              ],
+              [
+                2022,
+                "2022",
+                3496306.322999994,
+                459655.05542499956
+              ],
+              [
+                2021,
+                "2021",
+                3478604.9774749996,
+                357467.1333749987
+              ],
+              [
+                2025,
+                "2025",
+                38786.7808,
+                7248.1222499999985
+              ]
+            ],
+            "intent": "aggregate",
+            "operator": "aggregate",
+            "confidence": 0.95,
+            "datasource_name": "订单+ (示例 - 超市)",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "queryspec": {
+              "intent": "aggregate",
+              "source": null,
+              "datasource": {
+                "name": "订单+ (示例 - 超市)",
+                "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+              },
+              "operator": "aggregate",
+              "time": {
+                "field": "发货日期",
+                "grain": "YEAR",
+                "range": {
+                  "type": "year",
+                  "value": "ALL"
+                },
+                "timezone": null
+              },
+              "metrics": [
+                {
+                  "field": "销售额",
+                  "aggregation": "SUM",
+                  "alias": null
+                },
+                {
+                  "field": "利润",
+                  "aggregation": "SUM",
+                  "alias": null
+                }
+              ],
+              "derived_metrics": [],
+              "dimensions": [
+                "发货年份"
+              ],
+              "breakdown_dimensions": [],
+              "focus_dimension": null,
+              "filters": [],
+              "sort": [
+                {
+                  "field": "SUM(销售额)",
+                  "direction": "DESC"
+                }
+              ],
+              "limit": 100,
+              "direction": null,
+              "operator_spec": {},
+              "universe": null,
+              "occurred": null,
+              "result_shape": null,
+              "raw_rows": false,
+              "detail_scan": false,
+              "allow_detail_scan": false,
+              "answer_contract": {
+                "max_chars": 120,
+                "must_include": [
+                  "销售额",
+                  "利润",
+                  "发货年份"
+                ],
+                "forbid": [
+                  "明细列表",
+                  "猜测原因"
+                ]
+              },
+              "params": {}
+            },
+            "table_display": {
+              "columns": [
+                {
+                  "key": "YEAR(发货日期)",
+                  "label": "发货日期",
+                  "semantic_type": "period",
+                  "value_type": "date",
+                  "align": "right",
+                  "format": "date"
+                },
+                {
+                  "key": "发货年份",
+                  "label": "发货年份",
+                  "semantic_type": "period",
+                  "value_type": "date",
+                  "align": "right",
+                  "format": "date"
+                },
+                {
+                  "key": "SUM(销售额)",
+                  "label": "销售额",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                },
+                {
+                  "key": "SUM(利润)",
+                  "label": "利润",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                }
+              ]
+            },
+            "mcp_args_guardrail": {
+              "decision": "allow",
+              "args": {
+                "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+                "query": {
+                  "fields": [
+                    {
+                      "fieldCaption": "发货日期",
+                      "function": "YEAR"
+                    },
+                    {
+                      "fieldCaption": "发货年份"
+                    },
+                    {
+                      "fieldCaption": "销售额",
+                      "function": "SUM",
+                      "sortDirection": "DESC",
+                      "sortPriority": 1
+                    },
+                    {
+                      "fieldCaption": "利润",
+                      "function": "SUM"
+                    }
+                  ],
+                  "filters": []
+                },
+                "limit": 100,
+                "timeout": 30,
+                "connection_id": 2
+              },
+              "repairs": [],
+              "reject_code": null,
+              "message": "MCP 参数通过安全检查。",
+              "user_hint": ""
+            },
+            "col_types": [
+              "numeric",
+              "string",
+              "numeric",
+              "numeric"
+            ]
+          },
+          "steps_count": 8,
+          "execution_time_ms": 86212,
+          "sources_count": 1,
+          "top_sources": [
+            "Tableau-online"
+          ],
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "4aed284d-44f7-40f6-b1f5-41121cd379bc",
+            "trace_id": "t-d9ca57c2",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.75,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "data_action_pattern",
+                  "message": "data_action_pattern"
+                }
+              },
+              "postprocess": {
+                "response_type": "table",
+                "row_count": 5,
+                "displayed_row_count": 5,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "ion\": null, \"filters\": [], \"sort\": [{\"field\": \"SUM(销售额)\", \"direction\": \"DESC\"}], \"limit\": 100, \"direction\": null, \"operator_spec\": {}, \"universe\": null, \"occurred\": null, \"result_shape\": null, \"raw_rows\": false, \"detail_scan\": false, \"allow_detail_scan\": false, \"answer_contract\": {\"max_chars\": 120, \"must_include\": [\"销售额\", \"利润\", \"发货年份\"], \"forbid\": [\"明细列表\", \"猜测原因\"]}, \"params\": {}}, \"table_display\": {\"columns\": [{\"key\": \"YEAR(发货日期)\", \"label\": \"发货日期\", \"semantic_type\": \"period\", \"value_type\": \"date\", \"align\": \"right\", \"format\": \"date\"}, {\"key\": \"发货年份\", \"label\": \"发货年份\", \"semantic_type\": \"period\", \"value_type\": \"date\", \"align\": \"right\", \"format\": \"date\"}, {\"key\": \"SUM(销售额)\", \"label\": \"销售额\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}, {\"key\": \"SUM(利润)\", \"label\": \"利润\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}]}, \"mcp_args_guardrail\": {\"decision\": \"allow\", \"args\": {\"datasourceLuid\": \"f4290485-26d3-428f-aa8d-ccc33862a411\", \"query\": {\"fields\": [{\"fieldCaption\": \"发货日期\", \"function\": \"YEAR\"}, {\"fieldCaption\": \"发货年份\"}, {\"fieldCaption\": \"销售额\", \"function\": \"SUM\", \"sortDirection\": \"DESC\", \"sortPriority\": 1}, {\"fieldCaption\": \"利润\", \"function\": \"SUM\"}], \"filters\": []}, \"limit\": 100, \"timeout\": 30, \"connection_id\": 2}, \"repairs\": [], \"reject_code\": null, \"message\": \"MCP 参数通过安全检查。\", \"user_hint\": \"\"}, \"col_types\": [\"numeric\", \"string\", \"numeric\", \"numeric\"]}, \"steps_count\": 8, \"execution_time_ms\": 86212, \"sources_count\": 1, \"top_sources\": [\"Tableau-online\"], \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"4aed284d-44f7-40f6-b1f5-41121cd379bc\", \"trace_id\": \"t-d9ca57c2\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.75, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"data_action_pattern\", \"message\": \"data_action_pattern\"}}, \"postprocess\": {\"response_type\": \"table\", \"row_count\": 5, \"displayed_row_count\": 5, \"formatting\": [\"markdown_summary\"]}}}}\n\n"
+    }
+  },
+  "target_base_url": "http://127.0.0.1:8001"
+}

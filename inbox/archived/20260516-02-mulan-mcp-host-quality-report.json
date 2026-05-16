@@ -1,0 +1,392 @@
+{
+  "schema_version": "mcp_host_quality_gate.v1",
+  "status": "pass",
+  "generated_at": "2026-05-16T03:22:55.458817+00:00",
+  "baseline_path": "inbox/20260515-13-abtest-raw.json",
+  "live_artifact_path": "inbox/20260516-02-mulan-mcp-host-q1-q4-trace.json",
+  "qids": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+  ],
+  "cases": [
+    {
+      "qid": "Q1",
+      "status": "pass",
+      "checks": [
+        {
+          "qid": "Q1",
+          "name": "live_artifact_present",
+          "status": "pass",
+          "message": "live artifact is present",
+          "details": {}
+        },
+        {
+          "qid": "Q1",
+          "name": "direct_mcp_baseline_present",
+          "status": "pass",
+          "message": "direct MCP baseline is present",
+          "details": {}
+        },
+        {
+          "qid": "Q1",
+          "name": "mcp_backed_response_data",
+          "status": "pass",
+          "message": "MCP-backed response_data is present",
+          "details": {
+            "has_response_table": true,
+            "has_mcp_evidence": true
+          }
+        },
+        {
+          "qid": "Q1",
+          "name": "forbidden_queryspec_markers_absent",
+          "status": "pass",
+          "message": "forbidden QuerySpec markers absent",
+          "details": {
+            "markers": []
+          }
+        },
+        {
+          "qid": "Q1",
+          "name": "baseline_required_fields",
+          "status": "pass",
+          "message": "baseline fields are present",
+          "details": {
+            "missing": [],
+            "expected": [
+              "SUM(销售额)",
+              "SUM(利润)",
+              "COUNTD(客户名称)"
+            ],
+            "actual": [
+              "SUM(销售额)",
+              "SUM(利润)",
+              "利润率",
+              "COUNTD(客户名称)",
+              "客单价"
+            ]
+          }
+        },
+        {
+          "qid": "Q1",
+          "name": "baseline_row_count",
+          "status": "pass",
+          "message": "row count matches",
+          "details": {
+            "expected": 1,
+            "actual": 1
+          }
+        },
+        {
+          "qid": "Q1",
+          "name": "baseline_rows",
+          "status": "pass",
+          "message": "rows match direct MCP baseline",
+          "details": {
+            "missing": [],
+            "extra": [],
+            "missing_count": 0,
+            "extra_count": 0,
+            "numeric_rel_tolerance": 1e-06,
+            "numeric_abs_tolerance": 1e-06
+          }
+        },
+        {
+          "qid": "Q1",
+          "name": "correctness_not_weaker_than_direct_mcp",
+          "status": "pass",
+          "message": "live response_data is not weaker than the direct MCP baseline",
+          "details": {}
+        }
+      ]
+    },
+    {
+      "qid": "Q2",
+      "status": "pass",
+      "checks": [
+        {
+          "qid": "Q2",
+          "name": "live_artifact_present",
+          "status": "pass",
+          "message": "live artifact is present",
+          "details": {}
+        },
+        {
+          "qid": "Q2",
+          "name": "direct_mcp_baseline_present",
+          "status": "pass",
+          "message": "direct MCP baseline is present",
+          "details": {}
+        },
+        {
+          "qid": "Q2",
+          "name": "mcp_backed_response_data",
+          "status": "pass",
+          "message": "MCP-backed response_data is present",
+          "details": {
+            "has_response_table": true,
+            "has_mcp_evidence": true
+          }
+        },
+        {
+          "qid": "Q2",
+          "name": "forbidden_queryspec_markers_absent",
+          "status": "pass",
+          "message": "forbidden QuerySpec markers absent",
+          "details": {
+            "markers": []
+          }
+        },
+        {
+          "qid": "Q2",
+          "name": "baseline_required_fields",
+          "status": "pass",
+          "message": "baseline fields are present",
+          "details": {
+            "missing": [],
+            "expected": [
+              "YEAR(发货日期)",
+              "SUM(销售额)",
+              "SUM(利润)",
+              "COUNTD(客户名称)"
+            ],
+            "actual": [
+              "YEAR(发货日期)",
+              "利润率",
+              "SUM(销售额)",
+              "SUM(利润)",
+              "COUNTD(客户名称)"
+            ]
+          }
+        },
+        {
+          "qid": "Q2",
+          "name": "baseline_row_count",
+          "status": "pass",
+          "message": "row count matches",
+          "details": {
+            "expected": 5,
+            "actual": 5
+          }
+        },
+        {
+          "qid": "Q2",
+          "name": "baseline_rows",
+          "status": "pass",
+          "message": "rows match direct MCP baseline",
+          "details": {
+            "missing": [],
+            "extra": [],
+            "missing_count": 0,
+            "extra_count": 0,
+            "numeric_rel_tolerance": 1e-06,
+            "numeric_abs_tolerance": 1e-06
+          }
+        },
+        {
+          "qid": "Q2",
+          "name": "correctness_not_weaker_than_direct_mcp",
+          "status": "pass",
+          "message": "live response_data is not weaker than the direct MCP baseline",
+          "details": {}
+        }
+      ]
+    },
+    {
+      "qid": "Q3",
+      "status": "pass",
+      "checks": [
+        {
+          "qid": "Q3",
+          "name": "live_artifact_present",
+          "status": "pass",
+          "message": "live artifact is present",
+          "details": {}
+        },
+        {
+          "qid": "Q3",
+          "name": "direct_mcp_baseline_present",
+          "status": "pass",
+          "message": "direct MCP baseline is present",
+          "details": {}
+        },
+        {
+          "qid": "Q3",
+          "name": "mcp_backed_response_data",
+          "status": "pass",
+          "message": "MCP-backed response_data is present",
+          "details": {
+            "has_response_table": true,
+            "has_mcp_evidence": true
+          }
+        },
+        {
+          "qid": "Q3",
+          "name": "forbidden_queryspec_markers_absent",
+          "status": "pass",
+          "message": "forbidden QuerySpec markers absent",
+          "details": {
+            "markers": []
+          }
+        },
+        {
+          "qid": "Q3",
+          "name": "baseline_required_fields",
+          "status": "pass",
+          "message": "baseline fields are present",
+          "details": {
+            "missing": [],
+            "expected": [
+              "子类别",
+              "SUM(销售额)",
+              "SUM(利润)"
+            ],
+            "actual": [
+              "子类别",
+              "SUM(销售额)",
+              "SUM(利润)",
+              "利润率"
+            ]
+          }
+        },
+        {
+          "qid": "Q3",
+          "name": "baseline_row_count",
+          "status": "pass",
+          "message": "row count matches",
+          "details": {
+            "expected": 17,
+            "actual": 17
+          }
+        },
+        {
+          "qid": "Q3",
+          "name": "baseline_rows",
+          "status": "pass",
+          "message": "rows match direct MCP baseline",
+          "details": {
+            "missing": [],
+            "extra": [],
+            "missing_count": 0,
+            "extra_count": 0,
+            "numeric_rel_tolerance": 1e-06,
+            "numeric_abs_tolerance": 1e-06
+          }
+        },
+        {
+          "qid": "Q3",
+          "name": "correctness_not_weaker_than_direct_mcp",
+          "status": "pass",
+          "message": "live response_data is not weaker than the direct MCP baseline",
+          "details": {}
+        }
+      ]
+    },
+    {
+      "qid": "Q4",
+      "status": "pass",
+      "checks": [
+        {
+          "qid": "Q4",
+          "name": "live_artifact_present",
+          "status": "pass",
+          "message": "live artifact is present",
+          "details": {}
+        },
+        {
+          "qid": "Q4",
+          "name": "direct_mcp_baseline_present",
+          "status": "pass",
+          "message": "direct MCP baseline is present",
+          "details": {}
+        },
+        {
+          "qid": "Q4",
+          "name": "mcp_backed_response_data",
+          "status": "pass",
+          "message": "MCP-backed response_data is present",
+          "details": {
+            "has_response_table": true,
+            "has_mcp_evidence": true
+          }
+        },
+        {
+          "qid": "Q4",
+          "name": "forbidden_queryspec_markers_absent",
+          "status": "pass",
+          "message": "forbidden QuerySpec markers absent",
+          "details": {
+            "markers": []
+          }
+        },
+        {
+          "qid": "Q4",
+          "name": "baseline_required_fields",
+          "status": "pass",
+          "message": "baseline fields are present",
+          "details": {
+            "missing": [],
+            "expected": [
+              "子类别",
+              "YEAR(发货日期)",
+              "SUM(销售额)",
+              "SUM(利润)"
+            ],
+            "actual": [
+              "子类别",
+              "YEAR(发货日期)",
+              "SUM(销售额)",
+              "SUM(利润)"
+            ]
+          }
+        },
+        {
+          "qid": "Q4",
+          "name": "baseline_row_count",
+          "status": "pass",
+          "message": "row count matches",
+          "details": {
+            "expected": 80,
+            "actual": 80
+          }
+        },
+        {
+          "qid": "Q4",
+          "name": "baseline_rows",
+          "status": "pass",
+          "message": "rows match direct MCP baseline",
+          "details": {
+            "missing": [],
+            "extra": [],
+            "missing_count": 0,
+            "extra_count": 0,
+            "numeric_rel_tolerance": 1e-06,
+            "numeric_abs_tolerance": 1e-06
+          }
+        },
+        {
+          "qid": "Q4",
+          "name": "correctness_not_weaker_than_direct_mcp",
+          "status": "pass",
+          "message": "live response_data is not weaker than the direct MCP baseline",
+          "details": {}
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "case_count": 4,
+    "passed_count": 4,
+    "blocked_count": 0,
+    "blocker_count": 0
+  },
+  "blockers": [],
+  "rules": [
+    "Q1-Q4 live artifacts must be present.",
+    "Each live artifact must include MCP-backed response_data.",
+    "Each live artifact must be free of forbidden QuerySpec markers.",
+    "Each live response_data table must be no weaker than the direct MCP baseline table for the same QID."
+  ]
+}

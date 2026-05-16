@@ -1,0 +1,117 @@
+{
+  "schema_version": "1.0",
+  "plan": "20260516-02-mulan-mcp-host-plan.md",
+  "status": "ready-for-coder",
+  "global_constraints": [
+    "Do not restore QuerySpec as the main execution plan.",
+    "Do not make planning skill a required pre-execution blocker.",
+    "Do not hardcode business field names, metric names, formulas, filters, or benchmark-question mappings in Python.",
+    "Do not let the renderer perform business calculation.",
+    "Do not silently fallback from MCP failure to QuerySpec execution.",
+    "Do not commit unless Q1-Q4 pass the baseline gate."
+  ],
+  "tasks": [
+    {
+      "id": "MCP-HOST-RUNTIME",
+      "owner": "coder-runtime",
+      "status": "ready",
+      "write_scope": [
+        "backend/services/data_agent/mcp_host/__init__.py",
+        "backend/services/data_agent/mcp_host/runtime.py",
+        "backend/tests/services/data_agent/test_mcp_host_runtime.py",
+        "backend/services/tableau/mcp_client.py",
+        "backend/tests/services/tableau/test_mcp_client.py"
+      ],
+      "goal": "Add MCP tool catalog discovery and schema-constrained tool execution.",
+      "requirements": [
+        "Expose a public MCP tools/list API from TableauMCPClient.",
+        "Expose a public generic tools/call API from TableauMCPClient.",
+        "Catalog entries must come from actual MCP tools/list only.",
+        "Executor must reject tool names not present in the catalog.",
+        "Executor must validate required top-level JSON schema properties before dispatch.",
+        "Executor must record serializable trace payloads for tool call and tool result.",
+        "No business field or metric names may appear in runtime code."
+      ],
+      "acceptance": [
+        "Unit tests cover catalog discovery.",
+        "Unit tests cover unknown tool rejection.",
+        "Unit tests cover required-property validation.",
+        "Unit tests prove query-datasource can be executed through the generic executor."
+      ]
+    },
+    {
+      "id": "MCP-HOST-PLANNER",
+      "owner": "coder-planner",
+      "status": "ready",
+      "write_scope": [
+        "backend/services/data_agent/mcp_host/planner.py",
+        "backend/tests/services/data_agent/test_mcp_host_planner.py"
+      ],
+      "goal": "Add model-native MCP Host planner that emits direct MCP tool calls.",
+      "requirements": [
+        "Planner input must include original question, selected datasource, MCP tool schemas, datasource metadata, and previous response_data.",
+        "Planner output must be one JSON object with action=tool_call, action=final, or action=repair_unavailable.",
+        "Planner must never emit QuerySpec.",
+        "Planner must never use planning skill.",
+        "Planner must validate that tool_call.tool exists in MCPToolCatalog before returning it.",
+        "Planner must preserve ThinkingBlock or commentary as non-output and parse only a valid JSON object.",
+        "No business field or metric names may appear in planner code."
+      ],
+      "acceptance": [
+        "Unit tests cover valid tool_call parsing.",
+        "Unit tests reject QuerySpec-shaped output.",
+        "Unit tests reject a tool not present in catalog.",
+        "Unit tests cover ThinkingBlock/commentary before JSON."
+      ]
+    },
+    {
+      "id": "MCP-HOST-ROUTE",
+      "owner": "coder-route",
+      "status": "ready",
+      "write_scope": [
+        "backend/services/data_agent/mcp_first_main.py",
+        "backend/services/data_agent/mcp_proxy_main.py",
+        "backend/tests/services/data_agent/test_mcp_first_main.py",
+        "backend/tests/services/data_agent/test_mcp_proxy_main.py"
+      ],
+      "goal": "Replace thin NL-tool-only route with MCP Host loop on the main data-question route.",
+      "requirements": [
+        "Use explicit frontend-selected datasource only.",
+        "Call MCP Host planner and executor instead of QuerySpec main path.",
+        "Support bounded loop: metadata call, query call, optional repair.",
+        "Emit trace events for catalog, planner, MCP tool call, MCP result, repair, and final response.",
+        "Keep thin passthrough as an explicit feature-flag fallback only.",
+        "Do not call llm_queryspec, llm_queryspec_repair, llm_mcp_args, or queryspec fallback on Q1-Q4 main path."
+      ],
+      "acceptance": [
+        "Route tests prove Q1-Q4-like questions use MCP Host events.",
+        "Route tests prove QuerySpec markers are absent.",
+        "Route tests prove missing explicit datasource fails fast.",
+        "Route tests prove MCP errors surface as structured errors without QuerySpec fallback."
+      ]
+    },
+    {
+      "id": "MCP-HOST-GATE",
+      "owner": "coder-gate",
+      "status": "ready",
+      "write_scope": [
+        "backend/services/data_agent/mcp_host/quality_gate.py",
+        "backend/tests/services/data_agent/test_mcp_host_quality_gate.py",
+        "inbox/20260516-02-mulan-mcp-host-validation.md"
+      ],
+      "goal": "Add Q1-Q4 baseline comparison gate for the MCP Host route.",
+      "requirements": [
+        "Compare Mulan response_data against inbox/20260515-13-abtest-raw.json.",
+        "Report Q1-Q4 correctness and forbidden QuerySpec markers.",
+        "Gate must fail if Q1-Q4 are worse than the direct MCP baseline.",
+        "Gate must not depend on hardcoded business field mappings in Python.",
+        "Live raw trace artifacts stay under inbox and remain uncommitted unless explicitly requested."
+      ],
+      "acceptance": [
+        "Unit tests cover pass and fail quality-gate decisions.",
+        "Validation markdown records the exact commands for live Q1-Q4.",
+        "No commit is made by coder."
+      ]
+    }
+  ]
+}

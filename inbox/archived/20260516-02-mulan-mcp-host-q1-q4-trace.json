@@ -1,0 +1,6349 @@
+{
+  "mulan": {
+    "Q1": {
+      "duration": 12.705623582995031,
+      "status_code": 200,
+      "conversation_id": "4977fc1e-aa75-4c33-8258-d4fe50108d62",
+      "done": {
+        "type": "done",
+        "answer": "查询已完成，返回 1 行结果。",
+        "trace_id": "t-f8a1b6fa",
+        "run_id": "bbbf8d6b-be69-4f23-a918-63d90ddb7f7c",
+        "tools_used": [
+          "context_resolver",
+          "mcp_host_catalog",
+          "tableau_mcp",
+          "mcp_host_planner",
+          "mcp_host_final_response"
+        ],
+        "response_type": "table",
+        "response_data": {
+          "data": [
+            {
+              "SUM(销售额)": 16867374.06867518,
+              "SUM(利润)": 2119151.905850007,
+              "利润率": 0.12563614805848985,
+              "COUNTD(客户名称)": 771,
+              "客单价": 21877.268571563138
+            }
+          ],
+          "fields": [
+            "SUM(销售额)",
+            "SUM(利润)",
+            "利润率",
+            "COUNTD(客户名称)",
+            "客单价"
+          ],
+          "rows": [
+            [
+              16867374.06867518,
+              2119151.905850007,
+              0.12563614805848985,
+              771,
+              21877.268571563138
+            ]
+          ],
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "chain_mode": "mcp_first_mcp_main",
+          "main_chain_mode": "mcp_first_mcp_main",
+          "mcp_tool": "query-datasource",
+          "mcp_host": true,
+          "mcp_args": {
+            "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "query": {
+              "fields": [
+                {
+                  "fieldCaption": "销售额",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润率"
+                },
+                {
+                  "fieldCaption": "客户数"
+                },
+                {
+                  "fieldCaption": "客单价"
+                }
+              ]
+            }
+          },
+          "context_trace": {
+            "status": "empty",
+            "datasource_name": null,
+            "metric_names": [],
+            "dimension_names": [],
+            "filter_names": [],
+            "unresolved_references": false,
+            "calculation_performed": false
+          },
+          "planner_final": {
+            "action": "final",
+            "source": "auto_final_after_successful_query"
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "SUM(销售额)",
+                "label": "SUM(销售额)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "SUM(利润)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "利润率",
+                "label": "利润率",
+                "semantic_type": "derived_metric",
+                "value_type": "percent",
+                "align": "right",
+                "format": "percent"
+              },
+              {
+                "key": "COUNTD(客户名称)",
+                "label": "COUNTD(客户名称)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "客单价",
+                "label": "客单价",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              }
+            ]
+          },
+          "col_types": [
+            "numeric",
+            "numeric",
+            "numeric",
+            "numeric",
+            "numeric"
+          ]
+        },
+        "steps_count": 6,
+        "execution_time_ms": 12479,
+        "sources_count": 1,
+        "top_sources": [
+          "Tableau-online"
+        ],
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "bbbf8d6b-be69-4f23-a918-63d90ddb7f7c",
+          "trace_id": "t-f8a1b6fa",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "table",
+              "row_count": 1,
+              "displayed_row_count": 1,
+              "formatting": [
+                "markdown_summary"
+              ]
+            }
+          }
+        }
+      },
+      "error": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.62,
+              "route_reason": "generic_business_data_context"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "4977fc1e-aa75-4c33-8258-d4fe50108d62",
+          "run_id": "bbbf8d6b-be69-4f23-a918-63d90ddb7f7c",
+          "trace_id": "t-f8a1b6fa",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已进入 Tableau MCP Host 主链路：aggregate。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "context_resolver",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "intent": "aggregate"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "context_resolver",
+          "summary": "{'status': 'empty', 'datasource_name': None, 'metric_names': [], 'dimension_names': [], 'filter_names': [], 'unresolved_references': False, 'calculation_performed': False}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_host_catalog",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_host_catalog",
+          "summary": "{'chain_mode': 'mcp_first_mcp_main', 'tool_count': 17, 'tools': [{'name': 'get-datasource-metadata', 'required': ['datasourceLuid'], 'has_input_schema': True}, {'name': 'list-datasources', 'required':"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "mcp_tool": "get-datasource-metadata",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "mcp_first_mcp_main",
+            "host_phase": "metadata",
+            "arguments": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'truncated': True, 'preview': '{\"datasourceDescription\": \"\", \"fieldGroups\": [{\"logicalTableId\": null, \"fields\": [{\"name\": \"客单价\", \"dataType\": \"REAL\", \"columnClass\": \"CALCULATION\", \"logicalTableId\": nu"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_host_planner",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "step": 1,
+            "catalog_tool_count": 17,
+            "has_metadata": true,
+            "repair_budget_remaining": 1
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_host_planner",
+          "summary": "{'chain_mode': 'mcp_first_mcp_main', 'action': 'tool_call', 'planner_output': {'action': 'tool_call', 'tool': 'query-datasource', 'arguments': {'datasourceLuid': 'f4290485-26d3-428f-aa8d-ccc33862a411'"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "mcp_tool": "query-datasource",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "mcp_first_mcp_main",
+            "host_phase": "query",
+            "arguments": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润率"
+                  },
+                  {
+                    "fieldCaption": "客户数"
+                  },
+                  {
+                    "fieldCaption": "客单价"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'data': [{'SUM(销售额)': 16867374.06867518, 'SUM(利润)': 2119151.905850007, '利润率': 0.12563614805848985, '客户数': 771, '客单价': 21877.268571563138}]}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_host_final_response",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "row_count": 1,
+            "mcp_tool": "query-datasource"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_host_final_response",
+          "summary": "{'data': [{'SUM(销售额)': 16867374.06867518, 'SUM(利润)': 2119151.905850007, '利润率': 0.12563614805848985, 'COUNTD(客户名称)': 771, '客单价': 21877.268571563138}], 'fields': ['SUM(销售额)', 'SUM(利润)', '利润率', 'COUNTD(客"
+        },
+        {
+          "data": [
+            {
+              "SUM(销售额)": 16867374.06867518,
+              "SUM(利润)": 2119151.905850007,
+              "利润率": 0.12563614805848985,
+              "COUNTD(客户名称)": 771,
+              "客单价": 21877.268571563138
+            }
+          ],
+          "fields": [
+            "SUM(销售额)",
+            "SUM(利润)",
+            "利润率",
+            "COUNTD(客户名称)",
+            "客单价"
+          ],
+          "rows": [
+            [
+              16867374.06867518,
+              2119151.905850007,
+              0.12563614805848985,
+              771,
+              21877.268571563138
+            ]
+          ],
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "chain_mode": "mcp_first_mcp_main",
+          "main_chain_mode": "mcp_first_mcp_main",
+          "mcp_tool": "query-datasource",
+          "mcp_host": true,
+          "mcp_args": {
+            "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "query": {
+              "fields": [
+                {
+                  "fieldCaption": "销售额",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润率"
+                },
+                {
+                  "fieldCaption": "客户数"
+                },
+                {
+                  "fieldCaption": "客单价"
+                }
+              ]
+            }
+          },
+          "context_trace": {
+            "status": "empty",
+            "datasource_name": null,
+            "metric_names": [],
+            "dimension_names": [],
+            "filter_names": [],
+            "unresolved_references": false,
+            "calculation_performed": false
+          },
+          "planner_final": {
+            "action": "final",
+            "source": "auto_final_after_successful_query"
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "SUM(销售额)",
+                "label": "SUM(销售额)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "SUM(利润)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "利润率",
+                "label": "利润率",
+                "semantic_type": "derived_metric",
+                "value_type": "percent",
+                "align": "right",
+                "format": "percent"
+              },
+              {
+                "key": "COUNTD(客户名称)",
+                "label": "COUNTD(客户名称)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "客单价",
+                "label": "客单价",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              }
+            ]
+          },
+          "col_types": [
+            "numeric",
+            "numeric",
+            "numeric",
+            "numeric",
+            "numeric"
+          ],
+          "type": "table_data"
+        },
+        {
+          "type": "token",
+          "content": "查"
+        },
+        {
+          "type": "token",
+          "content": "询"
+        },
+        {
+          "type": "token",
+          "content": "已"
+        },
+        {
+          "type": "token",
+          "content": "完"
+        },
+        {
+          "type": "token",
+          "content": "成"
+        },
+        {
+          "type": "token",
+          "content": "，"
+        },
+        {
+          "type": "token",
+          "content": "返"
+        },
+        {
+          "type": "token",
+          "content": "回"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "1"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "行"
+        },
+        {
+          "type": "token",
+          "content": "结"
+        },
+        {
+          "type": "token",
+          "content": "果"
+        },
+        {
+          "type": "token",
+          "content": "。"
+        },
+        {
+          "type": "done",
+          "answer": "查询已完成，返回 1 行结果。",
+          "trace_id": "t-f8a1b6fa",
+          "run_id": "bbbf8d6b-be69-4f23-a918-63d90ddb7f7c",
+          "tools_used": [
+            "context_resolver",
+            "mcp_host_catalog",
+            "tableau_mcp",
+            "mcp_host_planner",
+            "mcp_host_final_response"
+          ],
+          "response_type": "table",
+          "response_data": {
+            "data": [
+              {
+                "SUM(销售额)": 16867374.06867518,
+                "SUM(利润)": 2119151.905850007,
+                "利润率": 0.12563614805848985,
+                "COUNTD(客户名称)": 771,
+                "客单价": 21877.268571563138
+              }
+            ],
+            "fields": [
+              "SUM(销售额)",
+              "SUM(利润)",
+              "利润率",
+              "COUNTD(客户名称)",
+              "客单价"
+            ],
+            "rows": [
+              [
+                16867374.06867518,
+                2119151.905850007,
+                0.12563614805848985,
+                771,
+                21877.268571563138
+              ]
+            ],
+            "datasource_name": "订单+ (示例 - 超市)",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "mcp_first_mcp_main",
+            "main_chain_mode": "mcp_first_mcp_main",
+            "mcp_tool": "query-datasource",
+            "mcp_host": true,
+            "mcp_args": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润率"
+                  },
+                  {
+                    "fieldCaption": "客户数"
+                  },
+                  {
+                    "fieldCaption": "客单价"
+                  }
+                ]
+              }
+            },
+            "context_trace": {
+              "status": "empty",
+              "datasource_name": null,
+              "metric_names": [],
+              "dimension_names": [],
+              "filter_names": [],
+              "unresolved_references": false,
+              "calculation_performed": false
+            },
+            "planner_final": {
+              "action": "final",
+              "source": "auto_final_after_successful_query"
+            },
+            "table_display": {
+              "columns": [
+                {
+                  "key": "SUM(销售额)",
+                  "label": "SUM(销售额)",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                },
+                {
+                  "key": "SUM(利润)",
+                  "label": "SUM(利润)",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                },
+                {
+                  "key": "利润率",
+                  "label": "利润率",
+                  "semantic_type": "derived_metric",
+                  "value_type": "percent",
+                  "align": "right",
+                  "format": "percent"
+                },
+                {
+                  "key": "COUNTD(客户名称)",
+                  "label": "COUNTD(客户名称)",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                },
+                {
+                  "key": "客单价",
+                  "label": "客单价",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                }
+              ]
+            },
+            "col_types": [
+              "numeric",
+              "numeric",
+              "numeric",
+              "numeric",
+              "numeric"
+            ]
+          },
+          "steps_count": 6,
+          "execution_time_ms": 12479,
+          "sources_count": 1,
+          "top_sources": [
+            "Tableau-online"
+          ],
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "bbbf8d6b-be69-4f23-a918-63d90ddb7f7c",
+            "trace_id": "t-f8a1b6fa",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "table",
+                "row_count": 1,
+                "displayed_row_count": 1,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "e_luid\": \"f4290485-26d3-428f-aa8d-ccc33862a411\", \"chain_mode\": \"mcp_first_mcp_main\", \"main_chain_mode\": \"mcp_first_mcp_main\", \"mcp_tool\": \"query-datasource\", \"mcp_host\": true, \"mcp_args\": {\"datasourceLuid\": \"f4290485-26d3-428f-aa8d-ccc33862a411\", \"query\": {\"fields\": [{\"fieldCaption\": \"销售额\", \"function\": \"SUM\"}, {\"fieldCaption\": \"利润\", \"function\": \"SUM\"}, {\"fieldCaption\": \"利润率\"}, {\"fieldCaption\": \"客户数\"}, {\"fieldCaption\": \"客单价\"}]}}, \"context_trace\": {\"status\": \"empty\", \"datasource_name\": null, \"metric_names\": [], \"dimension_names\": [], \"filter_names\": [], \"unresolved_references\": false, \"calculation_performed\": false}, \"planner_final\": {\"action\": \"final\", \"source\": \"auto_final_after_successful_query\"}, \"table_display\": {\"columns\": [{\"key\": \"SUM(销售额)\", \"label\": \"SUM(销售额)\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}, {\"key\": \"SUM(利润)\", \"label\": \"SUM(利润)\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}, {\"key\": \"利润率\", \"label\": \"利润率\", \"semantic_type\": \"derived_metric\", \"value_type\": \"percent\", \"align\": \"right\", \"format\": \"percent\"}, {\"key\": \"COUNTD(客户名称)\", \"label\": \"COUNTD(客户名称)\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}, {\"key\": \"客单价\", \"label\": \"客单价\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}]}, \"col_types\": [\"numeric\", \"numeric\", \"numeric\", \"numeric\", \"numeric\"]}, \"steps_count\": 6, \"execution_time_ms\": 12479, \"sources_count\": 1, \"top_sources\": [\"Tableau-online\"], \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"bbbf8d6b-be69-4f23-a918-63d90ddb7f7c\", \"trace_id\": \"t-f8a1b6fa\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"table\", \"row_count\": 1, \"displayed_row_count\": 1, \"formatting\": [\"markdown_summary\"]}}}}\n\n"
+    },
+    "Q2": {
+      "duration": 11.904558082984295,
+      "status_code": 200,
+      "conversation_id": "4977fc1e-aa75-4c33-8258-d4fe50108d62",
+      "done": {
+        "type": "done",
+        "answer": "查询已完成，返回 5 行结果。",
+        "trace_id": "t-0f100a6f",
+        "run_id": "641d1498-c1ee-40e8-8a6b-0ddef7371159",
+        "tools_used": [
+          "context_resolver",
+          "mcp_host_catalog",
+          "tableau_mcp",
+          "mcp_host_planner",
+          "mcp_host_final_response"
+        ],
+        "response_type": "table",
+        "response_data": {
+          "data": [
+            {
+              "YEAR(发货日期)": 2021,
+              "利润率": 0.1,
+              "SUM(销售额)": 3478604.9774749996,
+              "SUM(利润)": 357467.1333749987,
+              "COUNTD(客户名称)": 598
+            },
+            {
+              "YEAR(发货日期)": 2022,
+              "利润率": 0.13,
+              "SUM(销售额)": 3496306.322999994,
+              "SUM(利润)": 459655.05542499956,
+              "COUNTD(客户名称)": 585
+            },
+            {
+              "YEAR(发货日期)": 2023,
+              "利润率": 0.14,
+              "SUM(销售额)": 4466389.57874999,
+              "SUM(利润)": 607630.7156999997,
+              "COUNTD(客户名称)": 629
+            },
+            {
+              "YEAR(发货日期)": 2024,
+              "利润率": 0.13,
+              "SUM(销售额)": 5387286.408650015,
+              "SUM(利润)": 687150.8790999999,
+              "COUNTD(客户名称)": 676
+            },
+            {
+              "YEAR(发货日期)": 2025,
+              "利润率": 0.19,
+              "SUM(销售额)": 38786.7808,
+              "SUM(利润)": 7248.1222499999985,
+              "COUNTD(客户名称)": 23
+            }
+          ],
+          "fields": [
+            "YEAR(发货日期)",
+            "利润率",
+            "SUM(销售额)",
+            "SUM(利润)",
+            "COUNTD(客户名称)"
+          ],
+          "rows": [
+            [
+              2021,
+              0.1,
+              3478604.9774749996,
+              357467.1333749987,
+              598
+            ],
+            [
+              2022,
+              0.13,
+              3496306.322999994,
+              459655.05542499956,
+              585
+            ],
+            [
+              2023,
+              0.14,
+              4466389.57874999,
+              607630.7156999997,
+              629
+            ],
+            [
+              2024,
+              0.13,
+              5387286.408650015,
+              687150.8790999999,
+              676
+            ],
+            [
+              2025,
+              0.19,
+              38786.7808,
+              7248.1222499999985,
+              23
+            ]
+          ],
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "chain_mode": "mcp_first_mcp_main",
+          "main_chain_mode": "mcp_first_mcp_main",
+          "mcp_tool": "query-datasource",
+          "mcp_host": true,
+          "mcp_args": {
+            "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "query": {
+              "fields": [
+                {
+                  "fieldCaption": "发货年份",
+                  "sortDirection": "ASC",
+                  "sortPriority": 1
+                },
+                {
+                  "fieldCaption": "利润率",
+                  "maxDecimalPlaces": 2
+                },
+                {
+                  "fieldCaption": "销售额",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "客户名称",
+                  "function": "COUNTD"
+                }
+              ]
+            }
+          },
+          "context_trace": {
+            "status": "resolved",
+            "datasource_name": "订单+ (示例 - 超市)",
+            "metric_names": [
+              "销售额",
+              "利润",
+              "客户名称"
+            ],
+            "dimension_names": [
+              "利润率",
+              "客单价"
+            ],
+            "filter_names": [],
+            "unresolved_references": false,
+            "calculation_performed": false
+          },
+          "planner_final": {
+            "action": "final",
+            "source": "auto_final_after_successful_query"
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "YEAR(发货日期)",
+                "label": "YEAR(发货日期)",
+                "semantic_type": "period",
+                "value_type": "date",
+                "align": "right",
+                "format": "date"
+              },
+              {
+                "key": "利润率",
+                "label": "利润率",
+                "semantic_type": "derived_metric",
+                "value_type": "percent",
+                "align": "right",
+                "format": "percent"
+              },
+              {
+                "key": "SUM(销售额)",
+                "label": "SUM(销售额)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "SUM(利润)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "COUNTD(客户名称)",
+                "label": "COUNTD(客户名称)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              }
+            ]
+          },
+          "col_types": [
+            "numeric",
+            "numeric",
+            "numeric",
+            "numeric",
+            "numeric"
+          ]
+        },
+        "steps_count": 6,
+        "execution_time_ms": 11649,
+        "sources_count": 1,
+        "top_sources": [
+          "Tableau-online"
+        ],
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "641d1498-c1ee-40e8-8a6b-0ddef7371159",
+          "trace_id": "t-0f100a6f",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.8500000000000001,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "data_action_pattern",
+                "message": "data_action_pattern"
+              }
+            },
+            "postprocess": {
+              "response_type": "table",
+              "row_count": 5,
+              "displayed_row_count": 5,
+              "formatting": [
+                "markdown_summary"
+              ]
+            }
+          }
+        }
+      },
+      "error": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "trend_condition",
+          "confidence": 0.82,
+          "route_reason": "trend_condition_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.8500000000000001,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "data_action_pattern",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.8500000000000001,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "data_action_pattern",
+              "message": "data_action_pattern"
+            },
+            "intent_classifier": {
+              "intent": "trend_condition",
+              "confidence": 0.82,
+              "route_reason": "trend_condition_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "4977fc1e-aa75-4c33-8258-d4fe50108d62",
+          "run_id": "641d1498-c1ee-40e8-8a6b-0ddef7371159",
+          "trace_id": "t-0f100a6f",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已进入 Tableau MCP Host 主链路：trend_condition。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "context_resolver",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "intent": "trend_condition"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "context_resolver",
+          "summary": "{'status': 'resolved', 'datasource_name': '订单+ (示例 - 超市)', 'metric_names': ['销售额', '利润', '客户名称'], 'dimension_names': ['利润率', '客单价'], 'filter_names': [], 'unresolved_references': False, 'calculation_pe"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_host_catalog",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_host_catalog",
+          "summary": "{'chain_mode': 'mcp_first_mcp_main', 'tool_count': 17, 'tools': [{'name': 'get-datasource-metadata', 'required': ['datasourceLuid'], 'has_input_schema': True}, {'name': 'list-datasources', 'required':"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "mcp_tool": "get-datasource-metadata",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "mcp_first_mcp_main",
+            "host_phase": "metadata",
+            "arguments": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'truncated': True, 'preview': '{\"datasourceDescription\": \"\", \"fieldGroups\": [{\"logicalTableId\": null, \"fields\": [{\"name\": \"客单价\", \"dataType\": \"REAL\", \"columnClass\": \"CALCULATION\", \"logicalTableId\": nu"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_host_planner",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "step": 1,
+            "catalog_tool_count": 17,
+            "has_metadata": true,
+            "repair_budget_remaining": 1
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_host_planner",
+          "summary": "{'chain_mode': 'mcp_first_mcp_main', 'action': 'tool_call', 'planner_output': {'action': 'tool_call', 'tool': 'query-datasource', 'arguments': {'datasourceLuid': 'f4290485-26d3-428f-aa8d-ccc33862a411'"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "mcp_tool": "query-datasource",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "mcp_first_mcp_main",
+            "host_phase": "query",
+            "arguments": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "发货年份",
+                    "sortDirection": "ASC",
+                    "sortPriority": 1
+                  },
+                  {
+                    "fieldCaption": "利润率",
+                    "maxDecimalPlaces": 2
+                  },
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "客户名称",
+                    "function": "COUNTD"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'data': [{'发货年份': '2021', '利润率': 0.1, 'SUM(销售额)': 3478604.9774749996, 'SUM(利润)': 357467.1333749987, 'COUNTD(客户名称)': 598}, {'发货年份': '2022', '利润率': 0.13, 'SUM(销售额)': 3496306.322999994, 'SUM(利润)': 45965"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_host_final_response",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "row_count": 5,
+            "mcp_tool": "query-datasource"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_host_final_response",
+          "summary": "{'data': [{'YEAR(发货日期)': 2021, '利润率': 0.1, 'SUM(销售额)': 3478604.9774749996, 'SUM(利润)': 357467.1333749987, 'COUNTD(客户名称)': 598}, {'YEAR(发货日期)': 2022, '利润率': 0.13, 'SUM(销售额)': 3496306.322999994, 'SUM(利润)"
+        },
+        {
+          "data": [
+            {
+              "YEAR(发货日期)": 2021,
+              "利润率": 0.1,
+              "SUM(销售额)": 3478604.9774749996,
+              "SUM(利润)": 357467.1333749987,
+              "COUNTD(客户名称)": 598
+            },
+            {
+              "YEAR(发货日期)": 2022,
+              "利润率": 0.13,
+              "SUM(销售额)": 3496306.322999994,
+              "SUM(利润)": 459655.05542499956,
+              "COUNTD(客户名称)": 585
+            },
+            {
+              "YEAR(发货日期)": 2023,
+              "利润率": 0.14,
+              "SUM(销售额)": 4466389.57874999,
+              "SUM(利润)": 607630.7156999997,
+              "COUNTD(客户名称)": 629
+            },
+            {
+              "YEAR(发货日期)": 2024,
+              "利润率": 0.13,
+              "SUM(销售额)": 5387286.408650015,
+              "SUM(利润)": 687150.8790999999,
+              "COUNTD(客户名称)": 676
+            },
+            {
+              "YEAR(发货日期)": 2025,
+              "利润率": 0.19,
+              "SUM(销售额)": 38786.7808,
+              "SUM(利润)": 7248.1222499999985,
+              "COUNTD(客户名称)": 23
+            }
+          ],
+          "fields": [
+            "YEAR(发货日期)",
+            "利润率",
+            "SUM(销售额)",
+            "SUM(利润)",
+            "COUNTD(客户名称)"
+          ],
+          "rows": [
+            [
+              2021,
+              0.1,
+              3478604.9774749996,
+              357467.1333749987,
+              598
+            ],
+            [
+              2022,
+              0.13,
+              3496306.322999994,
+              459655.05542499956,
+              585
+            ],
+            [
+              2023,
+              0.14,
+              4466389.57874999,
+              607630.7156999997,
+              629
+            ],
+            [
+              2024,
+              0.13,
+              5387286.408650015,
+              687150.8790999999,
+              676
+            ],
+            [
+              2025,
+              0.19,
+              38786.7808,
+              7248.1222499999985,
+              23
+            ]
+          ],
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "chain_mode": "mcp_first_mcp_main",
+          "main_chain_mode": "mcp_first_mcp_main",
+          "mcp_tool": "query-datasource",
+          "mcp_host": true,
+          "mcp_args": {
+            "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "query": {
+              "fields": [
+                {
+                  "fieldCaption": "发货年份",
+                  "sortDirection": "ASC",
+                  "sortPriority": 1
+                },
+                {
+                  "fieldCaption": "利润率",
+                  "maxDecimalPlaces": 2
+                },
+                {
+                  "fieldCaption": "销售额",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "客户名称",
+                  "function": "COUNTD"
+                }
+              ]
+            }
+          },
+          "context_trace": {
+            "status": "resolved",
+            "datasource_name": "订单+ (示例 - 超市)",
+            "metric_names": [
+              "销售额",
+              "利润",
+              "客户名称"
+            ],
+            "dimension_names": [
+              "利润率",
+              "客单价"
+            ],
+            "filter_names": [],
+            "unresolved_references": false,
+            "calculation_performed": false
+          },
+          "planner_final": {
+            "action": "final",
+            "source": "auto_final_after_successful_query"
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "YEAR(发货日期)",
+                "label": "YEAR(发货日期)",
+                "semantic_type": "period",
+                "value_type": "date",
+                "align": "right",
+                "format": "date"
+              },
+              {
+                "key": "利润率",
+                "label": "利润率",
+                "semantic_type": "derived_metric",
+                "value_type": "percent",
+                "align": "right",
+                "format": "percent"
+              },
+              {
+                "key": "SUM(销售额)",
+                "label": "SUM(销售额)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "SUM(利润)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "COUNTD(客户名称)",
+                "label": "COUNTD(客户名称)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              }
+            ]
+          },
+          "col_types": [
+            "numeric",
+            "numeric",
+            "numeric",
+            "numeric",
+            "numeric"
+          ],
+          "type": "table_data"
+        },
+        {
+          "type": "token",
+          "content": "查"
+        },
+        {
+          "type": "token",
+          "content": "询"
+        },
+        {
+          "type": "token",
+          "content": "已"
+        },
+        {
+          "type": "token",
+          "content": "完"
+        },
+        {
+          "type": "token",
+          "content": "成"
+        },
+        {
+          "type": "token",
+          "content": "，"
+        },
+        {
+          "type": "token",
+          "content": "返"
+        },
+        {
+          "type": "token",
+          "content": "回"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "5"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "行"
+        },
+        {
+          "type": "token",
+          "content": "结"
+        },
+        {
+          "type": "token",
+          "content": "果"
+        },
+        {
+          "type": "token",
+          "content": "。"
+        },
+        {
+          "type": "done",
+          "answer": "查询已完成，返回 5 行结果。",
+          "trace_id": "t-0f100a6f",
+          "run_id": "641d1498-c1ee-40e8-8a6b-0ddef7371159",
+          "tools_used": [
+            "context_resolver",
+            "mcp_host_catalog",
+            "tableau_mcp",
+            "mcp_host_planner",
+            "mcp_host_final_response"
+          ],
+          "response_type": "table",
+          "response_data": {
+            "data": [
+              {
+                "YEAR(发货日期)": 2021,
+                "利润率": 0.1,
+                "SUM(销售额)": 3478604.9774749996,
+                "SUM(利润)": 357467.1333749987,
+                "COUNTD(客户名称)": 598
+              },
+              {
+                "YEAR(发货日期)": 2022,
+                "利润率": 0.13,
+                "SUM(销售额)": 3496306.322999994,
+                "SUM(利润)": 459655.05542499956,
+                "COUNTD(客户名称)": 585
+              },
+              {
+                "YEAR(发货日期)": 2023,
+                "利润率": 0.14,
+                "SUM(销售额)": 4466389.57874999,
+                "SUM(利润)": 607630.7156999997,
+                "COUNTD(客户名称)": 629
+              },
+              {
+                "YEAR(发货日期)": 2024,
+                "利润率": 0.13,
+                "SUM(销售额)": 5387286.408650015,
+                "SUM(利润)": 687150.8790999999,
+                "COUNTD(客户名称)": 676
+              },
+              {
+                "YEAR(发货日期)": 2025,
+                "利润率": 0.19,
+                "SUM(销售额)": 38786.7808,
+                "SUM(利润)": 7248.1222499999985,
+                "COUNTD(客户名称)": 23
+              }
+            ],
+            "fields": [
+              "YEAR(发货日期)",
+              "利润率",
+              "SUM(销售额)",
+              "SUM(利润)",
+              "COUNTD(客户名称)"
+            ],
+            "rows": [
+              [
+                2021,
+                0.1,
+                3478604.9774749996,
+                357467.1333749987,
+                598
+              ],
+              [
+                2022,
+                0.13,
+                3496306.322999994,
+                459655.05542499956,
+                585
+              ],
+              [
+                2023,
+                0.14,
+                4466389.57874999,
+                607630.7156999997,
+                629
+              ],
+              [
+                2024,
+                0.13,
+                5387286.408650015,
+                687150.8790999999,
+                676
+              ],
+              [
+                2025,
+                0.19,
+                38786.7808,
+                7248.1222499999985,
+                23
+              ]
+            ],
+            "datasource_name": "订单+ (示例 - 超市)",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "mcp_first_mcp_main",
+            "main_chain_mode": "mcp_first_mcp_main",
+            "mcp_tool": "query-datasource",
+            "mcp_host": true,
+            "mcp_args": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "发货年份",
+                    "sortDirection": "ASC",
+                    "sortPriority": 1
+                  },
+                  {
+                    "fieldCaption": "利润率",
+                    "maxDecimalPlaces": 2
+                  },
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "客户名称",
+                    "function": "COUNTD"
+                  }
+                ]
+              }
+            },
+            "context_trace": {
+              "status": "resolved",
+              "datasource_name": "订单+ (示例 - 超市)",
+              "metric_names": [
+                "销售额",
+                "利润",
+                "客户名称"
+              ],
+              "dimension_names": [
+                "利润率",
+                "客单价"
+              ],
+              "filter_names": [],
+              "unresolved_references": false,
+              "calculation_performed": false
+            },
+            "planner_final": {
+              "action": "final",
+              "source": "auto_final_after_successful_query"
+            },
+            "table_display": {
+              "columns": [
+                {
+                  "key": "YEAR(发货日期)",
+                  "label": "YEAR(发货日期)",
+                  "semantic_type": "period",
+                  "value_type": "date",
+                  "align": "right",
+                  "format": "date"
+                },
+                {
+                  "key": "利润率",
+                  "label": "利润率",
+                  "semantic_type": "derived_metric",
+                  "value_type": "percent",
+                  "align": "right",
+                  "format": "percent"
+                },
+                {
+                  "key": "SUM(销售额)",
+                  "label": "SUM(销售额)",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                },
+                {
+                  "key": "SUM(利润)",
+                  "label": "SUM(利润)",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                },
+                {
+                  "key": "COUNTD(客户名称)",
+                  "label": "COUNTD(客户名称)",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                }
+              ]
+            },
+            "col_types": [
+              "numeric",
+              "numeric",
+              "numeric",
+              "numeric",
+              "numeric"
+            ]
+          },
+          "steps_count": 6,
+          "execution_time_ms": 11649,
+          "sources_count": 1,
+          "top_sources": [
+            "Tableau-online"
+          ],
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "641d1498-c1ee-40e8-8a6b-0ddef7371159",
+            "trace_id": "t-0f100a6f",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.8500000000000001,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "data_action_pattern",
+                  "message": "data_action_pattern"
+                }
+              },
+              "postprocess": {
+                "response_type": "table",
+                "row_count": 5,
+                "displayed_row_count": 5,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": " true, \"mcp_args\": {\"datasourceLuid\": \"f4290485-26d3-428f-aa8d-ccc33862a411\", \"query\": {\"fields\": [{\"fieldCaption\": \"发货年份\", \"sortDirection\": \"ASC\", \"sortPriority\": 1}, {\"fieldCaption\": \"利润率\", \"maxDecimalPlaces\": 2}, {\"fieldCaption\": \"销售额\", \"function\": \"SUM\"}, {\"fieldCaption\": \"利润\", \"function\": \"SUM\"}, {\"fieldCaption\": \"客户名称\", \"function\": \"COUNTD\"}]}}, \"context_trace\": {\"status\": \"resolved\", \"datasource_name\": \"订单+ (示例 - 超市)\", \"metric_names\": [\"销售额\", \"利润\", \"客户名称\"], \"dimension_names\": [\"利润率\", \"客单价\"], \"filter_names\": [], \"unresolved_references\": false, \"calculation_performed\": false}, \"planner_final\": {\"action\": \"final\", \"source\": \"auto_final_after_successful_query\"}, \"table_display\": {\"columns\": [{\"key\": \"YEAR(发货日期)\", \"label\": \"YEAR(发货日期)\", \"semantic_type\": \"period\", \"value_type\": \"date\", \"align\": \"right\", \"format\": \"date\"}, {\"key\": \"利润率\", \"label\": \"利润率\", \"semantic_type\": \"derived_metric\", \"value_type\": \"percent\", \"align\": \"right\", \"format\": \"percent\"}, {\"key\": \"SUM(销售额)\", \"label\": \"SUM(销售额)\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}, {\"key\": \"SUM(利润)\", \"label\": \"SUM(利润)\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}, {\"key\": \"COUNTD(客户名称)\", \"label\": \"COUNTD(客户名称)\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}]}, \"col_types\": [\"numeric\", \"numeric\", \"numeric\", \"numeric\", \"numeric\"]}, \"steps_count\": 6, \"execution_time_ms\": 11649, \"sources_count\": 1, \"top_sources\": [\"Tableau-online\"], \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"641d1498-c1ee-40e8-8a6b-0ddef7371159\", \"trace_id\": \"t-0f100a6f\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.8500000000000001, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"data_action_pattern\", \"message\": \"data_action_pattern\"}}, \"postprocess\": {\"response_type\": \"table\", \"row_count\": 5, \"displayed_row_count\": 5, \"formatting\": [\"markdown_summary\"]}}}}\n\n"
+    },
+    "Q3": {
+      "duration": 12.685117000015453,
+      "status_code": 200,
+      "conversation_id": "4977fc1e-aa75-4c33-8258-d4fe50108d62",
+      "done": {
+        "type": "done",
+        "answer": "查询已完成，返回 17 行结果。",
+        "trace_id": "t-5f88014d",
+        "run_id": "ac345573-89bb-41ed-ac51-1a34d8a807ee",
+        "tools_used": [
+          "context_resolver",
+          "mcp_host_catalog",
+          "tableau_mcp",
+          "mcp_host_planner",
+          "mcp_host_final_response"
+        ],
+        "response_type": "table",
+        "response_data": {
+          "data": [
+            {
+              "子类别": "装订机",
+              "SUM(销售额)": 1503322.8872500008,
+              "SUM(利润)": 227839.22717499963,
+              "利润率": 0.15155708005735313
+            },
+            {
+              "子类别": "复印机",
+              "SUM(销售额)": 1092903.3524999996,
+              "SUM(利润)": 406681.0396249999,
+              "利润率": 0.37211070740585
+            },
+            {
+              "子类别": "收纳具",
+              "SUM(销售额)": 1628673.0164999971,
+              "SUM(利润)": 154317.0583749999,
+              "利润率": 0.09475017809690603
+            },
+            {
+              "子类别": "信封",
+              "SUM(销售额)": 119830.62449999998,
+              "SUM(利润)": 50663.179074999985,
+              "利润率": 0.4227899110631773
+            },
+            {
+              "子类别": "设备",
+              "SUM(销售额)": 1376956.4747499996,
+              "SUM(利润)": 25099.332524999885,
+              "利润率": 0.01822812339043391
+            },
+            {
+              "子类别": "电话",
+              "SUM(销售额)": 2405859.139999997,
+              "SUM(利润)": 326618.4921249998,
+              "利润率": 0.13575960732472486
+            },
+            {
+              "子类别": "系固件",
+              "SUM(销售额)": 61858.73999999999,
+              "SUM(利润)": 17607.609549999994,
+              "利润率": 0.2846422275979109
+            },
+            {
+              "子类别": "桌子",
+              "SUM(销售额)": 1508146.3195000004,
+              "SUM(利润)": -128710.74422500002,
+              "利润率": -0.08534367160586369
+            },
+            {
+              "子类别": "纸张",
+              "SUM(销售额)": 576668.9005,
+              "SUM(利润)": 250208.42574999938,
+              "利润率": 0.43388576275408036
+            },
+            {
+              "子类别": "用具",
+              "SUM(销售额)": 693086.4135000005,
+              "SUM(利润)": 100715.13675000002,
+              "利润率": 0.14531396776543498
+            },
+            {
+              "子类别": "椅子",
+              "SUM(销售额)": 2434319.8052499974,
+              "SUM(利润)": 197370.60917500002,
+              "利润率": 0.08107834013811124
+            },
+            {
+              "子类别": "器具",
+              "SUM(销售额)": 784545.5912499998,
+              "SUM(利润)": 132888.76189999998,
+              "利润率": 0.16938309689341463
+            },
+            {
+              "子类别": "美术",
+              "SUM(销售额)": 200527.8515,
+              "SUM(利润)": 48235.672449999955,
+              "利润率": 0.240543505997719
+            },
+            {
+              "子类别": "配件",
+              "SUM(销售额)": 1213507.3054999972,
+              "SUM(利润)": 304040.6088249999,
+              "利润率": 0.2505469950176584
+            },
+            {
+              "子类别": "用品",
+              "SUM(销售额)": 338759.86049999995,
+              "SUM(利润)": -8492.610125000012,
+              "利润率": -0.02506970605214313
+            },
+            {
+              "子类别": "书架",
+              "SUM(销售额)": 836368.7311749996,
+              "SUM(利润)": -26332.533600000028,
+              "利润率": -0.03148435925265393
+            },
+            {
+              "子类别": "标签",
+              "SUM(销售额)": 92039.05449999988,
+              "SUM(利润)": 40402.64049999998,
+              "利润率": 0.4389727895346864
+            }
+          ],
+          "fields": [
+            "子类别",
+            "SUM(销售额)",
+            "SUM(利润)",
+            "利润率"
+          ],
+          "rows": [
+            [
+              "装订机",
+              1503322.8872500008,
+              227839.22717499963,
+              0.15155708005735313
+            ],
+            [
+              "复印机",
+              1092903.3524999996,
+              406681.0396249999,
+              0.37211070740585
+            ],
+            [
+              "收纳具",
+              1628673.0164999971,
+              154317.0583749999,
+              0.09475017809690603
+            ],
+            [
+              "信封",
+              119830.62449999998,
+              50663.179074999985,
+              0.4227899110631773
+            ],
+            [
+              "设备",
+              1376956.4747499996,
+              25099.332524999885,
+              0.01822812339043391
+            ],
+            [
+              "电话",
+              2405859.139999997,
+              326618.4921249998,
+              0.13575960732472486
+            ],
+            [
+              "系固件",
+              61858.73999999999,
+              17607.609549999994,
+              0.2846422275979109
+            ],
+            [
+              "桌子",
+              1508146.3195000004,
+              -128710.74422500002,
+              -0.08534367160586369
+            ],
+            [
+              "纸张",
+              576668.9005,
+              250208.42574999938,
+              0.43388576275408036
+            ],
+            [
+              "用具",
+              693086.4135000005,
+              100715.13675000002,
+              0.14531396776543498
+            ],
+            [
+              "椅子",
+              2434319.8052499974,
+              197370.60917500002,
+              0.08107834013811124
+            ],
+            [
+              "器具",
+              784545.5912499998,
+              132888.76189999998,
+              0.16938309689341463
+            ],
+            [
+              "美术",
+              200527.8515,
+              48235.672449999955,
+              0.240543505997719
+            ],
+            [
+              "配件",
+              1213507.3054999972,
+              304040.6088249999,
+              0.2505469950176584
+            ],
+            [
+              "用品",
+              338759.86049999995,
+              -8492.610125000012,
+              -0.02506970605214313
+            ],
+            [
+              "书架",
+              836368.7311749996,
+              -26332.533600000028,
+              -0.03148435925265393
+            ],
+            [
+              "标签",
+              92039.05449999988,
+              40402.64049999998,
+              0.4389727895346864
+            ]
+          ],
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "chain_mode": "mcp_first_mcp_main",
+          "main_chain_mode": "mcp_first_mcp_main",
+          "mcp_tool": "query-datasource",
+          "mcp_host": true,
+          "mcp_args": {
+            "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "query": {
+              "fields": [
+                {
+                  "fieldCaption": "子类别"
+                },
+                {
+                  "fieldCaption": "销售额",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润率"
+                }
+              ],
+              "filters": []
+            }
+          },
+          "context_trace": {
+            "status": "resolved",
+            "datasource_name": "订单+ (示例 - 超市)",
+            "metric_names": [
+              "销售额",
+              "利润",
+              "客户名称"
+            ],
+            "dimension_names": [
+              "利润率"
+            ],
+            "filter_names": [],
+            "unresolved_references": false,
+            "calculation_performed": false
+          },
+          "planner_final": {
+            "action": "final",
+            "source": "auto_final_after_successful_query"
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "子类别",
+                "label": "子类别",
+                "semantic_type": "dimension",
+                "value_type": "string",
+                "align": "left",
+                "format": "plain"
+              },
+              {
+                "key": "SUM(销售额)",
+                "label": "SUM(销售额)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "SUM(利润)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "利润率",
+                "label": "利润率",
+                "semantic_type": "derived_metric",
+                "value_type": "percent",
+                "align": "right",
+                "format": "percent"
+              }
+            ]
+          },
+          "col_types": [
+            "string",
+            "numeric",
+            "numeric",
+            "numeric"
+          ]
+        },
+        "steps_count": 6,
+        "execution_time_ms": 12465,
+        "sources_count": 1,
+        "top_sources": [
+          "Tableau-online"
+        ],
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "ac345573-89bb-41ed-ac51-1a34d8a807ee",
+          "trace_id": "t-5f88014d",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "table",
+              "row_count": 17,
+              "displayed_row_count": 17,
+              "formatting": [
+                "markdown_summary"
+              ]
+            }
+          }
+        }
+      },
+      "error": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.78,
+          "route_reason": "aggregate_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.78,
+              "route_reason": "aggregate_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "4977fc1e-aa75-4c33-8258-d4fe50108d62",
+          "run_id": "ac345573-89bb-41ed-ac51-1a34d8a807ee",
+          "trace_id": "t-5f88014d",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已进入 Tableau MCP Host 主链路：aggregate。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "context_resolver",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "intent": "aggregate"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "context_resolver",
+          "summary": "{'status': 'resolved', 'datasource_name': '订单+ (示例 - 超市)', 'metric_names': ['销售额', '利润', '客户名称'], 'dimension_names': ['利润率'], 'filter_names': [], 'unresolved_references': False, 'calculation_performed"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_host_catalog",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_host_catalog",
+          "summary": "{'chain_mode': 'mcp_first_mcp_main', 'tool_count': 17, 'tools': [{'name': 'get-datasource-metadata', 'required': ['datasourceLuid'], 'has_input_schema': True}, {'name': 'list-datasources', 'required':"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "mcp_tool": "get-datasource-metadata",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "mcp_first_mcp_main",
+            "host_phase": "metadata",
+            "arguments": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'truncated': True, 'preview': '{\"datasourceDescription\": \"\", \"fieldGroups\": [{\"logicalTableId\": null, \"fields\": [{\"name\": \"客单价\", \"dataType\": \"REAL\", \"columnClass\": \"CALCULATION\", \"logicalTableId\": nu"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_host_planner",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "step": 1,
+            "catalog_tool_count": 17,
+            "has_metadata": true,
+            "repair_budget_remaining": 1
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_host_planner",
+          "summary": "{'chain_mode': 'mcp_first_mcp_main', 'action': 'tool_call', 'planner_output': {'action': 'tool_call', 'tool': 'query-datasource', 'arguments': {'datasourceLuid': 'f4290485-26d3-428f-aa8d-ccc33862a411'"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "mcp_tool": "query-datasource",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "mcp_first_mcp_main",
+            "host_phase": "query",
+            "arguments": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "子类别"
+                  },
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润率"
+                  }
+                ],
+                "filters": []
+              }
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'data': [{'子类别': '装订机', 'SUM(销售额)': 1503322.8872500008, 'SUM(利润)': 227839.22717499963, '利润率': 0.15155708005735313}, {'子类别': '复印机', 'SUM(销售额)': 1092903.3524999996, 'SUM(利润)': 406681.0396249999, '利润率':"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_host_final_response",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "row_count": 17,
+            "mcp_tool": "query-datasource"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_host_final_response",
+          "summary": "{'data': [{'子类别': '装订机', 'SUM(销售额)': 1503322.8872500008, 'SUM(利润)': 227839.22717499963, '利润率': 0.15155708005735313}, {'子类别': '复印机', 'SUM(销售额)': 1092903.3524999996, 'SUM(利润)': 406681.0396249999, '利润率':"
+        },
+        {
+          "data": [
+            {
+              "子类别": "装订机",
+              "SUM(销售额)": 1503322.8872500008,
+              "SUM(利润)": 227839.22717499963,
+              "利润率": 0.15155708005735313
+            },
+            {
+              "子类别": "复印机",
+              "SUM(销售额)": 1092903.3524999996,
+              "SUM(利润)": 406681.0396249999,
+              "利润率": 0.37211070740585
+            },
+            {
+              "子类别": "收纳具",
+              "SUM(销售额)": 1628673.0164999971,
+              "SUM(利润)": 154317.0583749999,
+              "利润率": 0.09475017809690603
+            },
+            {
+              "子类别": "信封",
+              "SUM(销售额)": 119830.62449999998,
+              "SUM(利润)": 50663.179074999985,
+              "利润率": 0.4227899110631773
+            },
+            {
+              "子类别": "设备",
+              "SUM(销售额)": 1376956.4747499996,
+              "SUM(利润)": 25099.332524999885,
+              "利润率": 0.01822812339043391
+            },
+            {
+              "子类别": "电话",
+              "SUM(销售额)": 2405859.139999997,
+              "SUM(利润)": 326618.4921249998,
+              "利润率": 0.13575960732472486
+            },
+            {
+              "子类别": "系固件",
+              "SUM(销售额)": 61858.73999999999,
+              "SUM(利润)": 17607.609549999994,
+              "利润率": 0.2846422275979109
+            },
+            {
+              "子类别": "桌子",
+              "SUM(销售额)": 1508146.3195000004,
+              "SUM(利润)": -128710.74422500002,
+              "利润率": -0.08534367160586369
+            },
+            {
+              "子类别": "纸张",
+              "SUM(销售额)": 576668.9005,
+              "SUM(利润)": 250208.42574999938,
+              "利润率": 0.43388576275408036
+            },
+            {
+              "子类别": "用具",
+              "SUM(销售额)": 693086.4135000005,
+              "SUM(利润)": 100715.13675000002,
+              "利润率": 0.14531396776543498
+            },
+            {
+              "子类别": "椅子",
+              "SUM(销售额)": 2434319.8052499974,
+              "SUM(利润)": 197370.60917500002,
+              "利润率": 0.08107834013811124
+            },
+            {
+              "子类别": "器具",
+              "SUM(销售额)": 784545.5912499998,
+              "SUM(利润)": 132888.76189999998,
+              "利润率": 0.16938309689341463
+            },
+            {
+              "子类别": "美术",
+              "SUM(销售额)": 200527.8515,
+              "SUM(利润)": 48235.672449999955,
+              "利润率": 0.240543505997719
+            },
+            {
+              "子类别": "配件",
+              "SUM(销售额)": 1213507.3054999972,
+              "SUM(利润)": 304040.6088249999,
+              "利润率": 0.2505469950176584
+            },
+            {
+              "子类别": "用品",
+              "SUM(销售额)": 338759.86049999995,
+              "SUM(利润)": -8492.610125000012,
+              "利润率": -0.02506970605214313
+            },
+            {
+              "子类别": "书架",
+              "SUM(销售额)": 836368.7311749996,
+              "SUM(利润)": -26332.533600000028,
+              "利润率": -0.03148435925265393
+            },
+            {
+              "子类别": "标签",
+              "SUM(销售额)": 92039.05449999988,
+              "SUM(利润)": 40402.64049999998,
+              "利润率": 0.4389727895346864
+            }
+          ],
+          "fields": [
+            "子类别",
+            "SUM(销售额)",
+            "SUM(利润)",
+            "利润率"
+          ],
+          "rows": [
+            [
+              "装订机",
+              1503322.8872500008,
+              227839.22717499963,
+              0.15155708005735313
+            ],
+            [
+              "复印机",
+              1092903.3524999996,
+              406681.0396249999,
+              0.37211070740585
+            ],
+            [
+              "收纳具",
+              1628673.0164999971,
+              154317.0583749999,
+              0.09475017809690603
+            ],
+            [
+              "信封",
+              119830.62449999998,
+              50663.179074999985,
+              0.4227899110631773
+            ],
+            [
+              "设备",
+              1376956.4747499996,
+              25099.332524999885,
+              0.01822812339043391
+            ],
+            [
+              "电话",
+              2405859.139999997,
+              326618.4921249998,
+              0.13575960732472486
+            ],
+            [
+              "系固件",
+              61858.73999999999,
+              17607.609549999994,
+              0.2846422275979109
+            ],
+            [
+              "桌子",
+              1508146.3195000004,
+              -128710.74422500002,
+              -0.08534367160586369
+            ],
+            [
+              "纸张",
+              576668.9005,
+              250208.42574999938,
+              0.43388576275408036
+            ],
+            [
+              "用具",
+              693086.4135000005,
+              100715.13675000002,
+              0.14531396776543498
+            ],
+            [
+              "椅子",
+              2434319.8052499974,
+              197370.60917500002,
+              0.08107834013811124
+            ],
+            [
+              "器具",
+              784545.5912499998,
+              132888.76189999998,
+              0.16938309689341463
+            ],
+            [
+              "美术",
+              200527.8515,
+              48235.672449999955,
+              0.240543505997719
+            ],
+            [
+              "配件",
+              1213507.3054999972,
+              304040.6088249999,
+              0.2505469950176584
+            ],
+            [
+              "用品",
+              338759.86049999995,
+              -8492.610125000012,
+              -0.02506970605214313
+            ],
+            [
+              "书架",
+              836368.7311749996,
+              -26332.533600000028,
+              -0.03148435925265393
+            ],
+            [
+              "标签",
+              92039.05449999988,
+              40402.64049999998,
+              0.4389727895346864
+            ]
+          ],
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "chain_mode": "mcp_first_mcp_main",
+          "main_chain_mode": "mcp_first_mcp_main",
+          "mcp_tool": "query-datasource",
+          "mcp_host": true,
+          "mcp_args": {
+            "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "query": {
+              "fields": [
+                {
+                  "fieldCaption": "子类别"
+                },
+                {
+                  "fieldCaption": "销售额",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润率"
+                }
+              ],
+              "filters": []
+            }
+          },
+          "context_trace": {
+            "status": "resolved",
+            "datasource_name": "订单+ (示例 - 超市)",
+            "metric_names": [
+              "销售额",
+              "利润",
+              "客户名称"
+            ],
+            "dimension_names": [
+              "利润率"
+            ],
+            "filter_names": [],
+            "unresolved_references": false,
+            "calculation_performed": false
+          },
+          "planner_final": {
+            "action": "final",
+            "source": "auto_final_after_successful_query"
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "子类别",
+                "label": "子类别",
+                "semantic_type": "dimension",
+                "value_type": "string",
+                "align": "left",
+                "format": "plain"
+              },
+              {
+                "key": "SUM(销售额)",
+                "label": "SUM(销售额)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "SUM(利润)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "利润率",
+                "label": "利润率",
+                "semantic_type": "derived_metric",
+                "value_type": "percent",
+                "align": "right",
+                "format": "percent"
+              }
+            ]
+          },
+          "col_types": [
+            "string",
+            "numeric",
+            "numeric",
+            "numeric"
+          ],
+          "type": "table_data"
+        },
+        {
+          "type": "token",
+          "content": "查"
+        },
+        {
+          "type": "token",
+          "content": "询"
+        },
+        {
+          "type": "token",
+          "content": "已"
+        },
+        {
+          "type": "token",
+          "content": "完"
+        },
+        {
+          "type": "token",
+          "content": "成"
+        },
+        {
+          "type": "token",
+          "content": "，"
+        },
+        {
+          "type": "token",
+          "content": "返"
+        },
+        {
+          "type": "token",
+          "content": "回"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "1"
+        },
+        {
+          "type": "token",
+          "content": "7"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "行"
+        },
+        {
+          "type": "token",
+          "content": "结"
+        },
+        {
+          "type": "token",
+          "content": "果"
+        },
+        {
+          "type": "token",
+          "content": "。"
+        },
+        {
+          "type": "done",
+          "answer": "查询已完成，返回 17 行结果。",
+          "trace_id": "t-5f88014d",
+          "run_id": "ac345573-89bb-41ed-ac51-1a34d8a807ee",
+          "tools_used": [
+            "context_resolver",
+            "mcp_host_catalog",
+            "tableau_mcp",
+            "mcp_host_planner",
+            "mcp_host_final_response"
+          ],
+          "response_type": "table",
+          "response_data": {
+            "data": [
+              {
+                "子类别": "装订机",
+                "SUM(销售额)": 1503322.8872500008,
+                "SUM(利润)": 227839.22717499963,
+                "利润率": 0.15155708005735313
+              },
+              {
+                "子类别": "复印机",
+                "SUM(销售额)": 1092903.3524999996,
+                "SUM(利润)": 406681.0396249999,
+                "利润率": 0.37211070740585
+              },
+              {
+                "子类别": "收纳具",
+                "SUM(销售额)": 1628673.0164999971,
+                "SUM(利润)": 154317.0583749999,
+                "利润率": 0.09475017809690603
+              },
+              {
+                "子类别": "信封",
+                "SUM(销售额)": 119830.62449999998,
+                "SUM(利润)": 50663.179074999985,
+                "利润率": 0.4227899110631773
+              },
+              {
+                "子类别": "设备",
+                "SUM(销售额)": 1376956.4747499996,
+                "SUM(利润)": 25099.332524999885,
+                "利润率": 0.01822812339043391
+              },
+              {
+                "子类别": "电话",
+                "SUM(销售额)": 2405859.139999997,
+                "SUM(利润)": 326618.4921249998,
+                "利润率": 0.13575960732472486
+              },
+              {
+                "子类别": "系固件",
+                "SUM(销售额)": 61858.73999999999,
+                "SUM(利润)": 17607.609549999994,
+                "利润率": 0.2846422275979109
+              },
+              {
+                "子类别": "桌子",
+                "SUM(销售额)": 1508146.3195000004,
+                "SUM(利润)": -128710.74422500002,
+                "利润率": -0.08534367160586369
+              },
+              {
+                "子类别": "纸张",
+                "SUM(销售额)": 576668.9005,
+                "SUM(利润)": 250208.42574999938,
+                "利润率": 0.43388576275408036
+              },
+              {
+                "子类别": "用具",
+                "SUM(销售额)": 693086.4135000005,
+                "SUM(利润)": 100715.13675000002,
+                "利润率": 0.14531396776543498
+              },
+              {
+                "子类别": "椅子",
+                "SUM(销售额)": 2434319.8052499974,
+                "SUM(利润)": 197370.60917500002,
+                "利润率": 0.08107834013811124
+              },
+              {
+                "子类别": "器具",
+                "SUM(销售额)": 784545.5912499998,
+                "SUM(利润)": 132888.76189999998,
+                "利润率": 0.16938309689341463
+              },
+              {
+                "子类别": "美术",
+                "SUM(销售额)": 200527.8515,
+                "SUM(利润)": 48235.672449999955,
+                "利润率": 0.240543505997719
+              },
+              {
+                "子类别": "配件",
+                "SUM(销售额)": 1213507.3054999972,
+                "SUM(利润)": 304040.6088249999,
+                "利润率": 0.2505469950176584
+              },
+              {
+                "子类别": "用品",
+                "SUM(销售额)": 338759.86049999995,
+                "SUM(利润)": -8492.610125000012,
+                "利润率": -0.02506970605214313
+              },
+              {
+                "子类别": "书架",
+                "SUM(销售额)": 836368.7311749996,
+                "SUM(利润)": -26332.533600000028,
+                "利润率": -0.03148435925265393
+              },
+              {
+                "子类别": "标签",
+                "SUM(销售额)": 92039.05449999988,
+                "SUM(利润)": 40402.64049999998,
+                "利润率": 0.4389727895346864
+              }
+            ],
+            "fields": [
+              "子类别",
+              "SUM(销售额)",
+              "SUM(利润)",
+              "利润率"
+            ],
+            "rows": [
+              [
+                "装订机",
+                1503322.8872500008,
+                227839.22717499963,
+                0.15155708005735313
+              ],
+              [
+                "复印机",
+                1092903.3524999996,
+                406681.0396249999,
+                0.37211070740585
+              ],
+              [
+                "收纳具",
+                1628673.0164999971,
+                154317.0583749999,
+                0.09475017809690603
+              ],
+              [
+                "信封",
+                119830.62449999998,
+                50663.179074999985,
+                0.4227899110631773
+              ],
+              [
+                "设备",
+                1376956.4747499996,
+                25099.332524999885,
+                0.01822812339043391
+              ],
+              [
+                "电话",
+                2405859.139999997,
+                326618.4921249998,
+                0.13575960732472486
+              ],
+              [
+                "系固件",
+                61858.73999999999,
+                17607.609549999994,
+                0.2846422275979109
+              ],
+              [
+                "桌子",
+                1508146.3195000004,
+                -128710.74422500002,
+                -0.08534367160586369
+              ],
+              [
+                "纸张",
+                576668.9005,
+                250208.42574999938,
+                0.43388576275408036
+              ],
+              [
+                "用具",
+                693086.4135000005,
+                100715.13675000002,
+                0.14531396776543498
+              ],
+              [
+                "椅子",
+                2434319.8052499974,
+                197370.60917500002,
+                0.08107834013811124
+              ],
+              [
+                "器具",
+                784545.5912499998,
+                132888.76189999998,
+                0.16938309689341463
+              ],
+              [
+                "美术",
+                200527.8515,
+                48235.672449999955,
+                0.240543505997719
+              ],
+              [
+                "配件",
+                1213507.3054999972,
+                304040.6088249999,
+                0.2505469950176584
+              ],
+              [
+                "用品",
+                338759.86049999995,
+                -8492.610125000012,
+                -0.02506970605214313
+              ],
+              [
+                "书架",
+                836368.7311749996,
+                -26332.533600000028,
+                -0.03148435925265393
+              ],
+              [
+                "标签",
+                92039.05449999988,
+                40402.64049999998,
+                0.4389727895346864
+              ]
+            ],
+            "datasource_name": "订单+ (示例 - 超市)",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "mcp_first_mcp_main",
+            "main_chain_mode": "mcp_first_mcp_main",
+            "mcp_tool": "query-datasource",
+            "mcp_host": true,
+            "mcp_args": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "子类别"
+                  },
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润率"
+                  }
+                ],
+                "filters": []
+              }
+            },
+            "context_trace": {
+              "status": "resolved",
+              "datasource_name": "订单+ (示例 - 超市)",
+              "metric_names": [
+                "销售额",
+                "利润",
+                "客户名称"
+              ],
+              "dimension_names": [
+                "利润率"
+              ],
+              "filter_names": [],
+              "unresolved_references": false,
+              "calculation_performed": false
+            },
+            "planner_final": {
+              "action": "final",
+              "source": "auto_final_after_successful_query"
+            },
+            "table_display": {
+              "columns": [
+                {
+                  "key": "子类别",
+                  "label": "子类别",
+                  "semantic_type": "dimension",
+                  "value_type": "string",
+                  "align": "left",
+                  "format": "plain"
+                },
+                {
+                  "key": "SUM(销售额)",
+                  "label": "SUM(销售额)",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                },
+                {
+                  "key": "SUM(利润)",
+                  "label": "SUM(利润)",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                },
+                {
+                  "key": "利润率",
+                  "label": "利润率",
+                  "semantic_type": "derived_metric",
+                  "value_type": "percent",
+                  "align": "right",
+                  "format": "percent"
+                }
+              ]
+            },
+            "col_types": [
+              "string",
+              "numeric",
+              "numeric",
+              "numeric"
+            ]
+          },
+          "steps_count": 6,
+          "execution_time_ms": 12465,
+          "sources_count": 1,
+          "top_sources": [
+            "Tableau-online"
+          ],
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "ac345573-89bb-41ed-ac51-1a34d8a807ee",
+            "trace_id": "t-5f88014d",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "table",
+                "row_count": 17,
+                "displayed_row_count": 17,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "5393], [\"标签\", 92039.05449999988, 40402.64049999998, 0.4389727895346864]], \"datasource_name\": \"订单+ (示例 - 超市)\", \"datasource_luid\": \"f4290485-26d3-428f-aa8d-ccc33862a411\", \"chain_mode\": \"mcp_first_mcp_main\", \"main_chain_mode\": \"mcp_first_mcp_main\", \"mcp_tool\": \"query-datasource\", \"mcp_host\": true, \"mcp_args\": {\"datasourceLuid\": \"f4290485-26d3-428f-aa8d-ccc33862a411\", \"query\": {\"fields\": [{\"fieldCaption\": \"子类别\"}, {\"fieldCaption\": \"销售额\", \"function\": \"SUM\"}, {\"fieldCaption\": \"利润\", \"function\": \"SUM\"}, {\"fieldCaption\": \"利润率\"}], \"filters\": []}}, \"context_trace\": {\"status\": \"resolved\", \"datasource_name\": \"订单+ (示例 - 超市)\", \"metric_names\": [\"销售额\", \"利润\", \"客户名称\"], \"dimension_names\": [\"利润率\"], \"filter_names\": [], \"unresolved_references\": false, \"calculation_performed\": false}, \"planner_final\": {\"action\": \"final\", \"source\": \"auto_final_after_successful_query\"}, \"table_display\": {\"columns\": [{\"key\": \"子类别\", \"label\": \"子类别\", \"semantic_type\": \"dimension\", \"value_type\": \"string\", \"align\": \"left\", \"format\": \"plain\"}, {\"key\": \"SUM(销售额)\", \"label\": \"SUM(销售额)\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}, {\"key\": \"SUM(利润)\", \"label\": \"SUM(利润)\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}, {\"key\": \"利润率\", \"label\": \"利润率\", \"semantic_type\": \"derived_metric\", \"value_type\": \"percent\", \"align\": \"right\", \"format\": \"percent\"}]}, \"col_types\": [\"string\", \"numeric\", \"numeric\", \"numeric\"]}, \"steps_count\": 6, \"execution_time_ms\": 12465, \"sources_count\": 1, \"top_sources\": [\"Tableau-online\"], \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"ac345573-89bb-41ed-ac51-1a34d8a807ee\", \"trace_id\": \"t-5f88014d\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"table\", \"row_count\": 17, \"displayed_row_count\": 17, \"formatting\": [\"markdown_summary\"]}}}}\n\n"
+    },
+    "Q4": {
+      "duration": 16.371499124972615,
+      "status_code": 200,
+      "conversation_id": "4977fc1e-aa75-4c33-8258-d4fe50108d62",
+      "done": {
+        "type": "done",
+        "answer": "查询已完成，返回 80 行结果。",
+        "trace_id": "t-3fb409eb",
+        "run_id": "7c93aff9-e54c-436d-bbea-96754cef971a",
+        "tools_used": [
+          "context_resolver",
+          "mcp_host_catalog",
+          "tableau_mcp",
+          "mcp_host_planner",
+          "mcp_host_final_response"
+        ],
+        "response_type": "table",
+        "response_data": {
+          "data": [
+            {
+              "子类别": "用具",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 215060.1429999997,
+              "SUM(利润)": 30660.204325000017
+            },
+            {
+              "子类别": "收纳具",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 504132.2155,
+              "SUM(利润)": 51478.25669999993
+            },
+            {
+              "子类别": "用品",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 103299.10199999998,
+              "SUM(利润)": -5136.792475000005
+            },
+            {
+              "子类别": "设备",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 446590.0022499999,
+              "SUM(利润)": 868.5275249999559
+            },
+            {
+              "子类别": "标签",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 525.2625,
+              "SUM(利润)": 252.12599999999998
+            },
+            {
+              "子类别": "用具",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 104717.15849999999,
+              "SUM(利润)": 16137.968575000003
+            },
+            {
+              "子类别": "书架",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 217152.615525,
+              "SUM(利润)": -4775.643875000007
+            },
+            {
+              "子类别": "装订机",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 1794.5779999999997,
+              "SUM(利润)": -527.155475
+            },
+            {
+              "子类别": "器具",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 100261.01125000003,
+              "SUM(利润)": 14724.598474999997
+            },
+            {
+              "子类别": "系固件",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 4547.171,
+              "SUM(利润)": 1454.9502999999993
+            },
+            {
+              "子类别": "信封",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 24494.661499999995,
+              "SUM(利润)": 10452.752749999998
+            },
+            {
+              "子类别": "配件",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 302687.0215,
+              "SUM(利润)": 69968.042625
+            },
+            {
+              "子类别": "纸张",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 203206.77000000034,
+              "SUM(利润)": 88230.9499499999
+            },
+            {
+              "子类别": "纸张",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 1992.0244999999998,
+              "SUM(利润)": 933.64195
+            },
+            {
+              "子类别": "用具",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 207067.85900000014,
+              "SUM(利润)": 29352.990174999995
+            },
+            {
+              "子类别": "书架",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 192761.988625,
+              "SUM(利润)": 1076.2088499999945
+            },
+            {
+              "子类别": "装订机",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 268726.94124999974,
+              "SUM(利润)": 48641.927650000005
+            },
+            {
+              "子类别": "电话",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 559240.2194999999,
+              "SUM(利润)": 87522.44877500008
+            },
+            {
+              "子类别": "系固件",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 5027.933000000001,
+              "SUM(利润)": 1403.0801749999998
+            },
+            {
+              "子类别": "收纳具",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 350610.3770000001,
+              "SUM(利润)": 29524.41714999999
+            },
+            {
+              "子类别": "椅子",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 608226.3307500001,
+              "SUM(利润)": 42472.518399999964
+            },
+            {
+              "子类别": "桌子",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 440799.7498749999,
+              "SUM(利润)": -21215.23420000001
+            },
+            {
+              "子类别": "设备",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 188377.39525,
+              "SUM(利润)": 21595.970849999976
+            },
+            {
+              "子类别": "书架",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 292160.79362500005,
+              "SUM(利润)": -18130.95080000001
+            },
+            {
+              "子类别": "信封",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 31463.11499999999,
+              "SUM(利润)": 13609.088824999999
+            },
+            {
+              "子类别": "用品",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 104172.56750000002,
+              "SUM(利润)": 3504.9153499999984
+            },
+            {
+              "子类别": "桌子",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 442501.1943749999,
+              "SUM(利润)": -58843.72817500004
+            },
+            {
+              "子类别": "用品",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 323.988,
+              "SUM(利润)": 36.44864999999997
+            },
+            {
+              "子类别": "器具",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 1517.4250000000002,
+              "SUM(利润)": 409.70475
+            },
+            {
+              "子类别": "标签",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 28442.402499999993,
+              "SUM(利润)": 12839.289625000005
+            },
+            {
+              "子类别": "装订机",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 380824.0632500001,
+              "SUM(利润)": 80438.68474999993
+            },
+            {
+              "子类别": "复印机",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 87360.77450000001,
+              "SUM(利润)": 24511.766425
+            },
+            {
+              "子类别": "椅子",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 532948.4062499997,
+              "SUM(利润)": 47243.29752500002
+            },
+            {
+              "子类别": "用品",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 14437.534,
+              "SUM(利润)": -74.80695000000037
+            },
+            {
+              "子类别": "信封",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 36372.1625,
+              "SUM(利润)": 15923.510675000005
+            },
+            {
+              "子类别": "配件",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 162664.26250000004,
+              "SUM(利润)": 38798.58307500002
+            },
+            {
+              "子类别": "桌子",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 287779.9593750001,
+              "SUM(利润)": -26768.774075000012
+            },
+            {
+              "子类别": "书架",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 131378.91460000002,
+              "SUM(利润)": -4505.929375000005
+            },
+            {
+              "子类别": "美术",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 44333.7935,
+              "SUM(利润)": 10289.131124999993
+            },
+            {
+              "子类别": "器具",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 182037.99525000007,
+              "SUM(利润)": 22106.286024999998
+            },
+            {
+              "子类别": "复印机",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 359595.7225,
+              "SUM(利润)": 128635.24634999999
+            },
+            {
+              "子类别": "书架",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 2914.4188000000004,
+              "SUM(利润)": 3.7815999999997985
+            },
+            {
+              "子类别": "椅子",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 16490.1975,
+              "SUM(利润)": 3127.8819999999996
+            },
+            {
+              "子类别": "用具",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 163663.96500000014,
+              "SUM(利润)": 23743.69127499999
+            },
+            {
+              "子类别": "复印机",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 456145.84300000005,
+              "SUM(利润)": 181539.36054999998
+            },
+            {
+              "子类别": "用品",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 116526.669,
+              "SUM(利润)": -6822.3747
+            },
+            {
+              "子类别": "椅子",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 702844.0797500003,
+              "SUM(利润)": 53989.128899999974
+            },
+            {
+              "子类别": "装订机",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 534041.79325,
+              "SUM(利润)": 58323.36595
+            },
+            {
+              "子类别": "标签",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 24207.257000000005,
+              "SUM(利润)": 10893.246800000003
+            },
+            {
+              "子类别": "收纳具",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 6589.3365,
+              "SUM(利润)": 1680.7624249999994
+            },
+            {
+              "子类别": "配件",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 312487.9195,
+              "SUM(利润)": 81551.345875
+            },
+            {
+              "子类别": "标签",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 21036.933500000003,
+              "SUM(利润)": 8395.737075000001
+            },
+            {
+              "子类别": "电话",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 2959.1309999999994,
+              "SUM(利润)": 213.2631000000001
+            },
+            {
+              "子类别": "装订机",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 317935.51149999985,
+              "SUM(利润)": 40962.40429999999
+            },
+            {
+              "子类别": "器具",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 311960.4384999999,
+              "SUM(利润)": 57219.50777500002
+            },
+            {
+              "子类别": "设备",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 320144.37625000003,
+              "SUM(利润)": -23327.328849999998
+            },
+            {
+              "子类别": "收纳具",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 427316.81249999994,
+              "SUM(利润)": 45271.35262499998
+            },
+            {
+              "子类别": "系固件",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 7450.2595,
+              "SUM(利润)": 2357.063449999999
+            },
+            {
+              "子类别": "系固件",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 44426.042499999996,
+              "SUM(利润)": 12211.085824999998
+            },
+            {
+              "子类别": "配件",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 435668.10200000025,
+              "SUM(利润)": 113722.63724999997
+            },
+            {
+              "子类别": "美术",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 695.797,
+              "SUM(利润)": 115.95504999999997
+            },
+            {
+              "子类别": "桌子",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 337065.4158750002,
+              "SUM(利润)": -21883.007775000005
+            },
+            {
+              "子类别": "纸张",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 108108.36050000007,
+              "SUM(利润)": 46370.37940000001
+            },
+            {
+              "子类别": "美术",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 46387.42850000001,
+              "SUM(利润)": 10868.285050000004
+            },
+            {
+              "子类别": "系固件",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 407.33400000000006,
+              "SUM(利润)": 181.4298
+            },
+            {
+              "子类别": "收纳具",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 340024.275,
+              "SUM(利润)": 26362.269474999986
+            },
+            {
+              "子类别": "美术",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 65210.125,
+              "SUM(利润)": 16397.209724999997
+            },
+            {
+              "子类别": "设备",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 421844.701,
+              "SUM(利润)": 25962.16299999998
+            },
+            {
+              "子类别": "电话",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 765328.9369999988,
+              "SUM(利润)": 93856.20537500008
+            },
+            {
+              "子类别": "电话",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 503859.0209999999,
+              "SUM(利润)": 75755.40370000005
+            },
+            {
+              "子类别": "纸张",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 149965.61200000005,
+              "SUM(利润)": 65864.29684999994
+            },
+            {
+              "子类别": "美术",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 43900.70749999998,
+              "SUM(利润)": 10565.091500000004
+            },
+            {
+              "子类别": "椅子",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 573810.7910000004,
+              "SUM(利润)": 50537.78235000001
+            },
+            {
+              "子类别": "标签",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 17827.199,
+              "SUM(利润)": 8022.240999999999
+            },
+            {
+              "子类别": "用具",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 2577.288,
+              "SUM(利润)": 820.2824
+            },
+            {
+              "子类别": "电话",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 574471.8314999996,
+              "SUM(利润)": 69271.17117500001
+            },
+            {
+              "子类别": "信封",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 27500.6855,
+              "SUM(利润)": 10677.826824999995
+            },
+            {
+              "子类别": "复印机",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 189801.01249999998,
+              "SUM(利润)": 71994.6663
+            },
+            {
+              "子类别": "器具",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 188768.72124999997,
+              "SUM(利润)": 38428.66487500001
+            },
+            {
+              "子类别": "纸张",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 113396.13350000005,
+              "SUM(利润)": 48809.157600000035
+            }
+          ],
+          "fields": [
+            "子类别",
+            "YEAR(发货日期)",
+            "SUM(销售额)",
+            "SUM(利润)"
+          ],
+          "rows": [
+            [
+              "用具",
+              2024,
+              215060.1429999997,
+              30660.204325000017
+            ],
+            [
+              "收纳具",
+              2024,
+              504132.2155,
+              51478.25669999993
+            ],
+            [
+              "用品",
+              2023,
+              103299.10199999998,
+              -5136.792475000005
+            ],
+            [
+              "设备",
+              2021,
+              446590.0022499999,
+              868.5275249999559
+            ],
+            [
+              "标签",
+              2025,
+              525.2625,
+              252.12599999999998
+            ],
+            [
+              "用具",
+              2021,
+              104717.15849999999,
+              16137.968575000003
+            ],
+            [
+              "书架",
+              2024,
+              217152.615525,
+              -4775.643875000007
+            ],
+            [
+              "装订机",
+              2025,
+              1794.5779999999997,
+              -527.155475
+            ],
+            [
+              "器具",
+              2021,
+              100261.01125000003,
+              14724.598474999997
+            ],
+            [
+              "系固件",
+              2022,
+              4547.171,
+              1454.9502999999993
+            ],
+            [
+              "信封",
+              2024,
+              24494.661499999995,
+              10452.752749999998
+            ],
+            [
+              "配件",
+              2023,
+              302687.0215,
+              69968.042625
+            ],
+            [
+              "纸张",
+              2024,
+              203206.77000000034,
+              88230.9499499999
+            ],
+            [
+              "纸张",
+              2025,
+              1992.0244999999998,
+              933.64195
+            ],
+            [
+              "用具",
+              2023,
+              207067.85900000014,
+              29352.990174999995
+            ],
+            [
+              "书架",
+              2023,
+              192761.988625,
+              1076.2088499999945
+            ],
+            [
+              "装订机",
+              2022,
+              268726.94124999974,
+              48641.927650000005
+            ],
+            [
+              "电话",
+              2021,
+              559240.2194999999,
+              87522.44877500008
+            ],
+            [
+              "系固件",
+              2021,
+              5027.933000000001,
+              1403.0801749999998
+            ],
+            [
+              "收纳具",
+              2021,
+              350610.3770000001,
+              29524.41714999999
+            ],
+            [
+              "椅子",
+              2023,
+              608226.3307500001,
+              42472.518399999964
+            ],
+            [
+              "桌子",
+              2023,
+              440799.7498749999,
+              -21215.23420000001
+            ],
+            [
+              "设备",
+              2022,
+              188377.39525,
+              21595.970849999976
+            ],
+            [
+              "书架",
+              2022,
+              292160.79362500005,
+              -18130.95080000001
+            ],
+            [
+              "信封",
+              2022,
+              31463.11499999999,
+              13609.088824999999
+            ],
+            [
+              "用品",
+              2021,
+              104172.56750000002,
+              3504.9153499999984
+            ],
+            [
+              "桌子",
+              2024,
+              442501.1943749999,
+              -58843.72817500004
+            ],
+            [
+              "用品",
+              2025,
+              323.988,
+              36.44864999999997
+            ],
+            [
+              "器具",
+              2025,
+              1517.4250000000002,
+              409.70475
+            ],
+            [
+              "标签",
+              2024,
+              28442.402499999993,
+              12839.289625000005
+            ],
+            [
+              "装订机",
+              2023,
+              380824.0632500001,
+              80438.68474999993
+            ],
+            [
+              "复印机",
+              2021,
+              87360.77450000001,
+              24511.766425
+            ],
+            [
+              "椅子",
+              2022,
+              532948.4062499997,
+              47243.29752500002
+            ],
+            [
+              "用品",
+              2022,
+              14437.534,
+              -74.80695000000037
+            ],
+            [
+              "信封",
+              2023,
+              36372.1625,
+              15923.510675000005
+            ],
+            [
+              "配件",
+              2021,
+              162664.26250000004,
+              38798.58307500002
+            ],
+            [
+              "桌子",
+              2022,
+              287779.9593750001,
+              -26768.774075000012
+            ],
+            [
+              "书架",
+              2021,
+              131378.91460000002,
+              -4505.929375000005
+            ],
+            [
+              "美术",
+              2021,
+              44333.7935,
+              10289.131124999993
+            ],
+            [
+              "器具",
+              2022,
+              182037.99525000007,
+              22106.286024999998
+            ],
+            [
+              "复印机",
+              2023,
+              359595.7225,
+              128635.24634999999
+            ],
+            [
+              "书架",
+              2025,
+              2914.4188000000004,
+              3.7815999999997985
+            ],
+            [
+              "椅子",
+              2025,
+              16490.1975,
+              3127.8819999999996
+            ],
+            [
+              "用具",
+              2022,
+              163663.96500000014,
+              23743.69127499999
+            ],
+            [
+              "复印机",
+              2024,
+              456145.84300000005,
+              181539.36054999998
+            ],
+            [
+              "用品",
+              2024,
+              116526.669,
+              -6822.3747
+            ],
+            [
+              "椅子",
+              2024,
+              702844.0797500003,
+              53989.128899999974
+            ],
+            [
+              "装订机",
+              2024,
+              534041.79325,
+              58323.36595
+            ],
+            [
+              "标签",
+              2022,
+              24207.257000000005,
+              10893.246800000003
+            ],
+            [
+              "收纳具",
+              2025,
+              6589.3365,
+              1680.7624249999994
+            ],
+            [
+              "配件",
+              2022,
+              312487.9195,
+              81551.345875
+            ],
+            [
+              "标签",
+              2023,
+              21036.933500000003,
+              8395.737075000001
+            ],
+            [
+              "电话",
+              2025,
+              2959.1309999999994,
+              213.2631000000001
+            ],
+            [
+              "装订机",
+              2021,
+              317935.51149999985,
+              40962.40429999999
+            ],
+            [
+              "器具",
+              2024,
+              311960.4384999999,
+              57219.50777500002
+            ],
+            [
+              "设备",
+              2024,
+              320144.37625000003,
+              -23327.328849999998
+            ],
+            [
+              "收纳具",
+              2023,
+              427316.81249999994,
+              45271.35262499998
+            ],
+            [
+              "系固件",
+              2023,
+              7450.2595,
+              2357.063449999999
+            ],
+            [
+              "系固件",
+              2024,
+              44426.042499999996,
+              12211.085824999998
+            ],
+            [
+              "配件",
+              2024,
+              435668.10200000025,
+              113722.63724999997
+            ],
+            [
+              "美术",
+              2025,
+              695.797,
+              115.95504999999997
+            ],
+            [
+              "桌子",
+              2021,
+              337065.4158750002,
+              -21883.007775000005
+            ],
+            [
+              "纸张",
+              2021,
+              108108.36050000007,
+              46370.37940000001
+            ],
+            [
+              "美术",
+              2022,
+              46387.42850000001,
+              10868.285050000004
+            ],
+            [
+              "系固件",
+              2025,
+              407.33400000000006,
+              181.4298
+            ],
+            [
+              "收纳具",
+              2022,
+              340024.275,
+              26362.269474999986
+            ],
+            [
+              "美术",
+              2024,
+              65210.125,
+              16397.209724999997
+            ],
+            [
+              "设备",
+              2023,
+              421844.701,
+              25962.16299999998
+            ],
+            [
+              "电话",
+              2024,
+              765328.9369999988,
+              93856.20537500008
+            ],
+            [
+              "电话",
+              2022,
+              503859.0209999999,
+              75755.40370000005
+            ],
+            [
+              "纸张",
+              2023,
+              149965.61200000005,
+              65864.29684999994
+            ],
+            [
+              "美术",
+              2023,
+              43900.70749999998,
+              10565.091500000004
+            ],
+            [
+              "椅子",
+              2021,
+              573810.7910000004,
+              50537.78235000001
+            ],
+            [
+              "标签",
+              2021,
+              17827.199,
+              8022.240999999999
+            ],
+            [
+              "用具",
+              2025,
+              2577.288,
+              820.2824
+            ],
+            [
+              "电话",
+              2023,
+              574471.8314999996,
+              69271.17117500001
+            ],
+            [
+              "信封",
+              2021,
+              27500.6855,
+              10677.826824999995
+            ],
+            [
+              "复印机",
+              2022,
+              189801.01249999998,
+              71994.6663
+            ],
+            [
+              "器具",
+              2023,
+              188768.72124999997,
+              38428.66487500001
+            ],
+            [
+              "纸张",
+              2022,
+              113396.13350000005,
+              48809.157600000035
+            ]
+          ],
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "chain_mode": "mcp_first_mcp_main",
+          "main_chain_mode": "mcp_first_mcp_main",
+          "mcp_tool": "query-datasource",
+          "mcp_host": true,
+          "mcp_args": {
+            "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "query": {
+              "fields": [
+                {
+                  "fieldCaption": "子类别"
+                },
+                {
+                  "fieldCaption": "发货年份"
+                },
+                {
+                  "fieldCaption": "销售额",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润",
+                  "function": "SUM"
+                }
+              ],
+              "filters": []
+            }
+          },
+          "context_trace": {
+            "status": "resolved",
+            "datasource_name": "订单+ (示例 - 超市)",
+            "metric_names": [
+              "销售额",
+              "利润"
+            ],
+            "dimension_names": [
+              "子类别",
+              "利润率"
+            ],
+            "filter_names": [],
+            "unresolved_references": false,
+            "calculation_performed": false
+          },
+          "planner_final": {
+            "action": "final",
+            "source": "auto_final_after_successful_query"
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "子类别",
+                "label": "子类别",
+                "semantic_type": "dimension",
+                "value_type": "string",
+                "align": "left",
+                "format": "plain"
+              },
+              {
+                "key": "YEAR(发货日期)",
+                "label": "YEAR(发货日期)",
+                "semantic_type": "period",
+                "value_type": "date",
+                "align": "right",
+                "format": "date"
+              },
+              {
+                "key": "SUM(销售额)",
+                "label": "SUM(销售额)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "SUM(利润)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              }
+            ]
+          },
+          "col_types": [
+            "string",
+            "numeric",
+            "numeric",
+            "numeric"
+          ]
+        },
+        "steps_count": 6,
+        "execution_time_ms": 16149,
+        "sources_count": 1,
+        "top_sources": [
+          "Tableau-online"
+        ],
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "7c93aff9-e54c-436d-bbea-96754cef971a",
+          "trace_id": "t-3fb409eb",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.75,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "data_action_pattern",
+                "message": "data_action_pattern"
+              }
+            },
+            "postprocess": {
+              "response_type": "table",
+              "row_count": 80,
+              "displayed_row_count": 80,
+              "formatting": [
+                "markdown_summary"
+              ]
+            }
+          }
+        }
+      },
+      "error": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.75,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "data_action_pattern",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.75,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "data_action_pattern",
+              "message": "data_action_pattern"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.62,
+              "route_reason": "generic_business_data_context"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "4977fc1e-aa75-4c33-8258-d4fe50108d62",
+          "run_id": "7c93aff9-e54c-436d-bbea-96754cef971a",
+          "trace_id": "t-3fb409eb",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已进入 Tableau MCP Host 主链路：aggregate。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "context_resolver",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "intent": "aggregate"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "context_resolver",
+          "summary": "{'status': 'resolved', 'datasource_name': '订单+ (示例 - 超市)', 'metric_names': ['销售额', '利润'], 'dimension_names': ['子类别', '利润率'], 'filter_names': [], 'unresolved_references': False, 'calculation_performed'"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_host_catalog",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_host_catalog",
+          "summary": "{'chain_mode': 'mcp_first_mcp_main', 'tool_count': 17, 'tools': [{'name': 'get-datasource-metadata', 'required': ['datasourceLuid'], 'has_input_schema': True}, {'name': 'list-datasources', 'required':"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "mcp_tool": "get-datasource-metadata",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "mcp_first_mcp_main",
+            "host_phase": "metadata",
+            "arguments": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'truncated': True, 'preview': '{\"datasourceDescription\": \"\", \"fieldGroups\": [{\"logicalTableId\": null, \"fields\": [{\"name\": \"客单价\", \"dataType\": \"REAL\", \"columnClass\": \"CALCULATION\", \"logicalTableId\": nu"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_host_planner",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "step": 1,
+            "catalog_tool_count": 17,
+            "has_metadata": true,
+            "repair_budget_remaining": 1
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_host_planner",
+          "summary": "{'chain_mode': 'mcp_first_mcp_main', 'action': 'tool_call', 'planner_output': {'action': 'tool_call', 'tool': 'query-datasource', 'arguments': {'datasourceLuid': 'f4290485-26d3-428f-aa8d-ccc33862a411'"
+        },
+        {
+          "type": "tool_call",
+          "tool": "tableau_mcp",
+          "params": {
+            "mcp_tool": "query-datasource",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "mcp_first_mcp_main",
+            "host_phase": "query",
+            "arguments": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "子类别"
+                  },
+                  {
+                    "fieldCaption": "发货年份"
+                  },
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  }
+                ],
+                "filters": []
+              }
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "tableau_mcp",
+          "summary": "{'truncated': True, 'preview': '{\"data\": [{\"子类别\": \"用具\", \"发货年份\": \"2024\", \"SUM(销售额)\": 215060.1429999997, \"SUM(利润)\": 30660.204325000017}, {\"子类别\": \"收纳具\", \"发货年份\": \"2024\", \"SUM(销售额)\": 504132.2155, \"SUM(利润)\""
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_host_final_response",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "row_count": 80,
+            "mcp_tool": "query-datasource"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_host_final_response",
+          "summary": "{'data': [{'子类别': '用具', 'YEAR(发货日期)': 2024, 'SUM(销售额)': 215060.1429999997, 'SUM(利润)': 30660.204325000017}, {'子类别': '收纳具', 'YEAR(发货日期)': 2024, 'SUM(销售额)': 504132.2155, 'SUM(利润)': 51478.25669999993}, {'"
+        },
+        {
+          "data": [
+            {
+              "子类别": "用具",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 215060.1429999997,
+              "SUM(利润)": 30660.204325000017
+            },
+            {
+              "子类别": "收纳具",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 504132.2155,
+              "SUM(利润)": 51478.25669999993
+            },
+            {
+              "子类别": "用品",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 103299.10199999998,
+              "SUM(利润)": -5136.792475000005
+            },
+            {
+              "子类别": "设备",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 446590.0022499999,
+              "SUM(利润)": 868.5275249999559
+            },
+            {
+              "子类别": "标签",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 525.2625,
+              "SUM(利润)": 252.12599999999998
+            },
+            {
+              "子类别": "用具",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 104717.15849999999,
+              "SUM(利润)": 16137.968575000003
+            },
+            {
+              "子类别": "书架",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 217152.615525,
+              "SUM(利润)": -4775.643875000007
+            },
+            {
+              "子类别": "装订机",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 1794.5779999999997,
+              "SUM(利润)": -527.155475
+            },
+            {
+              "子类别": "器具",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 100261.01125000003,
+              "SUM(利润)": 14724.598474999997
+            },
+            {
+              "子类别": "系固件",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 4547.171,
+              "SUM(利润)": 1454.9502999999993
+            },
+            {
+              "子类别": "信封",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 24494.661499999995,
+              "SUM(利润)": 10452.752749999998
+            },
+            {
+              "子类别": "配件",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 302687.0215,
+              "SUM(利润)": 69968.042625
+            },
+            {
+              "子类别": "纸张",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 203206.77000000034,
+              "SUM(利润)": 88230.9499499999
+            },
+            {
+              "子类别": "纸张",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 1992.0244999999998,
+              "SUM(利润)": 933.64195
+            },
+            {
+              "子类别": "用具",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 207067.85900000014,
+              "SUM(利润)": 29352.990174999995
+            },
+            {
+              "子类别": "书架",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 192761.988625,
+              "SUM(利润)": 1076.2088499999945
+            },
+            {
+              "子类别": "装订机",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 268726.94124999974,
+              "SUM(利润)": 48641.927650000005
+            },
+            {
+              "子类别": "电话",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 559240.2194999999,
+              "SUM(利润)": 87522.44877500008
+            },
+            {
+              "子类别": "系固件",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 5027.933000000001,
+              "SUM(利润)": 1403.0801749999998
+            },
+            {
+              "子类别": "收纳具",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 350610.3770000001,
+              "SUM(利润)": 29524.41714999999
+            },
+            {
+              "子类别": "椅子",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 608226.3307500001,
+              "SUM(利润)": 42472.518399999964
+            },
+            {
+              "子类别": "桌子",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 440799.7498749999,
+              "SUM(利润)": -21215.23420000001
+            },
+            {
+              "子类别": "设备",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 188377.39525,
+              "SUM(利润)": 21595.970849999976
+            },
+            {
+              "子类别": "书架",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 292160.79362500005,
+              "SUM(利润)": -18130.95080000001
+            },
+            {
+              "子类别": "信封",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 31463.11499999999,
+              "SUM(利润)": 13609.088824999999
+            },
+            {
+              "子类别": "用品",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 104172.56750000002,
+              "SUM(利润)": 3504.9153499999984
+            },
+            {
+              "子类别": "桌子",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 442501.1943749999,
+              "SUM(利润)": -58843.72817500004
+            },
+            {
+              "子类别": "用品",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 323.988,
+              "SUM(利润)": 36.44864999999997
+            },
+            {
+              "子类别": "器具",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 1517.4250000000002,
+              "SUM(利润)": 409.70475
+            },
+            {
+              "子类别": "标签",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 28442.402499999993,
+              "SUM(利润)": 12839.289625000005
+            },
+            {
+              "子类别": "装订机",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 380824.0632500001,
+              "SUM(利润)": 80438.68474999993
+            },
+            {
+              "子类别": "复印机",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 87360.77450000001,
+              "SUM(利润)": 24511.766425
+            },
+            {
+              "子类别": "椅子",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 532948.4062499997,
+              "SUM(利润)": 47243.29752500002
+            },
+            {
+              "子类别": "用品",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 14437.534,
+              "SUM(利润)": -74.80695000000037
+            },
+            {
+              "子类别": "信封",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 36372.1625,
+              "SUM(利润)": 15923.510675000005
+            },
+            {
+              "子类别": "配件",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 162664.26250000004,
+              "SUM(利润)": 38798.58307500002
+            },
+            {
+              "子类别": "桌子",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 287779.9593750001,
+              "SUM(利润)": -26768.774075000012
+            },
+            {
+              "子类别": "书架",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 131378.91460000002,
+              "SUM(利润)": -4505.929375000005
+            },
+            {
+              "子类别": "美术",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 44333.7935,
+              "SUM(利润)": 10289.131124999993
+            },
+            {
+              "子类别": "器具",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 182037.99525000007,
+              "SUM(利润)": 22106.286024999998
+            },
+            {
+              "子类别": "复印机",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 359595.7225,
+              "SUM(利润)": 128635.24634999999
+            },
+            {
+              "子类别": "书架",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 2914.4188000000004,
+              "SUM(利润)": 3.7815999999997985
+            },
+            {
+              "子类别": "椅子",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 16490.1975,
+              "SUM(利润)": 3127.8819999999996
+            },
+            {
+              "子类别": "用具",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 163663.96500000014,
+              "SUM(利润)": 23743.69127499999
+            },
+            {
+              "子类别": "复印机",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 456145.84300000005,
+              "SUM(利润)": 181539.36054999998
+            },
+            {
+              "子类别": "用品",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 116526.669,
+              "SUM(利润)": -6822.3747
+            },
+            {
+              "子类别": "椅子",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 702844.0797500003,
+              "SUM(利润)": 53989.128899999974
+            },
+            {
+              "子类别": "装订机",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 534041.79325,
+              "SUM(利润)": 58323.36595
+            },
+            {
+              "子类别": "标签",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 24207.257000000005,
+              "SUM(利润)": 10893.246800000003
+            },
+            {
+              "子类别": "收纳具",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 6589.3365,
+              "SUM(利润)": 1680.7624249999994
+            },
+            {
+              "子类别": "配件",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 312487.9195,
+              "SUM(利润)": 81551.345875
+            },
+            {
+              "子类别": "标签",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 21036.933500000003,
+              "SUM(利润)": 8395.737075000001
+            },
+            {
+              "子类别": "电话",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 2959.1309999999994,
+              "SUM(利润)": 213.2631000000001
+            },
+            {
+              "子类别": "装订机",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 317935.51149999985,
+              "SUM(利润)": 40962.40429999999
+            },
+            {
+              "子类别": "器具",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 311960.4384999999,
+              "SUM(利润)": 57219.50777500002
+            },
+            {
+              "子类别": "设备",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 320144.37625000003,
+              "SUM(利润)": -23327.328849999998
+            },
+            {
+              "子类别": "收纳具",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 427316.81249999994,
+              "SUM(利润)": 45271.35262499998
+            },
+            {
+              "子类别": "系固件",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 7450.2595,
+              "SUM(利润)": 2357.063449999999
+            },
+            {
+              "子类别": "系固件",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 44426.042499999996,
+              "SUM(利润)": 12211.085824999998
+            },
+            {
+              "子类别": "配件",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 435668.10200000025,
+              "SUM(利润)": 113722.63724999997
+            },
+            {
+              "子类别": "美术",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 695.797,
+              "SUM(利润)": 115.95504999999997
+            },
+            {
+              "子类别": "桌子",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 337065.4158750002,
+              "SUM(利润)": -21883.007775000005
+            },
+            {
+              "子类别": "纸张",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 108108.36050000007,
+              "SUM(利润)": 46370.37940000001
+            },
+            {
+              "子类别": "美术",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 46387.42850000001,
+              "SUM(利润)": 10868.285050000004
+            },
+            {
+              "子类别": "系固件",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 407.33400000000006,
+              "SUM(利润)": 181.4298
+            },
+            {
+              "子类别": "收纳具",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 340024.275,
+              "SUM(利润)": 26362.269474999986
+            },
+            {
+              "子类别": "美术",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 65210.125,
+              "SUM(利润)": 16397.209724999997
+            },
+            {
+              "子类别": "设备",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 421844.701,
+              "SUM(利润)": 25962.16299999998
+            },
+            {
+              "子类别": "电话",
+              "YEAR(发货日期)": 2024,
+              "SUM(销售额)": 765328.9369999988,
+              "SUM(利润)": 93856.20537500008
+            },
+            {
+              "子类别": "电话",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 503859.0209999999,
+              "SUM(利润)": 75755.40370000005
+            },
+            {
+              "子类别": "纸张",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 149965.61200000005,
+              "SUM(利润)": 65864.29684999994
+            },
+            {
+              "子类别": "美术",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 43900.70749999998,
+              "SUM(利润)": 10565.091500000004
+            },
+            {
+              "子类别": "椅子",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 573810.7910000004,
+              "SUM(利润)": 50537.78235000001
+            },
+            {
+              "子类别": "标签",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 17827.199,
+              "SUM(利润)": 8022.240999999999
+            },
+            {
+              "子类别": "用具",
+              "YEAR(发货日期)": 2025,
+              "SUM(销售额)": 2577.288,
+              "SUM(利润)": 820.2824
+            },
+            {
+              "子类别": "电话",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 574471.8314999996,
+              "SUM(利润)": 69271.17117500001
+            },
+            {
+              "子类别": "信封",
+              "YEAR(发货日期)": 2021,
+              "SUM(销售额)": 27500.6855,
+              "SUM(利润)": 10677.826824999995
+            },
+            {
+              "子类别": "复印机",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 189801.01249999998,
+              "SUM(利润)": 71994.6663
+            },
+            {
+              "子类别": "器具",
+              "YEAR(发货日期)": 2023,
+              "SUM(销售额)": 188768.72124999997,
+              "SUM(利润)": 38428.66487500001
+            },
+            {
+              "子类别": "纸张",
+              "YEAR(发货日期)": 2022,
+              "SUM(销售额)": 113396.13350000005,
+              "SUM(利润)": 48809.157600000035
+            }
+          ],
+          "fields": [
+            "子类别",
+            "YEAR(发货日期)",
+            "SUM(销售额)",
+            "SUM(利润)"
+          ],
+          "rows": [
+            [
+              "用具",
+              2024,
+              215060.1429999997,
+              30660.204325000017
+            ],
+            [
+              "收纳具",
+              2024,
+              504132.2155,
+              51478.25669999993
+            ],
+            [
+              "用品",
+              2023,
+              103299.10199999998,
+              -5136.792475000005
+            ],
+            [
+              "设备",
+              2021,
+              446590.0022499999,
+              868.5275249999559
+            ],
+            [
+              "标签",
+              2025,
+              525.2625,
+              252.12599999999998
+            ],
+            [
+              "用具",
+              2021,
+              104717.15849999999,
+              16137.968575000003
+            ],
+            [
+              "书架",
+              2024,
+              217152.615525,
+              -4775.643875000007
+            ],
+            [
+              "装订机",
+              2025,
+              1794.5779999999997,
+              -527.155475
+            ],
+            [
+              "器具",
+              2021,
+              100261.01125000003,
+              14724.598474999997
+            ],
+            [
+              "系固件",
+              2022,
+              4547.171,
+              1454.9502999999993
+            ],
+            [
+              "信封",
+              2024,
+              24494.661499999995,
+              10452.752749999998
+            ],
+            [
+              "配件",
+              2023,
+              302687.0215,
+              69968.042625
+            ],
+            [
+              "纸张",
+              2024,
+              203206.77000000034,
+              88230.9499499999
+            ],
+            [
+              "纸张",
+              2025,
+              1992.0244999999998,
+              933.64195
+            ],
+            [
+              "用具",
+              2023,
+              207067.85900000014,
+              29352.990174999995
+            ],
+            [
+              "书架",
+              2023,
+              192761.988625,
+              1076.2088499999945
+            ],
+            [
+              "装订机",
+              2022,
+              268726.94124999974,
+              48641.927650000005
+            ],
+            [
+              "电话",
+              2021,
+              559240.2194999999,
+              87522.44877500008
+            ],
+            [
+              "系固件",
+              2021,
+              5027.933000000001,
+              1403.0801749999998
+            ],
+            [
+              "收纳具",
+              2021,
+              350610.3770000001,
+              29524.41714999999
+            ],
+            [
+              "椅子",
+              2023,
+              608226.3307500001,
+              42472.518399999964
+            ],
+            [
+              "桌子",
+              2023,
+              440799.7498749999,
+              -21215.23420000001
+            ],
+            [
+              "设备",
+              2022,
+              188377.39525,
+              21595.970849999976
+            ],
+            [
+              "书架",
+              2022,
+              292160.79362500005,
+              -18130.95080000001
+            ],
+            [
+              "信封",
+              2022,
+              31463.11499999999,
+              13609.088824999999
+            ],
+            [
+              "用品",
+              2021,
+              104172.56750000002,
+              3504.9153499999984
+            ],
+            [
+              "桌子",
+              2024,
+              442501.1943749999,
+              -58843.72817500004
+            ],
+            [
+              "用品",
+              2025,
+              323.988,
+              36.44864999999997
+            ],
+            [
+              "器具",
+              2025,
+              1517.4250000000002,
+              409.70475
+            ],
+            [
+              "标签",
+              2024,
+              28442.402499999993,
+              12839.289625000005
+            ],
+            [
+              "装订机",
+              2023,
+              380824.0632500001,
+              80438.68474999993
+            ],
+            [
+              "复印机",
+              2021,
+              87360.77450000001,
+              24511.766425
+            ],
+            [
+              "椅子",
+              2022,
+              532948.4062499997,
+              47243.29752500002
+            ],
+            [
+              "用品",
+              2022,
+              14437.534,
+              -74.80695000000037
+            ],
+            [
+              "信封",
+              2023,
+              36372.1625,
+              15923.510675000005
+            ],
+            [
+              "配件",
+              2021,
+              162664.26250000004,
+              38798.58307500002
+            ],
+            [
+              "桌子",
+              2022,
+              287779.9593750001,
+              -26768.774075000012
+            ],
+            [
+              "书架",
+              2021,
+              131378.91460000002,
+              -4505.929375000005
+            ],
+            [
+              "美术",
+              2021,
+              44333.7935,
+              10289.131124999993
+            ],
+            [
+              "器具",
+              2022,
+              182037.99525000007,
+              22106.286024999998
+            ],
+            [
+              "复印机",
+              2023,
+              359595.7225,
+              128635.24634999999
+            ],
+            [
+              "书架",
+              2025,
+              2914.4188000000004,
+              3.7815999999997985
+            ],
+            [
+              "椅子",
+              2025,
+              16490.1975,
+              3127.8819999999996
+            ],
+            [
+              "用具",
+              2022,
+              163663.96500000014,
+              23743.69127499999
+            ],
+            [
+              "复印机",
+              2024,
+              456145.84300000005,
+              181539.36054999998
+            ],
+            [
+              "用品",
+              2024,
+              116526.669,
+              -6822.3747
+            ],
+            [
+              "椅子",
+              2024,
+              702844.0797500003,
+              53989.128899999974
+            ],
+            [
+              "装订机",
+              2024,
+              534041.79325,
+              58323.36595
+            ],
+            [
+              "标签",
+              2022,
+              24207.257000000005,
+              10893.246800000003
+            ],
+            [
+              "收纳具",
+              2025,
+              6589.3365,
+              1680.7624249999994
+            ],
+            [
+              "配件",
+              2022,
+              312487.9195,
+              81551.345875
+            ],
+            [
+              "标签",
+              2023,
+              21036.933500000003,
+              8395.737075000001
+            ],
+            [
+              "电话",
+              2025,
+              2959.1309999999994,
+              213.2631000000001
+            ],
+            [
+              "装订机",
+              2021,
+              317935.51149999985,
+              40962.40429999999
+            ],
+            [
+              "器具",
+              2024,
+              311960.4384999999,
+              57219.50777500002
+            ],
+            [
+              "设备",
+              2024,
+              320144.37625000003,
+              -23327.328849999998
+            ],
+            [
+              "收纳具",
+              2023,
+              427316.81249999994,
+              45271.35262499998
+            ],
+            [
+              "系固件",
+              2023,
+              7450.2595,
+              2357.063449999999
+            ],
+            [
+              "系固件",
+              2024,
+              44426.042499999996,
+              12211.085824999998
+            ],
+            [
+              "配件",
+              2024,
+              435668.10200000025,
+              113722.63724999997
+            ],
+            [
+              "美术",
+              2025,
+              695.797,
+              115.95504999999997
+            ],
+            [
+              "桌子",
+              2021,
+              337065.4158750002,
+              -21883.007775000005
+            ],
+            [
+              "纸张",
+              2021,
+              108108.36050000007,
+              46370.37940000001
+            ],
+            [
+              "美术",
+              2022,
+              46387.42850000001,
+              10868.285050000004
+            ],
+            [
+              "系固件",
+              2025,
+              407.33400000000006,
+              181.4298
+            ],
+            [
+              "收纳具",
+              2022,
+              340024.275,
+              26362.269474999986
+            ],
+            [
+              "美术",
+              2024,
+              65210.125,
+              16397.209724999997
+            ],
+            [
+              "设备",
+              2023,
+              421844.701,
+              25962.16299999998
+            ],
+            [
+              "电话",
+              2024,
+              765328.9369999988,
+              93856.20537500008
+            ],
+            [
+              "电话",
+              2022,
+              503859.0209999999,
+              75755.40370000005
+            ],
+            [
+              "纸张",
+              2023,
+              149965.61200000005,
+              65864.29684999994
+            ],
+            [
+              "美术",
+              2023,
+              43900.70749999998,
+              10565.091500000004
+            ],
+            [
+              "椅子",
+              2021,
+              573810.7910000004,
+              50537.78235000001
+            ],
+            [
+              "标签",
+              2021,
+              17827.199,
+              8022.240999999999
+            ],
+            [
+              "用具",
+              2025,
+              2577.288,
+              820.2824
+            ],
+            [
+              "电话",
+              2023,
+              574471.8314999996,
+              69271.17117500001
+            ],
+            [
+              "信封",
+              2021,
+              27500.6855,
+              10677.826824999995
+            ],
+            [
+              "复印机",
+              2022,
+              189801.01249999998,
+              71994.6663
+            ],
+            [
+              "器具",
+              2023,
+              188768.72124999997,
+              38428.66487500001
+            ],
+            [
+              "纸张",
+              2022,
+              113396.13350000005,
+              48809.157600000035
+            ]
+          ],
+          "datasource_name": "订单+ (示例 - 超市)",
+          "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+          "chain_mode": "mcp_first_mcp_main",
+          "main_chain_mode": "mcp_first_mcp_main",
+          "mcp_tool": "query-datasource",
+          "mcp_host": true,
+          "mcp_args": {
+            "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "query": {
+              "fields": [
+                {
+                  "fieldCaption": "子类别"
+                },
+                {
+                  "fieldCaption": "发货年份"
+                },
+                {
+                  "fieldCaption": "销售额",
+                  "function": "SUM"
+                },
+                {
+                  "fieldCaption": "利润",
+                  "function": "SUM"
+                }
+              ],
+              "filters": []
+            }
+          },
+          "context_trace": {
+            "status": "resolved",
+            "datasource_name": "订单+ (示例 - 超市)",
+            "metric_names": [
+              "销售额",
+              "利润"
+            ],
+            "dimension_names": [
+              "子类别",
+              "利润率"
+            ],
+            "filter_names": [],
+            "unresolved_references": false,
+            "calculation_performed": false
+          },
+          "planner_final": {
+            "action": "final",
+            "source": "auto_final_after_successful_query"
+          },
+          "table_display": {
+            "columns": [
+              {
+                "key": "子类别",
+                "label": "子类别",
+                "semantic_type": "dimension",
+                "value_type": "string",
+                "align": "left",
+                "format": "plain"
+              },
+              {
+                "key": "YEAR(发货日期)",
+                "label": "YEAR(发货日期)",
+                "semantic_type": "period",
+                "value_type": "date",
+                "align": "right",
+                "format": "date"
+              },
+              {
+                "key": "SUM(销售额)",
+                "label": "SUM(销售额)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              },
+              {
+                "key": "SUM(利润)",
+                "label": "SUM(利润)",
+                "semantic_type": "metric",
+                "value_type": "number",
+                "align": "right",
+                "format": "number"
+              }
+            ]
+          },
+          "col_types": [
+            "string",
+            "numeric",
+            "numeric",
+            "numeric"
+          ],
+          "type": "table_data"
+        },
+        {
+          "type": "token",
+          "content": "查"
+        },
+        {
+          "type": "token",
+          "content": "询"
+        },
+        {
+          "type": "token",
+          "content": "已"
+        },
+        {
+          "type": "token",
+          "content": "完"
+        },
+        {
+          "type": "token",
+          "content": "成"
+        },
+        {
+          "type": "token",
+          "content": "，"
+        },
+        {
+          "type": "token",
+          "content": "返"
+        },
+        {
+          "type": "token",
+          "content": "回"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "8"
+        },
+        {
+          "type": "token",
+          "content": "0"
+        },
+        {
+          "type": "token",
+          "content": " "
+        },
+        {
+          "type": "token",
+          "content": "行"
+        },
+        {
+          "type": "token",
+          "content": "结"
+        },
+        {
+          "type": "token",
+          "content": "果"
+        },
+        {
+          "type": "token",
+          "content": "。"
+        },
+        {
+          "type": "done",
+          "answer": "查询已完成，返回 80 行结果。",
+          "trace_id": "t-3fb409eb",
+          "run_id": "7c93aff9-e54c-436d-bbea-96754cef971a",
+          "tools_used": [
+            "context_resolver",
+            "mcp_host_catalog",
+            "tableau_mcp",
+            "mcp_host_planner",
+            "mcp_host_final_response"
+          ],
+          "response_type": "table",
+          "response_data": {
+            "data": [
+              {
+                "子类别": "用具",
+                "YEAR(发货日期)": 2024,
+                "SUM(销售额)": 215060.1429999997,
+                "SUM(利润)": 30660.204325000017
+              },
+              {
+                "子类别": "收纳具",
+                "YEAR(发货日期)": 2024,
+                "SUM(销售额)": 504132.2155,
+                "SUM(利润)": 51478.25669999993
+              },
+              {
+                "子类别": "用品",
+                "YEAR(发货日期)": 2023,
+                "SUM(销售额)": 103299.10199999998,
+                "SUM(利润)": -5136.792475000005
+              },
+              {
+                "子类别": "设备",
+                "YEAR(发货日期)": 2021,
+                "SUM(销售额)": 446590.0022499999,
+                "SUM(利润)": 868.5275249999559
+              },
+              {
+                "子类别": "标签",
+                "YEAR(发货日期)": 2025,
+                "SUM(销售额)": 525.2625,
+                "SUM(利润)": 252.12599999999998
+              },
+              {
+                "子类别": "用具",
+                "YEAR(发货日期)": 2021,
+                "SUM(销售额)": 104717.15849999999,
+                "SUM(利润)": 16137.968575000003
+              },
+              {
+                "子类别": "书架",
+                "YEAR(发货日期)": 2024,
+                "SUM(销售额)": 217152.615525,
+                "SUM(利润)": -4775.643875000007
+              },
+              {
+                "子类别": "装订机",
+                "YEAR(发货日期)": 2025,
+                "SUM(销售额)": 1794.5779999999997,
+                "SUM(利润)": -527.155475
+              },
+              {
+                "子类别": "器具",
+                "YEAR(发货日期)": 2021,
+                "SUM(销售额)": 100261.01125000003,
+                "SUM(利润)": 14724.598474999997
+              },
+              {
+                "子类别": "系固件",
+                "YEAR(发货日期)": 2022,
+                "SUM(销售额)": 4547.171,
+                "SUM(利润)": 1454.9502999999993
+              },
+              {
+                "子类别": "信封",
+                "YEAR(发货日期)": 2024,
+                "SUM(销售额)": 24494.661499999995,
+                "SUM(利润)": 10452.752749999998
+              },
+              {
+                "子类别": "配件",
+                "YEAR(发货日期)": 2023,
+                "SUM(销售额)": 302687.0215,
+                "SUM(利润)": 69968.042625
+              },
+              {
+                "子类别": "纸张",
+                "YEAR(发货日期)": 2024,
+                "SUM(销售额)": 203206.77000000034,
+                "SUM(利润)": 88230.9499499999
+              },
+              {
+                "子类别": "纸张",
+                "YEAR(发货日期)": 2025,
+                "SUM(销售额)": 1992.0244999999998,
+                "SUM(利润)": 933.64195
+              },
+              {
+                "子类别": "用具",
+                "YEAR(发货日期)": 2023,
+                "SUM(销售额)": 207067.85900000014,
+                "SUM(利润)": 29352.990174999995
+              },
+              {
+                "子类别": "书架",
+                "YEAR(发货日期)": 2023,
+                "SUM(销售额)": 192761.988625,
+                "SUM(利润)": 1076.2088499999945
+              },
+              {
+                "子类别": "装订机",
+                "YEAR(发货日期)": 2022,
+                "SUM(销售额)": 268726.94124999974,
+                "SUM(利润)": 48641.927650000005
+              },
+              {
+                "子类别": "电话",
+                "YEAR(发货日期)": 2021,
+                "SUM(销售额)": 559240.2194999999,
+                "SUM(利润)": 87522.44877500008
+              },
+              {
+                "子类别": "系固件",
+                "YEAR(发货日期)": 2021,
+                "SUM(销售额)": 5027.933000000001,
+                "SUM(利润)": 1403.0801749999998
+              },
+              {
+                "子类别": "收纳具",
+                "YEAR(发货日期)": 2021,
+                "SUM(销售额)": 350610.3770000001,
+                "SUM(利润)": 29524.41714999999
+              },
+              {
+                "子类别": "椅子",
+                "YEAR(发货日期)": 2023,
+                "SUM(销售额)": 608226.3307500001,
+                "SUM(利润)": 42472.518399999964
+              },
+              {
+                "子类别": "桌子",
+                "YEAR(发货日期)": 2023,
+                "SUM(销售额)": 440799.7498749999,
+                "SUM(利润)": -21215.23420000001
+              },
+              {
+                "子类别": "设备",
+                "YEAR(发货日期)": 2022,
+                "SUM(销售额)": 188377.39525,
+                "SUM(利润)": 21595.970849999976
+              },
+              {
+                "子类别": "书架",
+                "YEAR(发货日期)": 2022,
+                "SUM(销售额)": 292160.79362500005,
+                "SUM(利润)": -18130.95080000001
+              },
+              {
+                "子类别": "信封",
+                "YEAR(发货日期)": 2022,
+                "SUM(销售额)": 31463.11499999999,
+                "SUM(利润)": 13609.088824999999
+              },
+              {
+                "子类别": "用品",
+                "YEAR(发货日期)": 2021,
+                "SUM(销售额)": 104172.56750000002,
+                "SUM(利润)": 3504.9153499999984
+              },
+              {
+                "子类别": "桌子",
+                "YEAR(发货日期)": 2024,
+                "SUM(销售额)": 442501.1943749999,
+                "SUM(利润)": -58843.72817500004
+              },
+              {
+                "子类别": "用品",
+                "YEAR(发货日期)": 2025,
+                "SUM(销售额)": 323.988,
+                "SUM(利润)": 36.44864999999997
+              },
+              {
+                "子类别": "器具",
+                "YEAR(发货日期)": 2025,
+                "SUM(销售额)": 1517.4250000000002,
+                "SUM(利润)": 409.70475
+              },
+              {
+                "子类别": "标签",
+                "YEAR(发货日期)": 2024,
+                "SUM(销售额)": 28442.402499999993,
+                "SUM(利润)": 12839.289625000005
+              },
+              {
+                "子类别": "装订机",
+                "YEAR(发货日期)": 2023,
+                "SUM(销售额)": 380824.0632500001,
+                "SUM(利润)": 80438.68474999993
+              },
+              {
+                "子类别": "复印机",
+                "YEAR(发货日期)": 2021,
+                "SUM(销售额)": 87360.77450000001,
+                "SUM(利润)": 24511.766425
+              },
+              {
+                "子类别": "椅子",
+                "YEAR(发货日期)": 2022,
+                "SUM(销售额)": 532948.4062499997,
+                "SUM(利润)": 47243.29752500002
+              },
+              {
+                "子类别": "用品",
+                "YEAR(发货日期)": 2022,
+                "SUM(销售额)": 14437.534,
+                "SUM(利润)": -74.80695000000037
+              },
+              {
+                "子类别": "信封",
+                "YEAR(发货日期)": 2023,
+                "SUM(销售额)": 36372.1625,
+                "SUM(利润)": 15923.510675000005
+              },
+              {
+                "子类别": "配件",
+                "YEAR(发货日期)": 2021,
+                "SUM(销售额)": 162664.26250000004,
+                "SUM(利润)": 38798.58307500002
+              },
+              {
+                "子类别": "桌子",
+                "YEAR(发货日期)": 2022,
+                "SUM(销售额)": 287779.9593750001,
+                "SUM(利润)": -26768.774075000012
+              },
+              {
+                "子类别": "书架",
+                "YEAR(发货日期)": 2021,
+                "SUM(销售额)": 131378.91460000002,
+                "SUM(利润)": -4505.929375000005
+              },
+              {
+                "子类别": "美术",
+                "YEAR(发货日期)": 2021,
+                "SUM(销售额)": 44333.7935,
+                "SUM(利润)": 10289.131124999993
+              },
+              {
+                "子类别": "器具",
+                "YEAR(发货日期)": 2022,
+                "SUM(销售额)": 182037.99525000007,
+                "SUM(利润)": 22106.286024999998
+              },
+              {
+                "子类别": "复印机",
+                "YEAR(发货日期)": 2023,
+                "SUM(销售额)": 359595.7225,
+                "SUM(利润)": 128635.24634999999
+              },
+              {
+                "子类别": "书架",
+                "YEAR(发货日期)": 2025,
+                "SUM(销售额)": 2914.4188000000004,
+                "SUM(利润)": 3.7815999999997985
+              },
+              {
+                "子类别": "椅子",
+                "YEAR(发货日期)": 2025,
+                "SUM(销售额)": 16490.1975,
+                "SUM(利润)": 3127.8819999999996
+              },
+              {
+                "子类别": "用具",
+                "YEAR(发货日期)": 2022,
+                "SUM(销售额)": 163663.96500000014,
+                "SUM(利润)": 23743.69127499999
+              },
+              {
+                "子类别": "复印机",
+                "YEAR(发货日期)": 2024,
+                "SUM(销售额)": 456145.84300000005,
+                "SUM(利润)": 181539.36054999998
+              },
+              {
+                "子类别": "用品",
+                "YEAR(发货日期)": 2024,
+                "SUM(销售额)": 116526.669,
+                "SUM(利润)": -6822.3747
+              },
+              {
+                "子类别": "椅子",
+                "YEAR(发货日期)": 2024,
+                "SUM(销售额)": 702844.0797500003,
+                "SUM(利润)": 53989.128899999974
+              },
+              {
+                "子类别": "装订机",
+                "YEAR(发货日期)": 2024,
+                "SUM(销售额)": 534041.79325,
+                "SUM(利润)": 58323.36595
+              },
+              {
+                "子类别": "标签",
+                "YEAR(发货日期)": 2022,
+                "SUM(销售额)": 24207.257000000005,
+                "SUM(利润)": 10893.246800000003
+              },
+              {
+                "子类别": "收纳具",
+                "YEAR(发货日期)": 2025,
+                "SUM(销售额)": 6589.3365,
+                "SUM(利润)": 1680.7624249999994
+              },
+              {
+                "子类别": "配件",
+                "YEAR(发货日期)": 2022,
+                "SUM(销售额)": 312487.9195,
+                "SUM(利润)": 81551.345875
+              },
+              {
+                "子类别": "标签",
+                "YEAR(发货日期)": 2023,
+                "SUM(销售额)": 21036.933500000003,
+                "SUM(利润)": 8395.737075000001
+              },
+              {
+                "子类别": "电话",
+                "YEAR(发货日期)": 2025,
+                "SUM(销售额)": 2959.1309999999994,
+                "SUM(利润)": 213.2631000000001
+              },
+              {
+                "子类别": "装订机",
+                "YEAR(发货日期)": 2021,
+                "SUM(销售额)": 317935.51149999985,
+                "SUM(利润)": 40962.40429999999
+              },
+              {
+                "子类别": "器具",
+                "YEAR(发货日期)": 2024,
+                "SUM(销售额)": 311960.4384999999,
+                "SUM(利润)": 57219.50777500002
+              },
+              {
+                "子类别": "设备",
+                "YEAR(发货日期)": 2024,
+                "SUM(销售额)": 320144.37625000003,
+                "SUM(利润)": -23327.328849999998
+              },
+              {
+                "子类别": "收纳具",
+                "YEAR(发货日期)": 2023,
+                "SUM(销售额)": 427316.81249999994,
+                "SUM(利润)": 45271.35262499998
+              },
+              {
+                "子类别": "系固件",
+                "YEAR(发货日期)": 2023,
+                "SUM(销售额)": 7450.2595,
+                "SUM(利润)": 2357.063449999999
+              },
+              {
+                "子类别": "系固件",
+                "YEAR(发货日期)": 2024,
+                "SUM(销售额)": 44426.042499999996,
+                "SUM(利润)": 12211.085824999998
+              },
+              {
+                "子类别": "配件",
+                "YEAR(发货日期)": 2024,
+                "SUM(销售额)": 435668.10200000025,
+                "SUM(利润)": 113722.63724999997
+              },
+              {
+                "子类别": "美术",
+                "YEAR(发货日期)": 2025,
+                "SUM(销售额)": 695.797,
+                "SUM(利润)": 115.95504999999997
+              },
+              {
+                "子类别": "桌子",
+                "YEAR(发货日期)": 2021,
+                "SUM(销售额)": 337065.4158750002,
+                "SUM(利润)": -21883.007775000005
+              },
+              {
+                "子类别": "纸张",
+                "YEAR(发货日期)": 2021,
+                "SUM(销售额)": 108108.36050000007,
+                "SUM(利润)": 46370.37940000001
+              },
+              {
+                "子类别": "美术",
+                "YEAR(发货日期)": 2022,
+                "SUM(销售额)": 46387.42850000001,
+                "SUM(利润)": 10868.285050000004
+              },
+              {
+                "子类别": "系固件",
+                "YEAR(发货日期)": 2025,
+                "SUM(销售额)": 407.33400000000006,
+                "SUM(利润)": 181.4298
+              },
+              {
+                "子类别": "收纳具",
+                "YEAR(发货日期)": 2022,
+                "SUM(销售额)": 340024.275,
+                "SUM(利润)": 26362.269474999986
+              },
+              {
+                "子类别": "美术",
+                "YEAR(发货日期)": 2024,
+                "SUM(销售额)": 65210.125,
+                "SUM(利润)": 16397.209724999997
+              },
+              {
+                "子类别": "设备",
+                "YEAR(发货日期)": 2023,
+                "SUM(销售额)": 421844.701,
+                "SUM(利润)": 25962.16299999998
+              },
+              {
+                "子类别": "电话",
+                "YEAR(发货日期)": 2024,
+                "SUM(销售额)": 765328.9369999988,
+                "SUM(利润)": 93856.20537500008
+              },
+              {
+                "子类别": "电话",
+                "YEAR(发货日期)": 2022,
+                "SUM(销售额)": 503859.0209999999,
+                "SUM(利润)": 75755.40370000005
+              },
+              {
+                "子类别": "纸张",
+                "YEAR(发货日期)": 2023,
+                "SUM(销售额)": 149965.61200000005,
+                "SUM(利润)": 65864.29684999994
+              },
+              {
+                "子类别": "美术",
+                "YEAR(发货日期)": 2023,
+                "SUM(销售额)": 43900.70749999998,
+                "SUM(利润)": 10565.091500000004
+              },
+              {
+                "子类别": "椅子",
+                "YEAR(发货日期)": 2021,
+                "SUM(销售额)": 573810.7910000004,
+                "SUM(利润)": 50537.78235000001
+              },
+              {
+                "子类别": "标签",
+                "YEAR(发货日期)": 2021,
+                "SUM(销售额)": 17827.199,
+                "SUM(利润)": 8022.240999999999
+              },
+              {
+                "子类别": "用具",
+                "YEAR(发货日期)": 2025,
+                "SUM(销售额)": 2577.288,
+                "SUM(利润)": 820.2824
+              },
+              {
+                "子类别": "电话",
+                "YEAR(发货日期)": 2023,
+                "SUM(销售额)": 574471.8314999996,
+                "SUM(利润)": 69271.17117500001
+              },
+              {
+                "子类别": "信封",
+                "YEAR(发货日期)": 2021,
+                "SUM(销售额)": 27500.6855,
+                "SUM(利润)": 10677.826824999995
+              },
+              {
+                "子类别": "复印机",
+                "YEAR(发货日期)": 2022,
+                "SUM(销售额)": 189801.01249999998,
+                "SUM(利润)": 71994.6663
+              },
+              {
+                "子类别": "器具",
+                "YEAR(发货日期)": 2023,
+                "SUM(销售额)": 188768.72124999997,
+                "SUM(利润)": 38428.66487500001
+              },
+              {
+                "子类别": "纸张",
+                "YEAR(发货日期)": 2022,
+                "SUM(销售额)": 113396.13350000005,
+                "SUM(利润)": 48809.157600000035
+              }
+            ],
+            "fields": [
+              "子类别",
+              "YEAR(发货日期)",
+              "SUM(销售额)",
+              "SUM(利润)"
+            ],
+            "rows": [
+              [
+                "用具",
+                2024,
+                215060.1429999997,
+                30660.204325000017
+              ],
+              [
+                "收纳具",
+                2024,
+                504132.2155,
+                51478.25669999993
+              ],
+              [
+                "用品",
+                2023,
+                103299.10199999998,
+                -5136.792475000005
+              ],
+              [
+                "设备",
+                2021,
+                446590.0022499999,
+                868.5275249999559
+              ],
+              [
+                "标签",
+                2025,
+                525.2625,
+                252.12599999999998
+              ],
+              [
+                "用具",
+                2021,
+                104717.15849999999,
+                16137.968575000003
+              ],
+              [
+                "书架",
+                2024,
+                217152.615525,
+                -4775.643875000007
+              ],
+              [
+                "装订机",
+                2025,
+                1794.5779999999997,
+                -527.155475
+              ],
+              [
+                "器具",
+                2021,
+                100261.01125000003,
+                14724.598474999997
+              ],
+              [
+                "系固件",
+                2022,
+                4547.171,
+                1454.9502999999993
+              ],
+              [
+                "信封",
+                2024,
+                24494.661499999995,
+                10452.752749999998
+              ],
+              [
+                "配件",
+                2023,
+                302687.0215,
+                69968.042625
+              ],
+              [
+                "纸张",
+                2024,
+                203206.77000000034,
+                88230.9499499999
+              ],
+              [
+                "纸张",
+                2025,
+                1992.0244999999998,
+                933.64195
+              ],
+              [
+                "用具",
+                2023,
+                207067.85900000014,
+                29352.990174999995
+              ],
+              [
+                "书架",
+                2023,
+                192761.988625,
+                1076.2088499999945
+              ],
+              [
+                "装订机",
+                2022,
+                268726.94124999974,
+                48641.927650000005
+              ],
+              [
+                "电话",
+                2021,
+                559240.2194999999,
+                87522.44877500008
+              ],
+              [
+                "系固件",
+                2021,
+                5027.933000000001,
+                1403.0801749999998
+              ],
+              [
+                "收纳具",
+                2021,
+                350610.3770000001,
+                29524.41714999999
+              ],
+              [
+                "椅子",
+                2023,
+                608226.3307500001,
+                42472.518399999964
+              ],
+              [
+                "桌子",
+                2023,
+                440799.7498749999,
+                -21215.23420000001
+              ],
+              [
+                "设备",
+                2022,
+                188377.39525,
+                21595.970849999976
+              ],
+              [
+                "书架",
+                2022,
+                292160.79362500005,
+                -18130.95080000001
+              ],
+              [
+                "信封",
+                2022,
+                31463.11499999999,
+                13609.088824999999
+              ],
+              [
+                "用品",
+                2021,
+                104172.56750000002,
+                3504.9153499999984
+              ],
+              [
+                "桌子",
+                2024,
+                442501.1943749999,
+                -58843.72817500004
+              ],
+              [
+                "用品",
+                2025,
+                323.988,
+                36.44864999999997
+              ],
+              [
+                "器具",
+                2025,
+                1517.4250000000002,
+                409.70475
+              ],
+              [
+                "标签",
+                2024,
+                28442.402499999993,
+                12839.289625000005
+              ],
+              [
+                "装订机",
+                2023,
+                380824.0632500001,
+                80438.68474999993
+              ],
+              [
+                "复印机",
+                2021,
+                87360.77450000001,
+                24511.766425
+              ],
+              [
+                "椅子",
+                2022,
+                532948.4062499997,
+                47243.29752500002
+              ],
+              [
+                "用品",
+                2022,
+                14437.534,
+                -74.80695000000037
+              ],
+              [
+                "信封",
+                2023,
+                36372.1625,
+                15923.510675000005
+              ],
+              [
+                "配件",
+                2021,
+                162664.26250000004,
+                38798.58307500002
+              ],
+              [
+                "桌子",
+                2022,
+                287779.9593750001,
+                -26768.774075000012
+              ],
+              [
+                "书架",
+                2021,
+                131378.91460000002,
+                -4505.929375000005
+              ],
+              [
+                "美术",
+                2021,
+                44333.7935,
+                10289.131124999993
+              ],
+              [
+                "器具",
+                2022,
+                182037.99525000007,
+                22106.286024999998
+              ],
+              [
+                "复印机",
+                2023,
+                359595.7225,
+                128635.24634999999
+              ],
+              [
+                "书架",
+                2025,
+                2914.4188000000004,
+                3.7815999999997985
+              ],
+              [
+                "椅子",
+                2025,
+                16490.1975,
+                3127.8819999999996
+              ],
+              [
+                "用具",
+                2022,
+                163663.96500000014,
+                23743.69127499999
+              ],
+              [
+                "复印机",
+                2024,
+                456145.84300000005,
+                181539.36054999998
+              ],
+              [
+                "用品",
+                2024,
+                116526.669,
+                -6822.3747
+              ],
+              [
+                "椅子",
+                2024,
+                702844.0797500003,
+                53989.128899999974
+              ],
+              [
+                "装订机",
+                2024,
+                534041.79325,
+                58323.36595
+              ],
+              [
+                "标签",
+                2022,
+                24207.257000000005,
+                10893.246800000003
+              ],
+              [
+                "收纳具",
+                2025,
+                6589.3365,
+                1680.7624249999994
+              ],
+              [
+                "配件",
+                2022,
+                312487.9195,
+                81551.345875
+              ],
+              [
+                "标签",
+                2023,
+                21036.933500000003,
+                8395.737075000001
+              ],
+              [
+                "电话",
+                2025,
+                2959.1309999999994,
+                213.2631000000001
+              ],
+              [
+                "装订机",
+                2021,
+                317935.51149999985,
+                40962.40429999999
+              ],
+              [
+                "器具",
+                2024,
+                311960.4384999999,
+                57219.50777500002
+              ],
+              [
+                "设备",
+                2024,
+                320144.37625000003,
+                -23327.328849999998
+              ],
+              [
+                "收纳具",
+                2023,
+                427316.81249999994,
+                45271.35262499998
+              ],
+              [
+                "系固件",
+                2023,
+                7450.2595,
+                2357.063449999999
+              ],
+              [
+                "系固件",
+                2024,
+                44426.042499999996,
+                12211.085824999998
+              ],
+              [
+                "配件",
+                2024,
+                435668.10200000025,
+                113722.63724999997
+              ],
+              [
+                "美术",
+                2025,
+                695.797,
+                115.95504999999997
+              ],
+              [
+                "桌子",
+                2021,
+                337065.4158750002,
+                -21883.007775000005
+              ],
+              [
+                "纸张",
+                2021,
+                108108.36050000007,
+                46370.37940000001
+              ],
+              [
+                "美术",
+                2022,
+                46387.42850000001,
+                10868.285050000004
+              ],
+              [
+                "系固件",
+                2025,
+                407.33400000000006,
+                181.4298
+              ],
+              [
+                "收纳具",
+                2022,
+                340024.275,
+                26362.269474999986
+              ],
+              [
+                "美术",
+                2024,
+                65210.125,
+                16397.209724999997
+              ],
+              [
+                "设备",
+                2023,
+                421844.701,
+                25962.16299999998
+              ],
+              [
+                "电话",
+                2024,
+                765328.9369999988,
+                93856.20537500008
+              ],
+              [
+                "电话",
+                2022,
+                503859.0209999999,
+                75755.40370000005
+              ],
+              [
+                "纸张",
+                2023,
+                149965.61200000005,
+                65864.29684999994
+              ],
+              [
+                "美术",
+                2023,
+                43900.70749999998,
+                10565.091500000004
+              ],
+              [
+                "椅子",
+                2021,
+                573810.7910000004,
+                50537.78235000001
+              ],
+              [
+                "标签",
+                2021,
+                17827.199,
+                8022.240999999999
+              ],
+              [
+                "用具",
+                2025,
+                2577.288,
+                820.2824
+              ],
+              [
+                "电话",
+                2023,
+                574471.8314999996,
+                69271.17117500001
+              ],
+              [
+                "信封",
+                2021,
+                27500.6855,
+                10677.826824999995
+              ],
+              [
+                "复印机",
+                2022,
+                189801.01249999998,
+                71994.6663
+              ],
+              [
+                "器具",
+                2023,
+                188768.72124999997,
+                38428.66487500001
+              ],
+              [
+                "纸张",
+                2022,
+                113396.13350000005,
+                48809.157600000035
+              ]
+            ],
+            "datasource_name": "订单+ (示例 - 超市)",
+            "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            "chain_mode": "mcp_first_mcp_main",
+            "main_chain_mode": "mcp_first_mcp_main",
+            "mcp_tool": "query-datasource",
+            "mcp_host": true,
+            "mcp_args": {
+              "datasourceLuid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+              "query": {
+                "fields": [
+                  {
+                    "fieldCaption": "子类别"
+                  },
+                  {
+                    "fieldCaption": "发货年份"
+                  },
+                  {
+                    "fieldCaption": "销售额",
+                    "function": "SUM"
+                  },
+                  {
+                    "fieldCaption": "利润",
+                    "function": "SUM"
+                  }
+                ],
+                "filters": []
+              }
+            },
+            "context_trace": {
+              "status": "resolved",
+              "datasource_name": "订单+ (示例 - 超市)",
+              "metric_names": [
+                "销售额",
+                "利润"
+              ],
+              "dimension_names": [
+                "子类别",
+                "利润率"
+              ],
+              "filter_names": [],
+              "unresolved_references": false,
+              "calculation_performed": false
+            },
+            "planner_final": {
+              "action": "final",
+              "source": "auto_final_after_successful_query"
+            },
+            "table_display": {
+              "columns": [
+                {
+                  "key": "子类别",
+                  "label": "子类别",
+                  "semantic_type": "dimension",
+                  "value_type": "string",
+                  "align": "left",
+                  "format": "plain"
+                },
+                {
+                  "key": "YEAR(发货日期)",
+                  "label": "YEAR(发货日期)",
+                  "semantic_type": "period",
+                  "value_type": "date",
+                  "align": "right",
+                  "format": "date"
+                },
+                {
+                  "key": "SUM(销售额)",
+                  "label": "SUM(销售额)",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                },
+                {
+                  "key": "SUM(利润)",
+                  "label": "SUM(利润)",
+                  "semantic_type": "metric",
+                  "value_type": "number",
+                  "align": "right",
+                  "format": "number"
+                }
+              ]
+            },
+            "col_types": [
+              "string",
+              "numeric",
+              "numeric",
+              "numeric"
+            ]
+          },
+          "steps_count": 6,
+          "execution_time_ms": 16149,
+          "sources_count": 1,
+          "top_sources": [
+            "Tableau-online"
+          ],
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "7c93aff9-e54c-436d-bbea-96754cef971a",
+            "trace_id": "t-3fb409eb",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.75,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "data_action_pattern",
+                  "message": "data_action_pattern"
+                }
+              },
+              "postprocess": {
+                "response_type": "table",
+                "row_count": 80,
+                "displayed_row_count": 80,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "500001], [\"纸张\", 2022, 113396.13350000005, 48809.157600000035]], \"datasource_name\": \"订单+ (示例 - 超市)\", \"datasource_luid\": \"f4290485-26d3-428f-aa8d-ccc33862a411\", \"chain_mode\": \"mcp_first_mcp_main\", \"main_chain_mode\": \"mcp_first_mcp_main\", \"mcp_tool\": \"query-datasource\", \"mcp_host\": true, \"mcp_args\": {\"datasourceLuid\": \"f4290485-26d3-428f-aa8d-ccc33862a411\", \"query\": {\"fields\": [{\"fieldCaption\": \"子类别\"}, {\"fieldCaption\": \"发货年份\"}, {\"fieldCaption\": \"销售额\", \"function\": \"SUM\"}, {\"fieldCaption\": \"利润\", \"function\": \"SUM\"}], \"filters\": []}}, \"context_trace\": {\"status\": \"resolved\", \"datasource_name\": \"订单+ (示例 - 超市)\", \"metric_names\": [\"销售额\", \"利润\"], \"dimension_names\": [\"子类别\", \"利润率\"], \"filter_names\": [], \"unresolved_references\": false, \"calculation_performed\": false}, \"planner_final\": {\"action\": \"final\", \"source\": \"auto_final_after_successful_query\"}, \"table_display\": {\"columns\": [{\"key\": \"子类别\", \"label\": \"子类别\", \"semantic_type\": \"dimension\", \"value_type\": \"string\", \"align\": \"left\", \"format\": \"plain\"}, {\"key\": \"YEAR(发货日期)\", \"label\": \"YEAR(发货日期)\", \"semantic_type\": \"period\", \"value_type\": \"date\", \"align\": \"right\", \"format\": \"date\"}, {\"key\": \"SUM(销售额)\", \"label\": \"SUM(销售额)\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}, {\"key\": \"SUM(利润)\", \"label\": \"SUM(利润)\", \"semantic_type\": \"metric\", \"value_type\": \"number\", \"align\": \"right\", \"format\": \"number\"}]}, \"col_types\": [\"string\", \"numeric\", \"numeric\", \"numeric\"]}, \"steps_count\": 6, \"execution_time_ms\": 16149, \"sources_count\": 1, \"top_sources\": [\"Tableau-online\"], \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"7c93aff9-e54c-436d-bbea-96754cef971a\", \"trace_id\": \"t-3fb409eb\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.75, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"data_action_pattern\", \"message\": \"data_action_pattern\"}}, \"postprocess\": {\"response_type\": \"table\", \"row_count\": 80, \"displayed_row_count\": 80, \"formatting\": [\"markdown_summary\"]}}}}\n\n"
+    }
+  }
+}

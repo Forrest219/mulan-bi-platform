@@ -4,6 +4,7 @@ import pytest
 
 from services.data_agent.query_plan import QueryPlanContext
 from services.data_agent.semantic_operators.all_period_condition import AllPeriodConditionOperator
+from services.data_agent.semantic_operators.base import DATA_CONTINUITY_ERROR, DataContinuityError
 from services.data_agent.semantic_operators.contribution_share import ContributionShareOperator
 from services.data_agent.semantic_operators.customer_record import CustomerRecordOperator
 from services.data_agent.semantic_operators.ranking import RankingOperator
@@ -11,6 +12,8 @@ from services.data_agent.semantic_operators.registry import default_registry
 from services.data_agent.semantic_operators.root_cause import RootCauseOperator
 from services.data_agent.semantic_operators.set_difference import SetDifferenceOperator
 from services.data_agent.semantic_operators.trend_condition import TrendConditionOperator
+
+pytestmark = pytest.mark.skip_db
 
 
 @pytest.fixture
@@ -140,6 +143,28 @@ def test_set_difference_returns_count_and_sample(base_ctx):
     assert result.result_shape == "key_set"
 
 
+def test_set_difference_raises_classified_error_when_target_dimension_missing(base_ctx):
+    ctx = QueryPlanContext(
+        **{
+            **asdict(base_ctx),
+            "question": "2025 年没有销售记录的子类别有哪些？",
+            "dimensions": ["子类别"],
+        }
+    )
+
+    with pytest.raises(DataContinuityError) as exc:
+        SetDifferenceOperator().reduce(
+            ctx,
+            {
+                "base_keys": {"fields": ["类别"], "rows": [["技术"]]},
+                "compare_keys": {"fields": ["类别"], "rows": [["家具"]]},
+            },
+        )
+
+    assert exc.value.code == DATA_CONTINUITY_ERROR
+    assert exc.value.detail["target_dimension"] == "子类别"
+
+
 def test_set_difference_builds_universe_minus_occurred_steps(base_ctx):
     ctx = QueryPlanContext(
         **{
@@ -228,6 +253,62 @@ def test_trend_condition_uses_target_dimension_and_complete_periods(base_ctx):
     assert result.explain["complete_periods"] is True
 
 
+def test_trend_condition_rejects_global_period_gap_with_classified_error(base_ctx):
+    ctx = QueryPlanContext(
+        **{
+            **asdict(base_ctx),
+            "question": "哪个子类别利润每年都在持续增长？",
+            "metric": "利润",
+            "dimensions": ["子类别"],
+            "params": {"expected_periods": [2022, 2023, 2024]},
+        }
+    )
+
+    with pytest.raises(DataContinuityError) as exc:
+        TrendConditionOperator().reduce(
+            ctx,
+            {
+                "series_by_dimension": {
+                    "fields": ["YEAR(订单日期)", "子类别", "SUM(利润)"],
+                    "rows": [
+                        [2022, "电话", 10],
+                        [2024, "电话", 30],
+                    ],
+                }
+            },
+        )
+
+    assert exc.value.code == DATA_CONTINUITY_ERROR
+    assert exc.value.detail["missing_periods"] == [2023]
+
+
+def test_trend_condition_does_not_accept_first_last_growth_when_middle_declines(base_ctx):
+    ctx = QueryPlanContext(
+        **{
+            **asdict(base_ctx),
+            "question": "哪个子类别利润每年都在持续增长？",
+            "metric": "利润",
+            "dimensions": ["子类别"],
+            "params": {"expected_periods": [2022, 2023, 2024]},
+        }
+    )
+    result = TrendConditionOperator().reduce(
+        ctx,
+        {
+            "series_by_dimension": {
+                "fields": ["YEAR(订单日期)", "子类别", "SUM(利润)"],
+                "rows": [
+                    [2022, "电话", 10],
+                    [2023, "电话", 5],
+                    [2024, "电话", 30],
+                ],
+            }
+        },
+    )
+
+    assert result.rows == []
+
+
 def test_all_period_condition_reduce_finds_always_loss(base_ctx):
     ctx = QueryPlanContext(
         **{
@@ -290,6 +371,62 @@ def test_all_period_condition_uses_generic_predicate_and_period_coverage(base_ct
     assert result.rows == [["东区", True, 2, []]]
     assert result.explain["predicate"] == {"op": ">=", "value": 10}
     assert result.explain["complete_periods"] is True
+
+
+def test_all_period_condition_rejects_global_period_gap_with_classified_error(base_ctx):
+    ctx = QueryPlanContext(
+        **{
+            **asdict(base_ctx),
+            "question": "哪些省份一直亏损？",
+            "metric": "利润",
+            "dimensions": ["省/自治区"],
+            "params": {"expected_periods": [2022, 2023, 2024]},
+        }
+    )
+
+    with pytest.raises(DataContinuityError) as exc:
+        AllPeriodConditionOperator().reduce(
+            ctx,
+            {
+                "period_metric_by_dimension": {
+                    "fields": ["YEAR(订单日期)", "省/自治区", "SUM(利润)"],
+                    "rows": [
+                        [2022, "重庆", -1],
+                        [2024, "重庆", -2],
+                    ],
+                }
+            },
+        )
+
+    assert exc.value.code == DATA_CONTINUITY_ERROR
+    assert exc.value.detail["missing_periods"] == [2023]
+
+
+def test_all_period_condition_does_not_accept_any_period_as_all_period(base_ctx):
+    ctx = QueryPlanContext(
+        **{
+            **asdict(base_ctx),
+            "question": "哪些省份一直亏损？",
+            "metric": "利润",
+            "dimensions": ["省/自治区"],
+            "params": {"expected_periods": [2022, 2023, 2024]},
+        }
+    )
+    result = AllPeriodConditionOperator().reduce(
+        ctx,
+        {
+            "period_metric_by_dimension": {
+                "fields": ["YEAR(订单日期)", "省/自治区", "SUM(利润)"],
+                "rows": [
+                    [2022, "重庆", -1],
+                    [2023, "重庆", 2],
+                    [2024, "重庆", -2],
+                ],
+            }
+        },
+    )
+
+    assert result.rows == []
 
 
 def test_customer_record_builds_entity_period_metric_step_and_reduces_last_period(base_ctx):

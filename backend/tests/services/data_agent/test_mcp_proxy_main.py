@@ -285,6 +285,27 @@ async def test_mcp_proxy_q1_like_question_enters_host_not_llm_or_queryspec(monke
 
 
 @pytest.mark.asyncio
+async def test_mcp_proxy_blocks_detail_scan_result_before_renderer(monkeypatch):
+    _patch_host(
+        monkeypatch,
+        query_result={"fields": ["Customer", "Sales"], "rows": [[f"c{i}", i] for i in range(250)]},
+    )
+
+    events = [
+        event
+        async for event in mcp_proxy_main.run_mcp_proxy_main_path(
+            question="top customers by sales",
+            context=_context(),
+            intent_result=_intent(),
+            llm_service=_FakeLLM({}),
+        )
+    ]
+
+    assert events[-1].type == "error"
+    assert events[-1].content["error_code"] == "DETAIL_SCAN_BLOCKED"
+
+
+@pytest.mark.asyncio
 async def test_mcp_proxy_requires_explicit_datasource(monkeypatch):
     async def _unexpected_components(**kwargs):
         raise AssertionError("Host runtime must not load without an explicit datasource")

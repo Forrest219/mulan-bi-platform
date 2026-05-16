@@ -7,6 +7,19 @@ from typing import Any, Protocol
 from services.data_agent.query_plan import OperatorResult, QueryPlanContext, QueryPlanStep, ResultShape
 
 
+DATA_CONTINUITY_ERROR = "DATA_CONTINUITY_ERROR"
+
+
+class DataContinuityError(ValueError):
+    """Classified semantic-operator data quality error."""
+
+    code = DATA_CONTINUITY_ERROR
+
+    def __init__(self, message: str, *, detail: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.detail = detail or {}
+
+
 class SemanticOperator(Protocol):
     name: str
     version: str

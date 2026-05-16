@@ -1,0 +1,1214 @@
+{
+  "base_url": "http://127.0.0.1:8001",
+  "mcp_url": "http://localhost:3927/tableau-mcp",
+  "connection_id": 2,
+  "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+  "mcp_tool_names": [
+    "get-datasource-metadata",
+    "list-datasources",
+    "query-datasource",
+    "list-all-pulse-metric-definitions",
+    "list-pulse-metric-definitions-from-definition-ids",
+    "list-pulse-metrics-from-metric-definition-id",
+    "list-pulse-metrics-from-metric-ids",
+    "list-pulse-metric-subscriptions",
+    "generate-pulse-metric-value-insight-bundle",
+    "generate-pulse-insight-brief",
+    "get-workbook",
+    "get-view-data",
+    "get-view-image",
+    "list-workbooks",
+    "list-views",
+    "list-custom-views",
+    "search-content"
+  ],
+  "questions": [
+    {
+      "qid": "Q1",
+      "question": "整体的销售额、利润、利润率、客户数、客单价是什么样子"
+    },
+    {
+      "qid": "Q2",
+      "question": "这个指标过去几年的趋势是什么样子"
+    },
+    {
+      "qid": "Q3",
+      "question": "统计一下每个子类别的销售额、利润和利润率"
+    },
+    {
+      "qid": "Q4",
+      "question": "继续拆分到每个年份"
+    }
+  ],
+  "mulan": {
+    "Q1": {
+      "qid": "Q1",
+      "duration": 0.04385220800759271,
+      "status_code": 200,
+      "request_payload": {
+        "question": "整体的销售额、利润、利润率、客户数、客单价是什么样子",
+        "connection_id": 2,
+        "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+        "datasource_name": "订单+ (示例 - 超市)"
+      },
+      "conversation_id": "5d867ce6-2829-4a33-8acf-70aed1b9887f",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "MCP_NL_TOOL_UNAVAILABLE",
+        "message": "当前 Tableau MCP 未提供自然语言查询工具。",
+        "fallback_type": "mcp_nl_passthrough_unavailable",
+        "trace_id": "t-2b19ca8f",
+        "retryable": true,
+        "suggested_actions": [
+          "请选择数据源，并确认 Tableau MCP 自然语言查询工具已启用。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "mcp_nl_tool_discovery"
+        ],
+        "intent_classifier": {
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {
+            "chain_mode": "mcp_first_mcp_main",
+            "reason": "MCP_NL_TOOL_UNAVAILABLE",
+            "original_error": {
+              "configured_tool": null
+            }
+          }
+        },
+        "user_hint": "请启用或配置 Tableau MCP 自然语言查询工具后重试。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "mcp_nl_passthrough_unavailable",
+              "message": "当前 Tableau MCP 未提供自然语言查询工具。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "当前 Tableau MCP 未提供自然语言查询工具。\n\n请启用或配置 Tableau MCP 自然语言查询工具后重试。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-2b19ca8f",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "mcp_nl_passthrough_unavailable",
+                  "message": "当前 Tableau MCP 未提供自然语言查询工具。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "当前 Tableau MCP 未提供自然语言查询工具。\n\n请启用或配置 Tableau MCP 自然语言查询工具后重试。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.62,
+              "route_reason": "generic_business_data_context"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "5d867ce6-2829-4a33-8acf-70aed1b9887f",
+          "run_id": "571b6463-c563-4c45-b805-11d659eb089a",
+          "trace_id": "t-2b19ca8f",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已进入 Tableau MCP 自然语言直通链路：aggregate。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "context_resolver",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "intent": "aggregate"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "context_resolver",
+          "summary": "{'status': 'empty', 'datasource_name': None, 'metric_names': [], 'dimension_names': [], 'filter_names': [], 'unresolved_references': False, 'calculation_performed': False}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_nl_tool_discovery",
+          "params": {
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "mcp_first_mcp_main"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_nl_tool_discovery",
+          "summary": "{'available': False, 'configured_tool': None, 'chain_mode': 'mcp_first_mcp_main'}"
+        },
+        {
+          "type": "error",
+          "error_code": "MCP_NL_TOOL_UNAVAILABLE",
+          "message": "当前 Tableau MCP 未提供自然语言查询工具。",
+          "fallback_type": "mcp_nl_passthrough_unavailable",
+          "trace_id": "t-2b19ca8f",
+          "retryable": true,
+          "suggested_actions": [
+            "请选择数据源，并确认 Tableau MCP 自然语言查询工具已启用。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "mcp_nl_tool_discovery"
+          ],
+          "intent_classifier": {
+            "intent": "aggregate",
+            "confidence": 0.62,
+            "route_reason": "generic_business_data_context"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {
+              "chain_mode": "mcp_first_mcp_main",
+              "reason": "MCP_NL_TOOL_UNAVAILABLE",
+              "original_error": {
+                "configured_tool": null
+              }
+            }
+          },
+          "user_hint": "请启用或配置 Tableau MCP 自然语言查询工具后重试。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "mcp_nl_passthrough_unavailable",
+                "message": "当前 Tableau MCP 未提供自然语言查询工具。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "当前 Tableau MCP 未提供自然语言查询工具。\n\n请启用或配置 Tableau MCP 自然语言查询工具后重试。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-2b19ca8f",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "mcp_nl_passthrough_unavailable",
+                    "message": "当前 Tableau MCP 未提供自然语言查询工具。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "当前 Tableau MCP 未提供自然语言查询工具。\n\n请启用或配置 Tableau MCP 自然语言查询工具后重试。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "\", \"tool\": \"mcp_nl_tool_discovery\", \"params\": {\"datasource\": {\"name\": \"订单+ (示例 - 超市)\", \"luid\": \"f4290485-26d3-428f-aa8d-ccc33862a411\"}, \"chain_mode\": \"mcp_first_mcp_main\"}}\n\ndata: {\"type\": \"tool_result\", \"tool\": \"mcp_nl_tool_discovery\", \"summary\": \"{'available': False, 'configured_tool': None, 'chain_mode': 'mcp_first_mcp_main'}\"}\n\ndata: {\"type\": \"error\", \"error_code\": \"MCP_NL_TOOL_UNAVAILABLE\", \"message\": \"当前 Tableau MCP 未提供自然语言查询工具。\", \"fallback_type\": \"mcp_nl_passthrough_unavailable\", \"trace_id\": \"t-2b19ca8f\", \"retryable\": true, \"suggested_actions\": [\"请选择数据源，并确认 Tableau MCP 自然语言查询工具已启用。\"], \"tools_used\": [\"intent_classifier\", \"mcp_nl_tool_discovery\"], \"intent_classifier\": {\"intent\": \"aggregate\", \"confidence\": 0.62, \"route_reason\": \"generic_business_data_context\"}, \"controlled_chain\": {\"status\": \"failed\", \"detail\": {\"chain_mode\": \"mcp_first_mcp_main\", \"reason\": \"MCP_NL_TOOL_UNAVAILABLE\", \"original_error\": {\"configured_tool\": null}}}, \"user_hint\": \"请启用或配置 Tableau MCP 自然语言查询工具后重试。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"mcp_nl_passthrough_unavailable\", \"message\": \"当前 Tableau MCP 未提供自然语言查询工具。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"当前 Tableau MCP 未提供自然语言查询工具。\\n\\n请启用或配置 Tableau MCP 自然语言查询工具后重试。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-2b19ca8f\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"mcp_nl_passthrough_unavailable\", \"message\": \"当前 Tableau MCP 未提供自然语言查询工具。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"当前 Tableau MCP 未提供自然语言查询工具。\\n\\n请启用或配置 Tableau MCP 自然语言查询工具后重试。\"}}}}\n\n"
+    },
+    "Q2": {
+      "qid": "Q2",
+      "duration": 0.021493875014130026,
+      "status_code": 200,
+      "request_payload": {
+        "question": "这个指标过去几年的趋势是什么样子",
+        "connection_id": 2,
+        "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+        "datasource_name": "订单+ (示例 - 超市)",
+        "conversation_id": "5d867ce6-2829-4a33-8acf-70aed1b9887f"
+      },
+      "conversation_id": "5d867ce6-2829-4a33-8acf-70aed1b9887f",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "MCP_NL_TOOL_UNAVAILABLE",
+        "message": "当前 Tableau MCP 未提供自然语言查询工具。",
+        "fallback_type": "mcp_nl_passthrough_unavailable",
+        "trace_id": "t-7f9e3a72",
+        "retryable": true,
+        "suggested_actions": [
+          "请选择数据源，并确认 Tableau MCP 自然语言查询工具已启用。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "mcp_nl_tool_discovery"
+        ],
+        "intent_classifier": {
+          "intent": "trend_condition",
+          "confidence": 0.82,
+          "route_reason": "trend_condition_pattern"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {
+            "chain_mode": "mcp_first_mcp_main",
+            "reason": "MCP_NL_TOOL_UNAVAILABLE",
+            "original_error": {
+              "configured_tool": null
+            }
+          }
+        },
+        "user_hint": "请启用或配置 Tableau MCP 自然语言查询工具后重试。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "mcp_nl_passthrough_unavailable",
+              "message": "当前 Tableau MCP 未提供自然语言查询工具。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "当前 Tableau MCP 未提供自然语言查询工具。\n\n请启用或配置 Tableau MCP 自然语言查询工具后重试。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-7f9e3a72",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.8500000000000001,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "data_action_pattern",
+                "message": "data_action_pattern"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "mcp_nl_passthrough_unavailable",
+                  "message": "当前 Tableau MCP 未提供自然语言查询工具。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "当前 Tableau MCP 未提供自然语言查询工具。\n\n请启用或配置 Tableau MCP 自然语言查询工具后重试。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "trend_condition",
+          "confidence": 0.82,
+          "route_reason": "trend_condition_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.8500000000000001,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "data_action_pattern",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.8500000000000001,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "data_action_pattern",
+              "message": "data_action_pattern"
+            },
+            "intent_classifier": {
+              "intent": "trend_condition",
+              "confidence": 0.82,
+              "route_reason": "trend_condition_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "5d867ce6-2829-4a33-8acf-70aed1b9887f",
+          "run_id": "32016a88-2d83-4b50-8cbf-f843b4288126",
+          "trace_id": "t-7f9e3a72",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已进入 Tableau MCP 自然语言直通链路：trend_condition。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "context_resolver",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "intent": "trend_condition"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "context_resolver",
+          "summary": "{'status': 'unresolved', 'datasource_name': None, 'metric_names': [], 'dimension_names': [], 'filter_names': [], 'unresolved_references': True, 'calculation_performed': False}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_nl_tool_discovery",
+          "params": {
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "mcp_first_mcp_main"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_nl_tool_discovery",
+          "summary": "{'available': False, 'configured_tool': None, 'chain_mode': 'mcp_first_mcp_main'}"
+        },
+        {
+          "type": "error",
+          "error_code": "MCP_NL_TOOL_UNAVAILABLE",
+          "message": "当前 Tableau MCP 未提供自然语言查询工具。",
+          "fallback_type": "mcp_nl_passthrough_unavailable",
+          "trace_id": "t-7f9e3a72",
+          "retryable": true,
+          "suggested_actions": [
+            "请选择数据源，并确认 Tableau MCP 自然语言查询工具已启用。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "mcp_nl_tool_discovery"
+          ],
+          "intent_classifier": {
+            "intent": "trend_condition",
+            "confidence": 0.82,
+            "route_reason": "trend_condition_pattern"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {
+              "chain_mode": "mcp_first_mcp_main",
+              "reason": "MCP_NL_TOOL_UNAVAILABLE",
+              "original_error": {
+                "configured_tool": null
+              }
+            }
+          },
+          "user_hint": "请启用或配置 Tableau MCP 自然语言查询工具后重试。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "mcp_nl_passthrough_unavailable",
+                "message": "当前 Tableau MCP 未提供自然语言查询工具。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "当前 Tableau MCP 未提供自然语言查询工具。\n\n请启用或配置 Tableau MCP 自然语言查询工具后重试。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-7f9e3a72",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.8500000000000001,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "data_action_pattern",
+                  "message": "data_action_pattern"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "mcp_nl_passthrough_unavailable",
+                    "message": "当前 Tableau MCP 未提供自然语言查询工具。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "当前 Tableau MCP 未提供自然语言查询工具。\n\n请启用或配置 Tableau MCP 自然语言查询工具后重试。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": "discovery\", \"params\": {\"datasource\": {\"name\": \"订单+ (示例 - 超市)\", \"luid\": \"f4290485-26d3-428f-aa8d-ccc33862a411\"}, \"chain_mode\": \"mcp_first_mcp_main\"}}\n\ndata: {\"type\": \"tool_result\", \"tool\": \"mcp_nl_tool_discovery\", \"summary\": \"{'available': False, 'configured_tool': None, 'chain_mode': 'mcp_first_mcp_main'}\"}\n\ndata: {\"type\": \"error\", \"error_code\": \"MCP_NL_TOOL_UNAVAILABLE\", \"message\": \"当前 Tableau MCP 未提供自然语言查询工具。\", \"fallback_type\": \"mcp_nl_passthrough_unavailable\", \"trace_id\": \"t-7f9e3a72\", \"retryable\": true, \"suggested_actions\": [\"请选择数据源，并确认 Tableau MCP 自然语言查询工具已启用。\"], \"tools_used\": [\"intent_classifier\", \"mcp_nl_tool_discovery\"], \"intent_classifier\": {\"intent\": \"trend_condition\", \"confidence\": 0.82, \"route_reason\": \"trend_condition_pattern\"}, \"controlled_chain\": {\"status\": \"failed\", \"detail\": {\"chain_mode\": \"mcp_first_mcp_main\", \"reason\": \"MCP_NL_TOOL_UNAVAILABLE\", \"original_error\": {\"configured_tool\": null}}}, \"user_hint\": \"请启用或配置 Tableau MCP 自然语言查询工具后重试。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"mcp_nl_passthrough_unavailable\", \"message\": \"当前 Tableau MCP 未提供自然语言查询工具。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"当前 Tableau MCP 未提供自然语言查询工具。\\n\\n请启用或配置 Tableau MCP 自然语言查询工具后重试。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-7f9e3a72\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.8500000000000001, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"data_action_pattern\", \"message\": \"data_action_pattern\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"mcp_nl_passthrough_unavailable\", \"message\": \"当前 Tableau MCP 未提供自然语言查询工具。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"当前 Tableau MCP 未提供自然语言查询工具。\\n\\n请启用或配置 Tableau MCP 自然语言查询工具后重试。\"}}}}\n\n"
+    },
+    "Q3": {
+      "qid": "Q3",
+      "duration": 0.020272875030059367,
+      "status_code": 200,
+      "request_payload": {
+        "question": "统计一下每个子类别的销售额、利润和利润率",
+        "connection_id": 2,
+        "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+        "datasource_name": "订单+ (示例 - 超市)",
+        "conversation_id": "5d867ce6-2829-4a33-8acf-70aed1b9887f"
+      },
+      "conversation_id": "5d867ce6-2829-4a33-8acf-70aed1b9887f",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "MCP_NL_TOOL_UNAVAILABLE",
+        "message": "当前 Tableau MCP 未提供自然语言查询工具。",
+        "fallback_type": "mcp_nl_passthrough_unavailable",
+        "trace_id": "t-a9afb1ff",
+        "retryable": true,
+        "suggested_actions": [
+          "请选择数据源，并确认 Tableau MCP 自然语言查询工具已启用。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "mcp_nl_tool_discovery"
+        ],
+        "intent_classifier": {
+          "intent": "aggregate",
+          "confidence": 0.78,
+          "route_reason": "aggregate_pattern"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {
+            "chain_mode": "mcp_first_mcp_main",
+            "reason": "MCP_NL_TOOL_UNAVAILABLE",
+            "original_error": {
+              "configured_tool": null
+            }
+          }
+        },
+        "user_hint": "请启用或配置 Tableau MCP 自然语言查询工具后重试。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "mcp_nl_passthrough_unavailable",
+              "message": "当前 Tableau MCP 未提供自然语言查询工具。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "当前 Tableau MCP 未提供自然语言查询工具。\n\n请启用或配置 Tableau MCP 自然语言查询工具后重试。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-a9afb1ff",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.95,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "metric_keyword",
+                "message": "metric_keyword"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "mcp_nl_passthrough_unavailable",
+                  "message": "当前 Tableau MCP 未提供自然语言查询工具。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "当前 Tableau MCP 未提供自然语言查询工具。\n\n请启用或配置 Tableau MCP 自然语言查询工具后重试。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.78,
+          "route_reason": "aggregate_pattern"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.95,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "metric_keyword",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.95,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "metric_keyword",
+              "message": "metric_keyword"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.78,
+              "route_reason": "aggregate_pattern"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "5d867ce6-2829-4a33-8acf-70aed1b9887f",
+          "run_id": "e5222ae8-6b3a-4a69-8181-eadf98061342",
+          "trace_id": "t-a9afb1ff",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已进入 Tableau MCP 自然语言直通链路：aggregate。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "context_resolver",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "intent": "aggregate"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "context_resolver",
+          "summary": "{'status': 'empty', 'datasource_name': None, 'metric_names': [], 'dimension_names': [], 'filter_names': [], 'unresolved_references': False, 'calculation_performed': False}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_nl_tool_discovery",
+          "params": {
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "mcp_first_mcp_main"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_nl_tool_discovery",
+          "summary": "{'available': False, 'configured_tool': None, 'chain_mode': 'mcp_first_mcp_main'}"
+        },
+        {
+          "type": "error",
+          "error_code": "MCP_NL_TOOL_UNAVAILABLE",
+          "message": "当前 Tableau MCP 未提供自然语言查询工具。",
+          "fallback_type": "mcp_nl_passthrough_unavailable",
+          "trace_id": "t-a9afb1ff",
+          "retryable": true,
+          "suggested_actions": [
+            "请选择数据源，并确认 Tableau MCP 自然语言查询工具已启用。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "mcp_nl_tool_discovery"
+          ],
+          "intent_classifier": {
+            "intent": "aggregate",
+            "confidence": 0.78,
+            "route_reason": "aggregate_pattern"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {
+              "chain_mode": "mcp_first_mcp_main",
+              "reason": "MCP_NL_TOOL_UNAVAILABLE",
+              "original_error": {
+                "configured_tool": null
+              }
+            }
+          },
+          "user_hint": "请启用或配置 Tableau MCP 自然语言查询工具后重试。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "mcp_nl_passthrough_unavailable",
+                "message": "当前 Tableau MCP 未提供自然语言查询工具。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "当前 Tableau MCP 未提供自然语言查询工具。\n\n请启用或配置 Tableau MCP 自然语言查询工具后重试。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-a9afb1ff",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.95,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "metric_keyword",
+                  "message": "metric_keyword"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "mcp_nl_passthrough_unavailable",
+                    "message": "当前 Tableau MCP 未提供自然语言查询工具。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "当前 Tableau MCP 未提供自然语言查询工具。\n\n请启用或配置 Tableau MCP 自然语言查询工具后重试。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": ": \"tool_call\", \"tool\": \"mcp_nl_tool_discovery\", \"params\": {\"datasource\": {\"name\": \"订单+ (示例 - 超市)\", \"luid\": \"f4290485-26d3-428f-aa8d-ccc33862a411\"}, \"chain_mode\": \"mcp_first_mcp_main\"}}\n\ndata: {\"type\": \"tool_result\", \"tool\": \"mcp_nl_tool_discovery\", \"summary\": \"{'available': False, 'configured_tool': None, 'chain_mode': 'mcp_first_mcp_main'}\"}\n\ndata: {\"type\": \"error\", \"error_code\": \"MCP_NL_TOOL_UNAVAILABLE\", \"message\": \"当前 Tableau MCP 未提供自然语言查询工具。\", \"fallback_type\": \"mcp_nl_passthrough_unavailable\", \"trace_id\": \"t-a9afb1ff\", \"retryable\": true, \"suggested_actions\": [\"请选择数据源，并确认 Tableau MCP 自然语言查询工具已启用。\"], \"tools_used\": [\"intent_classifier\", \"mcp_nl_tool_discovery\"], \"intent_classifier\": {\"intent\": \"aggregate\", \"confidence\": 0.78, \"route_reason\": \"aggregate_pattern\"}, \"controlled_chain\": {\"status\": \"failed\", \"detail\": {\"chain_mode\": \"mcp_first_mcp_main\", \"reason\": \"MCP_NL_TOOL_UNAVAILABLE\", \"original_error\": {\"configured_tool\": null}}}, \"user_hint\": \"请启用或配置 Tableau MCP 自然语言查询工具后重试。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"mcp_nl_passthrough_unavailable\", \"message\": \"当前 Tableau MCP 未提供自然语言查询工具。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"当前 Tableau MCP 未提供自然语言查询工具。\\n\\n请启用或配置 Tableau MCP 自然语言查询工具后重试。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-a9afb1ff\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.95, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"metric_keyword\", \"message\": \"metric_keyword\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"mcp_nl_passthrough_unavailable\", \"message\": \"当前 Tableau MCP 未提供自然语言查询工具。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"当前 Tableau MCP 未提供自然语言查询工具。\\n\\n请启用或配置 Tableau MCP 自然语言查询工具后重试。\"}}}}\n\n"
+    },
+    "Q4": {
+      "qid": "Q4",
+      "duration": 0.019318750011734664,
+      "status_code": 200,
+      "request_payload": {
+        "question": "继续拆分到每个年份",
+        "connection_id": 2,
+        "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+        "datasource_name": "订单+ (示例 - 超市)",
+        "conversation_id": "5d867ce6-2829-4a33-8acf-70aed1b9887f"
+      },
+      "conversation_id": "5d867ce6-2829-4a33-8acf-70aed1b9887f",
+      "done": null,
+      "error": {
+        "type": "error",
+        "error_code": "MCP_NL_TOOL_UNAVAILABLE",
+        "message": "当前 Tableau MCP 未提供自然语言查询工具。",
+        "fallback_type": "mcp_nl_passthrough_unavailable",
+        "trace_id": "t-987fe935",
+        "retryable": true,
+        "suggested_actions": [
+          "请选择数据源，并确认 Tableau MCP 自然语言查询工具已启用。"
+        ],
+        "tools_used": [
+          "intent_classifier",
+          "mcp_nl_tool_discovery"
+        ],
+        "intent_classifier": {
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        "controlled_chain": {
+          "status": "failed",
+          "detail": {
+            "chain_mode": "mcp_first_mcp_main",
+            "reason": "MCP_NL_TOOL_UNAVAILABLE",
+            "original_error": {
+              "configured_tool": null
+            }
+          }
+        },
+        "user_hint": "请启用或配置 Tableau MCP 自然语言查询工具后重试。",
+        "fallback": {
+          "occurred": true,
+          "chain": [
+            {
+              "from": "router_guardrail",
+              "to": "error",
+              "reason_code": "mcp_nl_passthrough_unavailable",
+              "message": "当前 Tableau MCP 未提供自然语言查询工具。"
+            }
+          ],
+          "final_source": "fallback",
+          "user_visible_message": "当前 Tableau MCP 未提供自然语言查询工具。\n\n请启用或配置 Tableau MCP 自然语言查询工具后重试。"
+        },
+        "explainability": {
+          "schema_version": "p0.1",
+          "run_id": "",
+          "trace_id": "t-987fe935",
+          "phases": {
+            "intent": {
+              "intent": "query",
+              "confidence": 0.75,
+              "strategy": "router_guardrail",
+              "guardrail": {
+                "decision": "allow",
+                "reason_code": "data_action_pattern",
+                "message": "data_action_pattern"
+              }
+            },
+            "postprocess": {
+              "response_type": "fallback",
+              "row_count": null,
+              "displayed_row_count": null,
+              "formatting": [
+                "markdown_summary"
+              ]
+            },
+            "fallback": {
+              "occurred": true,
+              "chain": [
+                {
+                  "from": "router_guardrail",
+                  "to": "error",
+                  "reason_code": "mcp_nl_passthrough_unavailable",
+                  "message": "当前 Tableau MCP 未提供自然语言查询工具。"
+                }
+              ],
+              "final_source": "fallback",
+              "user_visible_message": "当前 Tableau MCP 未提供自然语言查询工具。\n\n请启用或配置 Tableau MCP 自然语言查询工具后重试。"
+            }
+          }
+        }
+      },
+      "row_count": null,
+      "events": [
+        {
+          "type": "intent_classifier",
+          "intent": "aggregate",
+          "confidence": 0.62,
+          "route_reason": "generic_business_data_context"
+        },
+        {
+          "type": "route_decision",
+          "question_type": "data_question",
+          "confidence": 0.75,
+          "route": "data_query",
+          "allowed_tools": [
+            "query"
+          ],
+          "forbidden_tools": [
+            "schema"
+          ],
+          "fallback_policy": "data_only",
+          "reason": "data_action_pattern",
+          "mode": "enforce"
+        },
+        {
+          "type": "explainability",
+          "phase": "intent",
+          "status": "completed",
+          "payload": {
+            "intent": "query",
+            "confidence": 0.75,
+            "strategy": "router_guardrail",
+            "guardrail": {
+              "decision": "allow",
+              "reason_code": "data_action_pattern",
+              "message": "data_action_pattern"
+            },
+            "intent_classifier": {
+              "intent": "aggregate",
+              "confidence": 0.62,
+              "route_reason": "generic_business_data_context"
+            }
+          }
+        },
+        {
+          "type": "metadata",
+          "conversation_id": "5d867ce6-2829-4a33-8acf-70aed1b9887f",
+          "run_id": "452f2857-b32d-44ec-9b8a-52d6460d72ea",
+          "trace_id": "t-987fe935",
+          "contract_version": "p0.1"
+        },
+        {
+          "type": "thinking",
+          "content": "已进入 Tableau MCP 自然语言直通链路：aggregate。"
+        },
+        {
+          "type": "tool_call",
+          "tool": "context_resolver",
+          "params": {
+            "chain_mode": "mcp_first_mcp_main",
+            "intent": "aggregate"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "context_resolver",
+          "summary": "{'status': 'unresolved', 'datasource_name': None, 'metric_names': [], 'dimension_names': [], 'filter_names': [], 'unresolved_references': True, 'calculation_performed': False}"
+        },
+        {
+          "type": "tool_call",
+          "tool": "mcp_nl_tool_discovery",
+          "params": {
+            "datasource": {
+              "name": "订单+ (示例 - 超市)",
+              "luid": "f4290485-26d3-428f-aa8d-ccc33862a411"
+            },
+            "chain_mode": "mcp_first_mcp_main"
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool": "mcp_nl_tool_discovery",
+          "summary": "{'available': False, 'configured_tool': None, 'chain_mode': 'mcp_first_mcp_main'}"
+        },
+        {
+          "type": "error",
+          "error_code": "MCP_NL_TOOL_UNAVAILABLE",
+          "message": "当前 Tableau MCP 未提供自然语言查询工具。",
+          "fallback_type": "mcp_nl_passthrough_unavailable",
+          "trace_id": "t-987fe935",
+          "retryable": true,
+          "suggested_actions": [
+            "请选择数据源，并确认 Tableau MCP 自然语言查询工具已启用。"
+          ],
+          "tools_used": [
+            "intent_classifier",
+            "mcp_nl_tool_discovery"
+          ],
+          "intent_classifier": {
+            "intent": "aggregate",
+            "confidence": 0.62,
+            "route_reason": "generic_business_data_context"
+          },
+          "controlled_chain": {
+            "status": "failed",
+            "detail": {
+              "chain_mode": "mcp_first_mcp_main",
+              "reason": "MCP_NL_TOOL_UNAVAILABLE",
+              "original_error": {
+                "configured_tool": null
+              }
+            }
+          },
+          "user_hint": "请启用或配置 Tableau MCP 自然语言查询工具后重试。",
+          "fallback": {
+            "occurred": true,
+            "chain": [
+              {
+                "from": "router_guardrail",
+                "to": "error",
+                "reason_code": "mcp_nl_passthrough_unavailable",
+                "message": "当前 Tableau MCP 未提供自然语言查询工具。"
+              }
+            ],
+            "final_source": "fallback",
+            "user_visible_message": "当前 Tableau MCP 未提供自然语言查询工具。\n\n请启用或配置 Tableau MCP 自然语言查询工具后重试。"
+          },
+          "explainability": {
+            "schema_version": "p0.1",
+            "run_id": "",
+            "trace_id": "t-987fe935",
+            "phases": {
+              "intent": {
+                "intent": "query",
+                "confidence": 0.75,
+                "strategy": "router_guardrail",
+                "guardrail": {
+                  "decision": "allow",
+                  "reason_code": "data_action_pattern",
+                  "message": "data_action_pattern"
+                }
+              },
+              "postprocess": {
+                "response_type": "fallback",
+                "row_count": null,
+                "displayed_row_count": null,
+                "formatting": [
+                  "markdown_summary"
+                ]
+              },
+              "fallback": {
+                "occurred": true,
+                "chain": [
+                  {
+                    "from": "router_guardrail",
+                    "to": "error",
+                    "reason_code": "mcp_nl_passthrough_unavailable",
+                    "message": "当前 Tableau MCP 未提供自然语言查询工具。"
+                  }
+                ],
+                "final_source": "fallback",
+                "user_visible_message": "当前 Tableau MCP 未提供自然语言查询工具。\n\n请启用或配置 Tableau MCP 自然语言查询工具后重试。"
+              }
+            }
+          }
+        }
+      ],
+      "raw_text_tail": " \"mcp_nl_tool_discovery\", \"params\": {\"datasource\": {\"name\": \"订单+ (示例 - 超市)\", \"luid\": \"f4290485-26d3-428f-aa8d-ccc33862a411\"}, \"chain_mode\": \"mcp_first_mcp_main\"}}\n\ndata: {\"type\": \"tool_result\", \"tool\": \"mcp_nl_tool_discovery\", \"summary\": \"{'available': False, 'configured_tool': None, 'chain_mode': 'mcp_first_mcp_main'}\"}\n\ndata: {\"type\": \"error\", \"error_code\": \"MCP_NL_TOOL_UNAVAILABLE\", \"message\": \"当前 Tableau MCP 未提供自然语言查询工具。\", \"fallback_type\": \"mcp_nl_passthrough_unavailable\", \"trace_id\": \"t-987fe935\", \"retryable\": true, \"suggested_actions\": [\"请选择数据源，并确认 Tableau MCP 自然语言查询工具已启用。\"], \"tools_used\": [\"intent_classifier\", \"mcp_nl_tool_discovery\"], \"intent_classifier\": {\"intent\": \"aggregate\", \"confidence\": 0.62, \"route_reason\": \"generic_business_data_context\"}, \"controlled_chain\": {\"status\": \"failed\", \"detail\": {\"chain_mode\": \"mcp_first_mcp_main\", \"reason\": \"MCP_NL_TOOL_UNAVAILABLE\", \"original_error\": {\"configured_tool\": null}}}, \"user_hint\": \"请启用或配置 Tableau MCP 自然语言查询工具后重试。\", \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"mcp_nl_passthrough_unavailable\", \"message\": \"当前 Tableau MCP 未提供自然语言查询工具。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"当前 Tableau MCP 未提供自然语言查询工具。\\n\\n请启用或配置 Tableau MCP 自然语言查询工具后重试。\"}, \"explainability\": {\"schema_version\": \"p0.1\", \"run_id\": \"\", \"trace_id\": \"t-987fe935\", \"phases\": {\"intent\": {\"intent\": \"query\", \"confidence\": 0.75, \"strategy\": \"router_guardrail\", \"guardrail\": {\"decision\": \"allow\", \"reason_code\": \"data_action_pattern\", \"message\": \"data_action_pattern\"}}, \"postprocess\": {\"response_type\": \"fallback\", \"row_count\": null, \"displayed_row_count\": null, \"formatting\": [\"markdown_summary\"]}, \"fallback\": {\"occurred\": true, \"chain\": [{\"from\": \"router_guardrail\", \"to\": \"error\", \"reason_code\": \"mcp_nl_passthrough_unavailable\", \"message\": \"当前 Tableau MCP 未提供自然语言查询工具。\"}], \"final_source\": \"fallback\", \"user_visible_message\": \"当前 Tableau MCP 未提供自然语言查询工具。\\n\\n请启用或配置 Tableau MCP 自然语言查询工具后重试。\"}}}}\n\n"
+    }
+  },
+  "summary": [
+    {
+      "qid": "Q1",
+      "duration": 0.04,
+      "status_code": 200,
+      "conversation_id": "5d867ce6-2829-4a33-8acf-70aed1b9887f",
+      "row_count": null,
+      "error_code": "MCP_NL_TOOL_UNAVAILABLE",
+      "tools_used": [
+        "intent_classifier",
+        "mcp_nl_tool_discovery"
+      ],
+      "forbidden_markers": {
+        "llm_mcp_args": false,
+        "llm_queryspec": false,
+        "llm_queryspec_repair": false,
+        "queryspec_mcp_fallback": false,
+        "mcp_main_queryspec_fallback": false
+      },
+      "event_types": [
+        "error",
+        "explainability",
+        "intent_classifier",
+        "metadata",
+        "route_decision",
+        "thinking",
+        "tool_call",
+        "tool_result"
+      ]
+    },
+    {
+      "qid": "Q2",
+      "duration": 0.02,
+      "status_code": 200,
+      "conversation_id": "5d867ce6-2829-4a33-8acf-70aed1b9887f",
+      "row_count": null,
+      "error_code": "MCP_NL_TOOL_UNAVAILABLE",
+      "tools_used": [
+        "intent_classifier",
+        "mcp_nl_tool_discovery"
+      ],
+      "forbidden_markers": {
+        "llm_mcp_args": false,
+        "llm_queryspec": false,
+        "llm_queryspec_repair": false,
+        "queryspec_mcp_fallback": false,
+        "mcp_main_queryspec_fallback": false
+      },
+      "event_types": [
+        "error",
+        "explainability",
+        "intent_classifier",
+        "metadata",
+        "route_decision",
+        "thinking",
+        "tool_call",
+        "tool_result"
+      ]
+    },
+    {
+      "qid": "Q3",
+      "duration": 0.02,
+      "status_code": 200,
+      "conversation_id": "5d867ce6-2829-4a33-8acf-70aed1b9887f",
+      "row_count": null,
+      "error_code": "MCP_NL_TOOL_UNAVAILABLE",
+      "tools_used": [
+        "intent_classifier",
+        "mcp_nl_tool_discovery"
+      ],
+      "forbidden_markers": {
+        "llm_mcp_args": false,
+        "llm_queryspec": false,
+        "llm_queryspec_repair": false,
+        "queryspec_mcp_fallback": false,
+        "mcp_main_queryspec_fallback": false
+      },
+      "event_types": [
+        "error",
+        "explainability",
+        "intent_classifier",
+        "metadata",
+        "route_decision",
+        "thinking",
+        "tool_call",
+        "tool_result"
+      ]
+    },
+    {
+      "qid": "Q4",
+      "duration": 0.02,
+      "status_code": 200,
+      "conversation_id": "5d867ce6-2829-4a33-8acf-70aed1b9887f",
+      "row_count": null,
+      "error_code": "MCP_NL_TOOL_UNAVAILABLE",
+      "tools_used": [
+        "intent_classifier",
+        "mcp_nl_tool_discovery"
+      ],
+      "forbidden_markers": {
+        "llm_mcp_args": false,
+        "llm_queryspec": false,
+        "llm_queryspec_repair": false,
+        "queryspec_mcp_fallback": false,
+        "mcp_main_queryspec_fallback": false
+      },
+      "event_types": [
+        "error",
+        "explainability",
+        "intent_classifier",
+        "metadata",
+        "route_decision",
+        "thinking",
+        "tool_call",
+        "tool_result"
+      ]
+    }
+  ]
+}

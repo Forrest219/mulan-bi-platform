@@ -9,6 +9,8 @@ from services.data_agent.mcp_host import (
     MCPToolExecutor,
 )
 
+pytestmark = pytest.mark.skip_db
+
 
 class FakeMCPClient:
     def __init__(self, tools, result=None):
@@ -140,7 +142,9 @@ def test_query_datasource_executes_through_generic_runtime_executor():
         },
     )
 
-    assert result == {"data": [{"value": 1}]}
+    assert result["data"] == [{"value": 1}]
+    assert result["metadata"]["truncated_by_guardrail"] is False
+    assert result["metadata"]["guardrail_resource_cap"]["max_rows"] == 1
     assert len(client.list_calls) == 1
     assert client.call_calls == [
         {
@@ -149,6 +153,9 @@ def test_query_datasource_executes_through_generic_runtime_executor():
                 "datasourceLuid": "ds-1",
                 "query": {"fields": []},
                 "limit": 1,
+                "max_rows": 1,
+                "max_bytes": 5242880,
+                "timeout_ms": 30000,
             },
             "timeout": 19,
             "connection_id": 42,

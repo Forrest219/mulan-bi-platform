@@ -21,6 +21,12 @@ from services.data_agent.queryspec_fallback import build_fallback_queryspec, inf
 from services.data_agent.queryspec_prompt_builder import build_queryspec_prompt, build_queryspec_repair_prompt
 from services.data_agent.queryspec_validator import validate_queryspec
 from services.data_agent.response import AgentEvent
+from services.data_agent.result_guardrail import (
+    DETAIL_SCAN_BLOCKED,
+    ResultGuardrailInput,
+    evaluate_result_guardrail,
+)
+from services.data_agent.semantic_operators.base import DataContinuityError
 from services.data_agent.semantic_operators.registry import default_registry
 from services.data_agent.skill_prompt_loader import SkillPromptLoader
 from services.data_agent.table_display import infer_table_display_schema
@@ -57,6 +63,7 @@ MCP_HOST_TOOL_EXECUTION_FAILED = "MCP_HOST_TOOL_EXECUTION_FAILED"
 MCP_HOST_NO_QUERY_RESULT = "MCP_HOST_NO_QUERY_RESULT"
 MCP_HOST_LOOP_BUDGET_EXHAUSTED = "MCP_HOST_LOOP_BUDGET_EXHAUSTED"
 MCP_HOST_TOOL_NOT_IN_CATALOG = "MCP_HOST_TOOL_NOT_IN_CATALOG"
+RESULT_GUARDRAIL_BLOCKED = "RESULT_GUARDRAIL_BLOCKED"
 MCP_HOST_METADATA_TOOL_NAME = "get-datasource-metadata"
 MCP_HOST_QUERY_TOOL_NAME = "query-datasource"
 MCP_HOST_MAX_TOOL_CALLS = 4
@@ -996,6 +1003,27 @@ async def run_mcp_first_main_path(
     })
     try:
         mcp_data = await _execute_queryspec(spec, ds_info, context, question, queryable_fields=field_captions)
+    except DataContinuityError as exc:
+        logger.warning("semantic operator data continuity failed: %s", exc)
+        yield AgentEvent(type="tool_result", content={
+            "tool": "tableau_mcp",
+            "result": {
+                "success": False,
+                "error": str(exc),
+                "error_code": exc.code,
+                "data": {"error": str(exc), "error_code": exc.code, "detail": exc.detail},
+            },
+        })
+        yield AgentEvent(type="error", content=_fallback_payload(
+            error_code=exc.code,
+            message="MCP 返回数据不满足语义算子的连续性要求，本次不输出结论。",
+            user_hint="请检查数据源周期是否完整，或缩小时间范围后重试。",
+            trace_id=context.trace_id,
+            intent_result=intent_result,
+            fallback_type="query_plan_unavailable",
+            detail={"reason": exc.code, "operator": spec.effective_operator, "detail": exc.detail},
+        ))
+        return
     except Exception as exc:
         logger.exception("controlled MCP execution failed")
         yield AgentEvent(type="tool_result", content={
@@ -1024,6 +1052,30 @@ async def run_mcp_first_main_path(
         "tool": "tableau_mcp",
         "result": {"data": mcp_data},
     })
+    mcp_data = _apply_result_guardrail(
+        question=question,
+        chain_mode=MCP_MAIN_CHAIN_MODE,
+        response_data=mcp_data,
+        semantic_operator=str(spec.effective_operator or "unknown"),
+        fallback_triggered=bool(queryspec_fallback_used),
+        fallback_reason=queryspec_fallback_reason,
+    )
+    guardrail = mcp_data.get("result_guardrail") if isinstance(mcp_data.get("result_guardrail"), Mapping) else {}
+    if guardrail.get("decision") == "block":
+        yield AgentEvent(type="error", content=_fallback_payload(
+            error_code=str(guardrail.get("error_code") or DETAIL_SCAN_BLOCKED),
+            message=str(guardrail.get("message") or "结果触发质量门禁，已阻断回答。"),
+            user_hint="请缩小时间范围、减少明细粒度后重试。",
+            trace_id=context.trace_id,
+            intent_result=intent_result,
+            fallback_type="query_plan_unavailable",
+            detail={
+                "reason": RESULT_GUARDRAIL_BLOCKED,
+                "result_guardrail": guardrail,
+                "chain_mode": MCP_MAIN_CHAIN_MODE,
+            },
+        ))
+        return
 
     rendering_skill = loader.load_rendering("answer_renderer")
     yield AgentEvent(type="tool_call", content={
@@ -1947,7 +1999,7 @@ async def _run_mcp_main_route(
         llm_service=llm_service,
         chain_mode=chain_mode,
     )
-    if attempt.success or not _mcp_host_thin_fallback_enabled():
+    if attempt.success or attempt.reason == RESULT_GUARDRAIL_BLOCKED or not _mcp_host_thin_fallback_enabled():
         return attempt
 
     fallback_events = list(attempt.events)
@@ -2085,10 +2137,29 @@ async def _run_thin_mcp_passthrough_route(
         question=question,
         analysis_context=analysis_context,
     )
+    response_data = _apply_result_guardrail(
+        question=question,
+        chain_mode=chain_mode,
+        response_data=response_data,
+        semantic_operator=str(intent_result.intent or "unknown"),
+        fallback_triggered=True,
+        fallback_reason="thin_mcp_passthrough",
+    )
     events.append(AgentEvent(type="tool_result", content={
         "tool": "tableau_mcp_nl",
         "result": {"data": response_data},
     }))
+    guardrail = response_data.get("result_guardrail") if isinstance(response_data.get("result_guardrail"), Mapping) else {}
+    if guardrail.get("decision") == "block":
+        return _McpMainAttempt(
+            success=False,
+            events=events,
+            reason=RESULT_GUARDRAIL_BLOCKED,
+            error_code=str(guardrail.get("error_code") or DETAIL_SCAN_BLOCKED),
+            original_error=guardrail,
+            message=str(guardrail.get("message") or "结果触发质量门禁，已阻断回答。"),
+            user_hint="请缩小时间范围、减少明细粒度后重试。",
+        )
 
     rendered = _render_thin_mcp_answer(response_data)
     events.append(AgentEvent(type="tool_call", content={
@@ -2350,6 +2421,27 @@ async def _run_mcp_host_route(
                 planner_output=planner_output,
                 datasource_metadata=metadata,
             )
+            response_data = _apply_result_guardrail(
+                question=question,
+                chain_mode=chain_mode,
+                response_data=response_data,
+                semantic_operator=str(intent_result.intent or "unknown"),
+            )
+            guardrail = response_data.get("result_guardrail") if isinstance(response_data.get("result_guardrail"), Mapping) else {}
+            if guardrail.get("decision") == "block":
+                events.append(AgentEvent(type="tool_result", content={
+                    "tool": "mcp_host_final_response",
+                    "result": {"success": False, "error": guardrail.get("error_code"), "data": response_data},
+                }))
+                return _McpMainAttempt(
+                    success=False,
+                    events=events,
+                    reason=RESULT_GUARDRAIL_BLOCKED,
+                    error_code=str(guardrail.get("error_code") or DETAIL_SCAN_BLOCKED),
+                    original_error=guardrail,
+                    message=str(guardrail.get("message") or "结果触发质量门禁，已阻断回答。"),
+                    user_hint="请缩小时间范围、减少明细粒度后重试。",
+                )
             rendered = _render_mcp_host_answer(response_data)
             events.append(AgentEvent(type="tool_call", content={
                 "tool": "mcp_host_final_response",
@@ -2544,6 +2636,27 @@ async def _run_mcp_host_route(
                 planner_output={"action": "final", "source": "auto_final_after_successful_query"},
                 datasource_metadata=metadata,
             )
+            response_data = _apply_result_guardrail(
+                question=question,
+                chain_mode=chain_mode,
+                response_data=response_data,
+                semantic_operator=str(intent_result.intent or "unknown"),
+            )
+            guardrail = response_data.get("result_guardrail") if isinstance(response_data.get("result_guardrail"), Mapping) else {}
+            if guardrail.get("decision") == "block":
+                events.append(AgentEvent(type="tool_result", content={
+                    "tool": "mcp_host_final_response",
+                    "result": {"success": False, "error": guardrail.get("error_code"), "data": response_data},
+                }))
+                return _McpMainAttempt(
+                    success=False,
+                    events=events,
+                    reason=RESULT_GUARDRAIL_BLOCKED,
+                    error_code=str(guardrail.get("error_code") or DETAIL_SCAN_BLOCKED),
+                    original_error=guardrail,
+                    message=str(guardrail.get("message") or "结果触发质量门禁，已阻断回答。"),
+                    user_hint="请缩小时间范围、减少明细粒度后重试。",
+                )
             rendered = _render_mcp_host_answer(response_data)
             events.append(AgentEvent(type="tool_call", content={
                 "tool": "mcp_host_final_response",
@@ -3542,6 +3655,49 @@ def _normalize_mcp_host_response_data(
 
 def _render_mcp_host_answer(response_data: Mapping[str, Any]) -> str:
     return _render_thin_mcp_answer(response_data)
+
+
+def _apply_result_guardrail(
+    *,
+    question: str,
+    chain_mode: str,
+    response_data: Mapping[str, Any],
+    semantic_operator: str,
+    fallback_triggered: bool = False,
+    fallback_reason: Optional[str] = None,
+) -> dict[str, Any]:
+    verdict = evaluate_result_guardrail(
+        ResultGuardrailInput(
+            question=question,
+            chain_mode=chain_mode,
+            fallback_triggered=fallback_triggered,
+            fallback_reason=fallback_reason,
+            semantic_operator=semantic_operator,
+            context_snapshot={},
+            tool_name="query-datasource",
+            safe_args={},
+            result={
+                "fields": response_data.get("fields") or [],
+                "rows": response_data.get("rows") or [],
+                "metadata": dict(response_data.get("metadata") or {}),
+            },
+            thresholds={"max_detail_rows": 200},
+        )
+    )
+    payload = dict(response_data)
+    data_qa = dict(payload.get("data_qa") or {})
+    data_qa.update(
+        {
+            "semantic_status": verdict.semantic_status,
+            "semantic_operator": semantic_operator or "unknown",
+            "fallback_triggered": fallback_triggered,
+            "result_guardrail_decision": verdict.decision,
+            "result_guardrail_error_code": verdict.error_code,
+        }
+    )
+    payload["data_qa"] = data_qa
+    payload["result_guardrail"] = verdict.to_dict()
+    return payload
 
 
 def _datasource_trace_payload(datasource: Mapping[str, Any]) -> dict[str, Any]:

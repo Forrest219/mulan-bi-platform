@@ -13,7 +13,7 @@ from services.data_agent.query_plan import (
     first_dimension,
     normalize_result_table,
 )
-from services.data_agent.semantic_operators.base import BaseSemanticOperator
+from services.data_agent.semantic_operators.base import BaseSemanticOperator, DataContinuityError
 from services.data_agent.table_display import infer_table_display_schema
 
 
@@ -99,6 +99,15 @@ def reduce_set_difference_result_sets(
 
     base_idx = _field_index(base_fields, entity)
     compare_idx = _field_index(compare_fields, entity)
+    if base_idx is None or compare_idx is None:
+        raise DataContinuityError(
+            "set_difference could not infer target dimension columns",
+            detail={
+                "target_dimension": entity,
+                "universe_fields": [field_name(field) for field in base_fields],
+                "occurred_fields": [field_name(field) for field in compare_fields],
+            },
+        )
     base_keys = _key_set(base_rows, base_idx)
     compare_keys = _key_set(compare_rows, compare_idx)
     diff = sorted(base_keys - compare_keys, key=lambda value: str(value))
@@ -202,12 +211,12 @@ def _occurred_filters(ctx: QueryPlanContext, universe_filters: list[dict[str, An
     return [*universe_filters, *_as_filter_list(extra)]
 
 
-def _field_index(fields: list[Any], expected: str) -> int:
+def _field_index(fields: list[Any], expected: str) -> int | None:
     expected_compact = compact(expected)
     for index, field in enumerate(fields):
         if compact(field_name(field)) == expected_compact:
             return index
-    return 0
+    return None
 
 
 def _key_set(rows: list[list[Any]], index: int) -> set[Any]:
