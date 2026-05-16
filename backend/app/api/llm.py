@@ -326,7 +326,7 @@ async def delete_llm_config_by_id(config_id: int, request: Request):
                 LLMConfig.id != config_id,
             ).count()
             if remaining == 0:
-                raise HTTPException(status_code=400, detail="不能删除最后一条 default 活跃配置")
+                raise HTTPException(status_code=400, detail="不能删除唯一活跃的 default 配置，请先启用另一条 default 配置后再删除")
         try:
             from services.logs import logger
             logger.log_operation(

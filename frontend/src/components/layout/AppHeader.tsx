@@ -126,7 +126,7 @@ export default function AppHeader({ onOpenHelpAgent }: AppHeaderProps) {
       setUnreadCount(prev => Math.max(0, prev - 1));
     }
     setNotifOpen(false);
-    if (n.link) navigate(n.link);
+    navigate('/notifications');
   };
 
   const handleQuickToggle = async (n: AppNotification) => {

@@ -787,6 +787,8 @@ export default function LLMConfigsPage({ headerless = false }: { headerless?: bo
                   const isToggling = togglingId === cfg.id;
                   const evidence = testEvidenceMap[cfg.id];
                   const evidenceExpanded = expandedEvidenceId === cfg.id;
+                  const activeDefaultCount = configs.filter(c => c.purpose === 'default' && c.is_active).length;
+                  const isLastActiveDefault = cfg.purpose === 'default' && cfg.is_active && activeDefaultCount === 1;
 
                   return (
                     <>
@@ -878,9 +880,14 @@ export default function LLMConfigsPage({ headerless = false }: { headerless?: bo
                               编辑
                             </button>
                             <button
-                              onClick={() => setDeleteTarget(cfg)}
-                              className="px-2.5 py-1 text-xs text-red-500 hover:text-red-700
-                                         hover:bg-red-50 rounded-md transition-colors"
+                              onClick={() => !isLastActiveDefault && setDeleteTarget(cfg)}
+                              disabled={isLastActiveDefault}
+                              title={isLastActiveDefault ? '当前为唯一活跃 default 配置，请先启用另一条 default 配置后再删除' : undefined}
+                              className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+                                isLastActiveDefault
+                                  ? 'text-slate-300 cursor-not-allowed'
+                                  : 'text-red-500 hover:text-red-700 hover:bg-red-50'
+                              }`}
                             >
                               <i className="ri-delete-bin-line mr-1" />
                               删除
