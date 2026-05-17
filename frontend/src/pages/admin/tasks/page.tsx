@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense, useMemo } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   fetchTaskStats,
   fetchTaskSchedules,
@@ -19,6 +20,47 @@ const SyncSchedulesTab = lazy(() => import('./SyncSchedulesTab'));
 const SyncTasksTab    = lazy(() => import('./SyncTasksTab'));
 const TaskQueueTab    = lazy(() => import('./TaskQueueTab'));
 const SyncCalendarTab = lazy(() => import('./SyncCalendarTab'));
+
+type PrimaryTab = 'calendar' | 'rules' | 'history' | 'system';
+type SystemTab = 'platform' | 'runs' | 'queue';
+
+const TASK_TABS: readonly [PrimaryTab, string][] = [
+  ['calendar', '同步日历'],
+  ['rules', '同步规则'],
+  ['history', '同步计划执行'],
+  ['system', '系统任务'],
+];
+
+const SYSTEM_TABS: readonly [SystemTab, string][] = [
+  ['platform', '平台任务'],
+  ['runs', '系统执行历史'],
+  ['queue', '执行队列'],
+];
+
+const PRIMARY_TAB_SET = new Set<PrimaryTab>(TASK_TABS.map(([key]) => key));
+const SYSTEM_TAB_SET = new Set<SystemTab>(SYSTEM_TABS.map(([key]) => key));
+
+function buildTasksPath(tab: PrimaryTab, systemTab: SystemTab = 'platform'): string {
+  return tab === 'system'
+    ? `/system/tasks/system/${systemTab}`
+    : `/system/tasks/${tab}`;
+}
+
+function parseTasksPath(pathname: string): {
+  activeTab: PrimaryTab;
+  systemTab: SystemTab;
+  canonicalPath: string;
+} {
+  const suffix = pathname.replace(/^\/system\/tasks\/?/, '');
+  const [rawTab, rawSystemTab] = suffix.split('/').filter(Boolean);
+  const activeTab = PRIMARY_TAB_SET.has(rawTab as PrimaryTab) ? rawTab as PrimaryTab : 'calendar';
+  const systemTab = SYSTEM_TAB_SET.has(rawSystemTab as SystemTab) ? rawSystemTab as SystemTab : 'platform';
+  return {
+    activeTab,
+    systemTab,
+    canonicalPath: buildTasksPath(activeTab, systemTab),
+  };
+}
 
 function formatDuration(ms: number | null): string {
   if (ms === null) return '—';
@@ -253,14 +295,18 @@ function CronEditModal({
 }
 
 export default function AdminTasksPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { activeTab, systemTab, canonicalPath } = useMemo(
+    () => parseTasksPath(location.pathname),
+    [location.pathname],
+  );
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<TaskStats | null>(null);
   const [schedules, setSchedules] = useState<TaskSchedule[]>([]);
   const [runs, setRuns] = useState<TaskRun[]>([]);
   const [runsTotal, setRunsTotal] = useState(0);
   const [runsPages, setRunsPages] = useState(0);
-  const [activeTab, setActiveTab] = useState<'calendar' | 'rules' | 'history' | 'system'>('calendar');
-  const [systemTab, setSystemTab] = useState<'platform' | 'runs' | 'queue'>('platform');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [taskFilter, setTaskFilter] = useState<string>('');
   const [page, setPage] = useState(1);
@@ -268,6 +314,12 @@ export default function AdminTasksPage() {
   const [togglingKey, setTogglingKey] = useState<string | null>(null);
   const [triggeringKey, setTriggeringKey] = useState<string | null>(null);
   const [cronModalSchedule, setCronModalSchedule] = useState<TaskSchedule | null>(null);
+
+  useEffect(() => {
+    if (location.pathname !== canonicalPath) {
+      navigate({ pathname: canonicalPath, search: location.search }, { replace: true });
+    }
+  }, [canonicalPath, location.pathname, location.search, navigate]);
 
   useEffect(() => {
     loadData();
@@ -366,15 +418,10 @@ export default function AdminTasksPage() {
       <div className="bg-white border-b border-slate-100 px-8">
         <div className="max-w-6xl mx-auto">
           <div className="flex gap-1 py-2">
-            {([
-              ['calendar', '同步日历'],
-              ['rules',    '同步规则'],
-              ['history',  '同步计划执行'],
-              ['system',   '系统任务'],
-            ] as const).map(([key, label]) => (
+            {TASK_TABS.map(([key, label]) => (
               <button
                 key={key}
-                onClick={() => setActiveTab(key)}
+                onClick={() => navigate(buildTasksPath(key))}
                 className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
                   activeTab === key
                     ? 'bg-slate-800 text-white'
@@ -420,14 +467,10 @@ export default function AdminTasksPage() {
       {activeTab === 'system' && (
         <>
           <div className="bg-white rounded-xl border border-slate-200 px-4 py-3 mb-4 flex flex-wrap items-center gap-2">
-            {([
-              ['platform', '平台任务'],
-              ['runs', '系统执行历史'],
-              ['queue', '执行队列'],
-            ] as const).map(([key, label]) => (
+            {SYSTEM_TABS.map(([key, label]) => (
               <button
                 key={key}
-                onClick={() => setSystemTab(key)}
+                onClick={() => navigate(buildTasksPath('system', key))}
                 className={`px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
                   systemTab === key
                     ? 'bg-slate-800 text-white'

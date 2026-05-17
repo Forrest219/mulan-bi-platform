@@ -943,7 +943,7 @@ const routes: RouteObject[] = [
             element: <Navigate to="/system/llm-configs" replace />,
           },
           {
-            path: 'tasks',
+            path: 'tasks/*',
             handle: helpProfile({
               page_key: 'tasks',
               page_title: '任务管理',

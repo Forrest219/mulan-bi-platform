@@ -302,6 +302,62 @@ def _reconcile_stale_sync_tasks(db, now=None, timeout_minutes=STALE_SYNC_TASK_TI
     return len(stale_tasks)
 
 
+def _sync_task_status_from_log_status(status: str) -> str:
+    if status == "success":
+        return "completed"
+    if status == "failed":
+        return "failed"
+    if status == "running":
+        return "running"
+    if status == "skipped":
+        return "skipped"
+    return "completed" if status else "completed"
+
+
+def _backfill_sync_tasks_from_tableau_logs(db, *, day_start, day_end, connection_id=None):
+    """Create missing BiSyncTask rows for existing Tableau sync logs.
+
+    Manual sync historically wrote tableau_sync_logs and bi_task_runs but did
+    not create bi_sync_tasks, so the System Tasks "sync plan execution" view
+    missed successful manual runs. This reconciliation is idempotent and scoped
+    to the requested date/window.
+    """
+    from services.tasks.models import BiSyncTask
+    from services.tableau.models import TableauSyncLog
+
+    query = (
+        db.query(TableauSyncLog)
+        .outerjoin(BiSyncTask, BiSyncTask.sync_log_id == TableauSyncLog.id)
+        .filter(
+            BiSyncTask.id.is_(None),
+            TableauSyncLog.started_at >= day_start,
+            TableauSyncLog.started_at < day_end,
+        )
+    )
+    if connection_id is not None:
+        query = query.filter(TableauSyncLog.connection_id == connection_id)
+
+    logs = query.order_by(TableauSyncLog.started_at, TableauSyncLog.id).all()
+    if not logs:
+        return 0
+
+    now = datetime.now()
+    for log in logs:
+        db.add(BiSyncTask(
+            schedule_id=None,
+            connection_id=log.connection_id,
+            scheduled_at=log.started_at,
+            status=_sync_task_status_from_log_status(log.status),
+            trigger_type=log.trigger_type or "manual",
+            sync_log_id=log.id,
+            error_message=log.error_message,
+            updated_at=log.finished_at or now,
+        ))
+    db.commit()
+    logger.info("backfilled %d bi_sync_tasks from tableau_sync_logs", len(logs))
+    return len(logs)
+
+
 def _check_sync_health():
     """Best-effort Celery health check; never fail the overview endpoint."""
     health = {
@@ -979,17 +1035,6 @@ async def list_sync_tasks(
     from services.tableau.models import TableauConnection, TableauDatabase
 
     with SessionLocal() as db:
-        _reconcile_stale_sync_tasks(db)
-        q = db.query(BiSyncTask)
-
-        if schedule_id is not None:
-            q = q.filter(BiSyncTask.schedule_id == schedule_id)
-        if connection_id is not None:
-            q = q.filter(BiSyncTask.connection_id == connection_id)
-        if status:
-            q = q.filter(BiSyncTask.status == status)
-
-        # 默认今日
         if date:
             try:
                 day = datetime.strptime(date, "%Y-%m-%d").date()
@@ -1000,6 +1045,23 @@ async def list_sync_tasks(
 
         day_start = datetime.combine(day, datetime.min.time())
         day_end   = day_start + timedelta(days=1)
+        _backfill_sync_tasks_from_tableau_logs(
+            db,
+            day_start=day_start,
+            day_end=day_end,
+            connection_id=connection_id,
+        )
+        _reconcile_stale_sync_tasks(db)
+
+        q = db.query(BiSyncTask)
+
+        if schedule_id is not None:
+            q = q.filter(BiSyncTask.schedule_id == schedule_id)
+        if connection_id is not None:
+            q = q.filter(BiSyncTask.connection_id == connection_id)
+        if status:
+            q = q.filter(BiSyncTask.status == status)
+
         q = q.filter(BiSyncTask.scheduled_at >= day_start, BiSyncTask.scheduled_at < day_end)
 
         total = q.count()

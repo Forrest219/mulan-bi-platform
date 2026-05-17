@@ -9,6 +9,11 @@ from sqlalchemy import (
 from app.core.database import Base, JSONB, sa_func, sa_text
 
 
+def _format_local_iso(dt):
+    """Format naive local datetimes without a UTC marker."""
+    return dt.strftime("%Y-%m-%dT%H:%M:%S") if dt else None
+
+
 class BiTaskRun(Base):
     """任务运行记录表 bi_task_runs"""
     __tablename__ = "bi_task_runs"
@@ -156,13 +161,13 @@ class BiSyncTask(Base):
             "id": self.id,
             "schedule_id": self.schedule_id,
             "connection_id": self.connection_id,
-            "scheduled_at": self.scheduled_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.scheduled_at else None,
+            "scheduled_at": _format_local_iso(self.scheduled_at),
             "status": self.status,
             "trigger_type": self.trigger_type,
             "sync_log_id": self.sync_log_id,
             "error_message": self.error_message,
-            "created_at": self.created_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.created_at else None,
-            "updated_at": self.updated_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.updated_at else None,
+            "created_at": _format_local_iso(self.created_at),
+            "updated_at": _format_local_iso(self.updated_at),
         }
 
 

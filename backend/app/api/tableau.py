@@ -996,11 +996,25 @@ async def sync_connection(
 
     _db.set_sync_status(conn_id, "running")
 
+    from datetime import datetime
+    from services.tasks.models import BiSyncTask
+
+    sync_task = BiSyncTask(
+        schedule_id=None,
+        connection_id=conn_id,
+        scheduled_at=datetime.now(),
+        status="pending",
+        trigger_type="manual",
+    )
+    db.add(sync_task)
+    db.commit()
+    db.refresh(sync_task)
+
     if celery_available:
         from services.tasks.tableau_tasks import sync_connection_task
         task = sync_connection_task.apply_async(
             args=[conn_id],
-            kwargs={"trigger_type": "manual"},
+            kwargs={"trigger_type": "manual", "sync_task_id": sync_task.id},
             headers={
                 "trigger_type": "manual",
                 "triggered_by": current_user["id"],
@@ -1059,16 +1073,21 @@ async def sync_connection(
 
                 result = service.sync_all_assets(sync_dbw, conn_id, trigger_type="manual", sync_log_id=sync_log.id)
                 sync_dbw.reset_sync_failures(conn_id)
-                return {"status": result["status"], "total": result["total"]}
+                return {"status": result["status"], "total": result["total"], "sync_log_id": sync_log.id}
             except Exception as e:
                 msg = str(e)
                 sync_dbw.finish_sync_log(sync_log.id, "failed", error_message=msg)
                 sync_dbw.set_sync_status(conn_id, "failed")
-                return {"status": "error", "message": msg}
+                return {"status": "error", "message": msg, "sync_log_id": sync_log.id}
             finally:
                 service.disconnect()
 
     result = await asyncio.to_thread(_run_sync_inline)
+    sync_task.status = "failed" if result.get("status") == "error" else "completed"
+    sync_task.sync_log_id = result.get("sync_log_id")
+    sync_task.error_message = result.get("message") if result.get("status") == "error" else None
+    sync_task.updated_at = datetime.now()
+    db.commit()
     if result.get("status") == "error":
         raise HTTPException(status_code=500, detail={"message": result["message"]})
     log_action(current_user["id"], current_user.get("username", ""), "sync", "tableau_connection", conn_id)

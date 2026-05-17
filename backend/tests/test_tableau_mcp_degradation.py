@@ -224,26 +224,51 @@ def test_sync_endpoint_mcp_degraded_returns_503(admin_client, db_session):
 
 def test_sync_endpoint_mcp_healthy_succeeds(admin_client, db_session):
     """POST /api/tableau/connections/{id}/sync - MCP healthy 正常提交"""
-    with patch("app.api.tableau.verify_connection_access"), \
-         patch("services.tableau.models.TableauDatabase.get_connection") as mock_get_conn, \
-         patch("app.api.tableau.is_mcp_degraded") as mock_degraded, \
-         patch("services.tasks.tableau_tasks.sync_connection_task") as mock_task:
-        
-        mock_degraded.return_value = False  # healthy
-        mock_get_conn.return_value = _make_mock_conn(conn_id=4)
-        mock_task.apply_async.return_value = MagicMock(id="task-123")
-        
-        resp = admin_client.post("/api/tableau/connections/4/sync")
-        
-    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
-    data = resp.json()
-    assert data["status"] == "pending"
-    assert data["task_id"] == "task-123"
-    mock_task.apply_async.assert_called_once_with(
-        args=[4],
-        kwargs={"trigger_type": "manual"},
-        headers={"trigger_type": "manual", "triggered_by": ANY},
+    from app.core.database import get_db
+    from app.main import app
+    from services.tableau.models import TableauConnection
+
+    conn = TableauConnection(
+        name=f"pytest sync endpoint {datetime.now().timestamp()}",
+        server_url="https://tableau.example.com",
+        site="pytest",
+        token_name="pytest",
+        token_encrypted="encrypted",
+        owner_id=1,
+        is_active=True,
     )
+    db_session.add(conn)
+    db_session.commit()
+    db_session.refresh(conn)
+
+    def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        with patch("app.api.tableau.verify_connection_access"), \
+             patch("services.tableau.models.TableauDatabase.get_connection") as mock_get_conn, \
+             patch("app.api.tableau.is_mcp_degraded") as mock_degraded, \
+             patch("services.tasks.tableau_tasks.sync_connection_task") as mock_task:
+
+            mock_degraded.return_value = False  # healthy
+            mock_get_conn.return_value = _make_mock_conn(conn_id=conn.id)
+            mock_task.apply_async.return_value = MagicMock(id="task-123")
+
+            resp = admin_client.post(f"/api/tableau/connections/{conn.id}/sync")
+
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        data = resp.json()
+        assert data["status"] == "pending"
+        assert data["task_id"] == "task-123"
+        _, call_kwargs = mock_task.apply_async.call_args
+        assert call_kwargs["args"] == [conn.id]
+        assert call_kwargs["kwargs"]["trigger_type"] == "manual"
+        assert isinstance(call_kwargs["kwargs"]["sync_task_id"], int)
+        assert call_kwargs["headers"] == {"trigger_type": "manual", "triggered_by": ANY}
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 
 def test_v2_query_read_cached_when_degraded(admin_client, db_session):

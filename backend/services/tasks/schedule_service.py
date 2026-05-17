@@ -15,12 +15,17 @@ logger = logging.getLogger(__name__)
 
 # ---- cron 计算辅助 ----
 
+def _format_local_iso(dt: datetime) -> str:
+    """Format naive local datetimes without a UTC marker."""
+    return dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def _compute_next_run(cron_expr: str) -> Optional[str]:
     """Return ISO-format next run time for a cron expression."""
     try:
         from croniter import croniter
         cr = croniter(cron_expr, datetime.now())
-        return cr.get_next(datetime).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return _format_local_iso(cr.get_next(datetime))
     except Exception:
         return None
 
@@ -33,7 +38,7 @@ def _compute_next_runs(cron_expr: str, count: int = 6) -> List[str]:
         results = []
         for _ in range(count):
             dt = cr.get_next(datetime)
-            results.append(dt.strftime("%Y-%m-%dT%H:%M:%SZ"))
+            results.append(_format_local_iso(dt))
         return results
     except Exception:
         return []

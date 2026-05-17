@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from services.tableau.models import TableauConnection
+from services.tableau.models import TableauConnection, TableauSyncLog
 from services.tasks.models import BiSyncSchedule, BiSyncTask, BiTaskRun, BiTaskSchedule
 from app.core.database import Base, engine
 
@@ -213,6 +213,79 @@ def test_reconcile_stale_sync_tasks_marks_orphan_running_failed(db_session):
     assert stale_task.status == "failed"
     assert "未创建执行日志" in stale_task.error_message
     assert recent_task.status == "running"
+
+
+def test_sync_tasks_backfills_existing_manual_tableau_sync_logs(db_session):
+    """回填历史手动同步日志，保证与 Tableau sync-logs 页面一致。"""
+    from app.api.tasks import _backfill_sync_tasks_from_tableau_logs
+
+    started_at = datetime(2026, 5, 17, 15, 37, 58)
+    conn = TableauConnection(
+        name=f"pytest manual sync {started_at.timestamp()}",
+        server_url="https://tableau.example.com",
+        site="pytest",
+        token_name="pytest",
+        token_encrypted="encrypted",
+        owner_id=1,
+        is_active=True,
+        auto_sync_enabled=False,
+    )
+    db_session.add(conn)
+    db_session.flush()
+    log = TableauSyncLog(
+        connection_id=conn.id,
+        trigger_type="manual",
+        started_at=started_at,
+        finished_at=started_at + timedelta(seconds=23),
+        status="success",
+        workbooks_synced=19,
+        views_synced=45,
+        datasources_synced=24,
+    )
+    db_session.add(log)
+    db_session.commit()
+
+    try:
+        count = _backfill_sync_tasks_from_tableau_logs(
+            db_session,
+            day_start=datetime(2026, 5, 17),
+            day_end=datetime(2026, 5, 18),
+            connection_id=conn.id,
+        )
+
+        assert count == 1
+        task = db_session.query(BiSyncTask).filter(BiSyncTask.sync_log_id == log.id).one()
+        assert task.connection_id == conn.id
+        assert task.trigger_type == "manual"
+        assert task.status == "completed"
+        assert task.scheduled_at == started_at
+        assert task.to_dict()["scheduled_at"] == "2026-05-17T15:37:58"
+        assert not task.to_dict()["scheduled_at"].endswith("Z")
+
+        assert _backfill_sync_tasks_from_tableau_logs(
+            db_session,
+            day_start=datetime(2026, 5, 17),
+            day_end=datetime(2026, 5, 18),
+            connection_id=conn.id,
+        ) == 0
+    finally:
+        db_session.query(BiSyncTask).filter(BiSyncTask.sync_log_id == log.id).delete(synchronize_session=False)
+        db_session.query(TableauSyncLog).filter(TableauSyncLog.id == log.id).delete(synchronize_session=False)
+        db_session.query(TableauConnection).filter(TableauConnection.id == conn.id).delete(synchronize_session=False)
+        db_session.commit()
+
+
+def test_sync_schedule_next_run_uses_local_iso_without_utc_marker():
+    """同步计划页的下次执行时间不可把本地时间伪装成 UTC。"""
+    from services.tasks.schedule_service import _compute_next_run, _compute_next_runs
+
+    next_run = _compute_next_run("0 0 * * *")
+    next_runs = _compute_next_runs("0 0 * * *", count=2)
+
+    assert next_run is not None
+    assert not next_run.endswith("Z")
+    assert len(next_runs) == 2
+    assert all(not item.endswith("Z") for item in next_runs)
 
 
 # ---------------------------------------------------------------------------
