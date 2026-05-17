@@ -36,7 +36,7 @@ from services.data_agent.mcp_args_guardrail import (  # noqa: E402
     execute_query_datasource_with_guardrail,
     extract_queryable_fields_from_metadata,
 )
-from services.tableau.mcp_client import TableauMCPClient, TableauMCPError  # noqa: E402
+from services.tableau.mcp_client import TableauMCPClient, TableauMCPError, set_mcp_runtime_context  # noqa: E402
 from services.llm.service import llm_service  # noqa: E402
 from services.llm.nlq_service import get_wrapper, get_principal  # noqa: E402
 
@@ -324,6 +324,7 @@ def _query_datasource_with_guardrail(
     username: str,
     user_id: Optional[int],
 ) -> Dict[str, Any]:
+    set_mcp_runtime_context(connection_id=connection_id, user_id=user_id)
     return execute_query_datasource_with_guardrail(
         question=message,
         datasource_luid=datasource_luid,
@@ -543,6 +544,7 @@ class QueryService:
         jwt_token = self._issue_jwt(username=username, connection_id=connection_id)
 
         # Step 2: 调用 MCP（以用户身份）
+        set_mcp_runtime_context(connection_id=connection_id, user_id=user_id)
         client = TableauMCPClient(connection_id=connection_id, username=username)
         try:
             result = client.list_datasources(

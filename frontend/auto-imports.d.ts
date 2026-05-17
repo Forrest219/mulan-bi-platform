@@ -11,7 +11,6 @@ declare global {
   const Navigate: typeof import('react-router-dom')['Navigate']
   const Outlet: typeof import('react-router-dom')['Outlet']
   const React: typeof import('react')['React']
-  const Trans: typeof import('react-i18next')['Trans']
   const cloneElement: typeof import('react')['cloneElement']
   const createContext: typeof import('react')['createContext']
   const createElement: typeof import('react')['createElement']
@@ -39,5 +38,4 @@ declare global {
   const useState: typeof import('react')['useState']
   const useSyncExternalStore: typeof import('react')['useSyncExternalStore']
   const useTransition: typeof import('react')['useTransition']
-  const useTranslation: typeof import('react-i18next')['useTranslation']
 }

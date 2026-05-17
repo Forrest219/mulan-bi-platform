@@ -52,7 +52,8 @@ services:
       DATABASE_URL: postgresql://mulan:mulan@postgres:5432/mulan_bi
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
-      TABLEAU_MCP_SERVER_URL: http://host.docker.internal:3927/tableau-mcp
+      TABLEAU_MCP_GATEWAY_URL: http://tableau-mcp-gateway:3928/tableau-mcp
+      TABLEAU_MCP_SERVER_URL: http://tableau-mcp-gateway:3928/tableau-mcp
       TZ: Asia/Shanghai
     depends_on:
       postgres:
@@ -78,6 +79,8 @@ services:
       DATABASE_URL: postgresql://mulan:mulan@postgres:5432/mulan_bi
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
+      TABLEAU_MCP_GATEWAY_URL: http://tableau-mcp-gateway:3928/tableau-mcp
+      TABLEAU_MCP_SERVER_URL: http://tableau-mcp-gateway:3928/tableau-mcp
       TZ: Asia/Shanghai
     depends_on:
       postgres:
@@ -104,6 +107,8 @@ services:
     container_name: mulan-bi-tableau-mcp
     restart: unless-stopped
     env_file: .env
+    volumes:
+      - ./backend:/backend:ro
     environment:
       DATABASE_URL: postgresql://mulan:mulan@postgres:5432/mulan_bi
       GATEWAY_PORT: "3928"

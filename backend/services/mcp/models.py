@@ -3,9 +3,26 @@ MCP Server Models — Multi-Site MCP 站点信息模型
 
 Spec 22 P0: 扩展 McpServer 模型支持多站点健康状态
 """
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Float
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Float, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import relationship
 from app.core.database import Base, sa_func, sa_text
+
+
+def _tableau_connection_cls():
+    from services.tableau.models import TableauConnection
+
+    return TableauConnection
+
+
+def _safe_credentials_for_response(server_type: str, credentials: dict | None) -> dict | None:
+    if credentials is None:
+        return None
+    cleaned = dict(credentials)
+    if server_type == "tableau":
+        for key in ("pat_value", "token_value", "token_secret"):
+            cleaned.pop(key, None)
+    return cleaned
 
 
 class McpServer(Base):
@@ -38,6 +55,17 @@ class McpServer(Base):
     priority = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
     health_status = Column(String(32), default="unknown", server_default=sa_text("'unknown'"))
     consecutive_failures = Column(Integer, default=0, server_default=sa_func.cast(0, Integer()))
+    tableau_connection_id = Column(
+        Integer,
+        ForeignKey("tableau_connections.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    binding_source = Column(String(32), nullable=False, default="manual", server_default=sa_text("'manual'"))
+    binding_status = Column(String(32), nullable=False, default="unbound", server_default=sa_text("'unbound'"))
+    last_binding_error = Column(Text, nullable=True)
+
+    tableau_connection = relationship(_tableau_connection_cls, back_populates="mcp_bindings")
 
     def to_dict(self):
         return {
@@ -47,7 +75,7 @@ class McpServer(Base):
             "server_url":  self.server_url,
             "description": self.description,
             "is_active":   self.is_active,
-            "credentials": self.credentials,
+            "credentials": _safe_credentials_for_response(self.type, self.credentials),
             "created_at":  self.created_at.isoformat() if self.created_at else None,
             "updated_at":  self.updated_at.isoformat() if self.updated_at else None,
             # Spec 22 P0 扩展字段
@@ -56,6 +84,15 @@ class McpServer(Base):
             "priority": self.priority,
             "health_status": self.health_status,
             "consecutive_failures": self.consecutive_failures,
+            "tableau_connection_id": self.tableau_connection_id,
+            "tableau_connection_name": (
+                self.tableau_connection.name
+                if getattr(self, "tableau_connection", None) is not None
+                else None
+            ),
+            "binding_source": self.binding_source,
+            "binding_status": self.binding_status,
+            "last_binding_error": self.last_binding_error,
         }
 
 

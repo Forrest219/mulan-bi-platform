@@ -20,6 +20,16 @@ export interface TableauConnection {
   last_sync_at: string | null;
   last_sync_duration_sec: number | null;
   sync_status: 'idle' | 'running' | 'failed';
+  mcp_direct_enabled?: boolean;
+  mcp_server_url?: string | null;
+  agent_enabled?: boolean;
+  mcp_binding?: {
+    mcp_server_id: number | null;
+    server_url: string | null;
+    binding_status: 'bound' | 'disabled' | 'unhealthy' | 'unbound';
+    health_status: 'healthy' | 'unhealthy' | 'unknown';
+    last_error: string | null;
+  };
   next_sync_at: string | null;
   created_at: string;
   updated_at: string;
@@ -129,6 +139,7 @@ export async function createConnection(data: {
   token_value: string;
   auto_sync_enabled?: boolean;
   schedule_id?: number | null;
+  agent_enabled?: boolean;
 }): Promise<{ connection: TableauConnection; message: string }> {
   const res = await fetch(`${API_BASE}/api/tableau/connections`, {
     method: 'POST',
@@ -155,7 +166,8 @@ export async function updateConnection(id: number, data: Partial<{
   auto_sync_enabled: boolean;
   sync_interval_hours: number;
   schedule_id: number | null;
-}>): Promise<{ message: string }> {
+  agent_enabled: boolean;
+}>): Promise<{ connection?: TableauConnection; message: string }> {
   const res = await fetch(`${API_BASE}/api/tableau/connections/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -193,7 +205,7 @@ export async function testConnection(id: number): Promise<{ success: boolean; me
   return res.json();
 }
 
-export async function syncConnection(id: number): Promise<{ success: boolean; message: string }> {
+export async function syncConnection(id: number): Promise<{ success?: boolean; message: string; status?: string; task_id?: string }> {
   const res = await fetch(`${API_BASE}/api/tableau/connections/${id}/sync`, {
     method: 'POST',
     credentials: 'include',

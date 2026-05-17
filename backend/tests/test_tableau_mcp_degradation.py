@@ -4,7 +4,7 @@
 T3.5: mock mcp_offline → 验证 degraded + 缓存可读 + 写入 503
 """
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import ANY, patch, MagicMock
 from datetime import datetime, timezone, timedelta
 
 from services.tableau.connection_health import (
@@ -231,7 +231,7 @@ def test_sync_endpoint_mcp_healthy_succeeds(admin_client, db_session):
         
         mock_degraded.return_value = False  # healthy
         mock_get_conn.return_value = _make_mock_conn(conn_id=4)
-        mock_task.delay.return_value = MagicMock(id="task-123")
+        mock_task.apply_async.return_value = MagicMock(id="task-123")
         
         resp = admin_client.post("/api/tableau/connections/4/sync")
         
@@ -239,6 +239,11 @@ def test_sync_endpoint_mcp_healthy_succeeds(admin_client, db_session):
     data = resp.json()
     assert data["status"] == "pending"
     assert data["task_id"] == "task-123"
+    mock_task.apply_async.assert_called_once_with(
+        args=[4],
+        kwargs={"trigger_type": "manual"},
+        headers={"trigger_type": "manual", "triggered_by": ANY},
+    )
 
 
 def test_v2_query_read_cached_when_degraded(admin_client, db_session):

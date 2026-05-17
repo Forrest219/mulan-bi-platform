@@ -13,6 +13,7 @@ import {
   type TaskRun,
   type TaskRunsParams,
 } from '../../../api/tasks';
+import { SyncLogLink } from './SyncLogLink';
 
 const SyncSchedulesTab = lazy(() => import('./SyncSchedulesTab'));
 const SyncTasksTab    = lazy(() => import('./SyncTasksTab'));
@@ -368,7 +369,7 @@ export default function AdminTasksPage() {
             {([
               ['calendar', '同步日历'],
               ['rules',    '同步规则'],
-              ['history',  '运行历史'],
+              ['history',  '同步计划执行'],
               ['system',   '系统任务'],
             ] as const).map(([key, label]) => (
               <button
@@ -411,7 +412,7 @@ export default function AdminTasksPage() {
       )}
 
       {activeTab === 'history' && (
-        <Suspense fallback={<div className="bg-white rounded-xl border border-slate-200 py-16 text-center text-[13px] text-slate-400">加载运行历史中…</div>}>
+        <Suspense fallback={<div className="bg-white rounded-xl border border-slate-200 py-16 text-center text-[13px] text-slate-400">加载同步计划执行中…</div>}>
           <SyncTasksTab />
         </Suspense>
       )}
@@ -421,7 +422,7 @@ export default function AdminTasksPage() {
           <div className="bg-white rounded-xl border border-slate-200 px-4 py-3 mb-4 flex flex-wrap items-center gap-2">
             {([
               ['platform', '平台任务'],
-              ['runs', '执行历史'],
+              ['runs', '系统执行历史'],
               ['queue', '执行队列'],
             ] as const).map(([key, label]) => (
               <button
@@ -676,6 +677,7 @@ export default function AdminTasksPage() {
                   <th className="text-left text-xs font-semibold text-slate-500 uppercase px-4 py-3">任务</th>
                   <th className="text-left text-xs font-semibold text-slate-500 uppercase px-4 py-3">触发</th>
                   <th className="text-left text-xs font-semibold text-slate-500 uppercase px-4 py-3">状态</th>
+                  <th className="text-left text-xs font-semibold text-slate-500 uppercase px-4 py-3">关联日志</th>
                   <th className="text-left text-xs font-semibold text-slate-500 uppercase px-4 py-3">开始时间</th>
                   <th className="text-left text-xs font-semibold text-slate-500 uppercase px-4 py-3">耗时</th>
                 </tr>
@@ -696,6 +698,9 @@ export default function AdminTasksPage() {
                       <StatusBadge status={run.status} />
                     </td>
                     <td className="px-4 py-3">
+                      <SyncLogLink run={run} />
+                    </td>
+                    <td className="px-4 py-3">
                       <span className="text-xs text-slate-500">{formatTime(run.started_at)}</span>
                     </td>
                     <td className="px-4 py-3">
@@ -705,7 +710,7 @@ export default function AdminTasksPage() {
                 ))}
                 {runs.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center text-slate-400">
+                    <td colSpan={7} className="px-4 py-12 text-center text-slate-400">
                       <i className="ri-history-line text-3xl mb-2 block" />
                       暂无执行记录
                     </td>

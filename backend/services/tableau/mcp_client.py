@@ -23,6 +23,7 @@ import json
 import logging
 import threading
 import time
+import uuid
 from typing import Any, Dict, Iterable, Optional
 
 import requests
@@ -63,6 +64,7 @@ class _CachedTableauConnection:
     __slots__ = (
         "id", "server_url", "site", "token_name", "token_encrypted",
         "is_active", "last_test_success", "mcp_direct_enabled", "mcp_server_url",
+        "mcp_server_id", "mcp_binding_status",
     )
 
     def __init__(
@@ -76,6 +78,8 @@ class _CachedTableauConnection:
         last_test_success: bool,
         mcp_direct_enabled: bool = False,
         mcp_server_url: str = None,
+        mcp_server_id: Optional[int] = None,
+        mcp_binding_status: Optional[str] = None,
     ):
         self.id = id
         self.server_url = server_url
@@ -86,6 +90,8 @@ class _CachedTableauConnection:
         self.last_test_success = last_test_success
         self.mcp_direct_enabled = mcp_direct_enabled
         self.mcp_server_url = mcp_server_url
+        self.mcp_server_id = mcp_server_id
+        self.mcp_binding_status = mcp_binding_status
 
 
 logger = logging.getLogger(__name__)
@@ -211,6 +217,12 @@ def normalize_datasource_metadata_field(field: Dict[str, Any]) -> Dict[str, Any]
 _connection_id_var: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar(
     "tableau_mcp_connection_id", default=None
 )
+_user_id_var: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar(
+    "tableau_mcp_user_id", default=None
+)
+_trace_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "tableau_mcp_trace_id", default=None
+)
 
 
 def set_mcp_connection_id(connection_id: int) -> None:
@@ -221,6 +233,20 @@ def set_mcp_connection_id(connection_id: int) -> None:
 def get_mcp_connection_id() -> Optional[int]:
     """获取当前上下文的 connection_id"""
     return _connection_id_var.get()
+
+
+def set_mcp_runtime_context(
+    *,
+    connection_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    trace_id: Optional[str] = None,
+) -> None:
+    if connection_id is not None:
+        _connection_id_var.set(connection_id)
+    if user_id is not None:
+        _user_id_var.set(user_id)
+    if trace_id is not None:
+        _trace_id_var.set(trace_id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -296,6 +322,39 @@ def _get_site_key(conn) -> str:
     return f"{server_url}|{site}"
 
 
+def _load_active_tableau_mcp_binding(connection_id: Optional[int]) -> Optional[dict]:
+    if not isinstance(connection_id, int):
+        return None
+    try:
+        from app.core.database import SessionLocal
+        from services.mcp.models import McpServer
+
+        session = SessionLocal()
+        try:
+            binding = (
+                session.query(McpServer)
+                .filter(
+                    McpServer.type == "tableau",
+                    McpServer.tableau_connection_id == connection_id,
+                    McpServer.is_active == True,
+                )
+                .order_by(McpServer.updated_at.desc(), McpServer.id.desc())
+                .first()
+            )
+            if not binding:
+                return None
+            return {
+                "mcp_server_id": binding.id,
+                "mcp_server_url": binding.server_url,
+                "mcp_binding_status": binding.binding_status,
+            }
+        finally:
+            session.close()
+    except Exception as exc:
+        logger.warning("Failed to load Tableau MCP binding for connection_id=%s: %s", connection_id, exc)
+        return None
+
+
 def _get_effective_mcp_base_url(conn) -> Optional[str]:
     """Return a configured MCP endpoint, ignoring accidental Tableau server URLs.
 
@@ -304,8 +363,14 @@ def _get_effective_mcp_base_url(conn) -> Optional[str]:
     streamable-http endpoint, and initialize returns 200 without mcp-session-id.
     In that case fall back to TABLEAU_MCP_SERVER_URL.
     """
-    mcp_url = (getattr(conn, "mcp_server_url", None) or "").strip()
-    server_url = (getattr(conn, "server_url", None) or "").strip()
+    binding = _load_active_tableau_mcp_binding(getattr(conn, "id", None))
+    if binding and binding.get("mcp_server_url"):
+        return str(binding["mcp_server_url"]).strip().rstrip("/")
+
+    raw_mcp_url = getattr(conn, "mcp_server_url", None)
+    raw_server_url = getattr(conn, "server_url", None)
+    mcp_url = raw_mcp_url.strip() if isinstance(raw_mcp_url, str) else ""
+    server_url = raw_server_url.strip() if isinstance(raw_server_url, str) else ""
     if not mcp_url:
         return None
     if server_url and mcp_url.rstrip("/") == server_url.rstrip("/"):
@@ -381,6 +446,7 @@ def _build_headers(
     with_session: bool = True,
     session_state: Optional[_MCPSessionState] = None,
     jwt_token: Optional[str] = None,
+    mcp_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
     """
     构建 MCP HTTP 请求头。
@@ -401,7 +467,22 @@ def _build_headers(
         headers["mcp-session-id"] = state.session_id
     if jwt_token:
         headers["Authorization"] = f"Bearer {jwt_token}"
+    if mcp_context:
+        headers.update(_build_mulan_headers(mcp_context))
     return headers
+
+
+def _build_mulan_headers(mcp_context: Dict[str, Any]) -> Dict[str, str]:
+    connection_id = mcp_context.get("tableau_connection_id") or mcp_context.get("connection_id")
+    mcp_server_id = mcp_context.get("mcp_server_id")
+    user_id = mcp_context.get("user_id")
+    trace_id = mcp_context.get("trace_id")
+    return {
+        "X-Mulan-Tableau-Connection-Id": str(connection_id or ""),
+        "X-Mulan-Mcp-Server-Id": str(mcp_server_id or ""),
+        "X-Mulan-User-Id": str(user_id if user_id is not None else ""),
+        "X-Mulan-Trace-Id": str(trace_id or uuid.uuid4()),
+    }
 
 
 def _parse_sse(response_text: str) -> Dict[str, Any]:
@@ -441,6 +522,7 @@ def _post_mcp(
     session_state: Optional[_MCPSessionState] = None,
     base_url: Optional[str] = None,
     jwt_token: Optional[str] = None,
+    mcp_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     发送 MCP JSON-RPC 请求，返回解析后的响应体。
@@ -459,7 +541,12 @@ def _post_mcp(
         - session 过期（HTTP 400 + "No valid session ID"）：由调用方处理（_ensure_session）
     """
     url = base_url if base_url else get_tableau_mcp_server_url()
-    headers = _build_headers(with_session=True, session_state=session_state, jwt_token=jwt_token)
+    headers = _build_headers(
+        with_session=True,
+        session_state=session_state,
+        jwt_token=jwt_token,
+        mcp_context=mcp_context,
+    )
     # Keep the gateway-side tool timeout slightly below the HTTP read timeout.
     # Otherwise a client-side timeout can leave the gateway proxy locked until
     # its own longer default timeout expires, making the next ask look hung.
@@ -548,6 +635,7 @@ def _ensure_session(
     base_url: Optional[str] = None,
     session_state: Optional[_MCPSessionState] = None,
     jwt_token: Optional[str] = None,
+    mcp_context: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     确保 MCP session 已建立。
@@ -597,6 +685,8 @@ def _ensure_session(
     }
     if jwt_token:
         headers_base["Authorization"] = f"Bearer {jwt_token}"
+    if mcp_context:
+        headers_base.update(_build_mulan_headers(mcp_context))
 
     # Step 1: initialize
     init_payload = {
@@ -888,6 +978,7 @@ class TableauMCPClient:
                 "mcp_direct_enabled": getattr(conn, "mcp_direct_enabled", False),
                 "mcp_server_url": getattr(conn, "mcp_server_url", None),
             }
+            conn_attrs.update(_load_active_tableau_mcp_binding(conn.id) or {})
         finally:
             session.close()
 
@@ -935,6 +1026,7 @@ class TableauMCPClient:
                 "mcp_direct_enabled": getattr(conn, "mcp_direct_enabled", False),
                 "mcp_server_url": getattr(conn, "mcp_server_url", None),
             }
+            conn_attrs.update(_load_active_tableau_mcp_binding(conn.id) or {})
         finally:
             session.close()
 
@@ -998,6 +1090,26 @@ class TableauMCPClient:
                 details={"connection_id": connection_id},
             )
 
+    def _runtime_context(
+        self,
+        conn: "TableauConnection|_CachedTableauConnection",
+        *,
+        connection_id: int,
+        user_id: Optional[int] = None,
+        trace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        conn_mcp_server_id = getattr(conn, "mcp_server_id", None)
+        raw_mcp_url = getattr(conn, "mcp_server_url", None)
+        should_lookup_binding = isinstance(conn_mcp_server_id, int) or isinstance(raw_mcp_url, str)
+        binding = _load_active_tableau_mcp_binding(connection_id) if should_lookup_binding else None
+        binding = binding or {}
+        return {
+            "tableau_connection_id": connection_id,
+            "mcp_server_id": binding.get("mcp_server_id") or (conn_mcp_server_id if isinstance(conn_mcp_server_id, int) else None),
+            "user_id": user_id if user_id is not None else _user_id_var.get(),
+            "trace_id": trace_id or _trace_id_var.get() or str(uuid.uuid4()),
+        }
+
     # ─────────────────────────────────────────────────────────────────────────
     # 公开 API
     # ─────────────────────────────────────────────────────────────────────────
@@ -1010,6 +1122,8 @@ class TableauMCPClient:
         timeout: int = 30,
         connection_id: int = None,
         jwt_token: Optional[str] = None,
+        user_id: Optional[int] = None,
+        trace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         通过 Tableau MCP 查询数据源（标准 MCP tools/call）。
@@ -1070,6 +1184,12 @@ class TableauMCPClient:
             session_state = _get_or_create_session_state(site_key)
             # base_url：优先 conn.mcp_server_url，fallback 到全局配置
             effective_base_url = _get_effective_mcp_base_url(conn)
+            mcp_context = self._runtime_context(
+                conn,
+                connection_id=connection_id,
+                user_id=user_id,
+                trace_id=trace_id,
+            )
 
             # 组装 MCP tools/call 请求（limit 在 arguments 顶层，verified by tools/list）
             payload = self._build_jsonrpc_request(
@@ -1086,6 +1206,7 @@ class TableauMCPClient:
                 base_url=effective_base_url,
                 jwt_token=jwt_token,
                 datasource_luid=datasource_luid,
+                mcp_context=mcp_context,
             )
         finally:
             _connection_id_var.reset(token)
@@ -1096,6 +1217,8 @@ class TableauMCPClient:
         connection_id: Optional[int] = None,
         datasource_luid: Optional[str] = None,
         jwt_token: Optional[str] = None,
+        user_id: Optional[int] = None,
+        trace_id: Optional[str] = None,
     ) -> list[Dict[str, Any]]:
         """Public MCP tools/list API for host runtimes."""
         resolved_connection_id = self._resolve_mcp_connection_id(connection_id)
@@ -1113,12 +1236,19 @@ class TableauMCPClient:
             site_key = _get_site_key(conn)
             session_state = _get_or_create_session_state(site_key)
             effective_base_url = _get_effective_mcp_base_url(conn)
+            mcp_context = self._runtime_context(
+                conn,
+                connection_id=resolved_connection_id,
+                user_id=user_id,
+                trace_id=trace_id,
+            )
             return self._list_mcp_tools(
                 timeout=timeout,
                 site_key=site_key,
                 session_state=session_state,
                 base_url=effective_base_url,
                 jwt_token=jwt_token,
+                mcp_context=mcp_context,
             )
         finally:
             _connection_id_var.reset(token)
@@ -1131,6 +1261,8 @@ class TableauMCPClient:
         connection_id: Optional[int] = None,
         datasource_luid: Optional[str] = None,
         jwt_token: Optional[str] = None,
+        user_id: Optional[int] = None,
+        trace_id: Optional[str] = None,
     ) -> Any:
         """Public generic MCP tools/call API for host runtimes."""
         name = str(tool_name or "").strip()
@@ -1166,6 +1298,12 @@ class TableauMCPClient:
             site_key = _get_site_key(conn)
             session_state = _get_or_create_session_state(site_key)
             effective_base_url = _get_effective_mcp_base_url(conn)
+            mcp_context = self._runtime_context(
+                conn,
+                connection_id=resolved_connection_id,
+                user_id=user_id,
+                trace_id=trace_id,
+            )
             payload = {
                 "jsonrpc": "2.0",
                 "id": _next_id(),
@@ -1182,6 +1320,7 @@ class TableauMCPClient:
                 session_state=session_state,
                 base_url=effective_base_url,
                 jwt_token=jwt_token,
+                mcp_context=mcp_context,
             )
             return _parse_tool_json_text(response, tool_name=name)
         finally:
@@ -1196,6 +1335,8 @@ class TableauMCPClient:
         connection_id: int = None,
         jwt_token: Optional[str] = None,
         allowed_tool_names: Optional[Iterable[str]] = None,
+        user_id: Optional[int] = None,
+        trace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Invoke an explicitly allowlisted Tableau MCP natural-language query tool.
@@ -1238,6 +1379,12 @@ class TableauMCPClient:
             site_key = _get_site_key(conn)
             session_state = _get_or_create_session_state(site_key)
             effective_base_url = _get_effective_mcp_base_url(conn)
+            mcp_context = self._runtime_context(
+                conn,
+                connection_id=connection_id,
+                user_id=user_id,
+                trace_id=trace_id,
+            )
 
             tools = self._list_mcp_tools(
                 timeout=timeout,
@@ -1245,6 +1392,7 @@ class TableauMCPClient:
                 session_state=session_state,
                 base_url=effective_base_url,
                 jwt_token=jwt_token,
+                mcp_context=mcp_context,
             )
             selected_tool = _select_nl_query_tool(
                 tools,
@@ -1289,6 +1437,7 @@ class TableauMCPClient:
                 session_state=session_state,
                 base_url=effective_base_url,
                 jwt_token=jwt_token,
+                mcp_context=mcp_context,
             )
             data = _parse_tool_json_text(response, tool_name=tool_name)
             if isinstance(data, dict):
@@ -1307,6 +1456,7 @@ class TableauMCPClient:
         base_url: str,
         jwt_token: Optional[str],
         datasource_luid: str,
+        mcp_context: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """Execute query-datasource with bounded retry for transient MCP failures."""
         budget = min(float(timeout), _QUERY_RETRY_BUDGET_SECONDS)
@@ -1337,6 +1487,7 @@ class TableauMCPClient:
                     session_state=session_state,
                     base_url=base_url,
                     jwt_token=jwt_token,
+                    mcp_context=mcp_context,
                 )
                 return self._parse_jsonrpc_response(response)
             except TableauMCPError as exc:
@@ -1377,6 +1528,7 @@ class TableauMCPClient:
         session_state: "_MCPSessionState",
         base_url: Optional[str],
         jwt_token: Optional[str],
+        mcp_context: Optional[Dict[str, Any]] = None,
     ) -> list[Dict[str, Any]]:
         """Discover MCP tools through tools/list for the prepared connection context."""
         payload = {
@@ -1392,6 +1544,7 @@ class TableauMCPClient:
             session_state=session_state,
             base_url=base_url,
             jwt_token=jwt_token,
+            mcp_context=mcp_context,
         )
         return _parse_tools_list_response(response)
 
@@ -1401,6 +1554,8 @@ class TableauMCPClient:
         timeout: int = 30,
         connection_id: Optional[int] = None,
         jwt_token: Optional[str] = None,
+        user_id: Optional[int] = None,
+        trace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         通过 Tableau MCP 列出可用的数据源（用于动态数据源发现）。
@@ -1442,6 +1597,12 @@ class TableauMCPClient:
             site_key = _get_site_key(conn_record)
             session_state = _get_or_create_session_state(site_key)
             effective_base_url = _get_effective_mcp_base_url(conn_record)
+            mcp_context = self._runtime_context(
+                conn_record,
+                connection_id=conn_record.id,
+                user_id=user_id,
+                trace_id=trace_id,
+            )
 
             # 官方 Tableau MCP 工具名使用连字符。
             payload = {
@@ -1461,6 +1622,7 @@ class TableauMCPClient:
                 session_state=session_state,
                 base_url=effective_base_url,
                 jwt_token=jwt_token,
+                mcp_context=mcp_context,
             )
 
             data = _parse_tool_json_text(response, tool_name="list-datasources")
@@ -1472,7 +1634,13 @@ class TableauMCPClient:
         finally:
             _connection_id_var.reset(token)
 
-    def get_datasource_metadata(self, datasource_luid: str, timeout: int = 30) -> Dict[str, Any]:
+    def get_datasource_metadata(
+        self,
+        datasource_luid: str,
+        timeout: int = 30,
+        user_id: Optional[int] = None,
+        trace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         通过 Tableau MCP 获取数据源的字段元数据（用于 NLQ 动态数据源发现）。
 
@@ -1506,6 +1674,12 @@ class TableauMCPClient:
             site_key = _get_site_key(conn_record)
             session_state = _get_or_create_session_state(site_key)
             effective_base_url = _get_effective_mcp_base_url(conn_record)
+            mcp_context = self._runtime_context(
+                conn_record,
+                connection_id=conn_record.id,
+                user_id=user_id,
+                trace_id=trace_id,
+            )
 
             # 调用 get-datasource-metadata 工具
             payload = {
@@ -1524,6 +1698,7 @@ class TableauMCPClient:
                 site_key=site_key,
                 session_state=session_state,
                 base_url=effective_base_url,
+                mcp_context=mcp_context,
             )
 
             parsed = self._parse_jsonrpc_response(response)
@@ -1595,6 +1770,7 @@ class TableauMCPClient:
         session_state: Optional[_MCPSessionState] = None,
         base_url: Optional[str] = None,
         jwt_token: Optional[str] = None,
+        mcp_context: Optional[Dict[str, Any]] = None,
     ) -> dict:
         """
         发送 MCP JSON-RPC 请求（内部处理 session 生命周期）。
@@ -1618,23 +1794,55 @@ class TableauMCPClient:
         for attempt in range(2):
             try:
                 # 确保 session 已建立（懒加载）
-                _ensure_session(timeout=timeout, site_key=site_key, base_url=base_url, session_state=state, jwt_token=jwt_token)
+                _ensure_session(
+                    timeout=timeout,
+                    site_key=site_key,
+                    base_url=base_url,
+                    session_state=state,
+                    jwt_token=jwt_token,
+                    mcp_context=mcp_context,
+                )
 
                 # 更新最后活跃时间（每次成功建立 session 后）
                 with state.lock:
                     state.last_activity = time.monotonic()
 
-                return _post_mcp(payload, method=method, timeout=timeout, expect_sse=True, session_state=state, base_url=base_url, jwt_token=jwt_token)
+                return _post_mcp(
+                    payload,
+                    method=method,
+                    timeout=timeout,
+                    expect_sse=True,
+                    session_state=state,
+                    base_url=base_url,
+                    jwt_token=jwt_token,
+                    mcp_context=mcp_context,
+                )
 
             except _SessionExpiredError:
                 # Session 过期：清空并重建，不计入外层重试
                 logger.warning("MCP session 过期，尝试重建: %s", method)
                 state.reset()
-                _ensure_session(timeout=timeout, site_key=site_key, base_url=base_url, session_state=state, jwt_token=jwt_token)
+                _ensure_session(
+                    timeout=timeout,
+                    site_key=site_key,
+                    base_url=base_url,
+                    session_state=state,
+                    jwt_token=jwt_token,
+                    mcp_context=mcp_context,
+                )
                 with state.lock:
                     state.last_activity = time.monotonic()
                 # 重试 1 次（这次用新 session）
-                return _post_mcp(payload, method=method, timeout=timeout, expect_sse=True, session_state=state, base_url=base_url, jwt_token=jwt_token)
+                return _post_mcp(
+                    payload,
+                    method=method,
+                    timeout=timeout,
+                    expect_sse=True,
+                    session_state=state,
+                    base_url=base_url,
+                    jwt_token=jwt_token,
+                    mcp_context=mcp_context,
+                )
 
             except TableauMCPError:
                 raise  # 已构造好，直接透传

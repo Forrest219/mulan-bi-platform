@@ -36,6 +36,11 @@ interface McpServerItem {
   description: string | null;
   is_active: boolean;
   credentials: Record<string, string> | null;
+  tableau_connection_id?: number | null;
+  tableau_connection_name?: string | null;
+  binding_source?: string | null;
+  binding_status?: string | null;
+  last_binding_error?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -47,6 +52,8 @@ interface McpServerForm {
   description: string;
   is_active: boolean;
   credentials: Record<string, string>;
+  tableau_connection_id: number | null;
+  advanced_mode: boolean;
 }
 
 interface TestResult {
@@ -101,6 +108,8 @@ const defaultForm: McpServerForm = {
   description: '',
   is_active: true,
   credentials: {},
+  tableau_connection_id: null,
+  advanced_mode: false,
 };
 
 function normalizeUrl(url?: string): string {
@@ -767,6 +776,8 @@ export default function McpConfigsPage({ headerless = false }: { headerless?: bo
       description: server.description ?? '',
       is_active: server.is_active,
       credentials: server.credentials ?? {},
+      tableau_connection_id: server.tableau_connection_id ?? null,
+      advanced_mode: false,
     });
     setFormError(null);
     setFormTestResult(null);
@@ -796,6 +807,8 @@ export default function McpConfigsPage({ headerless = false }: { headerless?: bo
         description: data.description ?? '',
         is_active: true,
         credentials: data.credentials ?? {},
+        tableau_connection_id: null,
+        advanced_mode: false,
       });
       setParsed(true);
     } catch {
@@ -812,8 +825,13 @@ export default function McpConfigsPage({ headerless = false }: { headerless?: bo
       const payload: McpServerForm = {
         ...form,
         description: form.description || '',
-        credentials: form.credentials,
+        server_url: form.type === 'tableau' && !form.advanced_mode ? '' : form.server_url,
+        credentials: form.type === 'tableau' ? {} : form.credentials,
       };
+      if (payload.type === 'tableau' && !payload.tableau_connection_id) {
+        setFormError('请选择来源 Tableau 连接');
+        return;
+      }
       if (editingId !== null) {
         await apiUpdate(editingId, { ...payload, description: payload.description || undefined });
       } else {
@@ -877,6 +895,10 @@ export default function McpConfigsPage({ headerless = false }: { headerless?: bo
 
   // 表单内测试连接
   const handleFormTest = async () => {
+    if (form.type === 'tableau' && !form.advanced_mode) {
+      setFormTestResult({ status: 'online', latency_ms: 0 });
+      return;
+    }
     if (editingId === null && !form.server_url.trim()) {
       alert(`请先填写 ${SERVER_URL_LABELS[form.type] ?? 'Server URL'}`);
       return;
@@ -1020,7 +1042,15 @@ export default function McpConfigsPage({ headerless = false }: { headerless?: bo
                           <td className="px-4 py-3 align-middle">
                             <TypeBadge type={server.type} />
                           </td>
-                          <td className="px-4 py-3 align-middle text-slate-700 font-medium">{server.name}</td>
+                          <td className="px-4 py-3 align-middle text-slate-700 font-medium">
+                            <div>{server.name}</div>
+                            {server.type === 'tableau' && (
+                              <div className="mt-0.5 text-xs text-slate-400">
+                                来源 Tableau 连接：{server.tableau_connection_name ?? (server.tableau_connection_id ? `#${server.tableau_connection_id}` : '未绑定')}
+                                {server.binding_status ? ` · ${server.binding_status}` : ''}
+                              </div>
+                            )}
+                          </td>
                           <td className="px-4 py-3 align-middle">
                             <span
                               className="font-mono text-xs text-slate-500"
@@ -1212,7 +1242,7 @@ export default function McpConfigsPage({ headerless = false }: { headerless?: bo
                   <select
                     value={form.type}
                     disabled={false}
-                    onChange={(e) => setForm({ ...form, type: e.target.value, server_url: '', credentials: {} })}
+                    onChange={(e) => setForm({ ...form, type: e.target.value, server_url: '', credentials: {}, tableau_connection_id: null, advanced_mode: false })}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
                   >
                     <option value="tableau">Tableau</option>
@@ -1220,7 +1250,37 @@ export default function McpConfigsPage({ headerless = false }: { headerless?: bo
                   </select>
                 </div>
 
+                {form.type === 'tableau' && (
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      来源 Tableau 连接 <span className="text-red-400">*</span>
+                    </label>
+                    <select
+                      value={form.tableau_connection_id ?? ''}
+                      onChange={(e) => setForm({ ...form, tableau_connection_id: e.target.value ? Number(e.target.value) : null })}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white"
+                    >
+                      <option value="">请选择已有 Tableau 连接</option>
+                      {tableauConnections.map(conn => (
+                        <option key={conn.id} value={conn.id}>
+                          {conn.name} · {conn.server_url} · {conn.site || 'default'}
+                        </option>
+                      ))}
+                    </select>
+                    <label className="mt-3 flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.advanced_mode}
+                        onChange={(e) => setForm({ ...form, advanced_mode: e.target.checked, server_url: e.target.checked ? form.server_url : '' })}
+                        className="w-4 h-4 rounded border-slate-300 text-blue-600"
+                      />
+                      高级模式：使用自定义 MCP HTTP Endpoint
+                    </label>
+                  </div>
+                )}
+
                 {/* MCP HTTP Endpoint */}
+                {(form.type !== 'tableau' || form.advanced_mode) && (
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-slate-700 mb-1">
                     {SERVER_URL_LABELS[form.type] ?? 'Server URL'} <span className="text-red-400">*</span>
@@ -1235,48 +1295,17 @@ export default function McpConfigsPage({ headerless = false }: { headerless?: bo
                   />
                   {form.type === 'tableau' && (
                     <p className={`mt-1 text-xs ${isTableauMcpEndpointLikelyWrong(form) ? 'text-amber-600' : 'text-slate-400'}`}>
-                      这里填写 MCP 服务地址，例如 http://localhost:3927/tableau-mcp；Tableau 站点地址填写在下方认证区。
+                      仅高级模式使用自定义 MCP Endpoint；默认由 Tableau 连接自动绑定共享 Gateway。
                     </p>
                   )}
                 </div>
+                )}
 
                 {/* 凭证字段 — Tableau */}
                 {form.type === 'tableau' && (
-                  <CredentialSection title="Tableau 认证">
-                    <CredentialField
-                      label="Tableau Server URL"
-                      fieldKey="tableau_server"
-                      placeholder="https://online.tableau.com"
-                      form={form}
-                      setForm={setForm}
-                      readOnly={false}
-                    />
-                    <CredentialField
-                      label="Site Name"
-                      fieldKey="site_name"
-                      placeholder="留空表示默认站点"
-                      form={form}
-                      setForm={setForm}
-                      readOnly={false}
-                    />
-                    <CredentialField
-                      label="PAT 名称"
-                      fieldKey="pat_name"
-                      placeholder="Personal Access Token 名称"
-                      form={form}
-                      setForm={setForm}
-                      readOnly={false}
-                    />
-                    <CredentialField
-                      label="PAT 密钥"
-                      fieldKey="pat_value"
-                      placeholder="Personal Access Token 密钥"
-                      sensitive
-                      form={form}
-                      setForm={setForm}
-                      readOnly={false}
-                    />
-                  </CredentialSection>
+                  <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+                    Tableau URL / Site / PAT 请在数据连接入口维护；此处只绑定 Agent 工具配置。
+                  </div>
                 )}
 
                 {/* 凭证字段 — StarRocks */}
@@ -1364,7 +1393,7 @@ export default function McpConfigsPage({ headerless = false }: { headerless?: bo
                 <button
                   onClick={handleFormTest}
                   disabled={formTesting}
-                  title={!form.server_url.trim() ? `请先填写 ${SERVER_URL_LABELS[form.type] ?? 'Server URL'}` : undefined}
+                  title={form.type !== 'tableau' && !form.server_url.trim() ? `请先填写 ${SERVER_URL_LABELS[form.type] ?? 'Server URL'}` : undefined}
                   className={`px-3 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${
                     formTestResult?.status === 'online'
                       ? 'border-emerald-200 bg-emerald-50 text-emerald-700'

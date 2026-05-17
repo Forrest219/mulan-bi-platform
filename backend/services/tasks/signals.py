@@ -41,6 +41,11 @@ def on_task_prerun(sender=None, task_id=None, task=None, **kwargs):
         with get_db_context() as db:
             headers = getattr(task.request, "headers", None) or {}
             trigger_type = headers.get("trigger_type", "beat")
+            triggered_by_raw = headers.get("triggered_by")
+            try:
+                triggered_by = int(triggered_by_raw) if triggered_by_raw is not None else None
+            except (TypeError, ValueError):
+                triggered_by = None
 
             retry_count = getattr(task.request, "retries", 0) or 0
             parent_run_id = None
@@ -60,6 +65,7 @@ def on_task_prerun(sender=None, task_id=None, task=None, **kwargs):
                 started_at=datetime.utcnow(),
                 retry_count=retry_count,
                 parent_run_id=parent_run_id,
+                triggered_by=triggered_by,
             )
             db.add(run)
             db.commit()
@@ -87,9 +93,16 @@ def on_task_postrun(sender=None, task_id=None, state=None, retval=None, **kwargs
             state_map = {"SUCCESS": "succeeded", "FAILURE": "failed", "REVOKED": "cancelled"}
             run.status = state_map.get(state, "failed")
 
-            if run.status == "succeeded":
-                run.result_summary = retval if isinstance(retval, dict) else None
-            else:
+            if isinstance(retval, dict):
+                run.result_summary = retval
+                result_status = retval.get("status")
+                if result_status == "error":
+                    run.status = "failed"
+                    run.error_message = retval.get("message")
+                elif result_status == "skipped":
+                    run.status = "cancelled"
+                    run.error_message = retval.get("message")
+            elif run.status != "succeeded":
                 run.error_message = str(retval) if retval else None
 
             db.commit()

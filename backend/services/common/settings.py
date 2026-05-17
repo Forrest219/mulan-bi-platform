@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from typing import Optional
+from urllib.parse import urlsplit, urlunsplit
 
 
 # =============================================================================
@@ -79,6 +80,47 @@ def get_celery_result_backend() -> str:
 # Tableau MCP Server 配置（惰性加载）
 # =============================================================================
 
+_LEGACY_DOCKER_HOST = "host.docker.internal"
+_LOCAL_TABLEAU_MCP_HOST = "localhost"
+_LOCAL_TABLEAU_MCP_PORT = 3927
+_DOCKER_TABLEAU_MCP_HOST = "tableau-mcp-gateway"
+_DOCKER_TABLEAU_MCP_PORT = 3928
+
+
+def _is_running_in_container() -> bool:
+    return bool(
+        os.environ.get("KUBERNETES_SERVICE_HOST")
+        or os.environ.get("DOCKER_CONTAINER")
+        or os.path.exists("/.dockerenv")
+    )
+
+
+def normalize_tableau_mcp_endpoint(value: Optional[str]) -> Optional[str]:
+    """Normalize persisted Tableau MCP endpoints for the current runtime.
+
+    `host.docker.internal` is a container-to-host address and should not be
+    persisted as the shared Tableau MCP binding URL. Host-side scripts need
+    localhost, while docker-compose services should use the gateway service DNS.
+    """
+    raw = (value or "").strip()
+    if not raw:
+        return None
+
+    parsed = urlsplit(raw)
+    if parsed.hostname != _LEGACY_DOCKER_HOST:
+        return raw.rstrip("/")
+
+    if _is_running_in_container():
+        host = _DOCKER_TABLEAU_MCP_HOST
+        port = _DOCKER_TABLEAU_MCP_PORT if parsed.port in (None, _LOCAL_TABLEAU_MCP_PORT) else parsed.port
+    else:
+        host = _LOCAL_TABLEAU_MCP_HOST
+        port = parsed.port or _LOCAL_TABLEAU_MCP_PORT
+
+    netloc = f"{host}:{port}" if port else host
+    return urlunsplit((parsed.scheme or "http", netloc, parsed.path, parsed.query, parsed.fragment)).rstrip("/")
+
+
 def get_tableau_mcp_server_url() -> str:
     """
     获取 Tableau MCP Server URL。
@@ -99,19 +141,37 @@ def get_tableau_mcp_server_url() -> str:
             for record in records:
                 credentials = record.credentials or {}
                 tableau_server = (credentials.get("tableau_server") or "").rstrip("/")
-                record_url = (record.server_url or "").rstrip("/")
+                record_url = (normalize_tableau_mcp_endpoint(record.server_url) or "").rstrip("/")
                 # mcp_servers.type='tableau' may store the Tableau site root
                 # together with PAT credentials. That is not a streamable-http
                 # MCP endpoint, so do not use it as TABLEAU_MCP_SERVER_URL.
                 if record_url and "/mcp" in record_url.lower():
-                    return record.server_url
+                    return record_url
                 if record_url and record_url != tableau_server:
-                    return record.server_url
+                    return record_url
         finally:
             db.close()
     except Exception:
         pass
-    return os.environ.get("TABLEAU_MCP_SERVER_URL", "http://localhost:3927/tableau-mcp")
+    default_url = (
+        "http://tableau-mcp-gateway:3928/tableau-mcp"
+        if _is_running_in_container()
+        else "http://localhost:3927/tableau-mcp"
+    )
+    return normalize_tableau_mcp_endpoint(os.environ.get("TABLEAU_MCP_SERVER_URL", default_url)) or default_url
+
+
+def get_tableau_mcp_gateway_url() -> Optional[str]:
+    """Shared Tableau MCP Gateway endpoint for auto-bound Tableau connections.
+
+    MVP auto-bindings only read TABLEAU_MCP_GATEWAY_URL. The legacy
+    TABLEAU_MCP_SERVER_URL fallback remains available to older runtime callers
+    through get_tableau_mcp_server_url(), but it is not used for new bindings.
+    """
+    value = os.environ.get("TABLEAU_MCP_GATEWAY_URL")
+    if value and value.strip():
+        return normalize_tableau_mcp_endpoint(value)
+    return None
 
 
 @lru_cache(maxsize=1)

@@ -30,7 +30,7 @@ class _FakeDb:
 
 
 class _FakeConn:
-    def to_dict(self):
+    def to_dict(self, *_args, **_kwargs):
         return {"id": 7, "name": "real-tableau", "is_active": True}
 
 
@@ -44,24 +44,10 @@ class _FakeMcp:
         self.updated_at = None
 
 
-def test_sync_mcp_to_tableau_reports_missing_pat_without_creating(monkeypatch):
+def test_legacy_sync_bridge_is_removed():
     from app.api import mcp_configs
 
-    class _Crypto:
-        def decrypt(self, value):
-            return value
-
-    monkeypatch.setattr("app.core.crypto.get_mcp_crypto", lambda: _Crypto())
-
-    result = mcp_configs._sync_mcp_to_tableau(
-        mcp_name="missing-pat",
-        mcp_server_url="http://mcp.local",
-        credentials={"tableau_server": "https://tableau.local", "pat_name": "pat"},
-        owner_id=1,
-    )
-
-    assert result["success"] is False
-    assert "pat_value" in result["message"]
+    assert not hasattr(mcp_configs, "_sync_mcp_to_tableau")
 
 
 @pytest.mark.asyncio

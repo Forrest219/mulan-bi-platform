@@ -40,6 +40,54 @@ class TableauConnection(Base):
 
     assets = relationship("TableauAsset", back_populates="connection", cascade="all, delete-orphan")
     schedule = relationship(BiSyncSchedule)
+    mcp_bindings = relationship(
+        "McpServer",
+        back_populates="tableau_connection",
+        passive_deletes=True,
+    )
+
+    def _mcp_binding_payload(self, db=None) -> Optional[Dict[str, Any]]:
+        binding = None
+        if db is not None:
+            from services.mcp.models import McpServer
+            binding = (
+                db.query(McpServer)
+                .filter(
+                    McpServer.type == "tableau",
+                    McpServer.tableau_connection_id == self.id,
+                )
+                .order_by(McpServer.is_active.desc(), McpServer.updated_at.desc(), McpServer.id.desc())
+                .first()
+            )
+        else:
+            bindings = list(getattr(self, "mcp_bindings", []) or [])
+            if bindings:
+                binding = sorted(
+                    bindings,
+                    key=lambda item: (
+                        bool(getattr(item, "is_active", False)),
+                        getattr(item, "updated_at", None) or getattr(item, "created_at", None),
+                        getattr(item, "id", 0) or 0,
+                    ),
+                    reverse=True,
+                )[0]
+
+        if binding is None:
+            return {
+                "mcp_server_id": None,
+                "server_url": None,
+                "binding_status": "disabled" if not self.mcp_direct_enabled else "unbound",
+                "health_status": "unknown",
+                "last_error": None,
+            }
+
+        return {
+            "mcp_server_id": binding.id,
+            "server_url": binding.server_url,
+            "binding_status": binding.binding_status,
+            "health_status": binding.health_status,
+            "last_error": binding.last_binding_error,
+        }
 
     def to_dict(self, db=None) -> Dict[str, Any]:
         next_sync_at = None
@@ -74,6 +122,11 @@ class TableauConnection(Base):
                 else:
                     next_sync_at = "待规划"
 
+        mcp_binding = self._mcp_binding_payload(db)
+        agent_enabled = bool(self.mcp_direct_enabled)
+        if mcp_binding and mcp_binding.get("mcp_server_id") is not None:
+            agent_enabled = agent_enabled or mcp_binding.get("binding_status") in {"bound", "unhealthy", "unbound"}
+
         return {
             "id": self.id,
             "name": self.name,
@@ -94,11 +147,18 @@ class TableauConnection(Base):
             "last_sync_duration_sec": self.last_sync_duration_sec,
             "sync_status": self.sync_status or "idle",
             "mcp_direct_enabled": self.mcp_direct_enabled or False,
+            "agent_enabled": agent_enabled,
             "mcp_server_url": self.mcp_server_url,
+            "mcp_binding": mcp_binding,
             "next_sync_at": next_sync_at,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
             "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S") if self.updated_at else None,
         }
+
+
+# Ensure the reverse relationship target is registered even in tests or scripts
+# that import Tableau models without importing services.mcp.models first.
+from services.mcp.models import McpServer  # noqa: E402,F401
 
 
 class TableauAsset(Base):

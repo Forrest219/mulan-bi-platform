@@ -59,7 +59,7 @@ def sync_connection_task(self, conn_id: int, sync_log_id: int = None, trigger_ty
         if not acquired:
             logger.warning("sync_connection_task[conn_id=%d]: already running, skipping", conn_id)
             _update_sync_task(sync_task_id, "skipped", error_message="同步任务正在进行中，已跳过本次调度")
-            return {"status": "skipped", "message": "同步任务正在进行中"}
+            return {"status": "skipped", "message": "同步任务正在进行中", "connection_id": conn_id}
     except Exception as e:
         logger.warning("sync_connection_task[conn_id=%d]: Redis lock failed (%s), proceeding", conn_id, e)
         redis_client = None
@@ -76,7 +76,7 @@ def sync_connection_task(self, conn_id: int, sync_log_id: int = None, trigger_ty
             if not conn:
                 logger.warning("Sync task: connection %d not found", conn_id)
                 _update_sync_task(sync_task_id, "failed", error_message="连接不存在")
-                return {"status": "error", "message": "连接不存在"}
+                return {"status": "error", "message": "连接不存在", "connection_id": conn_id}
 
             # 复用已有日志或新建（重试时复用，避免每次重试创建新记录）
             if sync_log_id:
@@ -98,7 +98,7 @@ def sync_connection_task(self, conn_id: int, sync_log_id: int = None, trigger_ty
                 _db.update_connection_health(conn_id, False, msg)
                 _db.increment_sync_failures(conn_id)
                 _update_sync_task(sync_task_id, "failed", sync_log_id=log_id, error_message=msg)
-                return {"status": "error", "message": msg}
+                return {"status": "error", "message": msg, "sync_log_id": log_id, "connection_id": conn_id}
 
             try:
                 if getattr(conn, "connection_type", "mcp") == "mcp":
@@ -129,7 +129,7 @@ def sync_connection_task(self, conn_id: int, sync_log_id: int = None, trigger_ty
                     _db.set_sync_status(conn_id, "failed")
                     _db.increment_sync_failures(conn_id)
                     _update_sync_task(sync_task_id, "failed", sync_log_id=log_id, error_message="连接失败，已达最大重试次数")
-                    return {"status": "error", "message": "连接失败"}
+                    return {"status": "error", "message": "连接失败", "sync_log_id": log_id, "connection_id": conn_id}
 
                 try:
                     result = service.sync_all_assets(_db, conn_id, trigger_type=trigger_type, sync_log_id=log_id)
@@ -142,9 +142,10 @@ def sync_connection_task(self, conn_id: int, sync_log_id: int = None, trigger_ty
                     return {
                         "status": result["status"],
                         "total": result["total"],
-                        "deleted": result["deleted"],
+                        "deleted": result.get("deleted", 0),
                         "duration_sec": result.get("duration_sec", 0),
                         "sync_log_id": log_id,
+                        "connection_id": conn_id,
                     }
                 finally:
                     service.disconnect()
@@ -155,7 +156,12 @@ def sync_connection_task(self, conn_id: int, sync_log_id: int = None, trigger_ty
                 _db.set_sync_status(conn_id, "failed")
                 _db.increment_sync_failures(conn_id)
                 _update_sync_task(sync_task_id, "failed", sync_log_id=log_id, error_message="同步失败，已达最大重试次数")
-                return {"status": "error", "message": "同步失败，已达最大重试次数"}
+                return {
+                    "status": "error",
+                    "message": "同步失败，已达最大重试次数",
+                    "sync_log_id": log_id,
+                    "connection_id": conn_id,
+                }
             except Exception as e:
                 logger.error("Sync task error for conn %d: %s", conn_id, e, exc_info=True)
                 if self.request.retries < self.max_retries:
@@ -169,7 +175,7 @@ def sync_connection_task(self, conn_id: int, sync_log_id: int = None, trigger_ty
                 _db.set_sync_status(conn_id, "failed")
                 _db.increment_sync_failures(conn_id)
                 _update_sync_task(sync_task_id, "failed", sync_log_id=log_id, error_message=str(e))
-                return {"status": "error", "message": str(e)}
+                return {"status": "error", "message": str(e), "sync_log_id": log_id, "connection_id": conn_id}
     finally:
         if redis_client:
             try:

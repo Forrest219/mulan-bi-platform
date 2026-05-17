@@ -132,7 +132,9 @@ export default function SyncLogsPage() {
                         className="cursor-pointer hover:bg-slate-50"
                         onClick={() => setExpandedId(isExpanded ? null : log.id)}
                       >
-                        <td className="px-4 py-3 text-slate-700 font-mono">{seqId}</td>
+                        <td className="px-4 py-3 text-slate-700 font-mono">
+                          {seqId} <span className="text-slate-400">· #{log.id}</span>
+                        </td>
                         <td className="px-4 py-3 text-slate-700">{log.started_at}</td>
                         <td className="px-4 py-3 text-slate-700">{log.finished_at || '-'}</td>
                         <td className="px-4 py-3 text-slate-700">

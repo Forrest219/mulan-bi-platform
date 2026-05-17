@@ -21,7 +21,8 @@ const TableauConnectionsPage = forwardRef<TableauConnectionsPageRef, { headerles
     name: '', server_url: '', site: '', api_version: '3.21',
     connection_type: 'mcp' as 'mcp' | 'tsc',
     token_name: '', token_value: '',
-    auto_sync_enabled: false, schedule_id: null as number | null
+    auto_sync_enabled: false, schedule_id: null as number | null,
+    agent_enabled: false
   });
   const [syncSchedules, setSyncSchedules] = useState<SyncSchedule[]>([]);
   const [formError, setFormError] = useState('');
@@ -62,12 +63,14 @@ const TableauConnectionsPage = forwardRef<TableauConnectionsPageRef, { headerles
       return;
     }
     try {
-      await createConnection({
+      const result = await createConnection({
         ...formData,
         schedule_id: formData.auto_sync_enabled ? formData.schedule_id : null,
       });
       setShowModal(false);
       resetForm();
+      const message = getBindingSaveMessage(result.connection);
+      if (message) setModalNotify({ success: true, message });
       fetchConnections();
     } catch (e: unknown) {
       setFormError(e instanceof Error ? e.message : '创建失败');
@@ -84,15 +87,18 @@ const TableauConnectionsPage = forwardRef<TableauConnectionsPageRef, { headerles
         api_version: formData.api_version,
         connection_type: formData.connection_type,
         auto_sync_enabled: formData.auto_sync_enabled,
-        schedule_id: formData.auto_sync_enabled ? formData.schedule_id : null
+        schedule_id: formData.auto_sync_enabled ? formData.schedule_id : null,
+        agent_enabled: formData.agent_enabled,
       };
       if (formData.token_value) {
         updateData.token_name = formData.token_name;
         updateData.token_value = formData.token_value;
       }
-      await updateConnection(editingConn.id, updateData);
+      const result = await updateConnection(editingConn.id, updateData);
       setShowModal(false);
       resetForm();
+      const message = result.connection ? getBindingSaveMessage(result.connection) : null;
+      if (message) setModalNotify({ success: true, message });
       fetchConnections();
     } catch (e: unknown) {
       setFormError(e instanceof Error ? e.message : '更新失败');
@@ -127,7 +133,7 @@ const TableauConnectionsPage = forwardRef<TableauConnectionsPageRef, { headerles
     setSyncingId(id);
     try {
       const result = await syncConnection(id);
-      setModalNotify({ success: result.success, message: result.message });
+      setModalNotify({ success: result.success ?? result.status === 'pending', message: result.message });
     } catch (e: unknown) {
       setModalNotify({ success: false, message: e instanceof Error ? e.message : '同步失败' });
     } finally {
@@ -147,13 +153,14 @@ const TableauConnectionsPage = forwardRef<TableauConnectionsPageRef, { headerles
       token_name: conn.token_name,
       token_value: '',
       auto_sync_enabled: conn.auto_sync_enabled || false,
-      schedule_id: conn.schedule_id || null
+      schedule_id: conn.schedule_id || null,
+      agent_enabled: conn.agent_enabled ?? conn.mcp_direct_enabled ?? false
     });
     setShowModal(true);
   };
 
   const resetForm = () => {
-    setFormData({ name: '', server_url: '', site: '', api_version: '3.21', connection_type: 'mcp', token_name: '', token_value: '', auto_sync_enabled: false, schedule_id: null });
+    setFormData({ name: '', server_url: '', site: '', api_version: '3.21', connection_type: 'mcp', token_name: '', token_value: '', auto_sync_enabled: false, schedule_id: null, agent_enabled: false });
     setFormError('');
     setEditingConn(null);
     setModalNotify(null);
@@ -172,6 +179,39 @@ const TableauConnectionsPage = forwardRef<TableauConnectionsPageRef, { headerles
       return { text: '连接失败', className: 'bg-orange-50 text-orange-600' };
     }
     return { text: '启用', className: 'bg-emerald-50 text-emerald-600' };
+  };
+
+  const getAgentBadge = (conn: TableauConnection) => {
+    const status = conn.mcp_binding?.binding_status;
+    if (status === 'bound') return { text: 'Agent 已启用', className: 'bg-emerald-50 text-emerald-600' };
+    if (status === 'unhealthy') return { text: 'Agent 异常', className: 'bg-orange-50 text-orange-600' };
+    if (status === 'unbound') return { text: 'Agent 待配置', className: 'bg-amber-50 text-amber-600' };
+    return { text: 'Agent 未启用', className: 'bg-slate-100 text-slate-500' };
+  };
+
+  const getAgentDetailText = (conn: TableauConnection) => {
+    const binding = conn.mcp_binding;
+    if (!binding) return null;
+    if (binding.binding_status === 'bound') return '可用';
+    if (binding.binding_status === 'unhealthy') return binding.last_error || 'MCP Gateway 健康检查失败';
+    if (binding.binding_status === 'unbound') {
+      return binding.last_error === 'TABLEAU_MCP_GATEWAY_URL is not configured'
+        ? '管理员需配置 TABLEAU_MCP_GATEWAY_URL'
+        : binding.last_error || 'MCP Gateway 未配置';
+    }
+    return '未启用';
+  };
+
+  const getBindingSaveMessage = (conn: TableauConnection) => {
+    const binding = conn.mcp_binding;
+    if (!binding) return null;
+    if (binding.binding_status === 'unhealthy') {
+      return `连接已保存，Agent 绑定异常：${binding.last_error || 'MCP Gateway 健康检查失败'}`;
+    }
+    if (binding.binding_status === 'disabled' && formData.agent_enabled) {
+      return `连接已保存，Agent 未启用：${binding.last_error || 'MCP Gateway 未配置'}`;
+    }
+    return null;
   };
 
   if (loading) return <div className="p-8 text-center text-slate-400">加载中...</div>;
@@ -209,6 +249,7 @@ const TableauConnectionsPage = forwardRef<TableauConnectionsPageRef, { headerles
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {connections.map(conn => {
           const status = getStatusBadge(conn);
+          const agentStatus = getAgentBadge(conn);
           return (
             <div key={conn.id} className="bg-white border border-slate-200 rounded-xl p-5">
               <div className="flex items-start justify-between mb-3">
@@ -226,6 +267,9 @@ const TableauConnectionsPage = forwardRef<TableauConnectionsPageRef, { headerles
                   </span>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${status.className}`}>
                     {status.text}
+                  </span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${agentStatus.className}`}>
+                    {agentStatus.text}
                   </span>
                 </div>
               </div>
@@ -252,6 +296,14 @@ const TableauConnectionsPage = forwardRef<TableauConnectionsPageRef, { headerles
                 )}
                 {conn.last_test_at && (
                   <div><span className="text-slate-400">连接测试:</span> {formatDate(conn.last_test_at)}</div>
+                )}
+                {conn.mcp_binding && (
+                  <div>
+                    <span className="text-slate-400">Agent 状态:</span>{' '}
+                    <span className={conn.mcp_binding.binding_status === 'bound' ? 'text-emerald-600' : 'text-orange-500'}>
+                      {getAgentDetailText(conn)}
+                    </span>
+                  </div>
                 )}
               </div>
               <div className="flex items-center gap-2">
@@ -425,6 +477,23 @@ const TableauConnectionsPage = forwardRef<TableauConnectionsPageRef, { headerles
                   onChange={e => setFormData({ ...formData, token_value: e.target.value })}
                   className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
                   placeholder={editingConn ? '******' : '7fryZb09QYuahmH648nEqA==:...'} />
+              </div>
+              <div className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.agent_enabled}
+                    onChange={e => setFormData({ ...formData, agent_enabled: e.target.checked })}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm font-medium text-slate-600">启用 Agent 访问</span>
+                </label>
+                {editingConn?.mcp_binding && (
+                  <div className="mt-2 text-xs text-slate-500">
+                    当前状态：{editingConn.mcp_binding.binding_status}
+                    {editingConn.mcp_binding.last_error ? ` · ${editingConn.mcp_binding.last_error}` : ''}
+                  </div>
+                )}
               </div>
               {/* 自动同步设置 */}
               <div className="border-t border-slate-200 pt-4 mt-4">

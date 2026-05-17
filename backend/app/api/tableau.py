@@ -17,6 +17,7 @@ from app.core.dependencies import get_current_user, require_roles
 from app.utils.auth import verify_connection_access  # 导入统一的权限验证函数
 from services.tableau.models import TableauDatabase, TableauSyncLog
 from services.tableau.models import TableauConnection as TableauConnectionModel
+from services.tableau.mcp_binding_service import TableauMcpBindingService
 from services.tableau.sync_service import TableauSyncService
 from services.audit.audit_service import log_action
 
@@ -141,6 +142,9 @@ class CreateConnectionRequest(BaseModel):
     connection_type: str = "mcp"  # 'mcp' or 'tsc'
     token_name: str
     token_value: str
+    auto_sync_enabled: bool = False
+    schedule_id: Optional[int] = None
+    agent_enabled: bool = False
 
 
 class UpdateConnectionRequest(BaseModel):
@@ -154,6 +158,8 @@ class UpdateConnectionRequest(BaseModel):
     is_active: Optional[bool] = None
     auto_sync_enabled: Optional[bool] = None
     sync_interval_hours: Optional[int] = None
+    schedule_id: Optional[int] = None
+    agent_enabled: Optional[bool] = None
 
 
 # --- REST API 直连测试（MCP 模式） ---
@@ -200,6 +206,56 @@ def _test_connection_rest(server_url: str, site: str, token_name: str,
         return {"success": False, "message": f"REST API 测试失败: {str(e)}"}
 
 
+def _normalize_connection_key(server_url: str, site: str) -> tuple[str, str]:
+    return ((server_url or "").strip().rstrip("/").lower(), (site or "").strip().strip("/").lower())
+
+
+def _find_duplicate_connection(
+    db: Session,
+    *,
+    server_url: str,
+    site: str,
+    owner_id: int,
+    exclude_id: Optional[int] = None,
+) -> Optional[TableauConnectionModel]:
+    target = _normalize_connection_key(server_url, site)
+    query = db.query(TableauConnectionModel).filter(TableauConnectionModel.owner_id == owner_id)
+    if exclude_id is not None:
+        query = query.filter(TableauConnectionModel.id != exclude_id)
+    for conn in query.all():
+        if _normalize_connection_key(conn.server_url, conn.site) == target:
+            return conn
+    return None
+
+
+def _binding_payload(binding_result: dict) -> dict:
+    return {
+        "mcp_server_id": binding_result.get("mcp_server_id"),
+        "server_url": binding_result.get("server_url"),
+        "binding_status": binding_result.get("binding_status") or binding_result.get("status"),
+        "health_status": binding_result.get("health_status"),
+        "last_error": binding_result.get("last_error"),
+    }
+
+
+def _refresh_binding_health_after_commit(
+    db: Session,
+    *,
+    connection_id: int,
+    user_id: int,
+    binding: dict,
+) -> dict:
+    if binding.get("binding_status") == "disabled" or not binding.get("mcp_server_id"):
+        return binding
+
+    binding = TableauMcpBindingService(db).refresh_health_for_connection(
+        connection_id=connection_id,
+        user_id=user_id,
+    )
+    db.commit()
+    return binding
+
+
 # --- Endpoints ---
 
 @router.get("/connections")
@@ -213,7 +269,7 @@ async def list_connections(request: Request, db: Session = Depends(get_db), incl
     else:
         connections = _db.get_all_connections(owner_id=user["id"], include_inactive=include_inactive)
 
-    connection_dicts = [c.to_dict() for c in connections]
+    connection_dicts = [c.to_dict(db) for c in connections]
 
     # 仅在没有真实 tableau_connections 时保留 10000+ 虚拟连接兜底。
     # 正常路径应由 MCP 配置创建/更新时桥接到 tableau_connections。
@@ -318,28 +374,51 @@ async def list_connections(request: Request, db: Session = Depends(get_db), incl
                     connections = _db.get_all_connections(include_inactive=include_inactive)
                 else:
                     connections = _db.get_all_connections(owner_id=user["id"], include_inactive=include_inactive)
-                connection_dicts = [c.to_dict() for c in connections]
+                connection_dicts = [c.to_dict(db) for c in connections]
     except Exception:
         logger.exception("修正 stale sync_status 时出错")
 
     return {"connections": connection_dicts, "total": len(connection_dicts)}
 
 
-@router.post("/connections")
+@router.post("/connections", status_code=201)
 async def create_connection(
     req: CreateConnectionRequest,
     current_user: dict = Depends(require_roles(["admin", "data_admin"])),
     db: Session = Depends(get_db),
 ):
     """创建 Tableau 连接"""
-    _db = TableauDatabase(session=db)
-
     if req.connection_type not in ("mcp", "tsc"):
         raise HTTPException(status_code=400, detail="connection_type 必须为 'mcp' 或 'tsc'")
 
-    encrypted_token = _encrypt(req.token_value)
+    duplicate = _find_duplicate_connection(
+        db,
+        server_url=req.server_url,
+        site=req.site,
+        owner_id=current_user["id"],
+    )
+    if duplicate is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "TAB_409", "message": "该 Tableau 站点已接入，请复用已有连接"},
+        )
 
-    conn = _db.create_connection(
+    if req.connection_type == "mcp":
+        test_result = _test_connection_rest(
+            req.server_url,
+            req.site,
+            req.token_name,
+            req.token_value,
+            req.api_version,
+        )
+        if not test_result.get("success"):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "TAB_REST_001", "message": test_result.get("message", "Tableau REST 测试失败")},
+            )
+
+    encrypted_token = _encrypt(req.token_value)
+    conn = TableauConnectionModel(
         name=req.name,
         server_url=req.server_url,
         site=req.site,
@@ -347,12 +426,33 @@ async def create_connection(
         token_encrypted=encrypted_token,
         owner_id=current_user["id"],
         api_version=req.api_version,
-        connection_type=req.connection_type
+        connection_type=req.connection_type,
+        auto_sync_enabled=req.auto_sync_enabled,
+        schedule_id=req.schedule_id if req.auto_sync_enabled else None,
     )
+    db.add(conn)
+    db.flush()
+
+    binding = TableauMcpBindingService(db).upsert_for_connection(
+        connection=conn,
+        enabled=req.agent_enabled,
+        owner_id=current_user["id"],
+        health_check=False,
+    )
+    db.commit()
+    binding = _refresh_binding_health_after_commit(
+        db,
+        connection_id=conn.id,
+        user_id=current_user["id"],
+        binding=binding,
+    )
+    db.refresh(conn)
 
     log_action(current_user["id"], current_user.get("username", ""), "create", "tableau_connection", conn.id,
                after_state={"name": conn.name, "server_url": conn.server_url, "site": conn.site})
-    return {"connection": conn.to_dict(), "message": "连接创建成功"}
+    payload = conn.to_dict(db)
+    payload["mcp_binding"] = _binding_payload(binding)
+    return {"connection": payload, "message": "连接创建成功"}
 
 
 @router.put("/connections/{conn_id}")
@@ -368,9 +468,36 @@ async def update_connection(
     # 使用统一的权限验证函数
     verify_connection_access(conn_id, current_user, db)
 
+    current = _db.get_connection(conn_id)
+    if not current:
+        raise HTTPException(status_code=404, detail="连接不存在")
+
     update_data = req.model_dump(exclude_unset=True)
+    agent_enabled = update_data.pop("agent_enabled", None)
+    new_server_url = update_data.get("server_url", current.server_url)
+    new_site = update_data.get("site", current.site)
+    connection_key_changed = (
+        _normalize_connection_key(new_server_url, new_site)
+        != _normalize_connection_key(current.server_url, current.site)
+    )
+    if connection_key_changed:
+        duplicate = _find_duplicate_connection(
+            db,
+            server_url=new_server_url,
+            site=new_site,
+            owner_id=current.owner_id,
+            exclude_id=conn_id,
+        )
+        if duplicate is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "TAB_409", "message": "该 Tableau 站点已接入，请复用已有连接"},
+            )
+
+    token_for_test = None
     if "token_value" in update_data and update_data["token_value"]:
         # 用户提供了新 token_value，同时更新 token_name 和加密后的 token
+        token_for_test = update_data["token_value"]
         update_data["token_encrypted"] = _encrypt(update_data.pop("token_value"))
         if req.token_name:
             update_data["token_name"] = req.token_name
@@ -379,9 +506,57 @@ async def update_connection(
         update_data.pop("token_value", None)
         update_data.pop("token_name", None)
 
-    _db.update_connection(conn_id, **update_data)
+    should_retest = (
+        connection_key_changed
+        or token_for_test is not None
+        or ("api_version" in update_data and update_data["api_version"] != current.api_version)
+        or ("token_name" in update_data and update_data["token_name"] != current.token_name)
+    )
+    if should_retest and current.connection_type == "mcp":
+        test_token = token_for_test
+        if test_token is None:
+            test_token = _decrypt(current.token_encrypted)
+        test_result = _test_connection_rest(
+            new_server_url,
+            new_site,
+            update_data.get("token_name", current.token_name),
+            test_token,
+            update_data.get("api_version", current.api_version),
+        )
+        if not test_result.get("success"):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "TAB_REST_001", "message": test_result.get("message", "Tableau REST 测试失败")},
+            )
+
+    for key, value in update_data.items():
+        if hasattr(current, key) and value is not None:
+            setattr(current, key, value)
+
+    if current.is_active is False:
+        agent_enabled = False
+    if agent_enabled is None:
+        agent_enabled = bool(current.mcp_direct_enabled)
+
+    binding = TableauMcpBindingService(db).upsert_for_connection(
+        connection=current,
+        enabled=bool(agent_enabled),
+        owner_id=current_user["id"],
+        health_check=False,
+    )
+    db.commit()
+    binding = _refresh_binding_health_after_commit(
+        db,
+        connection_id=current.id,
+        user_id=current_user["id"],
+        binding=binding,
+    )
+    db.refresh(current)
+
     log_action(current_user["id"], current_user.get("username", ""), "update", "tableau_connection", conn_id)
-    return {"message": "连接更新成功"}
+    payload = current.to_dict(db)
+    payload["mcp_binding"] = _binding_payload(binding)
+    return {"connection": payload, "message": "连接更新成功"}
 
 
 @router.delete("/connections/{conn_id}")
@@ -823,7 +998,14 @@ async def sync_connection(
 
     if celery_available:
         from services.tasks.tableau_tasks import sync_connection_task
-        task = sync_connection_task.delay(conn_id)
+        task = sync_connection_task.apply_async(
+            args=[conn_id],
+            kwargs={"trigger_type": "manual"},
+            headers={
+                "trigger_type": "manual",
+                "triggered_by": current_user["id"],
+            },
+        )
         log_action(current_user["id"], current_user.get("username", ""), "sync", "tableau_connection", conn_id,
                    after_state={"task_id": task.id, "mode": "celery"})
         return {"task_id": task.id, "message": "同步任务已提交", "status": "pending"}

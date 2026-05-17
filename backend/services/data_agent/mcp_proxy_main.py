@@ -835,6 +835,8 @@ async def _execute_query_datasource_args(args: Mapping[str, Any], context: ToolC
         limit=limit,
         connection_id=context.connection_id,
         timeout=30,
+        user_id=context.user_id,
+        trace_id=context.trace_id,
     )
     if inspect.isawaitable(result):
         result = await result
