@@ -47,6 +47,7 @@ backend/uv.lock
 .dev-pids/
 cookies.txt
 backend/cookies.txt
+backend/celerybeat-schedule
 frontend/cookies.txt
 
 # Local editor/workspace state
