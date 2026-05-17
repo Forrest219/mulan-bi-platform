@@ -7,13 +7,16 @@ from typing import Any, AsyncGenerator, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import orm as sa_orm
 from sqlalchemy.orm import Session
+import sqlalchemy as sa
 
 from app.core.crypto import get_tableau_crypto
 from app.core.database import get_db  # 导入中央数据库依赖
 from app.core.dependencies import get_current_user, require_roles
 from app.utils.auth import verify_connection_access  # 导入统一的权限验证函数
-from services.tableau.models import TableauDatabase
+from services.tableau.models import TableauDatabase, TableauSyncLog
+from services.tableau.models import TableauConnection as TableauConnectionModel
 from services.tableau.sync_service import TableauSyncService
 from services.audit.audit_service import log_action
 
@@ -278,6 +281,52 @@ async def list_connections(request: Request, db: Session = Depends(get_db), incl
                 })
     except Exception:
         logger.exception("从 mcp_servers 聚合 Tableau 连接时出错，返回仅 tableau_connections 的结果")
+
+    # 修正 stale sync_status（基于最新 TableauSyncLog）
+    # 场景：Celery 任务中途失败/超时，只更新了 BiSyncTask 而未清理 connections 表的 running 状态
+    try:
+        running_conn_ids = [
+            c.id for c in connections if c.sync_status == "running"
+        ]
+        if running_conn_ids:
+            # 对于每个 running 的连接，查找其最新一条 sync_log 的 status
+            # 若最新 log status != running，说明同步已结束（成功/failed/partial）
+            latest_log_status = (
+                db.query(
+                    TableauSyncLog.connection_id,
+                    sa.func.max(TableauSyncLog.id).label("max_log_id"),
+                )
+                .filter(TableauSyncLog.connection_id.in_(running_conn_ids))
+                .group_by(TableauSyncLog.connection_id)
+                .subquery()
+            )
+            stale_ids = (
+                db.query(TableauConnection.id)
+                .join(latest_log_status, TableauConnection.id == latest_log_status.c.connection_id)
+                .join(
+                    TableauSyncLog,
+                    TableauSyncLog.id == latest_log_status.c.max_log_id,
+                )
+                .filter(TableauSyncLog.status != "running")
+                .all()
+            )
+            if stale_ids:
+                stale_conn_ids = [r[0] for r in stale_ids]
+                db.query(TableauConnection).filter(
+                    TableauConnection.id.in_(stale_conn_ids)
+                ).update(
+                    {TableauConnection.sync_status: "failed"},
+                    synchronize_session=False,
+                )
+                db.commit()
+                # 重新查询更新后的连接
+                if user["role"] == "admin":
+                    connections = _db.get_all_connections(include_inactive=include_inactive)
+                else:
+                    connections = _db.get_all_connections(owner_id=user["id"], include_inactive=include_inactive)
+                connection_dicts = [c.to_dict() for c in connections]
+    except Exception:
+        logger.exception("修正 stale sync_status 时出错")
 
     return {"connections": connection_dicts, "total": len(connection_dicts)}
 
@@ -790,12 +839,12 @@ async def sync_connection(
 
     def _run_sync_inline():
         from services.tableau.sync_service import TableauSyncService, TableauRestSyncService
-        from services.tableau.models import TableauDatabase as _TDB
+        from services.tableau.models import TableauDatabase, TableauSyncLog, TableauConnection
         from app.core.crypto import get_tableau_crypto
         from app.core.database import get_db_context
 
         with get_db_context() as sync_db:
-            sync_dbw = _TDB(session=sync_db)
+            sync_dbw = TableauDatabase(session=sync_db)
             sync_conn = sync_dbw.get_connection(conn_id)
             if not sync_conn:
                 return {"status": "error", "message": "连接不存在"}
@@ -1249,7 +1298,8 @@ from services.tableau.mcp_client import (
     get_tableau_mcp_client,
     normalize_datasource_metadata_field,
 )
-from services.tableau.models import TableauDatabase
+from services.tableau.models import TableauDatabase, TableauSyncLog
+from services.tableau.models import TableauConnection as TableauConnectionModel
 
 
 class VizQLQueryRequest(BaseModel):
