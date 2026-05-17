@@ -256,6 +256,7 @@ class SessionManager:
         user_id: int,
         status: Optional[str] = "active",
         limit: int = 20,
+        offset: int = 0,
     ) -> list[AgentConversation]:
         """Get all conversations for a user"""
         query = self.db.query(AgentConversation).filter(
@@ -265,4 +266,4 @@ class SessionManager:
         )
         if status:
             query = query.filter(AgentConversation.status == status)
-        return query.order_by(AgentConversation.updated_at.desc()).limit(limit).all()
+        return query.order_by(AgentConversation.updated_at.desc()).limit(limit).offset(offset).all()

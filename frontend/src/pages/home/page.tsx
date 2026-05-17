@@ -78,6 +78,11 @@ function HomePageInner() {
   const { appendMessage, addConversation } = useConversations();
   const { selectedConvId } = useHomeUrlState();
 
+  // T6: 消息分页状态（必须在此位置，在所有回调之前声明）
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [messageOffset, setMessageOffset] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   // Gap-05: streaming state 完全独立，不与 AskBar 的 input/loading state 共享
   const { messages: streamingMessages, isStreaming, sendMessage, abort, clearMessages } = useStreamingChat();
 
@@ -89,13 +94,17 @@ function HomePageInner() {
     setHomeState('HOME_IDLE');
     setResult(null);
     setError(null);
+    setHasMoreMessages(false);
+    setMessageOffset(0);
+    setLoadingMore(false);
   }, [clearMessages]);
 
   // Task 1: URL conv= 参数驱动历史消息恢复
+  const PAGE = 50;
   const loadConvHistory = useCallback(async (convId: string) => {
     try {
       const [msgs, conv] = await Promise.all([
-        agentConversationsApi.getMessages(convId),
+        agentConversationsApi.getMessages(convId, { limit: PAGE, offset: 0 }),
         agentConversationsApi.getConversation(convId),
       ]);
       const history = msgs.map((m) => ({
@@ -113,6 +122,8 @@ function HomePageInner() {
       }));
       setHistoryMessages(history);
       setCurrentConversationId(convId);
+      setHasMoreMessages(msgs.length === PAGE);
+      setMessageOffset(PAGE);
       // 恢复对话原始连接，避免追问时 connection_id 为空导致多余 ReAct 步骤
       if (conv.connection_id != null) {
         setScopeConnectionId(String(conv.connection_id));
@@ -120,10 +131,41 @@ function HomePageInner() {
       setHomeState('HOME_RESULT');
     } catch {
       setHistoryMessages([]);
+      setHasMoreMessages(false);
+      setMessageOffset(0);
       setHomeState('HOME_ERROR');
       setError({ code: 'LOAD_HISTORY_FAILED', message: '历史对话加载失败，请刷新重试' });
     }
   }, [setScopeConnectionId]);
+
+  // T6: 加载更多历史消息
+  const loadMoreHistory = useCallback(async () => {
+    if (!currentConversationId || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const older = await agentConversationsApi.getMessages(currentConversationId, { limit: PAGE, offset: messageOffset });
+      const mapped = older.map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+        created_at: m.created_at,
+        response_type: m.response_type,
+        response_data: m.response_data,
+        error_detail: m.error_detail ?? (m.response_type === 'error' || m.response_type === 'fallback' ? m.response_data : undefined),
+        run_id: m.run_id,
+        explainability: m.explainability,
+        trace_id: m.trace_id,
+        sources_count: m.sources_count,
+        top_sources: m.top_sources,
+      }));
+      setHistoryMessages((prev) => [...mapped, ...prev]);
+      setHasMoreMessages(older.length === PAGE);
+      setMessageOffset((prev) => prev + PAGE);
+    } catch {
+      // 静默忽略，加载失败不影响已有消息
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [currentConversationId, messageOffset, loadingMore]);
 
   // Mock 流路径：onStreamToken 逐 token 追加到此 state 用于展示
   const [mockStreamingContent, setMockStreamingContent] = useState('');
@@ -134,10 +176,16 @@ function HomePageInner() {
   useEffect(() => {
     if (selectedConvId) {
       void loadConvHistory(selectedConvId);
+      setHasMoreMessages(false);
+      setMessageOffset(0);
+      setLoadingMore(false);
     } else {
       setHistoryMessages([]);
       setCurrentConversationId(null);
       savedMessageCountRef.current = 0;
+      setHasMoreMessages(false);
+      setMessageOffset(0);
+      setLoadingMore(false);
     }
   }, [selectedConvId, loadConvHistory]);
 
@@ -350,6 +398,9 @@ function HomePageInner() {
           historyMessages={historyMessages}
           historyConversationId={currentConversationId}
           onSourceClick={(name) => console.log('Open DataSource Drawer:', name)}
+          onLoadMore={loadMoreHistory}
+          hasMore={hasMoreMessages}
+          loadingMore={loadingMore}
         />
       )}
       {/* SuggestionGrid */}
@@ -370,6 +421,9 @@ function HomePageInner() {
           historyMessages={historyMessages}
           historyConversationId={currentConversationId}
           onSourceClick={(name) => console.log('Open DataSource Drawer:', name)}
+          onLoadMore={loadMoreHistory}
+          hasMore={hasMoreMessages}
+          loadingMore={loadingMore}
         />
       )}
       {/* SearchResult */}
@@ -405,6 +459,9 @@ function HomePageInner() {
           historyMessages={historyMessages}
           historyConversationId={currentConversationId}
           onSourceClick={(name) => console.log('Open DataSource Drawer:', name)}
+          onLoadMore={loadMoreHistory}
+          hasMore={hasMoreMessages}
+          loadingMore={loadingMore}
         />
       )}
     </>

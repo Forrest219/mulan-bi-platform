@@ -15,7 +15,7 @@
  * - 时间分组使用浏览器本地时区（C5）
  * - 导航：点击对话跳转 /chat/:id（useNavigate）
  */
-import { useState, useMemo, useRef, useCallback } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useConversations, type Conversation } from '../../../store/conversationStore';
 import { ConfirmModal } from '../../../components/ConfirmModal';
@@ -65,6 +65,14 @@ export function ConversationBar({ collapsed, onToggleCollapse, onNew }: Conversa
   const [page, setPage] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [errorToast, setErrorToast] = useState<string | null>(null);
+
+  // T4: 自动清除错误 toast
+  useEffect(() => {
+    if (!errorToast) return;
+    const t = setTimeout(() => setErrorToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [errorToast]);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -113,11 +121,17 @@ export function ConversationBar({ collapsed, onToggleCollapse, onNew }: Conversa
       if (currentId === deleteTarget.id) {
         navigate('/');
       }
+    } catch {
+      setErrorToast('删除失败，请稍后重试');
     } finally {
       setDeleting(false);
       setDeleteTarget(null);
     }
   }, [deleteTarget, deleteConversation, currentId, navigate]);
+
+  const handleRenameError = useCallback((msg: string) => {
+    setErrorToast(msg);
+  }, []);
 
   return (
     <aside
@@ -193,6 +207,13 @@ export function ConversationBar({ collapsed, onToggleCollapse, onNew }: Conversa
           )}
         </div>
 
+        {/* T4: 错误提示 toast */}
+          {!collapsed && errorToast && (
+            <div className="mx-2 mt-1 px-3 py-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg">
+              {errorToast}
+            </div>
+          )}
+
         {/* Conversation list — expanded only, fills remaining space */}
         {!collapsed && (
           <div className="flex-1 overflow-y-auto px-2 mt-1">
@@ -216,6 +237,7 @@ export function ConversationBar({ collapsed, onToggleCollapse, onNew }: Conversa
                       }}
                       onDelete={() => setDeleteTarget(conv)}
                       onRename={updateConversationTitle}
+                      onRenameError={handleRenameError}
                     />
                   ))}
                 </div>
@@ -264,9 +286,10 @@ interface ConversationItemProps {
   onSelect: () => void;
   onDelete: () => void;
   onRename: (id: string, title: string) => Promise<void>;
+  onRenameError?: (msg: string) => void;
 }
 
-function ConversationItem({ conv, isActive, onSelect, onDelete, onRename }: ConversationItemProps) {
+function ConversationItem({ conv, isActive, onSelect, onDelete, onRename, onRenameError }: ConversationItemProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(conv.title);
@@ -293,8 +316,9 @@ function ConversationItem({ conv, isActive, onSelect, onDelete, onRename }: Conv
       if (trimmed && trimmed !== conv.title) {
         await onRename(conv.id, trimmed);
       }
-    } catch {
+    } catch (error) {
       setRenameValue(conv.title);
+      onRenameError?.(error instanceof Error ? error.message : '重命名失败，请稍后重试');
     }
     setRenaming(false);
   };

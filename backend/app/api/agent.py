@@ -18,7 +18,7 @@ import uuid as uuid_lib
 from datetime import datetime, timezone
 from typing import AsyncGenerator, Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, text
@@ -1466,6 +1466,8 @@ async def agent_stream(
 
 @router.get("/conversations")
 def list_conversations(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1475,7 +1477,8 @@ def list_conversations(
     convs = session_mgr.get_user_conversations(
         user_id=current_user["id"],
         status="active",
-        limit=20,
+        limit=limit,
+        offset=offset,
     )
     message_counts = {
         str(row._mapping["conversation_id"]): row._mapping["count"]
@@ -1598,6 +1601,8 @@ def get_conversation(
 @router.get("/conversations/{conversation_id}/messages")
 def get_conversation_messages(
     conversation_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1615,7 +1620,7 @@ def get_conversation_messages(
     if not session:
         raise HTTPException(status_code=404, detail={"error_code": "AGENT_004", "message": "会话不存在"})
 
-    msgs = session_mgr.get_conversation_messages(conv_uuid, user_id=current_user["id"], limit=50, offset=0)
+    msgs = session_mgr.get_conversation_messages(conv_uuid, user_id=current_user["id"], limit=limit, offset=offset)
     runs = (
         db.query(BiAgentRun)
         .filter(BiAgentRun.conversation_id == conv_uuid)

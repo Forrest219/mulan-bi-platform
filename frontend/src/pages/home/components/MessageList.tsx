@@ -28,6 +28,10 @@ interface MessageListProps {
   /** conversation_id for history messages — enables feedback via conversation_id alone */
   historyConversationId?: string | null;
   onSourceClick?: (sourceName: string) => void;
+  /** T6: 加载更早的消息 */
+  onLoadMore?: () => void;
+  hasMore?: boolean;
+  loadingMore?: boolean;
 }
 
 interface RenderItemOpts {
@@ -243,7 +247,7 @@ function histErrorHint(msg: HistoryMessage): string | undefined {
   return undefined;
 }
 
-function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onRegenerate, historyMessages, historyConversationId, onSourceClick }: MessageListProps) {
+function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onRegenerate, historyMessages, historyConversationId, onSourceClick, onLoadMore, hasMore, loadingMore }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -267,6 +271,24 @@ function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onR
   return (
     <div className="max-w-5xl mx-auto w-full px-4">
       <div className="flex flex-col gap-4 py-6">
+
+        {/* T6: 加载更早的消息按钮 */}
+        {hasMore && (
+          <div className="flex justify-center">
+            <button
+              onClick={onLoadMore}
+              disabled={loadingMore}
+              className="text-sm text-blue-500 hover:underline disabled:opacity-50 flex items-center gap-1"
+            >
+              {loadingMore ? (
+                <>
+                  <span className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin inline-block" />
+                  加载中...
+                </>
+              ) : '↑ 加载更早的消息'}
+            </button>
+          </div>
+        )}
 
         {/* 历史消息（URL conv= 恢复） */}
         {historyMessages && historyMessages.length > 0 && (() => {

@@ -388,11 +388,16 @@ export const agentConversationsApi = {
   /**
    * GET /api/agent/conversations
    */
-  list: (): Promise<AgentConversationItem[]> =>
-    fetch('/api/agent/conversations', { credentials: 'include' }).then((r) => {
+  list: (params?: { limit?: number; offset?: number }): Promise<AgentConversationItem[]> => {
+    const qs = new URLSearchParams();
+    if (params?.limit !== undefined) qs.set('limit', String(params.limit));
+    if (params?.offset !== undefined) qs.set('offset', String(params.offset));
+    const url = `/api/agent/conversations${qs.toString() ? `?${qs}` : ''}`;
+    return fetch(url, { credentials: 'include' }).then((r) => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
-    }),
+    });
+  },
 
   /**
    * GET /api/agent/conversations/{id} — 获取单个会话元数据（含 connection_id）
@@ -408,13 +413,16 @@ export const agentConversationsApi = {
   /**
    * GET /api/agent/conversations/{id}/messages
    */
-  getMessages: (conversationId: string): Promise<AgentMessageItem[]> =>
-    fetch(`/api/agent/conversations/${conversationId}/messages`, {
-      credentials: 'include',
-    }).then((r) => {
+  getMessages: (conversationId: string, params?: { limit?: number; offset?: number }): Promise<AgentMessageItem[]> => {
+    const qs = new URLSearchParams();
+    if (params?.limit !== undefined) qs.set('limit', String(params.limit));
+    if (params?.offset !== undefined) qs.set('offset', String(params.offset));
+    const url = `/api/agent/conversations/${conversationId}/messages${qs.toString() ? `?${qs}` : ''}`;
+    return fetch(url, { credentials: 'include' }).then((r) => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
-    }),
+    });
+  },
 
   /**
    * PATCH /api/agent/conversations/{id} — 更新 Data Agent 会话标题

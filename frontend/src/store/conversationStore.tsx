@@ -169,7 +169,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     setIsLoading(true);
     agentConversationsApi
-      .list()
+      .list({ limit: 50 })
       .then((list) => {
         if (cancelled) return;
         // 将后端列表映射为本地 Conversation 结构（messages 为空，按需加载）
@@ -242,7 +242,6 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       await agentConversationsApi.updateConversationTitle(id, title);
     } catch (error) {
       dispatch({ type: 'UPDATE_TITLE', payload: { id, title: previousTitle } });
-      window.alert(error instanceof Error ? error.message : '重命名失败，请稍后重试');
       throw error;
     }
   }, [conversations]);
