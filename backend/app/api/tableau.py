@@ -285,37 +285,27 @@ async def list_connections(request: Request, db: Session = Depends(get_db), incl
     # 修正 stale sync_status（基于最新 TableauSyncLog）
     # 场景：Celery 任务中途失败/超时，只更新了 BiSyncTask 而未清理 connections 表的 running 状态
     try:
-        running_conn_ids = [
-            c.id for c in connections if c.sync_status == "running"
-        ]
+        running_conn_ids = [c.id for c in connections if c.sync_status == "running"]
+        logger.info(f"[sync_status reconciliation] found {len(running_conn_ids)} running connections: {running_conn_ids}")
         if running_conn_ids:
-            # 对于每个 running 的连接，查找其最新一条 sync_log 的 status
-            # 若最新 log status != running，说明同步已结束（成功/failed/partial）
-            latest_log_status = (
-                db.query(
-                    TableauSyncLog.connection_id,
-                    sa.func.max(TableauSyncLog.id).label("max_log_id"),
+            # 简单方案：逐个检查 running 的连接，取其 max log id 的 status
+            stale_conn_ids = []
+            for conn_id in running_conn_ids:
+                max_log = (
+                    db.query(sa.func.max(TableauSyncLog.id))
+                    .filter(TableauSyncLog.connection_id == conn_id)
+                    .scalar()
                 )
-                .filter(TableauSyncLog.connection_id.in_(running_conn_ids))
-                .group_by(TableauSyncLog.connection_id)
-                .subquery()
-            )
-            stale_ids = (
-                db.query(TableauConnection.id)
-                .join(latest_log_status, TableauConnection.id == latest_log_status.c.connection_id)
-                .join(
-                    TableauSyncLog,
-                    TableauSyncLog.id == latest_log_status.c.max_log_id,
-                )
-                .filter(TableauSyncLog.status != "running")
-                .all()
-            )
-            if stale_ids:
-                stale_conn_ids = [r[0] for r in stale_ids]
-                db.query(TableauConnection).filter(
-                    TableauConnection.id.in_(stale_conn_ids)
+                if max_log:
+                    log = db.query(TableauSyncLog).filter(TableauSyncLog.id == max_log).first()
+                    if log and log.status != "running":
+                        stale_conn_ids.append(conn_id)
+                        logger.info(f"[sync_status reconciliation] conn_id={conn_id} latest log status={log.status}, marking stale")
+            if stale_conn_ids:
+                db.query(TableauConnectionModel).filter(
+                    TableauConnectionModel.id.in_(stale_conn_ids)
                 ).update(
-                    {TableauConnection.sync_status: "failed"},
+                    {TableauConnectionModel.sync_status: "failed"},
                     synchronize_session=False,
                 )
                 db.commit()
@@ -325,6 +315,7 @@ async def list_connections(request: Request, db: Session = Depends(get_db), incl
                 else:
                     connections = _db.get_all_connections(owner_id=user["id"], include_inactive=include_inactive)
                 connection_dicts = [c.to_dict() for c in connections]
+                logger.info(f"[sync_status reconciliation] updated {len(stale_conn_ids)} connections to 'failed'")
     except Exception:
         logger.exception("修正 stale sync_status 时出错")
 
