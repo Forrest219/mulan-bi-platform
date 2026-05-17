@@ -35,7 +35,7 @@ def _request(args, *, schema=None, fields=None, question="各省份销售额是�
         tool_name="query_datasource",
         tool_schema=schema or _schema(),
         args=args,
-        queryable_fields=fields or ["省份", "销售额", "订单日期", "类别"],
+        queryable_fields=fields if fields is not None else ["省份", "销售额", "订单日期", "类别"],
         current_datasource=current_datasource or {"luid": "ds-1", "connection_id": 7},
         user_context=user_context or {
             "accessible_datasource_luids": ["ds-1"],
@@ -153,6 +153,54 @@ def test_rejects_unknown_field():
     assert result.args is None
     assert result.message
     assert result.user_hint
+
+
+def test_rejects_catalog_only_field_with_specific_code_and_alternatives():
+    result = validate_mcp_args(
+        _request(
+            {
+                "datasource_luid": "ds-1",
+                "connection_id": 7,
+                "fields": [{"fieldCaption": "订单日期"}],
+                "limit": 20,
+            },
+            fields=["发货日期", "发货年份", "销售额"],
+            current_datasource={
+                "luid": "ds-1",
+                "connection_id": 7,
+                "catalog_fields": ["订单日期", "发货日期", "发货年份", "销售额"],
+                "catalog_only_fields": ["订单日期"],
+            },
+        )
+    )
+
+    assert result.decision == "reject"
+    assert result.reject_code == "MCP_ARGS_CATALOG_ONLY_FIELD"
+    assert "订单日期" in result.message
+    assert "发货日期" in result.user_hint
+
+
+def test_unknown_catalog_field_is_not_catalog_only_when_queryable_set_unavailable():
+    result = validate_mcp_args(
+        _request(
+            {
+                "datasource_luid": "ds-1",
+                "connection_id": 7,
+                "fields": [{"fieldCaption": "销售额"}],
+                "limit": 20,
+            },
+            fields=[],
+            current_datasource={
+                "luid": "ds-1",
+                "connection_id": 7,
+                "catalog_fields": ["销售额", "订单日期"],
+            },
+        )
+    )
+
+    assert result.decision == "reject"
+    assert result.reject_code == "MCP_ARGS_UNKNOWN_FIELD"
+    assert "catalog" not in (result.reject_code or "").lower()
 
 
 def test_rejects_unsafe_detail_scan_without_original_limit():

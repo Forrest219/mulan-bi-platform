@@ -41,6 +41,12 @@ from services.llm.service import (
     LLM_THINKING_ONLY_RESPONSE,
     LLMService,
 )
+from services.tableau.mcp_metadata_fields import (
+    extract_mcp_field_metadata,
+    extract_queryable_fields_from_metadata,
+    field_display_name,
+    normalize_field_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +69,7 @@ MCP_HOST_TOOL_EXECUTION_FAILED = "MCP_HOST_TOOL_EXECUTION_FAILED"
 MCP_HOST_NO_QUERY_RESULT = "MCP_HOST_NO_QUERY_RESULT"
 MCP_HOST_LOOP_BUDGET_EXHAUSTED = "MCP_HOST_LOOP_BUDGET_EXHAUSTED"
 MCP_HOST_TOOL_NOT_IN_CATALOG = "MCP_HOST_TOOL_NOT_IN_CATALOG"
+MCP_CATALOG_ONLY_FIELD = "MCP_CATALOG_ONLY_FIELD"
 RESULT_GUARDRAIL_BLOCKED = "RESULT_GUARDRAIL_BLOCKED"
 MCP_HOST_METADATA_TOOL_NAME = "get-datasource-metadata"
 MCP_HOST_QUERY_TOOL_NAME = "query-datasource"
@@ -157,6 +164,15 @@ async def run_mcp_first_main_path(
     })
 
     field_captions, _metadata_fields = _queryable_field_context(ds_info, context.connection_id)
+    preflight_error = _catalog_only_preflight(question, ds_info, field_captions)
+    if preflight_error:
+        yield AgentEvent(type="error", content=_catalog_only_error_payload(
+            preflight_error,
+            context.trace_id,
+            intent_result,
+            chain_mode=MCP_MAIN_CHAIN_MODE,
+        ))
+        return
     deterministic_operator = infer_fallback_operator(question, intent_result.intent)
     if deterministic_operator in {
         "aggregate",
@@ -1183,9 +1199,11 @@ def _queryable_field_context(
                 str(luid),
                 timeout=20,
             )
-            field_metadata = _extract_mcp_field_metadata(metadata)
+            field_metadata = extract_mcp_field_metadata(metadata)
             mcp_fields = _field_metadata_names(field_metadata)
             if mcp_fields:
+                if isinstance(ds_info, dict):
+                    ds_info.setdefault("queryable_fields", mcp_fields)
                 return mcp_fields, field_metadata
         except Exception:
             logger.warning("MCP metadata fields unavailable; falling back to local cache", exc_info=True)
@@ -1193,7 +1211,10 @@ def _queryable_field_context(
     asset_id = ds_info.get("asset_id")
     if not asset_id:
         return [], []
-    fields = get_datasource_fields_cached(asset_id) or []
+    local_context = _local_field_capability_context(asset_id)
+    if isinstance(ds_info, dict):
+        ds_info.update({key: value for key, value in local_context.items() if value not in (None, [], {})})
+    fields = local_context.get("queryable_fields") or []
     return [str(field) for field in fields if str(field or "").strip()], []
 
 
@@ -1204,36 +1225,162 @@ def _queryable_fields(ds_info: Mapping[str, Any], connection_id: Optional[int] =
     return fields
 
 
-def _extract_mcp_field_metadata(metadata: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _local_field_capability_context(asset_id: Any) -> dict[str, Any]:
+    if not asset_id:
+        return {}
+    try:
+        from app.core.database import SessionLocal
+        from services.tableau.field_reconciliation import queryability_status, summarize_field_capabilities
+        from services.tableau.models import TableauDatasourceField
+
+        session = SessionLocal()
+        try:
+            rows = (
+                session.query(TableauDatasourceField)
+                .filter(TableauDatasourceField.asset_id == int(asset_id))
+                .order_by(TableauDatasourceField.role, TableauDatasourceField.field_name)
+                .all()
+            )
+            catalog_fields = [_catalog_field_name(row) for row in rows if _catalog_field_name(row)]
+            queryable_fields = [_catalog_field_name(row) for row in rows if getattr(row, "mcp_queryable", None) is True and _catalog_field_name(row)]
+            catalog_only_fields = [
+                _catalog_field_name(row)
+                for row in rows
+                if queryability_status(row) == "catalog_only" and _catalog_field_name(row)
+            ]
+            return {
+                "catalog_fields": catalog_fields,
+                "queryable_fields": queryable_fields,
+                "catalog_only_fields": catalog_only_fields,
+                "field_capability_summary": summarize_field_capabilities(rows),
+            }
+        finally:
+            session.close()
+    except Exception:
+        logger.debug("local field capability context unavailable", exc_info=True)
+        return {}
+
+
+def _catalog_field_name(row: Any) -> str:
+    return str(getattr(row, "field_caption", None) or getattr(row, "field_name", None) or "").strip()
+
+
+def _catalog_only_preflight(
+    question: str,
+    ds_info: Mapping[str, Any],
+    queryable_fields: list[str],
+) -> Optional[dict[str, Any]]:
+    context = _catalog_queryable_context(ds_info, queryable_fields)
+    catalog_only_fields = context.get("catalog_only_fields") or []
+    if not catalog_only_fields:
+        return None
+    queryable = context.get("queryable_fields") or queryable_fields
+    mentioned = _mentioned_catalog_only_fields(question, catalog_only_fields, queryable)
+    if not mentioned:
+        return None
+    return {
+        "fields": mentioned,
+        "alternatives": _queryable_alternatives(mentioned[0], queryable),
+        "catalog_field_count": len(context.get("catalog_fields") or []),
+        "queryable_field_count": len(queryable),
+        "catalog_only_count": len(catalog_only_fields),
+    }
+
+
+def _catalog_queryable_context(ds_info: Mapping[str, Any], queryable_fields: list[str]) -> dict[str, Any]:
+    local_context = {}
+    if not ds_info.get("catalog_fields") and ds_info.get("asset_id"):
+        local_context = _local_field_capability_context(ds_info.get("asset_id"))
+    catalog_fields = list(ds_info.get("catalog_fields") or local_context.get("catalog_fields") or [])
+    queryable = list(queryable_fields or ds_info.get("queryable_fields") or local_context.get("queryable_fields") or [])
+    queryable_norm = {normalize_field_name(field) for field in queryable}
+    explicit_catalog_only = list(ds_info.get("catalog_only_fields") or local_context.get("catalog_only_fields") or [])
+    if explicit_catalog_only:
+        catalog_only = explicit_catalog_only
+    elif catalog_fields and queryable:
+        catalog_only = [
+            field
+            for field in catalog_fields
+            if normalize_field_name(field) and normalize_field_name(field) not in queryable_norm
+        ]
+    else:
+        catalog_only = []
+    if isinstance(ds_info, dict):
+        ds_info.setdefault("catalog_fields", catalog_fields)
+        ds_info.setdefault("queryable_fields", queryable)
+        ds_info.setdefault("catalog_only_fields", catalog_only)
+        if local_context.get("field_capability_summary"):
+            ds_info.setdefault("field_capability_summary", local_context["field_capability_summary"])
+    return {
+        "catalog_fields": catalog_fields,
+        "queryable_fields": queryable,
+        "catalog_only_fields": catalog_only,
+    }
+
+
+def _mentioned_catalog_only_fields(question: str, catalog_only_fields: list[str], queryable_fields: list[str]) -> list[str]:
+    normalized_question = normalize_field_name(question)
+    queryable_norm = {normalize_field_name(field) for field in queryable_fields}
+    matches: list[str] = []
     seen: set[str] = set()
-    fields: list[dict[str, Any]] = []
+    for field in catalog_only_fields:
+        normalized = normalize_field_name(field)
+        if not normalized or normalized in queryable_norm:
+            continue
+        if normalized == normalized_question or (len(normalized) >= 2 and normalized in normalized_question):
+            if normalized not in seen:
+                seen.add(normalized)
+                matches.append(field)
+    return matches
 
-    def add(item: Any) -> None:
-        if isinstance(item, Mapping):
-            payload = dict(item)
-        else:
-            payload = {"name": str(item or "").strip()}
-        name = _field_caption(payload)
-        if name and name not in seen:
-            seen.add(name)
-            fields.append(payload)
 
-    for item in metadata.get("fields") or []:
-        add(item)
+def _queryable_alternatives(field: str, queryable_fields: list[str]) -> list[str]:
+    scored: list[tuple[int, str]] = []
+    for candidate in queryable_fields:
+        score = 0
+        if normalize_field_name(field) in normalize_field_name(candidate) or normalize_field_name(candidate) in normalize_field_name(field):
+            score += 3
+        for marker in ("日期", "年份", "时间", "年", "月", "区域", "省", "类", "客户", "销售", "利润", "数量"):
+            if marker in field and marker in candidate:
+                score += 2
+        if score:
+            scored.append((score, candidate))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [candidate for _, candidate in scored[:3]]
 
-    raw = metadata.get("raw")
-    if isinstance(raw, Mapping):
-        for group in raw.get("fieldGroups") or []:
-            if not isinstance(group, Mapping):
-                continue
-            for item in group.get("fields") or []:
-                add(item)
 
-    return fields
+def _catalog_only_error_payload(
+    preflight_error: Mapping[str, Any],
+    trace_id: str,
+    intent_result: IntentClassification,
+    *,
+    chain_mode: str,
+) -> dict[str, Any]:
+    fields = [str(field) for field in preflight_error.get("fields") or [] if str(field or "").strip()]
+    alternatives = [str(field) for field in preflight_error.get("alternatives") or [] if str(field or "").strip()]
+    field_text = "、".join(fields) if fields else "该字段"
+    alt_text = f"当前可替代字段有：{'、'.join(alternatives)}。" if alternatives else "当前没有可自动替代的 Agent 可查询字段。"
+    return _mcp_passthrough_error_payload(
+        MCP_CATALOG_ONLY_FIELD,
+        f"字段存在于 Tableau 资产目录，但当前 Agent/MCP 不支持查询：{field_text}",
+        f"{alt_text} 请调整问题后再查询。",
+        trace_id,
+        intent_result,
+        chain_mode=chain_mode,
+        detail={
+            "chain_mode": chain_mode,
+            "reason": "catalog_only_field_preflight",
+            "catalog_only_fields": fields,
+            "alternatives": alternatives,
+            "catalog_field_count": preflight_error.get("catalog_field_count"),
+            "queryable_field_count": preflight_error.get("queryable_field_count"),
+            "catalog_only_count": preflight_error.get("catalog_only_count"),
+        },
+    )
 
 
 def _field_metadata_names(fields: list[dict[str, Any]]) -> list[str]:
-    return [name for item in fields if (name := _field_caption(item))]
+    return [name for item in fields if (name := field_display_name(item))]
 
 
 async def _call_llm_json(llm: LLMService, messages: list[dict[str, str]], *, purpose: str) -> dict[str, Any]:
@@ -1990,6 +2137,25 @@ async def _run_mcp_main_route(
     llm_service: Optional[LLMService] = None,
     chain_mode: str = MCP_MAIN_CHAIN_MODE,
 ) -> _McpMainAttempt:
+    queryable_fields = list(datasource.get("queryable_fields") or [])
+    if not queryable_fields:
+        queryable_fields, _ = _queryable_field_context(datasource, context.connection_id)
+    preflight_error = _catalog_only_preflight(question, datasource, queryable_fields)
+    if preflight_error:
+        fields = [str(field) for field in preflight_error.get("fields") or [] if str(field or "").strip()]
+        alternatives = [str(field) for field in preflight_error.get("alternatives") or [] if str(field or "").strip()]
+        field_text = "、".join(fields) if fields else "该字段"
+        alt_text = f"可替代字段：{'、'.join(alternatives)}。" if alternatives else "当前没有可自动替代的 Agent 可查询字段。"
+        return _McpMainAttempt(
+            success=False,
+            events=[],
+            reason=MCP_CATALOG_ONLY_FIELD,
+            error_code=MCP_CATALOG_ONLY_FIELD,
+            original_error=preflight_error,
+            message=f"字段存在于 Tableau 资产目录，但当前 Agent/MCP 不支持查询：{field_text}",
+            user_hint=f"{alt_text} 请调整问题后再查询。",
+        )
+
     attempt = await _run_mcp_host_route(
         question=question,
         context=context,
@@ -1999,7 +2165,7 @@ async def _run_mcp_main_route(
         llm_service=llm_service,
         chain_mode=chain_mode,
     )
-    if attempt.success or attempt.reason == RESULT_GUARDRAIL_BLOCKED or not _mcp_host_thin_fallback_enabled():
+    if attempt.success or attempt.reason in {RESULT_GUARDRAIL_BLOCKED, MCP_CATALOG_ONLY_FIELD} or not _mcp_host_thin_fallback_enabled():
         return attempt
 
     fallback_events = list(attempt.events)
@@ -2535,6 +2701,27 @@ async def _run_mcp_host_route(
             previous_response_data=previous_response_data,
             analysis_context=analysis_context,
         )
+        if _is_query_tool_name(tool_name):
+            guardrail_result = _validate_mcp_host_query_arguments(
+                question=question,
+                tool_name=tool_name,
+                arguments=arguments,
+                datasource=datasource,
+                metadata=metadata,
+                context=context,
+            )
+            if guardrail_result.decision == "reject":
+                return _McpMainAttempt(
+                    success=False,
+                    events=events,
+                    reason=guardrail_result.reject_code or "mcp_host_args_guardrail_rejected",
+                    error_code=guardrail_result.reject_code or "MCP_HOST_ARGS_GUARDRAIL_REJECTED",
+                    original_error=guardrail_result.to_dict(),
+                    message=guardrail_result.message,
+                    user_hint=guardrail_result.user_hint,
+                )
+            if guardrail_result.args:
+                arguments = guardrail_result.args
         events.append(_mcp_host_tool_call_event(
             tool_name=tool_name,
             arguments=arguments,
@@ -3117,6 +3304,53 @@ def _sanitize_mcp_host_tool_arguments(
             cleaned_fields.append(cleaned)
         query["fields"] = cleaned_fields
     return sanitized
+
+
+def _is_query_tool_name(tool_name: str) -> bool:
+    return str(tool_name or "") == MCP_HOST_QUERY_TOOL_NAME
+
+
+def _validate_mcp_host_query_arguments(
+    *,
+    question: str,
+    tool_name: str,
+    arguments: Mapping[str, Any],
+    datasource: Mapping[str, Any],
+    metadata: Any,
+    context: ToolContext,
+):
+    from services.data_agent.mcp_args_guardrail import McpArgsGuardrailInput, query_datasource_tool_schema, validate_mcp_args
+
+    queryable_fields = list(datasource.get("queryable_fields") or [])
+    if not queryable_fields:
+        queryable_fields = extract_queryable_fields_from_metadata(metadata)
+    enriched_datasource = dict(datasource)
+    _catalog_queryable_context(enriched_datasource, queryable_fields)
+    current_datasource: dict[str, Any] = {
+        "name": datasource.get("name"),
+        "luid": datasource.get("luid"),
+        "connection_id": context.connection_id,
+    }
+    for key in ("catalog_fields", "queryable_fields", "catalog_only_fields", "field_capability_summary"):
+        value = enriched_datasource.get(key)
+        if value:
+            current_datasource[key] = value
+    return validate_mcp_args(
+        McpArgsGuardrailInput(
+            question=question,
+            tool_name=tool_name,
+            tool_schema=query_datasource_tool_schema(),
+            args=dict(arguments),
+            queryable_fields=queryable_fields,
+            current_datasource=current_datasource,
+            user_context={
+                "user_id": context.user_id,
+                "connection_id": context.connection_id,
+                "accessible_datasource_luids": [datasource.get("luid")],
+                **({"accessible_connection_ids": [context.connection_id]} if context.connection_id is not None else {}),
+            },
+        )
+    )
 
 
 def _context_followup_trend_arguments(

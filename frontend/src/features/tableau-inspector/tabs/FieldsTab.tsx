@@ -14,10 +14,27 @@ const CACHE_STATUS_LABELS: Record<string, string> = {
   miss: '无缓存',
 };
 
-type FieldFilter = 'all' | 'mcp' | 'measure' | 'dimension' | 'calculation' | 'formula' | 'hidden';
+const MCP_STATUS_LABELS: Record<string, string> = {
+  ok: '全部可查询',
+  partial: '部分可查询',
+  unknown: '未校验',
+  error: 'MCP 异常',
+};
+
+const MCP_STATUS_CLASSES: Record<string, string> = {
+  ok: 'bg-emerald-50 text-emerald-700',
+  partial: 'bg-amber-50 text-amber-700',
+  unknown: 'bg-slate-100 text-slate-600',
+  error: 'bg-red-50 text-red-700',
+};
+
+type FieldFilter = 'all' | 'queryable' | 'catalog_only' | 'mcp_error' | 'mcp' | 'measure' | 'dimension' | 'calculation' | 'formula' | 'hidden';
 
 const FIELD_FILTERS: Array<{ key: FieldFilter; label: string }> = [
   { key: 'all', label: '全部' },
+  { key: 'queryable', label: 'Agent 可查询' },
+  { key: 'catalog_only', label: '仅资产目录' },
+  { key: 'mcp_error', label: 'MCP 异常' },
   { key: 'mcp', label: 'MCP 字段' },
   { key: 'measure', label: '度量' },
   { key: 'dimension', label: '维度' },
@@ -74,8 +91,28 @@ function isCalculatedField(field: FieldSemantic) {
   return field.mcp?.columnClass?.toUpperCase() === 'CALCULATION' || Boolean(getFormula(field));
 }
 
+function queryabilityStatus(field: FieldSemantic) {
+  if (field.queryability_status) return field.queryability_status;
+  if (field.mcp_last_error) return 'error';
+  if (field.mcp_checked_at == null && field.mcp_queryable == null) return 'unknown';
+  if (field.mcp_queryable === true) return 'queryable';
+  if (field.mcp_queryable === false) return 'catalog_only';
+  return 'unknown';
+}
+
+function queryabilityBadge(field: FieldSemantic) {
+  const status = queryabilityStatus(field);
+  if (status === 'queryable') return { label: 'Agent 可查询', className: 'bg-emerald-50 text-emerald-700' };
+  if (status === 'catalog_only') return { label: '仅资产目录', className: 'bg-amber-50 text-amber-700' };
+  if (status === 'error') return { label: 'MCP 异常', className: 'bg-red-50 text-red-700' };
+  return { label: '未校验', className: 'bg-slate-100 text-slate-600' };
+}
+
 function matchesFilter(field: FieldSemantic, filter: FieldFilter) {
   if (filter === 'all') return true;
+  if (filter === 'queryable') return queryabilityStatus(field) === 'queryable';
+  if (filter === 'catalog_only') return queryabilityStatus(field) === 'catalog_only';
+  if (filter === 'mcp_error') return queryabilityStatus(field) === 'error';
   if (filter === 'mcp') return isMcpField(field);
   if (filter === 'measure') return getFieldRole(field) === 'measure';
   if (filter === 'dimension') return getFieldRole(field) === 'dimension';
@@ -115,10 +152,16 @@ function getMcpTags(field: FieldSemantic) {
 export function FieldsTab({ fieldSemantics, fieldMetadata, fieldsLoading }: FieldsTabProps) {
   const [activeFilter, setActiveFilter] = useState<FieldFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const localFieldCount = fieldMetadata?.local_field_count ?? fieldMetadata?.field_count ?? fieldSemantics.length;
+  const catalogFieldCount = fieldMetadata?.catalog_field_count ?? fieldMetadata?.field_count ?? fieldSemantics.length;
+  const queryableFieldCount = fieldMetadata?.queryable_field_count ?? fieldSemantics.filter(field => queryabilityStatus(field) === 'queryable').length;
+  const catalogOnlyCount = fieldMetadata?.catalog_only_count ?? fieldSemantics.filter(field => queryabilityStatus(field) === 'catalog_only').length;
+  const localFieldCount = fieldMetadata?.local_field_count ?? catalogFieldCount;
   const cacheStatus = fieldMetadata?.cache_status || (fieldSemantics.length > 0 ? 'cached' : null);
-  const statusLabel = cacheStatus ? CACHE_STATUS_LABELS[cacheStatus] || cacheStatus : '-';
-  const updatedAt = fieldMetadata?.updated_at || fieldMetadata?.cached_at;
+  const cacheStatusLabel = cacheStatus ? CACHE_STATUS_LABELS[cacheStatus] || cacheStatus : '-';
+  const mcpStatus = fieldMetadata?.mcp_status || 'unknown';
+  const mcpStatusLabel = MCP_STATUS_LABELS[mcpStatus] || mcpStatus;
+  const mcpStatusClass = MCP_STATUS_CLASSES[mcpStatus] || MCP_STATUS_CLASSES.unknown;
+  const updatedAt = fieldMetadata?.mcp_checked_at || fieldMetadata?.updated_at || fieldMetadata?.cached_at;
   const filteredFields = useMemo(
     () => fieldSemantics.filter(field => matchesFilter(field, activeFilter) && matchesSearch(field, searchQuery)),
     [activeFilter, fieldSemantics, searchQuery],
@@ -139,18 +182,32 @@ export function FieldsTab({ fieldSemantics, fieldMetadata, fieldsLoading }: Fiel
         </div>
         <div className="flex flex-wrap items-center gap-2 mt-3">
           <span className="text-[11px] px-2 py-1 rounded bg-slate-100 text-slate-600">
-            本地缓存字段数 {localFieldCount ?? 0}
+            资产字段 {catalogFieldCount ?? localFieldCount ?? 0}
+          </span>
+          <span className="text-[11px] px-2 py-1 rounded bg-emerald-50 text-emerald-700">
+            Agent 可查询 {queryableFieldCount ?? 0}
+          </span>
+          <span className="text-[11px] px-2 py-1 rounded bg-amber-50 text-amber-700">
+            仅资产目录 {catalogOnlyCount ?? 0}
           </span>
           <span className={`text-[11px] px-2 py-1 rounded ${
             cacheStatus === 'fresh' ? 'bg-emerald-50 text-emerald-600' :
             cacheStatus === 'stale' ? 'bg-amber-50 text-amber-600' :
             'bg-blue-50 text-blue-600'
           }`}>
-            MCP/缓存状态 {statusLabel}
+            缓存状态 {cacheStatusLabel}
+          </span>
+          <span className={`text-[11px] px-2 py-1 rounded ${mcpStatusClass}`}>
+            MCP 状态 {mcpStatusLabel}
           </span>
           <span className="text-[11px] px-2 py-1 rounded bg-slate-100 text-slate-600">
-            字段更新时间 {formatTime(updatedAt)}
+            MCP 校验时间 {formatTime(updatedAt)}
           </span>
+          {fieldMetadata?.mcp_last_error && (
+            <span className="text-[11px] px-2 py-1 rounded bg-red-50 text-red-700 max-w-full truncate" title={fieldMetadata.mcp_last_error}>
+              {fieldMetadata.mcp_last_error}
+            </span>
+          )}
         </div>
         <div className="mt-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex flex-wrap gap-2">
@@ -187,12 +244,13 @@ export function FieldsTab({ fieldSemantics, fieldMetadata, fieldsLoading }: Fiel
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1080px] table-fixed">
+          <table className="w-full min-w-[1180px] table-fixed">
             <thead>
               <tr className="bg-slate-50">
                 {[
                   ['字段名', 'w-[210px]'],
                   ['中文名', 'w-[140px]'],
+                  ['Agent 状态', 'w-[120px]'],
                   ['数据类型', 'w-[100px]'],
                   ['角色', 'w-[90px]'],
                   ['MCP 属性', 'w-[270px]'],
@@ -209,6 +267,7 @@ export function FieldsTab({ fieldSemantics, fieldMetadata, fieldsLoading }: Fiel
                 const formula = getFormula(f);
                 const description = getFieldMeaning(f);
                 const role = getFieldRole(f);
+                const queryability = queryabilityBadge(f);
                 return (
                   <tr key={`${getFieldName(f)}-${i}`} className="border-t border-slate-100 hover:bg-slate-50">
                     <td className="px-4 py-2.5 text-xs text-slate-700 align-top">
@@ -220,6 +279,14 @@ export function FieldsTab({ fieldSemantics, fieldMetadata, fieldsLoading }: Fiel
                       )}
                     </td>
                     <td className="px-4 py-2.5 text-xs text-slate-600 align-top break-words">{f.caption || '-'}</td>
+                    <td className="px-4 py-2.5 align-top">
+                      <span
+                        className={`text-[10px] px-1.5 py-0.5 rounded ${queryability.className}`}
+                        title={f.mcp_last_error || undefined}
+                      >
+                        {queryability.label}
+                      </span>
+                    </td>
                     <td className="px-4 py-2.5 text-xs text-slate-500 align-top">{getDataType(f) || '-'}</td>
                     <td className="px-4 py-2.5 align-top">
                       <span className={`text-[10px] px-1.5 py-0.5 rounded ${

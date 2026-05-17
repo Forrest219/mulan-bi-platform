@@ -809,6 +809,20 @@ class TableauRestSyncService:
                         db.upsert_datasource_fields(asset.id, ds_id, parsed_fields)
                         asset.field_count = len(parsed_fields)
                         db.session.commit()
+                        try:
+                            from services.tableau.field_reconciliation import TableauFieldReconciliationService
+
+                            TableauFieldReconciliationService(db.session).reconcile_asset(
+                                asset_id=asset.id,
+                                connection_id=connection_id,
+                                datasource_luid=ds_id,
+                            )
+                        except Exception as reconcile_err:
+                            logger.warning(
+                                "REST sync: MCP field reconciliation failed for datasource %s: %s",
+                                ds_id,
+                                reconcile_err,
+                            )
                         field_sync["succeeded"] += 1
                         field_sync["fields_upserted"] += len(parsed_fields)
                         logger.info("REST sync: upserted %d fields for datasource %s", len(parsed_fields), ds_id)

@@ -15,6 +15,7 @@ from app.core.crypto import get_tableau_crypto
 from app.core.database import get_db  # 导入中央数据库依赖
 from app.core.dependencies import get_current_user, require_roles
 from app.utils.auth import verify_connection_access  # 导入统一的权限验证函数
+from services.tableau.field_reconciliation import queryability_status, summarize_field_capabilities
 from services.tableau.models import TableauDatabase, TableauSyncLog
 from services.tableau.models import TableauConnection as TableauConnectionModel
 from services.tableau.mcp_binding_service import TableauMcpBindingService
@@ -31,7 +32,7 @@ _decrypt = _crypto.decrypt
 
 
 def _format_tableau_dt(value) -> Optional[str]:
-    return value.strftime("%Y-%m-%d %H:%M:%S") if value else None
+    return value.strftime("%Y-%m-%d %H:%M:%S") if hasattr(value, "strftime") else None
 
 
 def _datasource_self_payload(asset) -> dict:
@@ -91,6 +92,7 @@ def _field_mcp_payload(field) -> dict | None:
 def _datasource_field_api_payload(field, *, source: str = "mcp_cache") -> dict:
     description = _clean_json_value(getattr(field, "description", None)) or ""
     ai_description = _clean_json_value(getattr(field, "ai_description", None))
+    mcp_queryable = getattr(field, "mcp_queryable", None)
     return {
         "name": _clean_json_value(getattr(field, "field_name", None)) or "",
         "field": _clean_json_value(getattr(field, "field_name", None)) or "",
@@ -104,8 +106,26 @@ def _datasource_field_api_payload(field, *, source: str = "mcp_cache") -> dict:
         "is_calculated": bool(_clean_json_value(getattr(field, "is_calculated", None))),
         "source": source,
         "fetched_at": _format_tableau_dt(getattr(field, "fetched_at", None)),
+        "mcp_queryable": mcp_queryable if isinstance(mcp_queryable, bool) else None,
+        "mcp_field_name": _clean_json_value(getattr(field, "mcp_field_name", None)),
+        "mcp_field_caption": _clean_json_value(getattr(field, "mcp_field_caption", None)),
+        "mcp_checked_at": _format_tableau_dt(getattr(field, "mcp_checked_at", None)),
+        "mcp_last_error": _clean_json_value(getattr(field, "mcp_last_error", None)),
+        "queryability_status": queryability_status(field),
         "mcp": _field_mcp_payload(field),
     }
+
+
+def _fields_response_payload(fields, *, cache_status: str, source: str = "mcp_cache", **extra) -> dict:
+    field_list = list(fields or [])
+    payload = {
+        "total": len(field_list),
+        "cache_status": cache_status,
+        "fields": [_datasource_field_api_payload(f, source=source) for f in field_list],
+    }
+    payload.update(summarize_field_capabilities(field_list))
+    payload.update(extra)
+    return payload
 
 
 # _db_path 函数不再需要，因为 TableauDatabase 将使用中央配置
@@ -1167,11 +1187,7 @@ async def get_asset_fields(asset_id: int, request: Request, db: Session = Depend
     fields = _db.get_datasource_fields(asset_id)
     total = len(fields or [])
     cache_status = "cached" if total else "empty"
-    return {
-        "total": total,
-        "cache_status": cache_status,
-        "fields": [_datasource_field_api_payload(f, source="mcp_cache") for f in (fields or [])]
-    }
+    return _fields_response_payload(fields, cache_status=cache_status, source="mcp_cache")
 
 
 @router.post("/assets/{asset_id}/explain")
@@ -1743,19 +1759,24 @@ async def tableau_v2_metadata(
     now = _time.time()
     cache_ttl = 24 * 3600  # 24h
 
-    def _fields_to_dict(fields):
-        return [_datasource_field_api_payload(f, source="mcp_cache") for f in fields]
+    def _metadata_response(fields, *, cache_status: str, cached_at: Optional[str]):
+        return _fields_response_payload(
+            fields,
+            cache_status=cache_status,
+            source="mcp_cache",
+            datasource_luid=asset.tableau_id,
+            cached_at=cached_at,
+        )
 
     # 缓存命中且未过期
     if cached_fields and not refresh:
         oldest = min((f.fetched_at.timestamp() for f in cached_fields), default=0)
         if now - oldest < cache_ttl:
-            return {
-                "datasource_luid": asset.tableau_id,
-                "fields": _fields_to_dict(cached_fields),
-                "cache_status": "cached",
-                "cached_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime(oldest)),
-            }
+            return _metadata_response(
+                cached_fields,
+                cache_status="cached",
+                cached_at=_time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime(oldest)),
+            )
 
     # 需要拉取（首次 or refresh=true）
     try:
@@ -1767,6 +1788,22 @@ async def tableau_v2_metadata(
         if raw_fields:
             parsed = [normalize_datasource_metadata_field(f) for f in raw_fields]
             _db.upsert_datasource_fields(asset.id, asset.tableau_id, parsed)
+            try:
+                from services.tableau.field_reconciliation import TableauFieldReconciliationService
+
+                TableauFieldReconciliationService(db).reconcile_asset(
+                    asset_id=asset.id,
+                    connection_id=asset.connection_id,
+                    datasource_luid=asset.tableau_id,
+                    metadata=raw,
+                )
+            except Exception:
+                logger.warning(
+                    "Tableau MCP metadata reconciliation skipped after refresh: asset_id=%s datasource_luid=%s",
+                    asset.id,
+                    asset.tableau_id,
+                    exc_info=True,
+                )
         else:
             logger.warning(
                 "Tableau MCP metadata refresh returned no parseable fields: asset_id=%s datasource_luid=%s raw_keys=%s",
@@ -1776,12 +1813,11 @@ async def tableau_v2_metadata(
             )
             if cached_fields:
                 oldest = min((f.fetched_at.timestamp() for f in cached_fields), default=0)
-                return {
-                    "datasource_luid": asset.tableau_id,
-                    "fields": _fields_to_dict(cached_fields),
-                    "cache_status": "stale",
-                    "cached_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime(oldest)),
-                }
+                return _metadata_response(
+                    cached_fields,
+                    cache_status="stale",
+                    cached_at=_time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime(oldest)),
+                )
             raise HTTPException(
                 status_code=502,
                 detail={
@@ -1793,23 +1829,21 @@ async def tableau_v2_metadata(
         # 重新读取（包含新数据）
         cached_fields = _db.get_datasource_fields(asset_id)
         oldest = min((f.fetched_at.timestamp() for f in cached_fields), default=0)
-        return {
-            "datasource_luid": asset.tableau_id,
-            "fields": _fields_to_dict(cached_fields),
-            "cache_status": "fresh",
-            "cached_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime(oldest)) if cached_fields else None,
-        }
+        return _metadata_response(
+            cached_fields,
+            cache_status="fresh",
+            cached_at=_time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime(oldest)) if cached_fields else None,
+        )
 
     except TableauMCPError:
         # MCP 不可达，降级返回缓存数据
         if cached_fields:
             oldest = min((f.fetched_at.timestamp() for f in cached_fields), default=0)
-            return {
-                "datasource_luid": asset.tableau_id,
-                "fields": _fields_to_dict(cached_fields),
-                "cache_status": "stale",
-                "cached_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime(oldest)),
-            }
+            return _metadata_response(
+                cached_fields,
+                cache_status="stale",
+                cached_at=_time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime(oldest)),
+            )
         raise HTTPException(
             status_code=503,
             detail={"error_code": "MCP_003", "message": "MCP Server 不可达，且无缓存数据"},

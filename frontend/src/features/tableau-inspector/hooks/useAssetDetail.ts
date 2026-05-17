@@ -151,6 +151,12 @@ export function useAssetDetail(id: string | undefined, defaultTab?: string): Use
             setFieldSemantics(d.fields);
             setFieldMetadata({
               field_count: d.field_count,
+              catalog_field_count: d.catalog_field_count,
+              queryable_field_count: d.queryable_field_count,
+              catalog_only_count: d.catalog_only_count,
+              mcp_checked_at: d.mcp_checked_at,
+              mcp_status: d.mcp_status,
+              mcp_last_error: d.mcp_last_error,
               local_field_count: d.local_field_count,
               cache_status: d.cache_status,
               cached_at: d.cached_at,

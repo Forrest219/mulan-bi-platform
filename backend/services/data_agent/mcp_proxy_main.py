@@ -905,6 +905,11 @@ def _current_datasource(ds_info: Mapping[str, Any], context: ToolContext) -> dic
     field_metadata = _datasource_field_metadata(ds_info)
     if field_metadata:
         payload["fields"] = field_metadata
+    for key in ("catalog_fields", "queryable_fields", "catalog_only_fields"):
+        if isinstance(ds_info.get(key), list):
+            payload[key] = list(ds_info[key])
+    if isinstance(ds_info.get("field_capability_summary"), Mapping):
+        payload["field_capability_summary"] = dict(ds_info["field_capability_summary"])
     if isinstance(ds_info.get("field_synonyms"), Mapping):
         payload["field_synonyms"] = dict(ds_info["field_synonyms"])
     if isinstance(ds_info.get("safe_field_synonyms"), Mapping):

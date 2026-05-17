@@ -342,6 +342,11 @@ class TableauDatasourceField(Base):
     is_calculated = Column(Boolean, default=False, server_default=sa_text('false')) # Boolean 默认值
     metadata_json = Column(JSONB, nullable=True) # 改为 JSONB
     fetched_at = Column(DateTime, nullable=False, server_default=sa_func.now()) # DateTime 默认值
+    mcp_queryable = Column(Boolean, nullable=True)
+    mcp_field_name = Column(String(256), nullable=True)
+    mcp_field_caption = Column(String(256), nullable=True)
+    mcp_checked_at = Column(DateTime, nullable=True)
+    mcp_last_error = Column(Text, nullable=True)
     # AI 标注
     ai_caption = Column(String(256), nullable=True)
     ai_description = Column(Text, nullable=True)
@@ -369,6 +374,12 @@ class TableauDatasourceField(Base):
             "is_calculated": self.is_calculated,
             "metadata_json": self.metadata_json,
             "source": "mcp_cache",
+            "mcp_queryable": self.mcp_queryable,
+            "mcp_field_name": self.mcp_field_name,
+            "mcp_field_caption": self.mcp_field_caption,
+            "mcp_checked_at": self.mcp_checked_at.isoformat() if self.mcp_checked_at else None,
+            "mcp_last_error": self.mcp_last_error,
+            "queryability_status": self._queryability_status(),
             "mcp": {
                 "name": metadata.get("name"),
                 "dataType": metadata.get("dataType"),
@@ -391,6 +402,17 @@ class TableauDatasourceField(Base):
             "ai_confidence": self.ai_confidence,
             "ai_annotated_at": self.ai_annotated_at.strftime("%Y-%m-%d %H:%M:%S") if self.ai_annotated_at else None,
         }
+
+    def _queryability_status(self) -> str:
+        if self.mcp_last_error:
+            return "error"
+        if self.mcp_checked_at is None:
+            return "unknown"
+        if self.mcp_queryable is True:
+            return "queryable"
+        if self.mcp_queryable is False:
+            return "catalog_only"
+        return "unknown"
 
 
 # 从中央配置导入 SessionLocal

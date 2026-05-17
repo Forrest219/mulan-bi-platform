@@ -1,5 +1,88 @@
 # IMPLEMENTATION_NOTES
 
+## Scope — reconcile-tableau-mcp-fields
+
+按 `openspec/changes/reconcile-tableau-mcp-fields/` 执行 RTMF-01 至 RTMF-12：区分 Tableau catalog fields 与 MCP queryable fields，资产页展示 Agent 可查询状态，Data Agent 在查询前阻止 catalog-only 字段进入 MCP 执行。
+
+## Implemented — reconcile-tableau-mcp-fields
+
+1. 字段能力模型与迁移
+- 新增迁移 `backend/alembic/versions/20260517_030000_add_tableau_field_mcp_capability.py`。
+- `tableau_datasource_fields` 增加 nullable MCP capability 字段：`mcp_queryable`、`mcp_field_name`、`mcp_field_caption`、`mcp_checked_at`、`mcp_last_error`。
+- `mcp_queryable = null` 表示未校验，不使用 false 默认值。
+
+2. Reconciliation 服务
+- 新增 `backend/services/tableau/mcp_metadata_fields.py`，集中提供 MCP metadata 字段提取和字段名规范化。
+- 新增 `backend/services/tableau/field_reconciliation.py`，实现 `TableauFieldReconciliationService`。
+- 成功 reconciliation 只更新能力标记；MCP 失败只记录 `mcp_last_error`，不删除、不覆盖 catalog fields。
+
+3. API 与同步
+- `/api/tableau/assets/{asset_id}/fields` 和 `/api/tableau/datasources/{asset_id}/metadata` 保持对象响应外形，追加 `catalog_field_count`、`queryable_field_count`、`catalog_only_count`、`mcp_checked_at`、`mcp_status` 等字段。
+- 字段行追加 `mcp_queryable` 和 `queryability_status`。
+- Tableau datasource 字段同步和 metadata refresh 成功后 best-effort 触发 reconciliation。
+
+4. Data Agent
+- Datasource routing 保持 catalog fields 可用于匹配。
+- MCP metadata 可用时 query planning 使用 MCP queryable fields；MCP metadata 不可用时，本地 fallback 只使用已标记 `mcp_queryable=true` 的字段，不再把完整 catalog fields 当成可执行字段。
+- LLM 规划前增加 catalog-only preflight，用户明确提到 catalog-only 字段时返回解释，不进入 MCP 查询。
+- MCP args guardrail 区分 `MCP_ARGS_CATALOG_ONLY_FIELD` 与 `MCP_ARGS_UNKNOWN_FIELD`，并给出保守替代字段候选。
+
+5. 前端
+- Tableau 资产字段页显示 `资产字段`、`Agent 可查询`、`仅资产目录`、`MCP 状态/异常`。
+- 字段表新增 `Agent 状态` 列，展示 `Agent 可查询 / 仅资产目录 / 未校验 / MCP 异常`，不隐藏 catalog-only 字段。
+
+6. 测试
+- 新增 `backend/tests/test_tableau_field_reconciliation.py` 覆盖 422-like fixture：catalog 32、queryable 11、catalog-only 21。
+- 新增 `backend/tests/services/data_agent/test_tableau_catalog_only_preflight.py` 覆盖 catalog-only preflight 和 queryable 放行。
+- 更新 `backend/tests/services/data_agent/test_mcp_args_guardrail.py` 覆盖 catalog-only guardrail 错误码。
+- 新增 `frontend/src/features/tableau-inspector/tabs/FieldsTab.test.tsx` 覆盖统计、状态标签和 MCP 异常提示。
+
+## Validation — reconcile-tableau-mcp-fields
+
+Executed:
+- `cd backend && .venv/bin/python -m py_compile services/tableau/mcp_metadata_fields.py services/tableau/field_reconciliation.py services/tableau/models.py app/api/tableau.py services/tableau/sync_service.py services/data_agent/mcp_first_main.py services/data_agent/mcp_proxy_main.py services/data_agent/mcp_args_guardrail.py tests/test_tableau_field_reconciliation.py tests/services/data_agent/test_tableau_catalog_only_preflight.py`: PASS.
+- `backend/.venv/bin/python -m py_compile $(git diff --name-only | grep '\.py$')`: PASS.
+- `cd backend && .venv/bin/python -m pytest tests/test_tableau_field_reconciliation.py tests/services/data_agent/test_mcp_args_guardrail.py::test_rejects_catalog_only_field_with_specific_code_and_alternatives tests/services/data_agent/test_tableau_catalog_only_preflight.py tests/test_tableau.py::test_v2_metadata_cache_hit -q --no-cov`: PASS, 5 passed.
+- `cd backend && .venv/bin/python -m alembic heads`: PASS, `20260517_030000 (head)`.
+- `cd frontend && npm run type-check`: PASS.
+- `cd frontend && npm run lint`: PASS, 52 existing warnings.
+- `cd frontend && npm test -- --run`: PASS, 4 files / 11 tests.
+- `cd frontend && npm test -- --run src/features/tableau-inspector/tabs/FieldsTab.test.tsx`: PASS.
+- `cd frontend && npm run build`: PASS.
+
+Attempted:
+- `cd backend && .venv/bin/python -m pytest tests/services/data_agent/test_mcp_args_guardrail.py::test_rejects_catalog_only_field_with_specific_code_and_alternatives tests/services/data_agent/test_tableau_catalog_only_preflight.py -q`: behavior tests passed, but the subset run failed the repository-wide coverage threshold because only 3 tests were executed.
+- `cd backend && .venv/bin/python -m pytest tests/ -x -q`: progressed to 1618 passed / 18 skipped, then stopped at existing unrelated failure `tests/test_agent_conversations.py::TestConversationPersistence::test_get_user_conversations_returns_list` (`MagicMock ... all()` is not a list).
+- `cd backend && .venv/bin/python -m py_compile $(git diff --name-only | grep '\.py$')` from inside `backend/`: failed because `git diff --name-only` returns repo-root paths like `backend/app/api/tableau.py`; reran successfully from repo root.
+
+Notes:
+- Worktree also contains unrelated non-RTMF modifications in task/sync-history files and `frontend/auto-imports.d.ts`; this RTMF implementation did not modify those files.
+
+## Fixer Update — reconcile-tableau-mcp-fields tester fail
+
+Addressed `openspec/changes/reconcile-tableau-mcp-fields/TESTER_FAIL.md` findings:
+
+1. Catalog-only preflight false positive
+- `_catalog_queryable_context()` now treats fields as catalog-only only when `catalog_only_fields` is explicit/persisted, or when a non-empty queryable set is available for a catalog-minus-queryable comparison.
+- Unknown/unreconciled/error states with empty queryable metadata are no longer converted into catalog-only.
+- `mcp_args_guardrail` now applies the same rule: catalog fields are not considered catalog-only when the queryable set is unavailable.
+
+2. MCP status display
+- `FieldsTab` now renders cache status and MCP status as separate badges.
+- MCP status maps `ok / partial / unknown / error` to explicit labels instead of falling back to cache status.
+
+3. Handoff boundary
+- RTMF handoff scope remains limited to Tableau field reconciliation, Data Agent field preflight/guardrail, and Tableau asset field UI.
+- Existing task/sync-history/router worktree changes are not part of RTMF validation scope and should be validated under their own change/handoff.
+
+Validation update:
+- `backend/.venv/bin/python -m py_compile backend/services/data_agent/mcp_first_main.py backend/services/data_agent/mcp_args_guardrail.py backend/tests/services/data_agent/test_tableau_catalog_only_preflight.py backend/tests/services/data_agent/test_mcp_args_guardrail.py`: PASS.
+- `cd backend && ./.venv/bin/python -m pytest tests/test_tableau_field_reconciliation.py tests/services/data_agent/test_tableau_catalog_only_preflight.py tests/services/data_agent/test_mcp_args_guardrail.py -q -o addopts=''`: PASS, 29 passed.
+- `cd frontend && npm test -- --run src/features/tableau-inspector/tabs/FieldsTab.test.tsx`: PASS, 2 passed.
+- `cd frontend && npm run type-check`: PASS.
+- `cd frontend && npm run lint`: PASS, 52 existing warnings.
+- `cd frontend && npm test -- --run`: PASS, 4 files / 12 tests.
+
 ## Scope
 
 修复 Tableau 手动同步与系统任务历史的关联，按 `inbox/20260517-13-tableau-sync-task-history-fix-plan.md` 执行。

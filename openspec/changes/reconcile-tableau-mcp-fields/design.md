@@ -41,6 +41,24 @@ Queryable fields are the runtime contract for `query-datasource`:
 - User-facing surface: Agent availability status on asset fields.
 - Agent use: prompt, query planning, preflight, guardrail, MCP execution.
 
+## Implementation Decision
+
+MVP uses nullable capability columns on `tableau_datasource_fields`; no separate reconciliation table is introduced.
+
+Implemented columns:
+
+```text
+mcp_queryable boolean null
+mcp_field_name varchar(256) null
+mcp_field_caption varchar(256) null
+mcp_checked_at timestamp null
+mcp_last_error text null
+```
+
+`mcp_queryable = null` means MCP queryability has not been checked. `false` is used only after successful MCP metadata reconciliation confirms the catalog field is not present in MCP queryable fields. MCP failures set `mcp_last_error` / `mcp_checked_at` and do not delete or overwrite catalog fields.
+
+Shared field extraction lives in `backend/services/tableau/mcp_metadata_fields.py`; Data Agent guardrail and reconciliation reuse it instead of importing private helpers from `query_tool.py`.
+
 ## Proposed Data Shape
 
 Preferred MVP option: extend `tableau_datasource_fields` with capability metadata.

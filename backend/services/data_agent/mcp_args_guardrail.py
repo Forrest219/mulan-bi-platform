@@ -11,6 +11,8 @@ from typing import Any, Literal
 
 import jsonschema
 
+from services.tableau.mcp_metadata_fields import extract_queryable_fields_from_metadata, normalize_field_name
+
 logger = logging.getLogger(__name__)
 
 GuardrailDecision = Literal["allow", "repair", "reject"]
@@ -175,36 +177,6 @@ def query_datasource_tool_schema() -> dict[str, Any]:
         "required": ["datasourceLuid", "query"],
         "additionalProperties": False,
     }
-
-
-def extract_queryable_fields_from_metadata(metadata: Any) -> list[str]:
-    """Extract a field whitelist from Tableau MCP or cached metadata payloads."""
-    candidates: list[str] = []
-    seen: set[str] = set()
-
-    def add_name(value: Any) -> None:
-        name = str(value or "").strip()
-        if not name:
-            return
-        normalized = _normalize_field(name)
-        if normalized in seen:
-            return
-        seen.add(normalized)
-        candidates.append(name)
-
-    def visit(node: Any) -> None:
-        if isinstance(node, Mapping):
-            for key in ("fieldCaption", "field_caption", "caption", "name", "fieldName", "field_name"):
-                add_name(node.get(key))
-            for value in node.values():
-                if isinstance(value, (Mapping, list)):
-                    visit(value)
-        elif isinstance(node, list):
-            for item in node:
-                visit(item)
-
-    visit(metadata)
-    return candidates
 
 
 def validate_query_datasource_args(
@@ -703,6 +675,7 @@ def _repair_and_validate_fields(
 ) -> tuple[str, str, str] | None:
     canonical_by_normalized = {_normalize_field(field): field for field in queryable_fields if field}
     synonyms = _field_synonyms(current_datasource)
+    catalog_only_by_normalized = _catalog_only_fields(current_datasource, canonical_by_normalized)
 
     for path, value in _iter_field_values(args):
         if not isinstance(value, str) or not value.strip():
@@ -742,12 +715,68 @@ def _repair_and_validate_fields(
             )
             continue
 
+        if normalized in catalog_only_by_normalized:
+            alternatives = _queryable_alternatives(value, queryable_fields)
+            hint = "请改用当前 Agent 可查询字段。"
+            if alternatives:
+                hint = f"可替代字段：{'、'.join(alternatives)}。"
+            return (
+                "MCP_ARGS_CATALOG_ONLY_FIELD",
+                f"字段存在于 Tableau 资产目录，但当前 Agent/MCP 不支持查询：{value}",
+                hint,
+            )
+
         return (
             "MCP_ARGS_UNKNOWN_FIELD",
             f"字段不存在或不可查询：{value}",
             "请改用当前数据源中可查询的字段。",
         )
     return None
+
+
+def _catalog_only_fields(
+    current_datasource: Mapping[str, Any],
+    canonical_by_normalized: Mapping[str, str],
+) -> dict[str, str]:
+    explicit = current_datasource.get("catalog_only_fields")
+    fields: dict[str, str] = {}
+    if isinstance(explicit, list):
+        for item in explicit:
+            name = str(item or "").strip()
+            normalized = _normalize_field(name)
+            if normalized:
+                fields[normalized] = name
+        return fields
+
+    catalog_fields = current_datasource.get("catalog_fields")
+    if isinstance(catalog_fields, list) and canonical_by_normalized:
+        for item in catalog_fields:
+            name = str(item or "").strip()
+            normalized = _normalize_field(name)
+            if normalized and normalized not in canonical_by_normalized:
+                fields[normalized] = name
+    return fields
+
+
+def _queryable_alternatives(field: str, queryable_fields: list[str]) -> list[str]:
+    if not queryable_fields:
+        return []
+    normalized_target = normalize_field_name(field)
+    scored: list[tuple[int, str]] = []
+    for candidate in queryable_fields:
+        normalized = normalize_field_name(candidate)
+        if not normalized:
+            continue
+        score = 0
+        if normalized_target and (normalized_target in normalized or normalized in normalized_target):
+            score += 3
+        for marker in ("日期", "年份", "时间", "年", "月", "区域", "省", "类", "客户", "销售", "利润", "数量"):
+            if marker in str(field) and marker in str(candidate):
+                score += 2
+        if score:
+            scored.append((score, candidate))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [candidate for _, candidate in scored[:3]]
 
 
 def _repair_and_validate_query_field_shapes(
@@ -1181,7 +1210,7 @@ def _format_path(path: tuple[Any, ...]) -> str:
 
 
 def _normalize_field(value: str) -> str:
-    return value.strip().lower().replace(" ", "").replace("　", "").replace("\u00a0", "")
+    return normalize_field_name(value)
 
 
 def _normalize_token(value: str) -> str:

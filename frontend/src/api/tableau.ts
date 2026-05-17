@@ -531,6 +531,12 @@ export interface TableauAssetField {
   cached?: boolean;
   updated_at?: string | null;
   fetched_at?: string | null;
+  mcp_queryable?: boolean | null;
+  mcp_field_name?: string | null;
+  mcp_field_caption?: string | null;
+  mcp_checked_at?: string | null;
+  mcp_last_error?: string | null;
+  queryability_status?: 'queryable' | 'catalog_only' | 'unknown' | 'error' | string | null;
   mcp?: TableauAssetFieldMcp | null;
 }
 
@@ -552,6 +558,12 @@ export interface TableauAssetFieldMcp {
 export interface TableauAssetFieldsResult {
   fields: TableauAssetField[];
   field_count?: number | null;
+  catalog_field_count?: number | null;
+  queryable_field_count?: number | null;
+  catalog_only_count?: number | null;
+  mcp_checked_at?: string | null;
+  mcp_status?: 'ok' | 'partial' | 'unknown' | 'error' | string | null;
+  mcp_last_error?: string | null;
   local_field_count?: number | null;
   cache_status?: 'cached' | 'fresh' | 'stale' | 'miss' | string | null;
   cached_at?: string | null;

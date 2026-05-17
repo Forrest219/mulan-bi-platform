@@ -302,6 +302,11 @@ def test_v2_metadata_cache_hit(admin_client, db_session):
         recent_field.role = "measure"
         recent_field.description = "Total sales"
         recent_field.aggregation = "SUM"
+        recent_field.mcp_queryable = True
+        recent_field.mcp_field_name = "Sales"
+        recent_field.mcp_field_caption = "Sales"
+        recent_field.mcp_checked_at = datetime.now(timezone.utc) - timedelta(minutes=30)
+        recent_field.mcp_last_error = None
         recent_field.fetched_at = datetime.now(timezone.utc) - timedelta(hours=1)
         mock_get_fields.return_value = [recent_field]
 
@@ -310,6 +315,10 @@ def test_v2_metadata_cache_hit(admin_client, db_session):
     assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
     data = resp.json()
     assert data["cache_status"] == "cached"
+    assert data["catalog_field_count"] == 1
+    assert data["queryable_field_count"] == 1
+    assert data["catalog_only_count"] == 0
+    assert data["fields"][0]["queryability_status"] == "queryable"
     # MCP 不应被调用
     mock_get_client.return_value.get_datasource_metadata.assert_not_called()
 
