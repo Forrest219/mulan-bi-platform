@@ -283,13 +283,15 @@ async def list_connections(request: Request, db: Session = Depends(get_db), incl
         logger.exception("从 mcp_servers 聚合 Tableau 连接时出错，返回仅 tableau_connections 的结果")
 
     # 修正 stale sync_status（基于最新 TableauSyncLog）
-    # 场景：Celery 任务中途失败/超时，只更新了 BiSyncTask 而未清理 connections 表的 running 状态
+    # 场景：Celery 任务完成但未更新 connections 表的 sync_status
+    # 规则：连接 sync_status 应与最新 log status 对齐
+    #   log=running  → 连接保持 running（正常进行中）
+    #   log=success  → 连接应为 idle
+    #   log=failed/partial → 连接应为 failed
     try:
         running_conn_ids = [c.id for c in connections if c.sync_status == "running"]
-        logger.info(f"[sync_status reconciliation] found {len(running_conn_ids)} running connections: {running_conn_ids}")
         if running_conn_ids:
-            # 简单方案：逐个检查 running 的连接，取其 max log id 的 status
-            stale_conn_ids = []
+            updates = {}  # conn_id -> new status
             for conn_id in running_conn_ids:
                 max_log = (
                     db.query(sa.func.max(TableauSyncLog.id))
@@ -299,15 +301,17 @@ async def list_connections(request: Request, db: Session = Depends(get_db), incl
                 if max_log:
                     log = db.query(TableauSyncLog).filter(TableauSyncLog.id == max_log).first()
                     if log and log.status != "running":
-                        stale_conn_ids.append(conn_id)
-                        logger.info(f"[sync_status reconciliation] conn_id={conn_id} latest log status={log.status}, marking stale")
-            if stale_conn_ids:
-                db.query(TableauConnectionModel).filter(
-                    TableauConnectionModel.id.in_(stale_conn_ids)
-                ).update(
-                    {TableauConnectionModel.sync_status: "failed"},
-                    synchronize_session=False,
-                )
+                        new_status = "idle" if log.status == "success" else "failed"
+                        updates[conn_id] = new_status
+                        logger.info(f"[sync_status reconciliation] conn_id={conn_id} log_status={log.status} → {new_status}")
+            if updates:
+                for conn_id, new_status in updates.items():
+                    db.query(TableauConnectionModel).filter(
+                        TableauConnectionModel.id == conn_id
+                    ).update(
+                        {TableauConnectionModel.sync_status: new_status},
+                        synchronize_session=False,
+                    )
                 db.commit()
                 # 重新查询更新后的连接
                 if user["role"] == "admin":
@@ -315,7 +319,6 @@ async def list_connections(request: Request, db: Session = Depends(get_db), incl
                 else:
                     connections = _db.get_all_connections(owner_id=user["id"], include_inactive=include_inactive)
                 connection_dicts = [c.to_dict() for c in connections]
-                logger.info(f"[sync_status reconciliation] updated {len(stale_conn_ids)} connections to 'failed'")
     except Exception:
         logger.exception("修正 stale sync_status 时出错")
 
