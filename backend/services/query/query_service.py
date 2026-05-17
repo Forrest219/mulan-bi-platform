@@ -387,14 +387,18 @@ class QueryService:
 
     # ── 内部：JWT 签发 ──────────────────────────────────────────────────────
 
-    def _issue_jwt(self, username: str, connection_id: int) -> str:
+    def _issue_jwt(self, username: str, connection_id: int) -> Optional[str]:
         """
         为当前用户签发 Tableau Connected Apps JWT。
 
         每次请求调用，不缓存 token（Tableau 要求 jti 唯一）。
 
+        Returns:
+            JWT 字符串；若 Connected App 未配置则返回 None（MCP 客户端将 fallback 到 PAT）
+
         Raises:
-            QueryServiceError(Q_JWT_001): 密钥未配置或签发失败
+            QueryServiceError(Q_JWT_001): 签发过程中非"未配置"的 RuntimeError
+            QueryServiceError(Q_INPUT_006): username 为空
         """
         from services.query.jwt_service import JWTService
 
@@ -402,6 +406,8 @@ class QueryService:
         try:
             return svc.issue(username=username, connection_id=connection_id, db=self._db)
         except RuntimeError as e:
+            if "not configured" in str(e):
+                return None  # Connected App 未配置，MCP 客户端以 PAT 身份执行
             raise QueryServiceError(
                 code="Q_JWT_001",
                 message=f"JWT 签发失败：{e}",
