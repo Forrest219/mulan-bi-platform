@@ -361,15 +361,17 @@ export default function MetricDetailPage() {
 // =============================================================================
 
 function InfoTab({ metric }: { metric: MetricDetail }) {
+  const activeBindings = metric.bindings?.filter((binding) => binding.is_active) || [];
   const fields: { label: string; value: string | number | null | undefined; mono?: boolean }[] = [
     { label: '指标编号', value: metric.metric_code, mono: true },
     { label: '指标中文名', value: metric.name_zh },
     { label: '指标英文名', value: metric.name, mono: true },
     { label: '指标类型', value: METRIC_TYPE_LABEL[metric.metric_type] || metric.metric_type },
     { label: '业务域', value: metric.business_domain },
-    { label: 'Tableau 连接', value: metric.tableau_connection_id },
-    { label: 'Tableau 资产', value: metric.tableau_asset_id },
-    { label: 'Tableau Datasource LUID', value: metric.tableau_datasource_luid, mono: true },
+    { label: 'Primary Tableau 连接', value: metric.primary_binding?.tableau_connection_id ?? metric.tableau_connection_id },
+    { label: 'Primary Tableau 资产', value: metric.primary_binding?.tableau_asset_id ?? metric.tableau_asset_id },
+    { label: 'Primary Datasource LUID', value: metric.primary_binding?.tableau_datasource_luid ?? metric.tableau_datasource_luid, mono: true },
+    { label: 'Active Binding 数', value: activeBindings.length || undefined },
     { label: '旧数据源 ID', value: metric.datasource_id },
     { label: '旧数据表', value: metric.table_name, mono: true },
     { label: '旧字段', value: metric.column_name, mono: true },
@@ -434,9 +436,39 @@ function InfoTab({ metric }: { metric: MetricDetail }) {
         </div>
       )}
 
-      {(metric.field_mappings || metric.required_base_metrics?.length || metric.formula_expression) && (
+      {(activeBindings.length > 0 || metric.field_mappings || metric.required_base_metrics?.length || metric.formula_expression) && (
         <div className="bg-white border border-slate-200 rounded-xl p-6">
           <h3 className="text-[14px] font-semibold text-slate-700 mb-3">执行绑定</h3>
+          {activeBindings.length > 0 && (
+            <div className="overflow-x-auto mb-4">
+              <table className="min-w-full text-[12px]">
+                <thead>
+                  <tr className="border-b border-slate-100 text-slate-500">
+                    <th className="text-left font-medium py-2 pr-4">角色</th>
+                    <th className="text-left font-medium py-2 pr-4">连接</th>
+                    <th className="text-left font-medium py-2 pr-4">资产</th>
+                    <th className="text-left font-medium py-2 pr-4">Datasource LUID</th>
+                    <th className="text-left font-medium py-2">字段映射</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeBindings.map((binding) => (
+                    <tr key={binding.id || `${binding.tableau_connection_id}-${binding.tableau_datasource_luid}`} className="border-b border-slate-50">
+                      <td className="py-2 pr-4">
+                        <span className={`px-2 py-0.5 rounded text-[11px] ${binding.is_primary ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>
+                          {binding.is_primary ? 'Primary' : 'Secondary'}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-4 text-slate-700">{binding.tableau_connection_id ?? '—'}</td>
+                      <td className="py-2 pr-4 text-slate-700">{binding.tableau_asset_id ?? '—'}</td>
+                      <td className="py-2 pr-4 text-slate-700 font-mono">{binding.tableau_datasource_luid ?? '—'}</td>
+                      <td className="py-2 text-slate-700 font-mono">{binding.field_mappings ? stringifyJson(binding.field_mappings) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           {metric.field_mappings && (
             <pre className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-[13px] text-slate-700 font-mono overflow-x-auto mb-3">
               {stringifyJson(metric.field_mappings)}

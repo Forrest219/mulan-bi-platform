@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   listMetrics, createMetric, updateMetric, deleteMetric, getMetricDetail,
   submitReviewMetric, approveMetric, publishMetric,
-  MetricItem, MetricsListResponse, MetricDetail, MetricDependency,
+  MetricItem, MetricsListResponse, MetricDetail, MetricDependency, MetricBinding,
 } from '../../../api/metrics';
 import {
   listConnections, listAssets, getDatasourceMetadata,
@@ -108,6 +108,67 @@ function parseExpression(value: string): unknown {
   }
 }
 
+interface BindingRow {
+  row_id: string;
+  tableau_connection_id: string;
+  tableau_asset_id: string;
+  tableau_datasource_luid: string;
+  field_caption: string;
+  is_primary: boolean;
+  is_active: boolean;
+  assets: TableauAsset[];
+  fields: TableauAssetField[];
+  loading_assets: boolean;
+  loading_fields: boolean;
+}
+
+function makeBindingRowId(): string {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `binding-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function makeBindingRow(overrides: Partial<BindingRow> = {}): BindingRow {
+  return {
+    row_id: overrides.row_id || makeBindingRowId(),
+    tableau_connection_id: overrides.tableau_connection_id || '',
+    tableau_asset_id: overrides.tableau_asset_id || '',
+    tableau_datasource_luid: overrides.tableau_datasource_luid || '',
+    field_caption: overrides.field_caption || '',
+    is_primary: overrides.is_primary ?? true,
+    is_active: overrides.is_active ?? true,
+    assets: overrides.assets || [],
+    fields: overrides.fields || [],
+    loading_assets: false,
+    loading_fields: false,
+  };
+}
+
+function bindingRowsFromMetric(metric: MetricDetail | MetricItem): BindingRow[] {
+  const bindings = metric.bindings && metric.bindings.length > 0
+    ? metric.bindings
+    : metric.tableau_connection_id || metric.tableau_datasource_luid
+      ? [{
+          tableau_connection_id: metric.tableau_connection_id,
+          tableau_asset_id: metric.tableau_asset_id,
+          tableau_datasource_luid: metric.tableau_datasource_luid,
+          field_mappings: metric.field_mappings,
+          is_primary: true,
+          is_active: true,
+        } as MetricBinding]
+      : [];
+  const rows = bindings.map((binding) => makeBindingRow({
+    row_id: binding.id || makeBindingRowId(),
+    tableau_connection_id: binding.tableau_connection_id ? String(binding.tableau_connection_id) : '',
+    tableau_asset_id: binding.tableau_asset_id ? String(binding.tableau_asset_id) : '',
+    tableau_datasource_luid: binding.tableau_datasource_luid || '',
+    field_caption: binding.field_mappings ? Object.values(binding.field_mappings)[0] || '' : '',
+    is_primary: binding.is_primary,
+    is_active: binding.is_active,
+  }));
+  return rows.length ? rows : [makeBindingRow()];
+}
+
 interface FormData {
   metric_code: string;
   name: string;
@@ -122,10 +183,7 @@ interface FormData {
   precision: string;
   sensitivity_level: string;
   description: string;
-  tableau_connection_id: string;
-  tableau_asset_id: string;
-  tableau_datasource_luid: string;
-  field_caption: string;
+  bindings: BindingRow[];
   dependency_metric_ids: string[];
   numerator_metric_id: string;
   denominator_metric_id: string;
@@ -145,10 +203,7 @@ const blankForm = (): FormData => ({
   precision: '2',
   sensitivity_level: 'public',
   description: '',
-  tableau_connection_id: '',
-  tableau_asset_id: '',
-  tableau_datasource_luid: '',
-  field_caption: '',
+  bindings: [makeBindingRow()],
   dependency_metric_ids: [],
   numerator_metric_id: '',
   denominator_metric_id: '',
@@ -176,10 +231,7 @@ export default function MetricsPage() {
   const [formError, setFormError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
   const [tableauConnections, setTableauConnections] = useState<TableauConnection[]>([]);
-  const [tableauAssets, setTableauAssets] = useState<TableauAsset[]>([]);
-  const [tableauFields, setTableauFields] = useState<TableauAssetField[]>([]);
   const [dependencyOptions, setDependencyOptions] = useState<MetricItem[]>([]);
-  const [tableauLoading, setTableauLoading] = useState(false);
   const formRef = useRef<HTMLDivElement | null>(null);
 
   // ── confirm delete ──
@@ -242,8 +294,6 @@ export default function MetricsPage() {
   const openCreate = async () => {
     setEditingItem(null);
     setFormData(blankForm());
-    setTableauAssets([]);
-    setTableauFields([]);
     setFormError('');
     await fetchModalResources();
     setShowForm(true);
@@ -274,10 +324,7 @@ export default function MetricsPage() {
       precision: String(detail.precision ?? 2),
       sensitivity_level: detail.sensitivity_level,
       description: 'description' in detail ? detail.description || '' : '',
-      tableau_connection_id: detail.tableau_connection_id ? String(detail.tableau_connection_id) : '',
-      tableau_asset_id: detail.tableau_asset_id ? String(detail.tableau_asset_id) : '',
-      tableau_datasource_luid: detail.tableau_datasource_luid || '',
-      field_caption: detail.field_mappings ? Object.values(detail.field_mappings)[0] || '' : '',
+      bindings: bindingRowsFromMetric(detail),
       dependency_metric_ids: dependencies
         .filter((dep) => dep.dependency_role === 'base')
         .sort((a, b) => (a.expression_order ?? 0) - (b.expression_order ?? 0))
@@ -285,8 +332,6 @@ export default function MetricsPage() {
       numerator_metric_id: numerator,
       denominator_metric_id: denominator,
     });
-    setTableauAssets([]);
-    setTableauFields([]);
     setFormError('');
     await fetchModalResources(item.id);
     setShowForm(true);
@@ -299,60 +344,61 @@ export default function MetricsPage() {
 
   useEffect(() => {
     if (showForm) {
-      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      formRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
     }
   }, [showForm, editingItem?.id]);
 
   useEffect(() => {
-    if (!showForm || !formData.tableau_connection_id) {
-      setTableauAssets([]);
-      return;
-    }
-    let ignore = false;
-    setTableauLoading(true);
-    listAssets({
-      connection_id: Number(formData.tableau_connection_id),
-      asset_type: 'datasource',
-      page: 1,
-      page_size: 100,
-    })
-      .then((res) => {
-        if (!ignore) setTableauAssets(res.assets);
-      })
-      .catch(() => {
-        if (!ignore) setTableauAssets([]);
-      })
-      .finally(() => {
-        if (!ignore) setTableauLoading(false);
-      });
-    return () => { ignore = true; };
-  }, [formData.tableau_connection_id, showForm]);
+    if (!showForm) return;
+    setFormData((prev) => ({
+      ...prev,
+      bindings: prev.bindings.length ? prev.bindings : [makeBindingRow()],
+    }));
+  }, [showForm]);
 
-  useEffect(() => {
-    if (!showForm || !formData.tableau_asset_id) {
-      setTableauFields([]);
+  const updateBindingRow = (rowId: string, patch: Partial<BindingRow>) => {
+    setFormData((prev) => ({
+      ...prev,
+      bindings: prev.bindings.map((row) => (row.row_id === rowId ? { ...row, ...patch } : row)),
+    }));
+  };
+
+  const loadBindingAssets = async (rowId: string, connectionId: string) => {
+    if (!connectionId) {
+      updateBindingRow(rowId, { assets: [], fields: [], loading_assets: false });
       return;
     }
-    let ignore = false;
-    setTableauLoading(true);
-    getDatasourceMetadata(Number(formData.tableau_asset_id))
-      .then((res) => {
-        if (!ignore) {
-          setTableauFields(res.fields || []);
-          setFormData((prev) => ({
-            ...prev,
-            tableau_datasource_luid: res.datasource_luid || prev.tableau_datasource_luid,
-          }));
-        }
-      })
-      .catch(() => {
-        if (!ignore) setTableauFields([]);
-      })
-      .finally(() => {
-        if (!ignore) setTableauLoading(false);
+    updateBindingRow(rowId, { loading_assets: true, assets: [], fields: [] });
+    try {
+      const res = await listAssets({
+        connection_id: Number(connectionId),
+        asset_type: 'datasource',
+        page: 1,
+        page_size: 100,
       });
-    return () => { ignore = true; };
-  }, [formData.tableau_asset_id, showForm]);
+      updateBindingRow(rowId, { assets: res.assets, loading_assets: false });
+    } catch {
+      updateBindingRow(rowId, { assets: [], loading_assets: false });
+    }
+  };
+
+  const loadBindingFields = async (rowId: string, assetId: string) => {
+    if (!assetId) {
+      updateBindingRow(rowId, { fields: [], loading_fields: false });
+      return;
+    }
+    updateBindingRow(rowId, { loading_fields: true, fields: [] });
+    try {
+      const res = await getDatasourceMetadata(Number(assetId));
+      updateBindingRow(rowId, {
+        fields: res.fields || [],
+        tableau_datasource_luid: res.datasource_luid || '',
+        loading_fields: false,
+      });
+    } catch {
+      updateBindingRow(rowId, { fields: [], loading_fields: false });
+    }
+  };
 
   const handleSave = async () => {
     setFormError('');
@@ -370,17 +416,28 @@ export default function MetricsPage() {
       return;
     }
     if (formData.metric_type === 'atomic') {
-      if (!formData.tableau_connection_id) {
-        setFormError('请选择 Tableau 连接');
+      const activeBindings = formData.bindings.filter((binding) => binding.is_active);
+      if (activeBindings.length === 0) {
+        setFormError('请至少配置一个 Tableau binding');
         return;
       }
-      if (!formData.tableau_asset_id) {
-        setFormError('请选择 Tableau Published Datasource');
+      if (activeBindings.filter((binding) => binding.is_primary).length !== 1) {
+        setFormError('必须且只能有一个 Primary Tableau binding');
         return;
       }
-      if (!formData.field_caption) {
-        setFormError('请选择 Tableau 字段');
-        return;
+      for (const binding of activeBindings) {
+        if (!binding.tableau_connection_id) {
+          setFormError('请选择 Tableau 连接');
+          return;
+        }
+        if (!binding.tableau_asset_id && !binding.tableau_datasource_luid) {
+          setFormError('请选择 Tableau Published Datasource');
+          return;
+        }
+        if (!binding.field_caption) {
+          setFormError('请选择 Tableau 字段');
+          return;
+        }
       }
       if (!formData.aggregation_type) {
         setFormError('请选择聚合方式');
@@ -411,13 +468,34 @@ export default function MetricsPage() {
     setFormLoading(true);
     try {
       const metricType = formData.metric_type as MetricItem['metric_type'];
-      const selectedAsset = tableauAssets.find((asset) => String(asset.id) === formData.tableau_asset_id);
       const selectedDependencies = dependencyOptions.filter((metric) => (
         formData.dependency_metric_ids.includes(metric.id)
       ));
       const numeratorMetric = dependencyOptions.find((metric) => metric.id === formData.numerator_metric_id);
       const denominatorMetric = dependencyOptions.find((metric) => metric.id === formData.denominator_metric_id);
       const dependencies: MetricDependency[] = [];
+      const atomicBindings = metricType === 'atomic'
+        ? formData.bindings.map((binding) => {
+            const selectedAsset = binding.assets.find((asset) => String(asset.id) === binding.tableau_asset_id);
+            const fieldCaption = binding.field_caption || undefined;
+            return {
+              source_type: 'tableau_published_datasource',
+              tableau_connection_id: binding.tableau_connection_id ? Number(binding.tableau_connection_id) : undefined,
+              tableau_asset_id: binding.tableau_asset_id ? Number(binding.tableau_asset_id) : undefined,
+              tableau_datasource_luid: binding.tableau_datasource_luid || selectedAsset?.tableau_id || undefined,
+              field_mappings: fieldCaption ? { value: fieldCaption } : undefined,
+              formula_expression: fieldCaption ? {
+                type: 'tableau_field',
+                field_caption: fieldCaption,
+                aggregation_type: formData.aggregation_type,
+              } : undefined,
+              is_primary: binding.is_active && binding.is_primary,
+              is_active: binding.is_active,
+            };
+          })
+        : undefined;
+      const primaryBinding = atomicBindings?.find((binding) => binding.is_active && binding.is_primary);
+      const primaryFieldCaption = primaryBinding?.field_mappings?.value || '';
 
       if (metricType === 'derived') {
         formData.dependency_metric_ids.forEach((metricId, index) => {
@@ -438,7 +516,7 @@ export default function MetricsPage() {
       const expression = metricType === 'atomic'
         ? {
             type: 'tableau_field',
-            field_caption: formData.field_caption,
+            field_caption: primaryFieldCaption,
             aggregation_type: formData.aggregation_type,
           }
         : metricType === 'ratio'
@@ -457,7 +535,7 @@ export default function MetricsPage() {
         business_domain: formData.business_domain.trim() || undefined,
         description: formData.description.trim() || undefined,
         formula: metricType === 'atomic'
-          ? `${formData.aggregation_type}([${formData.field_caption}])`
+          ? `${formData.aggregation_type}([${primaryFieldCaption}])`
           : formData.formula.trim() || undefined,
         aggregation_type: metricType === 'ratio'
           ? 'none' as const
@@ -467,17 +545,18 @@ export default function MetricsPage() {
         precision: formData.precision ? Number(formData.precision) : 2,
         sensitivity_level: formData.sensitivity_level as MetricItem['sensitivity_level'],
         dependencies: dependencies.length ? dependencies : undefined,
-        tableau_connection_id: formData.tableau_connection_id ? Number(formData.tableau_connection_id) : undefined,
-        tableau_asset_id: formData.tableau_asset_id ? Number(formData.tableau_asset_id) : undefined,
-        tableau_datasource_luid: formData.tableau_datasource_luid || selectedAsset?.tableau_id || undefined,
-        field_caption: metricType === 'atomic' ? formData.field_caption : undefined,
-        field_mappings: metricType === 'atomic' ? { value: formData.field_caption } : undefined,
+        tableau_connection_id: primaryBinding?.tableau_connection_id,
+        tableau_asset_id: primaryBinding?.tableau_asset_id,
+        tableau_datasource_luid: primaryBinding?.tableau_datasource_luid,
+        field_caption: metricType === 'atomic' ? primaryFieldCaption : undefined,
+        field_mappings: metricType === 'atomic' ? { value: primaryFieldCaption } : undefined,
         required_base_metrics: metricType === 'derived'
           ? selectedDependencies.map(metricDisplayName)
           : metricType === 'ratio'
             ? [numeratorMetric, denominatorMetric].filter(Boolean).map((metric) => metricDisplayName(metric!))
             : undefined,
         formula_expression: expression,
+        bindings: atomicBindings,
       };
 
       if (editingItem) {
@@ -638,7 +717,10 @@ export default function MetricsPage() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
+                {items.map((item) => {
+                  const primaryBinding = item.primary_binding || item.bindings?.find((binding) => binding.is_primary);
+                  const bindingCount = item.bindings?.filter((binding) => binding.is_active).length || (item.tableau_datasource_luid ? 1 : 0);
+                  return (
                   <tr key={item.id} className="border-t border-slate-100 hover:bg-slate-50">
                     {/* 指标名 */}
                     <td className="px-4 py-3">
@@ -660,8 +742,15 @@ export default function MetricsPage() {
                       {item.business_domain || '—'}
                     </td>
                     {/* 数据源 */}
-                    <td className="px-4 py-3 text-[12px] text-slate-600 font-mono" style={{ width: 80 }}>
-                      {item.tableau_datasource_luid
+                    <td className="px-4 py-3 text-[12px] text-slate-600" style={{ width: 120 }}>
+                      {primaryBinding?.tableau_datasource_luid
+                        ? (
+                          <div>
+                            <div className="font-mono">Tableau {primaryBinding.tableau_datasource_luid.slice(0, 8)}</div>
+                            <div className="text-[10px] text-slate-400">{bindingCount} 个 binding</div>
+                          </div>
+                        )
+                        : item.tableau_datasource_luid
                         ? `Tableau ${item.tableau_datasource_luid.slice(0, 8)}`
                         : item.datasource_id
                           ? `DS-${item.datasource_id}`
@@ -727,7 +816,8 @@ export default function MetricsPage() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -891,75 +981,173 @@ export default function MetricsPage() {
                 {formData.metric_type === 'atomic' && (
                   <>
                     <div className="col-span-2 border-t border-slate-100 pt-4">
-                      <div className="text-[12px] font-semibold text-slate-700 mb-3">Tableau Binding</div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-[11px] font-medium text-slate-500 mb-1">
-                            Tableau 连接 <span className="text-red-500">*</span>
-                          </label>
-                          <select
-                            value={formData.tableau_connection_id}
-                            onChange={(e) => setFormData({
-                              ...formData,
-                              tableau_connection_id: e.target.value,
-                              tableau_asset_id: '',
-                              tableau_datasource_luid: '',
-                              field_caption: '',
-                            })}
-                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 bg-white"
-                          >
-                            <option value="">请选择 Tableau 连接</option>
-                            {tableauConnections.map((conn) => (
-                              <option key={conn.id} value={conn.id}>{conn.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-[11px] font-medium text-slate-500 mb-1">
-                            Published Datasource <span className="text-red-500">*</span>
-                          </label>
-                          <select
-                            value={formData.tableau_asset_id}
-                            onChange={(e) => {
-                              const asset = tableauAssets.find((a) => String(a.id) === e.target.value);
-                              setFormData({
-                                ...formData,
-                                tableau_asset_id: e.target.value,
-                                tableau_datasource_luid: asset?.tableau_id || '',
-                                field_caption: '',
-                              });
-                            }}
-                            disabled={!formData.tableau_connection_id}
-                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 bg-white"
-                          >
-                            <option value="">{tableauLoading ? '加载中...' : '请选择数据源资产'}</option>
-                            {tableauAssets.map((asset) => (
-                              <option key={asset.id} value={asset.id}>{asset.name}</option>
-                            ))}
-                          </select>
-                        </div>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="text-[12px] font-semibold text-slate-700">Tableau Bindings</div>
+                        <button
+                          type="button"
+                          onClick={() => setFormData((prev) => ({
+                            ...prev,
+                            bindings: [...prev.bindings, makeBindingRow({ is_primary: false })],
+                          }))}
+                          className="text-[11px] px-2 py-1 border border-slate-200 rounded text-slate-600 hover:border-slate-300 cursor-pointer"
+                        >
+                          添加 binding
+                        </button>
                       </div>
-                    </div>
-                    <div className="col-span-2">
-                      <label className="block text-[11px] font-medium text-slate-500 mb-1">
-                        字段 Caption <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        value={formData.field_caption}
-                        onChange={(e) => setFormData({ ...formData, field_caption: e.target.value })}
-                        disabled={!formData.tableau_asset_id}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 bg-white"
-                      >
-                        <option value="">{tableauLoading ? '加载中...' : '请选择字段'}</option>
-                        {tableauFields.map((field) => {
-                          const caption = fieldCaption(field);
-                          return caption ? (
-                            <option key={`${caption}-${field.fullyQualifiedName || field.fully_qualified_name || field.name || field.field}`} value={caption}>
-                              {caption}
-                            </option>
-                          ) : null;
-                        })}
-                      </select>
+                      <div className="space-y-3">
+                        {formData.bindings.map((binding, index) => (
+                          <div key={binding.row_id} className="border border-slate-200 rounded-lg p-3">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-3 text-[12px] text-slate-600">
+                                <span className="font-medium">Binding {index + 1}</span>
+                                <label className="inline-flex items-center gap-1">
+                                  <input
+                                    type="radio"
+                                    checked={binding.is_primary}
+                                    disabled={!binding.is_active}
+                                    onChange={() => setFormData((prev) => ({
+                                      ...prev,
+                                      bindings: prev.bindings.map((row) => ({
+                                        ...row,
+                                        is_primary: row.row_id === binding.row_id,
+                                      })),
+                                    }))}
+                                  />
+                                  Primary
+                                </label>
+                                <label className="inline-flex items-center gap-1">
+                                  <input
+                                    type="checkbox"
+                                    checked={binding.is_active}
+                                    onChange={(e) => {
+                                      const nextActive = e.target.checked;
+                                      setFormData((prev) => {
+                                        const rows = prev.bindings.map((row) => (
+                                          row.row_id === binding.row_id
+                                            ? { ...row, is_active: nextActive }
+                                            : row
+                                        ));
+                                        const activeRows = rows.filter((row) => row.is_active);
+                                        const activePrimary = activeRows.find((row) => row.is_primary);
+                                        if (!activePrimary && activeRows[0]) {
+                                          return {
+                                            ...prev,
+                                            bindings: rows.map((row) => ({
+                                              ...row,
+                                              is_primary: row.row_id === activeRows[0].row_id,
+                                            })),
+                                          };
+                                        }
+                                        return { ...prev, bindings: rows };
+                                      });
+                                    }}
+                                  />
+                                  Active
+                                </label>
+                              </div>
+                              {formData.bindings.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setFormData((prev) => {
+                                    const nextRows = prev.bindings.filter((row) => row.row_id !== binding.row_id);
+                                    if (binding.is_primary && nextRows[0]) nextRows[0] = { ...nextRows[0], is_primary: true };
+                                    return { ...prev, bindings: nextRows };
+                                  })}
+                                  className="text-[11px] text-red-500 hover:text-red-600 cursor-pointer"
+                                >
+                                  移除
+                                </button>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-3 gap-3">
+                              <div>
+                                <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                                  Tableau 连接 <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                  value={binding.tableau_connection_id}
+                                  onChange={(e) => {
+                                    const connectionId = e.target.value;
+                                    updateBindingRow(binding.row_id, {
+                                      tableau_connection_id: connectionId,
+                                      tableau_asset_id: '',
+                                      tableau_datasource_luid: '',
+                                      field_caption: '',
+                                      assets: [],
+                                      fields: [],
+                                    });
+                                    void loadBindingAssets(binding.row_id, connectionId);
+                                  }}
+                                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 bg-white"
+                                >
+                                  <option value="">请选择 Tableau 连接</option>
+                                  {tableauConnections.map((conn) => (
+                                    <option key={conn.id} value={conn.id}>{conn.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                                  Published Datasource <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                  value={binding.tableau_asset_id}
+                                  onChange={(e) => {
+                                    const assetId = e.target.value;
+                                    const asset = binding.assets.find((a) => String(a.id) === assetId);
+                                    updateBindingRow(binding.row_id, {
+                                      tableau_asset_id: assetId,
+                                      tableau_datasource_luid: asset?.tableau_id || '',
+                                      field_caption: '',
+                                      fields: [],
+                                    });
+                                    void loadBindingFields(binding.row_id, assetId);
+                                  }}
+                                  disabled={!binding.tableau_connection_id}
+                                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 bg-white"
+                                >
+                                  <option value="">{binding.loading_assets ? '加载中...' : '请选择数据源资产'}</option>
+                                  {binding.tableau_asset_id && !binding.assets.some((asset) => String(asset.id) === binding.tableau_asset_id) && (
+                                    <option value={binding.tableau_asset_id}>已选资产 #{binding.tableau_asset_id}</option>
+                                  )}
+                                  {binding.assets.map((asset) => (
+                                    <option key={asset.id} value={asset.id}>{asset.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                                  字段 Caption <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                  value={binding.field_caption}
+                                  onChange={(e) => updateBindingRow(binding.row_id, { field_caption: e.target.value })}
+                                  disabled={!binding.tableau_asset_id}
+                                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:border-slate-400 bg-white"
+                                >
+                                  <option value="">{binding.loading_fields ? '加载中...' : '请选择字段'}</option>
+                                  {binding.field_caption && !binding.fields.some((field) => fieldCaption(field) === binding.field_caption) && (
+                                    <option value={binding.field_caption}>{binding.field_caption}</option>
+                                  )}
+                                  {binding.fields.map((field) => {
+                                    const caption = fieldCaption(field);
+                                    return caption ? (
+                                      <option key={`${binding.row_id}-${caption}-${field.fullyQualifiedName || field.fully_qualified_name || field.name || field.field}`} value={caption}>
+                                        {caption}
+                                      </option>
+                                    ) : null;
+                                  })}
+                                </select>
+                              </div>
+                            </div>
+                            {binding.tableau_datasource_luid && (
+                              <div className="mt-2 text-[11px] text-slate-400 font-mono">
+                                Datasource LUID: {binding.tableau_datasource_luid}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </>
                 )}

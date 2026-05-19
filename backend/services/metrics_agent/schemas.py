@@ -51,6 +51,42 @@ class LineageStatus(str, Enum):
     manual = "manual"
 
 
+class MetricBindingInput(BaseModel):
+    """Metric execution binding input."""
+
+    id: Optional[uuid.UUID] = None
+    source_type: str = Field(default="tableau_published_datasource")
+    datasource_id: Optional[int] = None
+    tableau_connection_id: Optional[int] = None
+    tableau_asset_id: Optional[int] = None
+    tableau_datasource_luid: Optional[str] = Field(None, max_length=128)
+    field_mappings: Optional[Any] = None
+    required_base_metrics: list[str] = Field(default_factory=list)
+    formula_expression: Optional[Any] = None
+    is_primary: bool = False
+    is_active: bool = True
+
+
+class MetricBindingOutput(BaseModel):
+    """Metric execution binding response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    source_type: str
+    datasource_id: Optional[int] = None
+    tableau_connection_id: Optional[int] = None
+    tableau_asset_id: Optional[int] = None
+    tableau_datasource_luid: Optional[str] = None
+    field_mappings: Optional[Any] = None
+    required_base_metrics: list[str] = Field(default_factory=list)
+    formula_expression: Optional[Any] = None
+    is_primary: bool
+    is_active: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
 # =============================================================================
 # 创建 / 更新入参
 # =============================================================================
@@ -97,6 +133,8 @@ class MetricCreate(BaseModel):
     tableau_asset_id: Optional[int] = Field(None, description="本地 Tableau asset id")
     tableau_datasource_luid: Optional[str] = Field(None, max_length=128, description="Tableau datasource LUID")
     field_mappings: Optional[Any] = Field(None, description="Tableau fieldCaption 映射")
+    required_base_metrics: list[str] = Field(default_factory=list, description="结构化公式依赖基础指标名")
+    bindings: Optional[list[MetricBindingInput]] = Field(None, description="Tableau execution bindings")
     dependency_metric_ids: list[uuid.UUID] = Field(default_factory=list, description="derived 基础指标 ID")
     numerator_metric_id: Optional[uuid.UUID] = Field(None, description="ratio 分子指标 ID")
     denominator_metric_id: Optional[uuid.UUID] = Field(None, description="ratio 分母指标 ID")
@@ -143,6 +181,8 @@ class MetricUpdate(BaseModel):
     tableau_asset_id: Optional[int] = None
     tableau_datasource_luid: Optional[str] = Field(None, max_length=128)
     field_mappings: Optional[Any] = None
+    required_base_metrics: Optional[list[str]] = None
+    bindings: Optional[list[MetricBindingInput]] = None
     dependency_metric_ids: Optional[list[uuid.UUID]] = None
     numerator_metric_id: Optional[uuid.UUID] = None
     denominator_metric_id: Optional[uuid.UUID] = None
@@ -168,6 +208,17 @@ class MetricBase(BaseModel):
     aggregation_type: Optional[str]
     result_type: Optional[str]
     datasource_id: Optional[int]
+    table_name: Optional[str] = None
+    column_name: Optional[str] = None
+    tableau_connection_id: Optional[int] = None
+    tableau_asset_id: Optional[int] = None
+    tableau_datasource_luid: Optional[str] = None
+    field_mappings: Optional[Any] = None
+    required_base_metrics: list[str] = Field(default_factory=list)
+    formula_expression: Optional[Any] = None
+    bindings: list[MetricBindingOutput] = Field(default_factory=list)
+    primary_binding: Optional[MetricBindingOutput] = None
+    binding_errors: list[dict[str, Any]] = Field(default_factory=list)
     is_active: bool
     sensitivity_level: str
     lineage_status: str
@@ -198,6 +249,17 @@ class MetricDetail(BaseModel):
     table_name: Optional[str]
     column_name: Optional[str]
     filters: Optional[Any]
+    tableau_connection_id: Optional[int] = None
+    tableau_asset_id: Optional[int] = None
+    tableau_datasource_luid: Optional[str] = None
+    field_mappings: Optional[Any] = None
+    required_base_metrics: list[str] = Field(default_factory=list)
+    formula_expression: Optional[Any] = None
+    bindings: list[MetricBindingOutput] = Field(default_factory=list)
+    primary_binding: Optional[MetricBindingOutput] = None
+    dependencies: list[dict[str, Any]] = Field(default_factory=list)
+    queryable: bool = False
+    binding_errors: list[dict[str, Any]] = Field(default_factory=list)
     is_active: bool
     lineage_status: str
     sensitivity_level: str
@@ -284,6 +346,8 @@ class MetricLookupItem(BaseModel):
     field_mappings: Optional[Any] = None
     required_base_metrics: list[str] = Field(default_factory=list)
     formula_expression: Optional[Any] = None
+    bindings: list[MetricBindingOutput] = Field(default_factory=list)
+    primary_binding: Optional[MetricBindingOutput] = None
     filters: Optional[Any]
     sensitivity_level: str
     lineage_status: Optional[str] = None

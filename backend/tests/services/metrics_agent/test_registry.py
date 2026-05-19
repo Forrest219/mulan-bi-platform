@@ -746,6 +746,212 @@ def test_metric_type_accepts_ratio(db_session, valid_datasource, valid_user):
     assert metric.metric_type == "ratio"
 
 
+def test_create_atomic_metric_accepts_multiple_tableau_bindings(db_session, valid_datasource, valid_user):
+    data = _make_create_data(
+        bindings=[
+            {
+                "tableau_connection_id": 2,
+                "tableau_datasource_luid": "primary-luid",
+                "field_mappings": {"amount": "销售额"},
+                "is_primary": True,
+            },
+            {
+                "tableau_connection_id": 3,
+                "tableau_datasource_luid": "secondary-luid",
+                "field_mappings": {"amount": "净销售额"},
+                "is_primary": False,
+            },
+        ],
+    )
+
+    metric = registry.create_metric(db_session, data, user_id=USER_A, tenant_id=TENANT_ID)
+    detail = registry.serialize_metric(registry.get_metric(db_session, metric.id, TENANT_ID), detail=True)
+
+    assert len(detail["bindings"]) == 2
+    assert detail["primary_binding"]["tableau_datasource_luid"] == "primary-luid"
+    assert detail["tableau_connection_id"] == 2
+    assert detail["tableau_datasource_luid"] == "primary-luid"
+    assert detail["field_mappings"] == {"amount": "销售额"}
+
+
+def test_create_metric_rejects_missing_or_multiple_primary_bindings(db_session, valid_datasource, valid_user):
+    with pytest.raises(MulanError) as missing_primary:
+        registry.create_metric(
+            db_session,
+            _make_create_data(
+                bindings=[
+                    {
+                        "tableau_connection_id": 2,
+                        "tableau_datasource_luid": "source-a",
+                        "field_mappings": {"amount": "销售额"},
+                        "is_primary": False,
+                    }
+                ],
+            ),
+            user_id=USER_A,
+            tenant_id=TENANT_ID,
+        )
+    assert missing_primary.value.error_code == "MC_BINDING_PRIMARY_INVALID"
+
+    with pytest.raises(MulanError) as multiple_primary:
+        registry.create_metric(
+            db_session,
+            _make_create_data(
+                bindings=[
+                    {
+                        "tableau_connection_id": 2,
+                        "tableau_datasource_luid": "source-a",
+                        "field_mappings": {"amount": "销售额"},
+                        "is_primary": True,
+                    },
+                    {
+                        "tableau_connection_id": 3,
+                        "tableau_datasource_luid": "source-b",
+                        "field_mappings": {"amount": "净销售额"},
+                        "is_primary": True,
+                    },
+                ],
+            ),
+            user_id=USER_A,
+            tenant_id=TENANT_ID,
+        )
+    assert multiple_primary.value.error_code == "MC_BINDING_PRIMARY_INVALID"
+
+
+def test_create_metric_rejects_duplicate_active_tableau_binding_identity(db_session, valid_datasource, valid_user):
+    with pytest.raises(MulanError) as exc_info:
+        registry.create_metric(
+            db_session,
+            _make_create_data(
+                bindings=[
+                    {
+                        "tableau_connection_id": 2,
+                        "tableau_datasource_luid": "same-luid",
+                        "field_mappings": {"amount": "销售额"},
+                        "is_primary": True,
+                    },
+                    {
+                        "tableau_connection_id": 2,
+                        "tableau_datasource_luid": "same-luid",
+                        "field_mappings": {"amount": "净销售额"},
+                        "is_primary": False,
+                    },
+                ],
+            ),
+            user_id=USER_A,
+            tenant_id=TENANT_ID,
+        )
+
+    assert exc_info.value.error_code == "MC_BINDING_DUPLICATE"
+
+
+def test_legacy_single_binding_creates_primary_binding(db_session, valid_datasource, valid_user):
+    data = _make_create_data(
+        tableau_connection_id=7,
+        tableau_datasource_luid="legacy-luid",
+        field_mappings={"amount": "销售额"},
+    )
+    metric = registry.create_metric(db_session, data, user_id=USER_A, tenant_id=TENANT_ID)
+    detail = registry.serialize_metric(registry.get_metric(db_session, metric.id, TENANT_ID), detail=True)
+
+    assert len(detail["bindings"]) == 1
+    assert detail["bindings"][0]["is_primary"] is True
+    assert detail["primary_binding"]["tableau_connection_id"] == 7
+    assert detail["primary_binding"]["tableau_datasource_luid"] == "legacy-luid"
+
+
+def test_list_and_detail_include_bindings_and_primary_compat_fields(db_session, valid_datasource, valid_user):
+    metric = registry.create_metric(
+        db_session,
+        _make_create_data(
+            name=f"multi_binding_{uuid.uuid4().hex[:6]}",
+            bindings=[
+                {
+                    "tableau_connection_id": 2,
+                    "tableau_datasource_luid": "list-primary-luid",
+                    "field_mappings": {"amount": "销售额"},
+                    "is_primary": True,
+                },
+                {
+                    "tableau_connection_id": 4,
+                    "tableau_datasource_luid": "list-secondary-luid",
+                    "field_mappings": {"amount": "净销售额"},
+                    "is_primary": False,
+                },
+            ],
+        ),
+        user_id=USER_A,
+        tenant_id=TENANT_ID,
+    )
+
+    listed = next(
+        item for item in registry.list_metrics(db_session, TENANT_ID, page=1, page_size=50)[0]
+        if item.id == metric.id
+    )
+    list_payload = registry.serialize_metric(listed)
+    detail_payload = registry.serialize_metric(registry.get_metric(db_session, metric.id, TENANT_ID), detail=True)
+
+    assert len(list_payload["bindings"]) == 2
+    assert list_payload["primary_binding"]["tableau_datasource_luid"] == "list-primary-luid"
+    assert list_payload["tableau_datasource_luid"] == "list-primary-luid"
+    assert len(detail_payload["bindings"]) == 2
+    assert detail_payload["primary_binding"]["field_mappings"] == {"amount": "销售额"}
+
+
+def test_lookup_uses_explicit_matching_binding_without_primary_fallback(db_session, valid_datasource, valid_user):
+    lookup_tenant = uuid.uuid4()
+    metric = _publish_test_metric(
+        db_session,
+        lookup_tenant,
+        name=f"multi_lookup_{uuid.uuid4().hex[:6]}",
+        name_zh="多绑定查询指标",
+        bindings=[
+            {
+                "tableau_connection_id": 2,
+                "tableau_datasource_luid": "lookup-primary-luid",
+                "field_mappings": {"amount": "销售额"},
+                "is_primary": True,
+            },
+            {
+                "tableau_connection_id": 8,
+                "tableau_datasource_luid": "lookup-secondary-luid",
+                "field_mappings": {"amount": "净销售额"},
+                "is_primary": False,
+            },
+        ],
+    )
+    db_session.commit()
+
+    secondary = registry.lookup_metrics(
+        db_session,
+        names=[metric.name],
+        tenant_id=lookup_tenant,
+        tableau_connection_id=8,
+        tableau_datasource_luid="lookup-secondary-luid",
+    )
+    assert secondary["binding_errors"] == []
+    assert secondary["metrics"][0]["tableau_connection_id"] == 8
+    assert secondary["metrics"][0]["tableau_datasource_luid"] == "lookup-secondary-luid"
+    assert secondary["metrics"][0]["primary_binding"] is None
+
+    no_context = registry.lookup_metrics(db_session, names=[metric.name], tenant_id=lookup_tenant)
+    assert no_context["binding_errors"] == []
+    assert no_context["metrics"][0]["tableau_connection_id"] == 2
+    assert no_context["metrics"][0]["tableau_datasource_luid"] == "lookup-primary-luid"
+    assert no_context["metrics"][0]["primary_binding"]["tableau_datasource_luid"] == "lookup-primary-luid"
+
+    missing = registry.lookup_metrics(
+        db_session,
+        names=[metric.name],
+        tenant_id=lookup_tenant,
+        tableau_connection_id=2,
+        tableau_datasource_luid="missing-explicit-luid",
+    )
+    assert missing["metrics"][0]["queryable"] is False
+    assert missing["binding_errors"][0]["error_code"] == "MC_BINDING_UNAVAILABLE"
+    assert missing["metrics"][0]["tableau_datasource_luid"] is None
+
+
 def test_derived_and_ratio_reject_invalid_dependencies(db_session, valid_datasource, valid_user):
     with pytest.raises(MulanError) as derived_exc:
         registry.create_metric(

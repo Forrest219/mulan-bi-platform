@@ -26,6 +26,22 @@ export interface MetricBindingError {
   [key: string]: unknown;
 }
 
+export interface MetricBinding {
+  id?: string;
+  source_type?: 'tableau_published_datasource' | string;
+  datasource_id?: number | null;
+  tableau_connection_id?: number | null;
+  tableau_asset_id?: number | null;
+  tableau_datasource_luid?: string | null;
+  field_mappings?: Record<string, string> | null;
+  required_base_metrics?: string[];
+  formula_expression?: unknown;
+  is_primary: boolean;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface MetricItem {
   id: string;
   metric_code?: string | null;
@@ -51,6 +67,8 @@ export interface MetricItem {
   field_mappings?: Record<string, string> | null;
   required_base_metrics?: string[];
   formula_expression?: unknown;
+  bindings?: MetricBinding[];
+  primary_binding?: MetricBinding | null;
   queryable?: boolean;
   binding_errors?: MetricBindingError[];
   created_at: string;
@@ -90,6 +108,7 @@ export interface CreateMetricInput {
   field_mappings?: Record<string, string> | null;
   required_base_metrics?: string[];
   formula_expression?: unknown;
+  bindings?: MetricBinding[];
 }
 
 export type UpdateMetricInput = Partial<CreateMetricInput>;
@@ -236,6 +255,8 @@ export interface MetricDetail {
   field_mappings?: Record<string, string> | null;
   required_base_metrics?: string[];
   formula_expression?: unknown;
+  bindings?: MetricBinding[];
+  primary_binding?: MetricBinding | null;
   queryable?: boolean;
   binding_errors?: MetricBindingError[];
   is_active: boolean;

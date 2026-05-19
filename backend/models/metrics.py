@@ -138,6 +138,17 @@ class BiMetricBinding(Base):
                 "is_active = true AND is_primary = true AND source_type = 'tableau_published_datasource'"
             ),
         ),
+        Index(
+            "uq_bmb_active_tableau_binding_identity",
+            "tenant_id",
+            "metric_id",
+            "tableau_connection_id",
+            "tableau_datasource_luid",
+            unique=True,
+            postgresql_where=sa_text(
+                "is_active = true AND source_type = 'tableau_published_datasource'"
+            ),
+        ),
     )
 
 

@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 from sqlalchemy import bindparam, delete, func, inspect, text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
 
 from app.core.errors import MulanError
 from models.metrics import (
@@ -33,6 +34,8 @@ _RELATIONSHIP_FIELDS = {
     "tableau_asset_id",
     "tableau_datasource_luid",
     "field_mappings",
+    "required_base_metrics",
+    "bindings",
     "dependency_metric_ids",
     "numerator_metric_id",
     "denominator_metric_id",
@@ -281,6 +284,28 @@ def _get_primary_tableau_binding(db, metric_id: uuid.UUID, tenant_id: uuid.UUID)
     )
 
 
+def _active_tableau_bindings_for_metric(metric: BiMetricDefinition) -> list[BiMetricBinding]:
+    return sorted(
+        [
+            binding
+            for binding in (getattr(metric, "bindings", []) or [])
+            if binding.source_type == _TABLEAU_SOURCE_TYPE and binding.is_active
+        ],
+        key=lambda binding: (
+            not bool(binding.is_primary),
+            binding.created_at or datetime.min,
+            str(binding.id),
+        ),
+    )
+
+
+def _primary_binding_for_metric(metric: BiMetricDefinition) -> Optional[BiMetricBinding]:
+    for binding in _active_tableau_bindings_for_metric(metric):
+        if binding.is_primary:
+            return binding
+    return None
+
+
 def _is_valid_tableau_binding(metric: BiMetricDefinition, binding: Optional[BiMetricBinding]) -> bool:
     if binding is None:
         return False
@@ -301,6 +326,97 @@ def _ensure_metric_has_valid_tableau_binding(db, metric: BiMetricDefinition):
             {"metric_id": str(metric.id), "metric_code": metric.metric_code},
         )
     return binding
+
+
+def _serialize_binding(binding: BiMetricBinding) -> dict[str, Any]:
+    return {
+        "id": binding.id,
+        "source_type": binding.source_type,
+        "datasource_id": binding.datasource_id,
+        "tableau_connection_id": binding.tableau_connection_id,
+        "tableau_asset_id": binding.tableau_asset_id,
+        "tableau_datasource_luid": binding.tableau_datasource_luid,
+        "field_mappings": _json_or_default(binding.field_mappings, None),
+        "required_base_metrics": _json_or_default(binding.required_base_metrics, []),
+        "formula_expression": _json_or_default(binding.formula_expression, None),
+        "is_primary": bool(binding.is_primary),
+        "is_active": bool(binding.is_active),
+        "created_at": binding.created_at,
+        "updated_at": binding.updated_at,
+    }
+
+
+def _serialize_dependency(row: BiMetricDependency) -> dict[str, Any]:
+    dep = getattr(row, "depends_on_metric", None)
+    return {
+        "id": str(row.id),
+        "metric_id": str(row.metric_id),
+        "depends_on_metric_id": str(row.depends_on_metric_id),
+        "dependency_role": row.dependency_role,
+        "expression_order": row.expression_order,
+        "weight": row.weight,
+        "metric_code": getattr(dep, "metric_code", None),
+        "name": getattr(dep, "name", None),
+        "name_zh": getattr(dep, "name_zh", None),
+    }
+
+
+def serialize_metric(metric: BiMetricDefinition, *, detail: bool = False) -> dict[str, Any]:
+    bindings = [_serialize_binding(binding) for binding in _active_tableau_bindings_for_metric(metric)]
+    primary_binding = next((binding for binding in bindings if binding["is_primary"]), None)
+    compat = primary_binding or {}
+    payload: dict[str, Any] = {
+        "id": metric.id,
+        "tenant_id": metric.tenant_id,
+        "metric_code": metric.metric_code,
+        "name": metric.name,
+        "name_zh": metric.name_zh,
+        "metric_type": metric.metric_type,
+        "business_domain": metric.business_domain,
+        "aggregation_type": metric.aggregation_type,
+        "result_type": metric.result_type,
+        "datasource_id": compat.get("datasource_id", metric.datasource_id),
+        "table_name": metric.table_name,
+        "column_name": metric.column_name,
+        "tableau_connection_id": compat.get("tableau_connection_id"),
+        "tableau_asset_id": compat.get("tableau_asset_id"),
+        "tableau_datasource_luid": compat.get("tableau_datasource_luid"),
+        "field_mappings": compat.get("field_mappings"),
+        "required_base_metrics": compat.get("required_base_metrics") or [],
+        "formula_expression": compat.get("formula_expression"),
+        "bindings": bindings,
+        "primary_binding": primary_binding,
+        "binding_errors": [],
+        "is_active": metric.is_active,
+        "sensitivity_level": metric.sensitivity_level,
+        "lineage_status": metric.lineage_status,
+        "created_at": metric.created_at,
+        "updated_at": metric.updated_at,
+    }
+    if detail:
+        payload.update(
+            {
+                "description": metric.description,
+                "formula": metric.formula,
+                "formula_template": metric.formula_template,
+                "unit": metric.unit,
+                "precision": metric.precision,
+                "filters": metric.filters,
+                "created_by": metric.created_by,
+                "reviewed_by": metric.reviewed_by,
+                "reviewed_at": metric.reviewed_at,
+                "published_at": metric.published_at,
+                "dependencies": [
+                    _serialize_dependency(row)
+                    for row in sorted(
+                        getattr(metric, "dependencies", []) or [],
+                        key=lambda dep: (dep.expression_order, dep.dependency_role),
+                    )
+                ],
+                "queryable": primary_binding is not None and _is_valid_tableau_binding(metric, _primary_binding_for_metric(metric)),
+            }
+        )
+    return payload
 
 
 def _dependency_rows_for_metric(db, metric_id: uuid.UUID, tenant_id: uuid.UUID) -> list[BiMetricDependency]:
@@ -384,33 +500,85 @@ def _validate_dependency_metrics(
     return ordered, binding_source or {}
 
 
-def _prepare_relationships(db, data: MetricCreate | MetricUpdate, tenant_id: uuid.UUID, metric_type: str):
-    dependency_specs: list[dict[str, Any]] = []
-    binding_source: dict[str, Any] = {
+def _binding_to_dict(value: Any) -> dict[str, Any]:
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    return dict(value or {})
+
+
+def _legacy_binding_from_data(data: MetricCreate | MetricUpdate, metric_type: str) -> dict[str, Any]:
+    return {
+        "source_type": _TABLEAU_SOURCE_TYPE,
+        "datasource_id": None,
         "tableau_connection_id": getattr(data, "tableau_connection_id", None),
         "tableau_asset_id": getattr(data, "tableau_asset_id", None),
         "tableau_datasource_luid": getattr(data, "tableau_datasource_luid", None),
+        "field_mappings": getattr(data, "field_mappings", None),
+        "required_base_metrics": list(getattr(data, "required_base_metrics", None) or []),
+        "formula_expression": getattr(data, "formula_expression", None),
+        "is_primary": True,
+        "is_active": True,
     }
 
+
+def _normalize_binding_inputs(data: MetricCreate | MetricUpdate, metric_type: str) -> list[dict[str, Any]]:
+    bindings = getattr(data, "bindings", None)
+    if bindings is not None:
+        return [_binding_to_dict(binding) for binding in bindings]
+    return [_legacy_binding_from_data(data, metric_type)]
+
+
+def _validate_metric_bindings(metric_type: str, bindings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    tableau_bindings = [
+        {**binding, "source_type": binding.get("source_type") or _TABLEAU_SOURCE_TYPE}
+        for binding in bindings
+        if (binding.get("source_type") or _TABLEAU_SOURCE_TYPE) == _TABLEAU_SOURCE_TYPE
+    ]
+    active = [binding for binding in tableau_bindings if binding.get("is_active", True)]
+    if not active:
+        raise MulanError("MC_BINDING_REQUIRED", "指标必须至少有一个 active Tableau binding", 400)
+
+    primary_count = sum(1 for binding in active if binding.get("is_primary") is True)
+    if primary_count != 1:
+        raise MulanError("MC_BINDING_PRIMARY_INVALID", "active Tableau binding 必须且只能有一个 primary", 400)
+
+    seen_sources: set[tuple[int, str]] = set()
+    for index, binding in enumerate(active):
+        connection_id = binding.get("tableau_connection_id")
+        datasource_luid = binding.get("tableau_datasource_luid")
+        if not connection_id or not datasource_luid:
+            raise MulanError("MC_BINDING_REQUIRED", "active Tableau binding 必须提供 connection_id 和 datasource_luid", 400)
+        source_key = (int(connection_id), str(datasource_luid))
+        if source_key in seen_sources:
+            raise MulanError("MC_BINDING_DUPLICATE", "同一指标不能重复绑定相同 Tableau datasource", 400)
+        seen_sources.add(source_key)
+
+        if metric_type == "atomic" and not _has_nonempty_mapping(binding.get("field_mappings")):
+            raise MulanError("MC_BINDING_REQUIRED", f"第 {index + 1} 个 atomic binding 必须提供 field_mappings", 400)
+        if metric_type in ("derived", "ratio") and binding.get("formula_expression") is None:
+            raise MulanError("MC_BINDING_REQUIRED", f"第 {index + 1} 个 {metric_type} binding 必须提供 formula_expression", 400)
+
+    return tableau_bindings
+
+
+def _prepare_relationships(db, data: MetricCreate | MetricUpdate, tenant_id: uuid.UUID, metric_type: str):
+    dependency_specs: list[dict[str, Any]] = []
+    raw_binding_inputs = _normalize_binding_inputs(data, metric_type)
+
     if metric_type == "atomic":
+        binding_inputs = _validate_metric_bindings(metric_type, raw_binding_inputs)
         if (
             getattr(data, "dependency_metric_ids", None)
             or getattr(data, "numerator_metric_id", None)
             or getattr(data, "denominator_metric_id", None)
         ):
             raise MulanError("MC_DEPENDENCY_INVALID", "atomic 指标不允许声明指标依赖", 400)
-        if not _has_nonempty_mapping(getattr(data, "field_mappings", None)):
-            raise MulanError("MC_BINDING_REQUIRED", "atomic 指标必须提供 Tableau field_mappings", 400)
-        if not binding_source["tableau_connection_id"] or not binding_source["tableau_datasource_luid"]:
-            raise MulanError("MC_BINDING_REQUIRED", "atomic 指标必须提供 Tableau connection_id 和 datasource_luid", 400)
-        return [], [], binding_source
+        return [], [], binding_inputs
 
     if metric_type == "derived":
         dependency_ids = list(getattr(data, "dependency_metric_ids", None) or [])
         if not dependency_ids:
             raise MulanError("MC_DEPENDENCY_INVALID", "derived 指标必须提供 dependency_metric_ids", 400)
-        if getattr(data, "formula_expression", None) is None:
-            raise MulanError("MC_DEPENDENCY_INVALID", "derived 指标必须提供 formula_expression", 400)
         for index, dependency_id in enumerate(dependency_ids):
             dependency_specs.append(
                 {
@@ -426,8 +594,6 @@ def _prepare_relationships(db, data: MetricCreate | MetricUpdate, tenant_id: uui
             raise MulanError("MC_DEPENDENCY_INVALID", "ratio 指标必须提供 numerator_metric_id 和 denominator_metric_id", 400)
         if numerator_id == denominator_id:
             raise MulanError("MC_DEPENDENCY_INVALID", "ratio 分子和分母不能引用同一个指标", 400)
-        if getattr(data, "formula_expression", None) is None:
-            raise MulanError("MC_DEPENDENCY_INVALID", "ratio 指标必须提供 formula_expression", 400)
         dependency_specs = [
             {"depends_on_metric_id": numerator_id, "dependency_role": "numerator", "expression_order": 0},
             {"depends_on_metric_id": denominator_id, "dependency_role": "denominator", "expression_order": 1},
@@ -436,12 +602,28 @@ def _prepare_relationships(db, data: MetricCreate | MetricUpdate, tenant_id: uui
         raise MulanError("MC_400", f"不支持的 metric_type：{metric_type}", 400)
 
     dependencies, dependency_source = _validate_dependency_metrics(db, tenant_id, dependency_specs)
-    for key in ("tableau_connection_id", "tableau_datasource_luid"):
-        explicit_value = binding_source.get(key)
-        if explicit_value is not None and explicit_value != dependency_source.get(key):
-            raise MulanError("MC_DEPENDENCY_INVALID", "指标 binding 与依赖指标 Tableau datasource 不一致", 400)
-    binding_source = {**dependency_source, **{k: v for k, v in binding_source.items() if v is not None}}
-    return dependency_specs, dependencies, binding_source
+    bindings_were_explicit = getattr(data, "bindings", None) is not None
+    binding_inputs = []
+    for raw_binding in raw_binding_inputs:
+        binding = dict(raw_binding)
+        if not bindings_were_explicit:
+            binding["tableau_connection_id"] = binding.get("tableau_connection_id") or dependency_source.get("tableau_connection_id")
+            binding["tableau_asset_id"] = binding.get("tableau_asset_id") or dependency_source.get("tableau_asset_id")
+            binding["tableau_datasource_luid"] = (
+                binding.get("tableau_datasource_luid") or dependency_source.get("tableau_datasource_luid")
+            )
+            binding["required_base_metrics"] = binding.get("required_base_metrics") or [
+                _metric_label(dependency) for dependency in dependencies
+            ]
+        binding_inputs.append(binding)
+
+    binding_inputs = _validate_metric_bindings(metric_type, binding_inputs)
+    for binding in binding_inputs:
+        for key in ("tableau_connection_id", "tableau_datasource_luid"):
+            explicit_value = binding.get(key)
+            if explicit_value is not None and explicit_value != dependency_source.get(key):
+                raise MulanError("MC_DEPENDENCY_INVALID", "指标 binding 与依赖指标 Tableau datasource 不一致", 400)
+    return dependency_specs, dependencies, binding_inputs
 
 
 def _replace_dependencies(
@@ -468,35 +650,40 @@ def _replace_dependencies(
         )
 
 
-def _replace_primary_tableau_binding(
+def _replace_tableau_bindings(
     db,
     metric: BiMetricDefinition,
-    data: MetricCreate | MetricUpdate,
+    binding_inputs: list[dict[str, Any]],
     dependencies: list[BiMetricDefinition],
-    binding_source: dict[str, Any],
 ):
-    existing = _get_primary_tableau_binding(db, metric.id, metric.tenant_id)
-    if existing is not None:
-        existing.is_primary = False
-        existing.is_active = False
-
-    required_base_metrics = [_metric_label(dep) for dep in dependencies]
-    db.add(
-        BiMetricBinding(
-            tenant_id=metric.tenant_id,
-            metric_id=metric.id,
-            source_type=_TABLEAU_SOURCE_TYPE,
-            datasource_id=None,
-            tableau_connection_id=binding_source.get("tableau_connection_id"),
-            tableau_asset_id=binding_source.get("tableau_asset_id"),
-            tableau_datasource_luid=binding_source.get("tableau_datasource_luid"),
-            field_mappings=getattr(data, "field_mappings", None),
-            required_base_metrics=required_base_metrics,
-            formula_expression=getattr(data, "formula_expression", None),
-            is_primary=True,
-            is_active=True,
+    db.execute(
+        delete(BiMetricBinding).where(
+            BiMetricBinding.tenant_id == metric.tenant_id,
+            BiMetricBinding.metric_id == metric.id,
+            BiMetricBinding.source_type == _TABLEAU_SOURCE_TYPE,
         )
     )
+
+    required_base_metrics = [_metric_label(dep) for dep in dependencies]
+    for raw in binding_inputs:
+        binding = {**raw, "source_type": raw.get("source_type") or _TABLEAU_SOURCE_TYPE}
+        db.add(
+            BiMetricBinding(
+                id=binding.get("id") or uuid.uuid4(),
+                tenant_id=metric.tenant_id,
+                metric_id=metric.id,
+                source_type=_TABLEAU_SOURCE_TYPE,
+                datasource_id=binding.get("datasource_id"),
+                tableau_connection_id=binding.get("tableau_connection_id"),
+                tableau_asset_id=binding.get("tableau_asset_id"),
+                tableau_datasource_luid=binding.get("tableau_datasource_luid"),
+                field_mappings=binding.get("field_mappings"),
+                required_base_metrics=binding.get("required_base_metrics") or required_base_metrics,
+                formula_expression=binding.get("formula_expression"),
+                is_primary=bool(binding.get("is_primary")),
+                is_active=bool(binding.get("is_active", True)),
+            )
+        )
 
 
 def _relationship_data_for_update(
@@ -506,6 +693,10 @@ def _relationship_data_for_update(
     target_metric_type: str,
 ) -> SimpleNamespace:
     current_binding = _get_primary_tableau_binding(db, metric.id, metric.tenant_id)
+    current_bindings = [
+        {**_serialize_binding(binding), "id": None}
+        for binding in _active_tableau_bindings_for_metric(metric)
+    ]
     rows = _dependency_rows_for_metric(db, metric.id, metric.tenant_id)
     by_role = {row.dependency_role: row.depends_on_metric_id for row in rows}
 
@@ -532,6 +723,12 @@ def _relationship_data_for_update(
         field_mappings=data.field_mappings
         if data.field_mappings is not None
         else getattr(current_binding, "field_mappings", None),
+        required_base_metrics=data.required_base_metrics
+        if data.required_base_metrics is not None
+        else _json_or_default(getattr(current_binding, "required_base_metrics", None), []),
+        bindings=data.bindings
+        if data.bindings is not None
+        else current_bindings,
         dependency_metric_ids=dependency_metric_ids,
         numerator_metric_id=numerator_metric_id,
         denominator_metric_id=denominator_metric_id,
@@ -586,7 +783,7 @@ def create_metric(db, data: MetricCreate, user_id: int, tenant_id: uuid.UUID):
         _get_datasource_or_400(db, data.datasource_id)
 
     metric_type = _enum_value(data.metric_type)
-    dependency_specs, dependencies, binding_source = _prepare_relationships(db, data, tenant_id, metric_type)
+    dependency_specs, dependencies, binding_inputs = _prepare_relationships(db, data, tenant_id, metric_type)
 
     metric = BiMetricDefinition(
         tenant_id=tenant_id,
@@ -626,7 +823,7 @@ def create_metric(db, data: MetricCreate, user_id: int, tenant_id: uuid.UUID):
             ):
                 raise MulanError("MC_DEPENDENCY_INVALID", "指标依赖存在环路", 400)
             _replace_dependencies(db, metric, dependency_specs)
-        _replace_primary_tableau_binding(db, metric, data, dependencies, binding_source)
+        _replace_tableau_bindings(db, metric, binding_inputs, dependencies)
         db.flush()
     except IntegrityError:
         db.rollback()
@@ -657,7 +854,11 @@ def list_metrics(
     Returns:
         (items: list[BiMetricDefinition], total: int)
     """
-    q = db.query(BiMetricDefinition).filter(BiMetricDefinition.tenant_id == tenant_id)
+    q = (
+        db.query(BiMetricDefinition)
+        .options(selectinload(BiMetricDefinition.bindings))
+        .filter(BiMetricDefinition.tenant_id == tenant_id)
+    )
 
     if business_domain is not None:
         q = q.filter(BiMetricDefinition.business_domain == business_domain)
@@ -685,7 +886,21 @@ def list_metrics(
 
 def get_metric(db, metric_id: uuid.UUID, tenant_id: uuid.UUID) -> BiMetricDefinition:
     """按 ID 获取指标详情，不存在则 404 MC_404。"""
-    return _get_metric_or_404(db, metric_id, tenant_id)
+    metric = (
+        db.query(BiMetricDefinition)
+        .options(
+            selectinload(BiMetricDefinition.bindings),
+            selectinload(BiMetricDefinition.dependencies).selectinload(BiMetricDependency.depends_on_metric),
+        )
+        .filter(
+            BiMetricDefinition.id == metric_id,
+            BiMetricDefinition.tenant_id == tenant_id,
+        )
+        .first()
+    )
+    if metric is None:
+        raise MulanError("MC_404", f"指标不存在：id={metric_id}", 404)
+    return metric
 
 
 def update_metric(
@@ -714,10 +929,10 @@ def update_metric(
     )
     dependency_specs: list[dict[str, Any]] = []
     dependencies: list[BiMetricDefinition] = []
-    binding_source: dict[str, Any] = {}
+    binding_inputs: list[dict[str, Any]] = []
     if relationship_update:
         relationship_data = _relationship_data_for_update(db, metric, data, target_metric_type)
-        dependency_specs, dependencies, binding_source = _prepare_relationships(
+        dependency_specs, dependencies, binding_inputs = _prepare_relationships(
             db,
             relationship_data,  # type: ignore[arg-type]
             tenant_id,
@@ -779,7 +994,7 @@ def update_metric(
             ):
                 raise MulanError("MC_DEPENDENCY_INVALID", "指标依赖存在环路", 400)
             _replace_dependencies(db, metric, dependency_specs)
-            _replace_primary_tableau_binding(db, metric, relationship_data, dependencies, binding_source)
+            _replace_tableau_bindings(db, metric, binding_inputs, dependencies)
         db.flush()
     except IntegrityError:
         db.rollback()
@@ -1384,19 +1599,23 @@ def _load_lookup_bindings(
         params["datasource_id"] = datasource_id
     else:
         clauses.append("source_type = 'tableau_published_datasource'")
+        clauses.append("is_primary = true")
 
     stmt = text(
         f"""
         SELECT
+            id,
             metric_id,
             source_type,
             datasource_id,
             tableau_connection_id,
+            tableau_asset_id,
             tableau_datasource_luid,
             field_mappings,
             required_base_metrics,
             formula_expression,
-            is_primary
+            is_primary,
+            is_active
         FROM {_METRIC_BINDINGS_TABLE}
         WHERE {" AND ".join(clauses)}
         ORDER BY is_primary DESC
@@ -1499,6 +1718,22 @@ def _serialize_lookup_metric(
         elif datasource_id is None:
             datasource_id = metric.datasource_id
 
+    lookup_binding = None
+    if binding is not None:
+        lookup_binding = {
+            "id": binding.get("id"),
+            "source_type": binding.get("source_type"),
+            "datasource_id": binding.get("datasource_id"),
+            "tableau_connection_id": binding.get("tableau_connection_id"),
+            "tableau_asset_id": binding.get("tableau_asset_id"),
+            "tableau_datasource_luid": binding.get("tableau_datasource_luid"),
+            "field_mappings": field_mappings,
+            "required_base_metrics": required_base_metrics,
+            "formula_expression": formula_expression,
+            "is_primary": bool(binding.get("is_primary")),
+            "is_active": bool(binding.get("is_active", True)),
+        }
+
     return {
         "metric_code": metric.metric_code,
         "name": metric.name,
@@ -1519,6 +1754,8 @@ def _serialize_lookup_metric(
         "field_mappings": field_mappings,
         "required_base_metrics": required_base_metrics,
         "formula_expression": formula_expression,
+        "bindings": [lookup_binding] if lookup_binding else [],
+        "primary_binding": lookup_binding if lookup_binding and lookup_binding.get("is_primary") else None,
         "filters": metric.filters,
         "sensitivity_level": metric.sensitivity_level,
         "lineage_status": metric.lineage_status,

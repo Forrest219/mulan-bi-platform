@@ -157,7 +157,13 @@ def list_metrics(
         search=search,
     )
     pages = math.ceil(total / page_size) if page_size else 0
-    return PaginatedMetrics(items=items, total=total, page=page, page_size=page_size, pages=pages)
+    return PaginatedMetrics(
+        items=[registry.serialize_metric(item) for item in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+        pages=pages,
+    )
 
 
 @router.get(
@@ -201,7 +207,8 @@ def get_metric(
 ):
     """获取指标完整详情（analyst+）"""
     tenant_id = _tenant_id_from_user(current_user)
-    return registry.get_metric(db, metric_id=metric_id, tenant_id=tenant_id)
+    metric = registry.get_metric(db, metric_id=metric_id, tenant_id=tenant_id)
+    return registry.serialize_metric(metric, detail=True)
 
 
 @router.put(
@@ -217,7 +224,9 @@ def update_metric(
 ):
     """更新指标字段（data_admin+）"""
     tenant_id = _tenant_id_from_user(current_user)
-    return registry.update_metric(db, metric_id=metric_id, data=data, user_id=current_user["id"], tenant_id=tenant_id)
+    metric = registry.update_metric(db, metric_id=metric_id, data=data, user_id=current_user["id"], tenant_id=tenant_id)
+    metric = registry.get_metric(db, metric_id=metric.id, tenant_id=tenant_id)
+    return registry.serialize_metric(metric, detail=True)
 
 
 @router.delete(
@@ -251,7 +260,9 @@ def submit_review(
 ):
     """将指标提交至审核队列（data_admin+）"""
     tenant_id = _tenant_id_from_user(current_user)
-    return registry.submit_review(db, metric_id=metric_id, user_id=current_user["id"], tenant_id=tenant_id)
+    metric = registry.submit_review(db, metric_id=metric_id, user_id=current_user["id"], tenant_id=tenant_id)
+    metric = registry.get_metric(db, metric_id=metric.id, tenant_id=tenant_id)
+    return registry.serialize_metric(metric, detail=True)
 
 
 @router.post(
@@ -266,7 +277,9 @@ def approve_metric(
 ):
     """批准审核中的指标（data_admin+）"""
     tenant_id = _tenant_id_from_user(current_user)
-    return registry.approve_metric(db, metric_id=metric_id, reviewer_id=current_user["id"], tenant_id=tenant_id)
+    metric = registry.approve_metric(db, metric_id=metric_id, reviewer_id=current_user["id"], tenant_id=tenant_id)
+    metric = registry.get_metric(db, metric_id=metric.id, tenant_id=tenant_id)
+    return registry.serialize_metric(metric, detail=True)
 
 
 @router.post(
@@ -282,13 +295,15 @@ def reject_metric(
 ):
     """拒绝审核中的指标，附带原因（data_admin+）"""
     tenant_id = _tenant_id_from_user(current_user)
-    return registry.reject_metric(
+    metric = registry.reject_metric(
         db,
         metric_id=metric_id,
         reason=body.reason,
         reviewer_id=current_user["id"],
         tenant_id=tenant_id,
     )
+    metric = registry.get_metric(db, metric_id=metric.id, tenant_id=tenant_id)
+    return registry.serialize_metric(metric, detail=True)
 
 
 @router.post(
