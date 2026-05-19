@@ -6,7 +6,7 @@ import pytest
 
 from services.data_agent.models import BiAgentRun, BiAgentStep
 from services.data_agent.response import AgentEvent
-from services.data_agent.runner import run_agent
+from services.data_agent.runner import resolve_recent_query_context, run_agent
 from services.data_agent.session import AgentSession
 from services.data_agent.tool_base import ToolContext
 
@@ -275,4 +275,37 @@ async def test_direct_query_followup_uses_recent_query_datasource_and_metrics(mo
     assert engine.kwargs["force_first_params"] == {
         "question": "销售额、利润、客户名称 这个指标过去几年的趋势是什么样子",
         "datasource_name": "订单+ (示例 - 超市)",
+    }
+
+
+def test_recent_query_context_inherits_schema_inventory_datasource():
+    """schema_inventory 命中的单数据源应成为后续问数的显式数据源上下文。"""
+    previous_schema_message = _FakeMessage(
+        tools_used=["schema"],
+        response_data={
+            "mode": "fields",
+            "matched_asset": {
+                "asset_id": 422,
+                "name": "订单+ (示例 - 超市)",
+                "tableau_id": "f4290485-26d3-428f-aa8d-ccc33862a411",
+            },
+            "fields": [{"display_name": "销售额"}, {"display_name": "利润"}],
+        },
+    )
+    session_mgr = _FakeSessionManager(messages=[previous_schema_message])
+    session = AgentSession(conversation_id=uuid.uuid4(), user_id=7)
+
+    context = resolve_recent_query_context(session_mgr, session, user_id=7)
+
+    assert context["datasource_luid"] == "f4290485-26d3-428f-aa8d-ccc33862a411"
+    assert context["tableau_datasource_luid"] == "f4290485-26d3-428f-aa8d-ccc33862a411"
+    assert context["datasource_name"] == "订单+ (示例 - 超市)"
+    assert context["selected_datasource"] == {
+        "luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+        "datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+        "tableau_datasource_luid": "f4290485-26d3-428f-aa8d-ccc33862a411",
+        "name": "订单+ (示例 - 超市)",
+        "datasource_name": "订单+ (示例 - 超市)",
+        "asset_id": 422,
+        "connection_id": None,
     }

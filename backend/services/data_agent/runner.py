@@ -671,21 +671,102 @@ def resolve_recent_query_context(session_mgr: SessionManager, session: AgentSess
     for message in reversed(messages):
         if getattr(message, "role", None) != "assistant":
             continue
-        tools_used = getattr(message, "tools_used", None) or []
-        if "query" not in tools_used and "tableau_mcp" not in tools_used:
-            continue
         response_data = getattr(message, "response_data", None)
         if not isinstance(response_data, dict):
+            continue
+
+        datasource_context = _extract_datasource_context(response_data)
+        tools_used = getattr(message, "tools_used", None) or []
+        if datasource_context and "schema" in tools_used:
+            return datasource_context
+        if "query" not in tools_used and "tableau_mcp" not in tools_used:
+            if datasource_context:
+                return datasource_context
             continue
         datasource_name = response_data.get("datasource_name")
         metric_names = _extract_metric_names(response_data.get("fields") or [])
         dimension_names = _extract_dimension_names(response_data.get("fields") or [])
-        return {
+        context: Dict[str, object] = {
             "datasource_name": datasource_name,
             "metric_names": metric_names,
             "dimension_names": dimension_names,
         }
+        context.update(datasource_context)
+        return context
     return {}
+
+
+def _extract_datasource_context(response_data: Dict[str, object]) -> Dict[str, object]:
+    """Extract an explicit datasource payload from prior assistant response data."""
+    candidates: List[object] = []
+    for key in ("selected_datasource", "datasource"):
+        value = response_data.get(key)
+        if isinstance(value, dict):
+            candidates.append(value)
+    candidates.append(response_data)
+
+    analysis_context = response_data.get("analysis_context")
+    if isinstance(analysis_context, dict):
+        for key in ("selected_datasource", "datasource"):
+            value = analysis_context.get(key)
+            if isinstance(value, dict):
+                candidates.append(value)
+        scope = analysis_context.get("scope")
+        if isinstance(scope, dict):
+            for key in ("selected_datasource", "datasource"):
+                value = scope.get(key)
+                if isinstance(value, dict):
+                    candidates.append(value)
+            candidates.append(scope)
+
+    matched_asset = response_data.get("matched_asset")
+    if isinstance(matched_asset, dict):
+        candidates.append(matched_asset)
+
+    for candidate in candidates:
+        payload = _datasource_context_from_mapping(candidate)
+        if payload:
+            return payload
+    return {}
+
+
+def _datasource_context_from_mapping(candidate: object) -> Dict[str, object]:
+    if not isinstance(candidate, dict):
+        return {}
+    datasource_luid = str(
+        candidate.get("luid")
+        or candidate.get("datasource_luid")
+        or candidate.get("selected_datasource_luid")
+        or candidate.get("tableau_datasource_luid")
+        or candidate.get("tableau_id")
+        or ""
+    ).strip()
+    if not datasource_luid:
+        return {}
+
+    datasource_name = str(
+        candidate.get("name")
+        or candidate.get("datasource_name")
+        or candidate.get("caption")
+        or datasource_luid
+    ).strip()
+    asset_id = candidate.get("asset_id")
+    connection_id = candidate.get("connection_id")
+    selected_datasource = {
+        "luid": datasource_luid,
+        "datasource_luid": datasource_luid,
+        "tableau_datasource_luid": datasource_luid,
+        "name": datasource_name,
+        "datasource_name": datasource_name,
+        "asset_id": asset_id,
+        "connection_id": connection_id,
+    }
+    return {
+        "datasource_luid": datasource_luid,
+        "tableau_datasource_luid": datasource_luid,
+        "selected_datasource": selected_datasource,
+        "datasource_name": datasource_name,
+    }
 
 
 def _extract_metric_names(fields: list) -> list[str]:

@@ -248,6 +248,7 @@ def _normalize_schema_fields(tool_data: dict[str, Any]) -> dict[str, Any]:
         "mode": "fields",
         "requested_table_name": tool_data.get("requested_table_name"),
         "matched_asset": {
+            "asset_id": matched_asset.get("asset_id"),
             "name": matched_asset.get("name") or asset_name,
             "asset_type": matched_asset.get("asset_type") or matched_asset.get("type"),
             "project": matched_asset.get("project") or matched_asset.get("project_name"),
@@ -402,6 +403,9 @@ def _validate_fields_payload(payload: dict[str, Any]) -> None:
     matched_asset = payload.get("matched_asset")
     if not isinstance(matched_asset, dict):
         raise ValueError("matched_asset must be a dict")
+    asset_id = matched_asset.get("asset_id")
+    if asset_id is not None and not isinstance(asset_id, int):
+        raise ValueError("matched_asset asset_id must be an int or None")
     for field in fields:
         if not isinstance(field, dict):
             raise ValueError("field item must be a dict")

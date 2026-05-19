@@ -251,6 +251,7 @@ export default function AgentMonitorPage() {
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [runsTotal, setRunsTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [runsRefreshing, setRunsRefreshing] = useState(false);
   const [diagnosticRunId, setDiagnosticRunId] = useState<string | null>(null);
   const [steps, setSteps] = useState<AgentStep[]>([]);
   const [stepsLoading, setStepsLoading] = useState(false);
@@ -491,6 +492,15 @@ export default function AgentMonitorPage() {
       run_id: runId,
     });
     setDiagnosticRunId(null);
+  };
+
+  const refreshRuns = async () => {
+    setRunsRefreshing(true);
+    try {
+      await Promise.all([fetchStats(), fetchRuns()]);
+    } finally {
+      setRunsRefreshing(false);
+    }
   };
 
   if (loading) {
@@ -746,7 +756,17 @@ export default function AgentMonitorPage() {
             </div>
           )}
 
-          <span className="ml-auto text-xs text-slate-400">
+          {overviewTable === 'runs' && (
+            <button
+              onClick={() => void refreshRuns()}
+              disabled={runsRefreshing}
+              className="ml-auto text-xs text-slate-400 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 transition-colors"
+            >
+              <i className={`ri-refresh-line ${runsRefreshing ? 'animate-spin' : ''}`} />刷新
+            </button>
+          )}
+
+          <span className={`${overviewTable === 'runs' ? '' : 'ml-auto'} text-xs text-slate-400`}>
             共 {overviewTable === 'runs' ? runsTotal : queryTotal} 条
           </span>
         </div>

@@ -590,7 +590,10 @@ export const agentAdminApi = {
    * GET /api/admin/agent/stats
    */
   getStats: (): Promise<AgentStats> =>
-    fetch('/api/admin/agent/stats', { credentials: 'include' }).then((r) => {
+    fetch('/api/admin/agent/stats', {
+      credentials: 'include',
+      cache: 'no-store',
+    }).then((r) => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
     }),
@@ -614,6 +617,7 @@ export const agentAdminApi = {
     });
     return fetch(`/api/admin/agent/runs?${query}`, {
       credentials: 'include',
+      cache: 'no-store',
     }).then((r) => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
@@ -626,6 +630,7 @@ export const agentAdminApi = {
   getRunSteps: (runId: string): Promise<AgentStep[]> =>
     fetch(`/api/admin/agent/runs/${runId}/steps`, {
       credentials: 'include',
+      cache: 'no-store',
     }).then((r) => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();

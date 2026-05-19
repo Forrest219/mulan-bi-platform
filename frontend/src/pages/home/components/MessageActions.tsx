@@ -16,16 +16,26 @@ interface MessageActionsProps {
 export function MessageActions({ content, conversationId, messageIndex, question, traceId, onRegenerate, onEdit, onDelete }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
   const [rated, setRated] = useState<'up' | 'down' | null>(null);
+  const showAlways = Boolean(onRegenerate);
 
   useEffect(() => {
-    if (!conversationId) return;
-    fetch(`/api/agent/feedback?conversation_id=${encodeURIComponent(conversationId)}&message_index=${messageIndex}`, {
+    if (!traceId && !conversationId) return;
+
+    const params = new URLSearchParams();
+    if (traceId) {
+      params.set('run_id', traceId);
+    } else if (conversationId) {
+      params.set('conversation_id', conversationId);
+      params.set('message_index', String(messageIndex));
+    }
+
+    fetch(`/api/agent/feedback?${params.toString()}`, {
       credentials: 'include',
     })
       .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data?.rating) setRated(data.rating as 'up' | 'down'); })
+      .then(data => { setRated(data?.rating ? data.rating as 'up' | 'down' : null); })
       .catch(() => {});
-  }, [conversationId, messageIndex]);
+  }, [conversationId, messageIndex, traceId]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(content);
@@ -65,7 +75,11 @@ export function MessageActions({ content, conversationId, messageIndex, question
   };
 
   return (
-    <div className="flex items-center gap-0.5 mt-2 flex-wrap opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+    <div
+      className={`flex items-center gap-0.5 mt-2 flex-wrap transition-opacity duration-150 ${
+        showAlways ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+      }`}
+    >
       <button
         onClick={() => handleRate('up')}
         disabled={rated !== null}

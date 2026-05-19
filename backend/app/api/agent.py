@@ -49,6 +49,7 @@ from services.data_agent.context import build_session_context
 from services.data_agent.fallback import StandardFallback, make_clarification_fallback
 from services.data_agent.intent_classifier import classify_intent
 from services.data_agent.router_guardrail import classify_homepage_question
+from services.data_agent.analysis_context import AnalysisContext, build_response_data_with_context
 from services.llm.models import log_nlq_query
 from services.llm.service import llm_user_id_var
 from services.tableau.models import TableauConnection
@@ -286,6 +287,74 @@ def _uuid_or_none(value: Any) -> Optional[uuid_lib.UUID]:
         return None
 
 
+def _schema_inventory_response_data_with_context(
+    *,
+    response_data: dict[str, Any],
+    run_id: uuid_lib.UUID,
+    conversation_id: str,
+    trace_id: str,
+    connection_id: Optional[int],
+) -> dict[str, Any]:
+    """Attach follow-up datasource context for schema field lookups."""
+    if not isinstance(response_data, dict) or response_data.get("mode") != "fields":
+        return response_data
+
+    matched_asset = response_data.get("matched_asset")
+    if not isinstance(matched_asset, dict):
+        return response_data
+
+    datasource_luid = str(matched_asset.get("tableau_id") or "").strip()
+    datasource_name = str(matched_asset.get("name") or "").strip()
+    if not datasource_luid:
+        return response_data
+
+    asset_id = matched_asset.get("asset_id")
+    selected_datasource = {
+        "luid": datasource_luid,
+        "datasource_luid": datasource_luid,
+        "tableau_datasource_luid": datasource_luid,
+        "name": datasource_name or datasource_luid,
+        "datasource_name": datasource_name or datasource_luid,
+        "asset_id": asset_id,
+        "connection_id": connection_id,
+    }
+    queryable_fields = [
+        field.get("display_name") or field.get("caption") or field.get("name")
+        for field in response_data.get("fields") or []
+        if isinstance(field, dict) and (field.get("display_name") or field.get("caption") or field.get("name"))
+    ]
+    analysis_context = AnalysisContext.new(
+        conversation_id=conversation_id,
+        run_id=str(run_id),
+        trace_id=trace_id,
+        turn_no=0,
+        scope={
+            "connection_id": connection_id,
+            "datasource_luid": datasource_luid,
+            "tableau_datasource_luid": datasource_luid,
+            "datasource_name": datasource_name or datasource_luid,
+            "asset_id": asset_id,
+            "selected_datasource": selected_datasource,
+        },
+        query_plan={
+            "subject": datasource_name or datasource_luid,
+            "metrics": [],
+            "dimensions": [],
+            "filters": [],
+        },
+        analysis_type="schema_inventory",
+        confidence=1.0,
+        source="schema_inventory",
+        is_followup=False,
+    )
+    enriched = build_response_data_with_context(response_data, analysis_context=analysis_context)
+    enriched["datasource_luid"] = datasource_luid
+    enriched["datasource_name"] = datasource_name or datasource_luid
+    enriched["selected_datasource"] = selected_datasource
+    enriched["queryable_fields"] = queryable_fields
+    return enriched
+
+
 def _write_schema_inventory_success(
     *,
     db: Session,
@@ -302,6 +371,14 @@ def _write_schema_inventory_success(
 ) -> None:
     skill_version_uuid = _uuid_or_none(result.skill_version_id)
     step_durations_ms = step_durations_ms or {}
+    response_data = _schema_inventory_response_data_with_context(
+        response_data=result.response_data,
+        run_id=run_id,
+        conversation_id=str(session.conversation_id),
+        trace_id=context.trace_id,
+        connection_id=connection_id,
+    )
+    result.response_data = response_data
 
     run = BiAgentRun(
         id=run_id,
@@ -1781,6 +1858,32 @@ def submit_feedback(
     return {"status": "created", "feedback_id": feedback.id}
 
 
+def _upsert_run_feedback(
+    db: Session,
+    run_uuid: uuid_lib.UUID,
+    user_id: int,
+    rating: str,
+    comment: Optional[str] = None,
+) -> tuple[BiAgentFeedback, str]:
+    existing = db.query(BiAgentFeedback).filter(
+        BiAgentFeedback.run_id == run_uuid,
+        BiAgentFeedback.user_id == user_id,
+    ).first()
+    if existing:
+        existing.rating = rating
+        existing.comment = comment
+        return existing, "updated"
+
+    feedback = BiAgentFeedback(
+        run_id=run_uuid,
+        user_id=user_id,
+        rating=rating,
+        comment=comment,
+    )
+    db.add(feedback)
+    return feedback, "created"
+
+
 @router.post("/feedback/v2")
 async def submit_agent_feedback_v2(
     run_id: Optional[str] = Body(None),
@@ -1799,7 +1902,7 @@ async def submit_agent_feedback_v2(
     1. run_id 方式：通过 run_id 查询 BiAgentRun 获取 conversation_id
     2. 直接方式：直接传入 conversation_id、message_index 等字段
 
-    转发到 feedback service（/api/feedback）写入 message_feedback 表。
+    run_id 方式写入 run 级反馈表；legacy message_feedback 仅用于无 run_id 的调用。
     """
     _require_agent_role(current_user.get("role", "user"))
 
@@ -1823,18 +1926,32 @@ async def submit_agent_feedback_v2(
                 detail={"error_code": "AGENT_004", "message": "运行记录不存在"},
             )
 
-        # 从 run 记录获取 conversation_id
-        resolved_conversation_id = str(run.conversation_id) if run.conversation_id else conversation_id
-        if conversation_id is None:
-            conversation_id = resolved_conversation_id
+        _feedback, run_feedback_status = _upsert_run_feedback(
+            db=db,
+            run_uuid=run_uuid,
+            user_id=current_user["id"],
+            rating=rating,
+        )
+        try:
+            db.commit()
+            logger.info(
+                "Agent run 反馈已记录（v2） user_id=%s rating=%s run_id=%s",
+                current_user["id"], rating, run_id,
+            )
+            return {"ok": True, "status": run_feedback_status or "created"}
+        except Exception as exc:
+            db.rollback()
+            logger.error("写入 run 级反馈失败（v2）: %s", exc, exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail={"error_code": "AGENT_008", "message": "反馈写入失败"},
+            )
     else:
         raise HTTPException(
             status_code=400,
             detail={"error_code": "AGENT_007", "message": "必须提供 run_id 或 conversation_id"},
         )
 
-    # 转发到 feedback service
-    from app.api.feedback import submit_feedback as forward_feedback
     from datetime import datetime, timezone
 
     try:
@@ -1872,13 +1989,38 @@ async def submit_agent_feedback_v2(
 
 @router.get("/feedback")
 def get_agent_feedback(
-    conversation_id: str,
-    message_index: int,
+    run_id: Optional[str] = Query(None),
+    conversation_id: Optional[str] = Query(None),
+    message_index: Optional[int] = Query(None),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """GET /api/agent/feedback — 查询当前用户对指定消息的已有评分"""
     _require_agent_role(current_user.get("role", "user"))
+    if run_id:
+        try:
+            run_uuid = uuid_lib.UUID(run_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail={"error_code": "AGENT_007", "message": "无效的运行 ID"},
+            )
+
+        feedback = db.query(BiAgentFeedback).filter(
+            BiAgentFeedback.run_id == run_uuid,
+            BiAgentFeedback.user_id == current_user["id"],
+        ).first()
+        if feedback:
+            return {"rating": feedback.rating}
+
+        return {"rating": None}
+
+    if conversation_id is None or message_index is None:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "AGENT_007", "message": "必须提供 run_id 或 conversation_id/message_index"},
+        )
+
     row = db.execute(
         text(
             "SELECT rating FROM message_feedback "

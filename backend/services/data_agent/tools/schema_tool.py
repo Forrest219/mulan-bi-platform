@@ -429,6 +429,7 @@ class SchemaTool(BaseTool):
 
     def _serialize_tableau_asset(self, asset: "TableauAsset") -> Dict[str, Any]:
         return {
+            "asset_id": asset.id,
             "name": asset.name,
             "type": asset.asset_type,
             "project": asset.project_name,

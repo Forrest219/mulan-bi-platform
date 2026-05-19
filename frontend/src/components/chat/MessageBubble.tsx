@@ -221,7 +221,7 @@ const markdownComponents: Components = {
       (c): c is React.ReactElement => React.isValidElement(c) && c.type === 'li'
     );
 
-    if (items.length >= 2 && items.length <= 15) {
+    if (items.length >= 1 && items.length <= 15) {
       const cardItems = items.map(item => ({
         text: getTextFromNode(item).trim(),
         url: getUrlFromNode((item.props as { children?: React.ReactNode }).children),
