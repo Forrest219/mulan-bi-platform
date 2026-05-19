@@ -83,6 +83,8 @@ services:
       TABLEAU_MCP_SERVER_URL: http://tableau-mcp-gateway:3928/tableau-mcp
       TZ: Asia/Shanghai
     depends_on:
+      backend:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
