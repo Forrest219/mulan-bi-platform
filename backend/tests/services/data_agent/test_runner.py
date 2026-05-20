@@ -1,5 +1,6 @@
 """Data Agent runner observability regressions."""
 
+import asyncio
 import uuid
 
 import pytest
@@ -84,12 +85,24 @@ class _ErrorEngine:
         )
 
 
+class _BlockingEngine:
+    async def run(self, query, context, session=None, **kwargs):
+        await asyncio.sleep(3600)
+        yield AgentEvent(type="answer", content="late")
+
+
+class _UnexpectedEngine:
+    async def run(self, query, context, session=None, **kwargs):
+        raise AssertionError("engine should not be called for previous-result transforms")
+
+
 class _FakeMessage:
-    def __init__(self, role="assistant", tools_used=None, content="", response_data=None):
+    def __init__(self, role="assistant", tools_used=None, content="", response_data=None, response_type=None):
         self.role = role
         self.tools_used = tools_used or ["schema"]
         self.content = content or "数据资产 **orders-订单明细表** 返回了 **16 个字段**："
         self.response_data = response_data
+        self.response_type = response_type
 
 
 class _FakeSessionManager:
@@ -191,6 +204,109 @@ async def test_error_event_persists_assistant_history_message(monkeypatch):
     assert message["trace_id"] == "t-error"
     assert message["sources_count"] == 1
     assert message["top_sources"] == ["Tableau"]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_stream_marks_run_failed_and_persists_message(monkeypatch):
+    """回归：客户端断开后 run 不应长期停留在 running。"""
+    monkeypatch.setattr("services.data_agent.runner.is_direct_query", lambda question: False)
+
+    db = _FakeDb()
+    session_mgr = _FakeSessionManager()
+    session = AgentSession(conversation_id=uuid.uuid4(), user_id=7)
+    context = ToolContext(
+        session_id=str(session.conversation_id),
+        user_id=7,
+        connection_id=1,
+        connection_name="Tableau",
+        trace_id="t-cancel",
+    )
+
+    stream = run_agent(
+        engine=_BlockingEngine(),
+        context=context,
+        session_mgr=session_mgr,
+        session=session,
+        question="一个会被取消的问题",
+        trace_id="t-cancel",
+        current_user={"id": 7},
+        db=db,
+        connection_id=1,
+    )
+
+    first = await stream.__anext__()
+    assert first.type == "metadata"
+
+    pending = asyncio.create_task(stream.__anext__())
+    await asyncio.sleep(0)
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+
+    assert db.updates[-1][BiAgentRun.status] == "failed"
+    assert db.updates[-1][BiAgentRun.error_code] == "AGENT_CANCELLED"
+    assert db.updates[-1][BiAgentRun.response_type] == "error"
+    assert session_mgr.messages[-1]["role"] == "assistant"
+    assert session_mgr.messages[-1]["response_data"]["error_type"] == "client_disconnected"
+
+
+@pytest.mark.asyncio
+async def test_previous_query_result_transform_skips_planner_and_persists_query_result(monkeypatch):
+    """追问增加派生列时，应基于上一条结果表变换，不进入 LLM/MCP planner。"""
+    previous_response = {
+        "fields": ["Period", "Revenue"],
+        "rows": [["2026-01", 100.0], ["2026-02", 125.0], ["2026-03", 150.0]],
+        "col_types": ["string", "numeric"],
+        "table_display": {
+            "columns": [
+                {"key": "Period", "label": "Period", "semantic_type": "period", "value_type": "date", "format": "date"},
+                {"key": "Revenue", "label": "Revenue", "semantic_type": "metric", "value_type": "number", "format": "number"},
+            ],
+        },
+    }
+    session_mgr = _FakeSessionManager(messages=[
+        _FakeMessage(
+            role="assistant",
+            tools_used=["tableau_mcp"],
+            response_type="query_result",
+            response_data=previous_response,
+        )
+    ])
+    db = _FakeDb()
+    session = AgentSession(conversation_id=uuid.uuid4(), user_id=7)
+    context = ToolContext(
+        session_id=str(session.conversation_id),
+        user_id=7,
+        connection_id=1,
+        connection_name="Tableau",
+        trace_id="t-transform",
+    )
+
+    events = [
+        event
+        async for event in run_agent(
+            engine=_UnexpectedEngine(),
+            context=context,
+            session_mgr=session_mgr,
+            session=session,
+            question="增加一列环比金额、环比金额变化率",
+            trace_id="t-transform",
+            current_user={"id": 7},
+            db=db,
+            connection_id=1,
+        )
+    ]
+
+    assert [event.type for event in events] == ["metadata", "tool_call", "tool_result", "table_data", "done"]
+    assert events[1].content["tool"] == "previous_result_transform"
+    assert db.updates[-1][BiAgentRun.status] == "completed"
+    assert db.updates[-1][BiAgentRun.response_type] == "query_result"
+    assert session_mgr.messages[-1]["response_type"] == "query_result"
+    data = session_mgr.messages[-1]["response_data"]
+    assert data["source"] == "previous_result_transform"
+    assert data["fields"] == ["Period", "Revenue", "环比金额", "环比金额变化率"]
+    assert data["rows"][1] == ["2026-02", 125.0, 25.0, 0.25]
+    assert data["table_display"]["columns"][-1]["format"] == "percent"
 
 
 @pytest.mark.asyncio

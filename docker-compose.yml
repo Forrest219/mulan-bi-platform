@@ -54,6 +54,8 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       TABLEAU_MCP_GATEWAY_URL: http://tableau-mcp-gateway:3928/tableau-mcp
       TABLEAU_MCP_SERVER_URL: http://tableau-mcp-gateway:3928/tableau-mcp
+      DATA_AGENT_CHAIN_MODE: mcp_proxy
+      DATA_AGENT_MCP_PROXY_ENABLED: "true"
       TZ: Asia/Shanghai
     depends_on:
       postgres:
@@ -81,6 +83,8 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       TABLEAU_MCP_GATEWAY_URL: http://tableau-mcp-gateway:3928/tableau-mcp
       TABLEAU_MCP_SERVER_URL: http://tableau-mcp-gateway:3928/tableau-mcp
+      DATA_AGENT_CHAIN_MODE: mcp_proxy
+      DATA_AGENT_MCP_PROXY_ENABLED: "true"
       TZ: Asia/Shanghai
     depends_on:
       backend:

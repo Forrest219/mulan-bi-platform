@@ -37,6 +37,7 @@ class ToolContext:
     tenant_id: Optional[str] = None
     selected_datasource_luid: Optional[str] = None
     datasource_name: Optional[str] = None
+    user_role: Optional[str] = None
 
 
 @dataclass

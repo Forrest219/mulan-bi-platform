@@ -6,12 +6,13 @@ yields raw AgentEvent objects (SSE serialisation is the caller's job).
 No web framework dependency: only SQLAlchemy + pure Python.
 """
 
+import asyncio
 import logging
 import json
 import re
 import time
 import uuid as uuid_lib
-from typing import AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from sqlalchemy import func as sa_func
 from sqlalchemy.orm import Session
@@ -24,6 +25,7 @@ from .intent_classifier import IntentClassification, classify_intent
 from .mcp_first_main import run_mcp_first_main_path
 from .mcp_proxy_main import run_mcp_proxy_main_path
 from .models import BiAgentRun, BiAgentStep
+from .result_transform import can_transform_previous_result, transform_previous_result
 from .response import AgentEvent, normalize_table_response, table_data_event_from_response
 from .router_guardrail import RouteDecision
 from .session import AgentSession, SessionManager
@@ -68,6 +70,7 @@ async def run_agent(
     table_response: Optional[dict] = None
     table_data_emitted = False
     run_id: Optional[uuid_lib.UUID] = None
+    step_number = 0
 
     try:
         # Create bi_agent_runs record
@@ -92,8 +95,6 @@ async def run_agent(
             },
         )
 
-        step_number = 0
-
         def _elapsed_ms(start: float, end: Optional[float] = None) -> int:
             return max(0, int(((end or time.monotonic()) - start) * 1000))
 
@@ -115,9 +116,116 @@ async def run_agent(
         )
         db.commit()
 
-        if enforce_controlled_data_path and intent_result.is_data_intent:
+        previous_result = resolve_recent_query_result(session_mgr, session, current_user["id"])
+        if can_transform_previous_result(question, previous_result):
+            transform_start = time.monotonic()
+            tools_used.append("previous_result_transform")
+            steps_count += 1
+            step_number += 1
+            tool_params = {"source": "previous_query_result", "operation": "table_transform"}
+            db.add(BiAgentStep(
+                run_id=run_id,
+                step_number=step_number,
+                step_type="tool_call",
+                tool_name="previous_result_transform",
+                tool_params=tool_params,
+                execution_time_ms=0,
+            ))
+            db.commit()
+            yield AgentEvent(type="tool_call", content={"tool": "previous_result_transform", "params": tool_params})
+
+            response_data = transform_previous_result(question, previous_result)
+            event_at = time.monotonic()
+            step_number += 1
+            db.add(BiAgentStep(
+                run_id=run_id,
+                step_number=step_number,
+                step_type="tool_result",
+                tool_name="previous_result_transform",
+                tool_result_summary=str({
+                    "source": response_data.get("source"),
+                    "fields": response_data.get("fields"),
+                    "row_count": len(response_data.get("rows") or []),
+                    "transformations": response_data.get("transformations"),
+                })[:500],
+                execution_time_ms=_elapsed_ms(transform_start, event_at),
+            ))
+            db.commit()
+            yield AgentEvent(type="tool_result", content={
+                "tool": "previous_result_transform",
+                "result": {
+                    "success": True,
+                    "data": {
+                        "source": response_data.get("source"),
+                        "field_count": len(response_data.get("fields") or []),
+                        "row_count": len(response_data.get("rows") or []),
+                        "transformations": response_data.get("transformations") or [],
+                    },
+                },
+            })
+
+            row_count = len(response_data.get("rows") or [])
+            transform_count = len(response_data.get("transformations") or [])
+            answer_text = f"已基于上一条结果追加 {transform_count} 个派生列，返回 {row_count} 行结果。"
+            execution_time_ms = _elapsed_ms(total_start)
+            step_number += 1
+            db.add(BiAgentStep(
+                run_id=run_id,
+                step_number=step_number,
+                step_type="answer",
+                tool_name="answer_renderer",
+                content=answer_text[:500],
+                execution_time_ms=_elapsed_ms(event_at),
+            ))
+            db.query(BiAgentRun).filter(BiAgentRun.id == run_id).update(
+                {
+                    BiAgentRun.status: "completed",
+                    BiAgentRun.steps_count: steps_count,
+                    BiAgentRun.tools_used: tools_used,
+                    BiAgentRun.response_type: "query_result",
+                    BiAgentRun.execution_time_ms: execution_time_ms,
+                    BiAgentRun.completed_at: sa_func.now(),
+                },
+                synchronize_session=False,
+            )
+            db.commit()
+            session_mgr.persist_message(
+                session=session,
+                role="assistant",
+                content=answer_text,
+                response_type="query_result",
+                response_data=response_data,
+                tools_used=tools_used,
+                trace_id=trace_id,
+                steps_count=steps_count,
+                execution_time_ms=execution_time_ms,
+                sources_count=1 if context.connection_id else 0,
+                top_sources=[context.connection_name] if context.connection_id and context.connection_name else [],
+            )
+            normalized = normalize_table_response(response_data)
+            if normalized is not None:
+                yield AgentEvent(type="table_data", content=table_data_event_from_response(normalized))
+            yield AgentEvent(type="done", content={
+                "answer": answer_text,
+                "trace_id": trace_id,
+                "run_id": str(run_id),
+                "tools_used": tools_used,
+                "response_type": "query_result",
+                "response_data": response_data,
+                "steps_count": steps_count,
+                "execution_time_ms": execution_time_ms,
+                "sources_count": 1 if context.connection_id else 0,
+                "top_sources": [context.connection_name] if context.connection_id and context.connection_name else [],
+            })
+            return
+
+        chain_selection = select_data_agent_chain()
+        controlled_asset_intent = chain_selection.is_mcp_proxy and (
+            intent_result.is_asset_inventory
+            or bool(route_decision and route_decision.is_asset_question)
+        )
+        if enforce_controlled_data_path and (intent_result.is_data_intent or controlled_asset_intent):
             followup_context = resolve_recent_query_context(session_mgr, session, current_user["id"])
-            chain_selection = select_data_agent_chain()
             if chain_selection.is_fallback:
                 logger.warning("Data Agent chain mode fallback: %s", chain_selection.trace_detail())
                 fallback_message = chain_selection.fallback_message()
@@ -202,10 +310,20 @@ async def run_agent(
                     data = last_tool_result.get("data") if isinstance(last_tool_result, dict) else None
                     if table_response is not None:
                         response_data = table_response
-                        response_type = "table"
+                        response_type = "query_result" if chain_selection.is_mcp_proxy else "table"
                     elif isinstance(data, dict):
-                        response_data = data
-                        response_type = "table" if "rows" in data and "fields" in data else "text"
+                        if isinstance(data.get("response_type"), str) and isinstance(data.get("response_data"), dict):
+                            response_type = data["response_type"]
+                            response_data = data["response_data"]
+                        else:
+                            response_data = data
+                            has_table_shape = "rows" in data and "fields" in data
+                            if chain_selection.is_mcp_proxy and has_table_shape:
+                                response_type = "query_result"
+                            elif has_table_shape:
+                                response_type = "table"
+                            else:
+                                response_type = "text"
                     step_number += 1
                     db.add(BiAgentStep(
                         run_id=run_id,
@@ -580,6 +698,59 @@ async def run_agent(
 
                 yield AgentEvent(type="error", content=error_content)
 
+    except asyncio.CancelledError:
+        logger.info("Agent runner cancelled trace_id=%s run_id=%s", trace_id, run_id)
+        if run_id:
+            try:
+                execution_time_ms = max(0, int((time.monotonic() - total_start) * 1000))
+                message = "请求连接已中断，Agent 运行已取消。"
+                error_content = {
+                    "error_code": "AGENT_CANCELLED",
+                    "message": message,
+                    "error_type": "client_disconnected",
+                    "retryable": True,
+                }
+                step = BiAgentStep(
+                    run_id=run_id,
+                    step_number=step_number + 1,
+                    step_type="error",
+                    content=message[:500],
+                    execution_time_ms=execution_time_ms,
+                )
+                db.add(step)
+                db.query(BiAgentRun).filter(BiAgentRun.id == run_id).update(
+                    {
+                        BiAgentRun.status: "failed",
+                        BiAgentRun.error_code: "AGENT_CANCELLED",
+                        BiAgentRun.steps_count: steps_count,
+                        BiAgentRun.tools_used: tools_used if tools_used else None,
+                        BiAgentRun.response_type: "error",
+                        BiAgentRun.execution_time_ms: execution_time_ms,
+                        BiAgentRun.completed_at: sa_func.now(),
+                    },
+                    synchronize_session=False,
+                )
+                db.commit()
+                try:
+                    session_mgr.persist_message(
+                        session=session,
+                        role="assistant",
+                        content=message,
+                        response_type="error",
+                        response_data=error_content,
+                        tools_used=tools_used if tools_used else None,
+                        trace_id=trace_id,
+                        steps_count=steps_count,
+                        execution_time_ms=execution_time_ms,
+                        sources_count=1 if context.connection_id else 0,
+                        top_sources=[context.connection_name] if context.connection_id and context.connection_name else [],
+                    )
+                except Exception:
+                    logger.warning("Failed to persist assistant cancellation message")
+            except Exception:
+                logger.warning("Failed to update run status on cancellation", exc_info=True)
+        raise
+
     except Exception as e:
         logger.exception("Agent runner exception")
         if run_id:
@@ -693,6 +864,32 @@ def resolve_recent_query_context(session_mgr: SessionManager, session: AgentSess
         }
         context.update(datasource_context)
         return context
+    return {}
+
+
+def resolve_recent_query_result(session_mgr: SessionManager, session: AgentSession, user_id: int) -> Dict[str, Any]:
+    """Return the most recent assistant query_result/table response data."""
+
+    try:
+        messages = session_mgr.get_conversation_messages(
+            conversation_id=session.conversation_id,
+            user_id=user_id,
+            limit=20,
+        )
+    except Exception:
+        return {}
+
+    for message in reversed(messages):
+        if getattr(message, "role", None) != "assistant":
+            continue
+        response_type = str(getattr(message, "response_type", "") or "")
+        if response_type not in {"query_result", "table"}:
+            continue
+        response_data = getattr(message, "response_data", None)
+        if not isinstance(response_data, dict):
+            continue
+        if isinstance(response_data.get("fields"), list) and isinstance(response_data.get("rows"), list):
+            return dict(response_data)
     return {}
 
 

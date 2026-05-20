@@ -21,6 +21,11 @@ import ThinkingBlock from '../../pages/home/components/ThinkingBlock';
 import AnalysisProcessBlock from '../../pages/home/components/AnalysisProcessBlock';
 import QueryResultTable from './QueryResultTable';
 import QueryResultChart from './QueryResultChart';
+import AgentStructuredResponse from './AgentStructuredResponse';
+import {
+  shouldRenderStructuredResponse,
+  shouldSuppressAnswerMarkdown,
+} from './AgentStructuredResponse.utils';
 import type { TableData, ChartData } from '../../hooks/useStreamingChat';
 import type { AgentExplainability } from '../../api/agent';
 import { searchAssets } from '../../api/tableau';
@@ -297,6 +302,10 @@ export interface MessageBubbleProps {
   explainability?: AgentExplainability;
   /** trace_id for feedback/rating (Spec 36 §5) */
   traceId?: string;
+  /** response_type from done event — used by generic structured renderer */
+  responseType?: string | null;
+  /** response_data from done event — used by generic structured renderer */
+  responseData?: unknown;
   /** Structured table data from table_data SSE event */
   tableData?: TableData;
   /** Structured chart data from chart_data SSE event */
@@ -317,6 +326,8 @@ export default function MessageBubble({
   errorHint,
   thinking,
   explainability,
+  responseType,
+  responseData,
   tableData,
   chartData,
   sourcesCount,
@@ -390,12 +401,23 @@ export default function MessageBubble({
             {(() => {
               const showThought = thinking ?? (parseThought(content).thought ?? null);
               const bodyText = thinking ? content : parseThought(content).body;
+              const hasStructuredResponse = shouldRenderStructuredResponse(responseType, responseData);
+              const suppressMarkdown = shouldSuppressAnswerMarkdown(responseType, responseData);
               return (
                 <>
                   {showThought != null && <ThinkingBlock content={showThought} />}
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                    {bodyText}
-                  </ReactMarkdown>
+                  {!suppressMarkdown && (
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                      {bodyText}
+                    </ReactMarkdown>
+                  )}
+                  {hasStructuredResponse && (
+                    <AgentStructuredResponse
+                      responseType={responseType}
+                      responseData={responseData}
+                      tableDataAlreadyRendered={!!tableData}
+                    />
+                  )}
                   {tableData && <QueryResultTable data={tableData} />}
                   {chartData && <QueryResultChart data={chartData} />}
                   <AnalysisProcessBlock explainability={explainability} />

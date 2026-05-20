@@ -11,6 +11,7 @@
 """
 
 import asyncio
+from contextlib import suppress
 import json
 import logging
 import time
@@ -41,7 +42,8 @@ from services.data_agent.models import (
     BiAgentStep,
     BiAgentFeedback,
 )
-from services.data_agent.runner import resolve_recent_schema_asset_name, run_agent
+from services.data_agent.chain_selector import select_data_agent_chain
+from services.data_agent.runner import run_agent
 from services.data_agent.response import normalize_table_response, table_data_event_from_response
 from services.data_agent.session import SessionManager, AgentSession
 from services.data_agent.tool_base import ToolContext, ToolRegistry
@@ -61,7 +63,6 @@ from services.agent.dual_write import (
     check_and_trigger_auto_rollback,
 )
 from services.data_agent.intent import IntentRecognizer
-from services.data_agent.intent.keyword_match import is_direct_query
 from services.skills.service import get_active_skill_version
 
 logger = logging.getLogger(__name__)
@@ -189,25 +190,51 @@ def _require_agent_role(role: str) -> None:
         )
 
 
-# ─── Fast-path 可观测性事件 ───────────────────────────────────────────
-_FAST_ATTEMPTED = "FAST_ATTEMPTED"   # 快通尝试
-_FAST_FAILED = "FAST_FAILED"          # 快通失败（fallback 到 ReAct）
-_FAST_SUCCESS = "FAST_SUCCESS"        # 快通成功
-_SLOW_FALLBACK = "SLOW_FALLBACK"     # 跳过快通或失败后走 ReAct
-
-# 仅对可恢复错误触发 fallback（不走快通的场景不算错）
-# 不包括：NLQ_009/010/011（认证/权限/限流），这些走快通反而会漏安全问题
-_FAST_RECOVERABLE_ERRORS = frozenset([
-    "NLQ_006",   # VizQL 执行失败
-    "NLQ_007",   # 查询超时
-    "NLQ_008",   # 数据源路由失败
-    "MCP_010",   # MCP 连接异常
-    "QUERY_001", # 字段不匹配
-])
-
-
 def _sse_data(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+_SSE_STREAM_DONE = object()
+_SSE_HEARTBEAT_INTERVAL_SECONDS = 15.0
+
+
+async def _stream_with_keepalive(
+    source: AsyncGenerator[str, None],
+    *,
+    heartbeat_interval_seconds: float = _SSE_HEARTBEAT_INTERVAL_SECONDS,
+) -> AsyncGenerator[str, None]:
+    """Proxy an SSE async generator and emit comment heartbeats during long awaits."""
+
+    queue: asyncio.Queue[object] = asyncio.Queue()
+
+    async def _produce() -> None:
+        try:
+            async for chunk in source:
+                await queue.put(chunk)
+        except BaseException as exc:
+            await queue.put(exc)
+        finally:
+            await queue.put(_SSE_STREAM_DONE)
+
+    producer = asyncio.create_task(_produce())
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=heartbeat_interval_seconds)
+            except asyncio.TimeoutError:
+                yield f": ping {int(time.time())}\n\n"
+                continue
+
+            if item is _SSE_STREAM_DONE:
+                break
+            if isinstance(item, BaseException):
+                raise item
+            yield str(item)
+    finally:
+        if not producer.done():
+            producer.cancel()
+            with suppress(asyncio.CancelledError):
+                await producer
 
 
 def _intent_explainability_payload(route_decision) -> dict:
@@ -536,376 +563,6 @@ def _write_standard_fallback_run(
     )
 
 
-async def try_fast_mcp_stream(
-    question: str,
-    context: ToolContext,
-    current_user: dict,
-    req_connection_id: Optional[int],
-    db: Session,
-    session,  # AgentSession from session_mgr
-    session_mgr,  # SessionManager instance
-    datasource_name_hint: Optional[str] = None,
-) -> Optional[tuple[Optional[uuid_lib.UUID], AsyncGenerator[str, None]]]:
-    """
-    快通 MCP 路径：绕过 ReAct 引擎，直接 route → VizQL → MCP 查询 → SSE。
-
-    返回 None 表示不满足快通条件（应 fallback 到 run_agent）。
-    返回 (run_id, generator) 时 generator 正常时应 yield 完整 SSE 事件流（含 done / error）。
-
-    可恢复错误（_FAST_RECOVERABLE_ERRORS）不向上抛，直接返回 None 触发 fallback。
-    其他错误（认证/权限/限流/未知）向上抛，不触发 fallback。
-    """
-    from services.llm.nlq_service import route_datasource, get_datasource_fields_cached, NLQError
-    from services.llm.query_executor import QueryExecutorError
-    from services.tableau.mcp_client import TableauMCPError
-    from services.data_agent.tools.query_tool import _lookup_datasource_by_name
-
-    fast_start = time.monotonic()
-    logger.info("[FAST_ATTEMPTED] question=%s, trace=%s", question[:80], context.trace_id)
-
-    # 1. 数据源路由（已有 Redis 缓存，<10ms）
-    try:
-        ds_info = (
-            _lookup_datasource_by_name(datasource_name_hint, connection_id=req_connection_id)
-            if datasource_name_hint
-            else None
-        ) or route_datasource(question, connection_id=req_connection_id)
-    except Exception as e:
-        logger.warning("[FAST_FAILED] route_datasource error=%s, trace=%s", e, context.trace_id)
-        # 路由异常走 ReAct，不算快通失败
-        return None
-
-    if not ds_info:
-        logger.info("[SLOW_FALLBACK] route_datasource returned None, trace=%s", context.trace_id)
-        return None
-    route_ms = max(0, int((time.monotonic() - fast_start) * 1000))
-
-    datasource_luid = ds_info.get("luid")
-    datasource_name = ds_info.get("name")
-    asset_id = ds_info.get("asset_id")
-
-    if not datasource_luid:
-        logger.info("[SLOW_FALLBACK] no datasource_luid, trace=%s", context.trace_id)
-        return None
-
-    # 2. 获取字段列表（Redis 缓存）
-    field_captions: List[str] = []
-    try:
-        field_captions = get_datasource_fields_cached(asset_id) if asset_id else []
-    except Exception:
-        pass
-
-    # 3. 构建直接 VizQL（无 LLM，<1ms）
-    from services.data_agent.tools.query_tool import (
-        _build_customer_churn_vizqls,
-        _build_direct_vizql,
-        _calculate_customer_churn,
-        _execute_query_with_date_fallback,
-        _normalize_result_table,
-        _postprocess_rows,
-    )
-
-    churn_plan = _build_customer_churn_vizqls(question, field_captions)
-    vizql_json = None if churn_plan else _build_direct_vizql(question, field_captions)
-    if not churn_plan and not vizql_json:
-        logger.info("[SLOW_FALLBACK] deterministic query builder returned None, trace=%s", context.trace_id)
-        return None
-
-    # 4. 通过 execute_query 走 MCP 执行（阻塞，~300-800ms）
-    query_start = time.monotonic()
-    try:
-        if churn_plan:
-            base_result, _base_vizql, base_substitutions = await _execute_query_with_date_fallback(
-                datasource_luid=datasource_luid,
-                vizql_json=churn_plan["base_vizql"],
-                connection_id=req_connection_id,
-                question=question,
-                limit=1000,
-            )
-            base_fields, base_rows = _normalize_result_table(base_result)
-            recent_substitutions: List[Dict[str, str]] = []
-            if base_rows:
-                recent_result, _recent_vizql, recent_substitutions = await _execute_query_with_date_fallback(
-                    datasource_luid=datasource_luid,
-                    vizql_json=churn_plan["recent_vizql"],
-                    connection_id=req_connection_id,
-                    question=question,
-                    limit=1000,
-                )
-                recent_fields, recent_rows = _normalize_result_table(recent_result)
-            else:
-                recent_fields, recent_rows = [churn_plan["customer_field"]], []
-            response_data = _calculate_customer_churn(
-                customer_field=churn_plan["customer_field"],
-                year=churn_plan["year"],
-                base_fields=base_fields,
-                base_rows=base_rows,
-                recent_fields=recent_fields,
-                recent_rows=recent_rows,
-            )
-            response_data.update({
-                "intent": "customer_churn",
-                "confidence": 0.95,
-                "datasource_name": datasource_name,
-            })
-            field_substitutions = base_substitutions + recent_substitutions
-            if field_substitutions:
-                response_data["field_substitutions"] = field_substitutions
-            fields = response_data["fields"]
-            rows = response_data["rows"]
-        else:
-            result, _effective_vizql, field_substitutions = await _execute_query_with_date_fallback(
-                datasource_luid=datasource_luid,
-                vizql_json=vizql_json,
-                connection_id=req_connection_id,
-                question=question,
-                limit=1000,
-            )
-            fields, rows = _normalize_result_table(result)
-            processed = _postprocess_rows(question, fields, rows)
-            fields = processed.get("fields", fields)
-            rows = processed.get("rows", rows)
-            response_data = {"fields": fields, "rows": rows}
-            if field_substitutions:
-                response_data["field_substitutions"] = field_substitutions
-            response_data.update({k: v for k, v in processed.items() if k not in {"fields", "rows"}})
-        response_data["datasource_name"] = datasource_name
-        response_data["datasource_luid"] = datasource_luid
-        normalized_response_data = normalize_table_response(response_data)
-        if normalized_response_data is None:
-            logger.info("[SLOW_FALLBACK] table response normalization failed, trace=%s", context.trace_id)
-            return None
-        response_data = normalized_response_data
-        fields = response_data["fields"]
-        rows = response_data["rows"]
-    except (TableauMCPError, QueryExecutorError, NLQError) as e:
-        code = getattr(e, "code", None) or (getattr(e, "error_code", None) if hasattr(e, "error_code") else None)
-        if code in _FAST_RECOVERABLE_ERRORS:
-            logger.warning(
-                "[FAST_FAILED] recoverable error code=%s message=%s trace=%s",
-                code, getattr(e, "message", str(e)), context.trace_id,
-            )
-            return None
-        # 认证/权限/限流错误不 fallback，直接抛给上层
-        raise
-    except Exception as e:
-        logger.warning("[FAST_FAILED] execute_query unexpected error=%s trace=%s", e, context.trace_id)
-        return None
-    query_ms = max(0, int((time.monotonic() - query_start) * 1000))
-
-    logger.info("[FAST_SUCCESS] datasource=%s rows=%d trace=%s", datasource_luid, len(rows), context.trace_id)
-
-    run_id: Optional[uuid_lib.UUID] = None
-
-    async def fast_event_generator() -> AsyncGenerator[str, None]:
-        # fast_event_generator accesses run_id from enclosing function scope
-        t0 = time.monotonic()
-        # 构造回答文本（L2 修复：使用 fields 和 datasource_name）
-        answer_text = _build_fast_answer(question, fields, rows, datasource_name or datasource_luid, response_data)
-        answer_ms = max(0, int((time.monotonic() - t0) * 1000))
-
-        # H4 修复：持久化 assistant 回复到会话历史
-        try:
-            session_mgr.persist_message(
-                session=session,
-                role="assistant",
-                content=answer_text,
-                trace_id=context.trace_id,
-                response_type="table",
-                response_data=response_data,
-                tools_used=["query"],
-                steps_count=3,
-            )
-        except Exception as e:
-            logger.warning("[FAST] persist_message assistant failed: %s", e)
-
-        # H5 修复：写入 BiAgentRun 记录（可观测性 + 反馈可用）
-        # 使用 ORM 实际字段：question/status/steps_count/tools_used/response_type/execution_time_ms
-        try:
-            run_id = uuid_lib.uuid4()
-            with get_db_context() as _db:
-                total_ms = max(0, int((time.monotonic() - fast_start) * 1000))
-                run = BiAgentRun(
-                    id=run_id,
-                    conversation_id=uuid_lib.UUID(context.session_id),
-                    user_id=current_user["id"],
-                    connection_id=req_connection_id,
-                    question=question,
-                    status="completed",
-                    steps_count=3,
-                    tools_used=["query"],
-                    response_type="table",
-                    execution_time_ms=total_ms,
-                    completed_at=func.now(),
-                )
-                _db.add(run)
-                _db.flush()
-                _db.add_all([
-                    BiAgentStep(
-                        run_id=run_id,
-                        step_number=1,
-                        step_type="tool_call",
-                        tool_name="query",
-                        tool_params={"question": question},
-                        execution_time_ms=route_ms,
-                    ),
-                    BiAgentStep(
-                        run_id=run_id,
-                        step_number=2,
-                        step_type="tool_result",
-                        tool_name="query",
-                        tool_result_summary=str({"fields": fields, "rows": rows[:3]})[:500],
-                        execution_time_ms=query_ms,
-                    ),
-                    BiAgentStep(
-                        run_id=run_id,
-                        step_number=3,
-                        step_type="answer",
-                        content=answer_text[:500],
-                        execution_time_ms=answer_ms,
-                    ),
-                ])
-                _db.commit()
-        except Exception as e:
-            logger.warning("[FAST] BiAgentRun write failed: %s", e)
-            run_id = None
-
-        # 流式输出 table_data
-        yield _sse_data(table_data_event_from_response(response_data))
-        # 流式输出 token
-        for char in answer_text:
-            yield f"data: {json.dumps({'type': 'token', 'content': char}, ensure_ascii=False)}\n\n"
-            await asyncio.sleep(0.01)
-        # done（L1 修复：直接使用外层 run_id 变量，不再用 dir() 检测）
-        explainability = _explainability_snapshot(
-            trace_id=context.trace_id,
-            run_id=str(run_id) if run_id else "",
-            route_decision=classify_homepage_question(question),
-            response_type="table",
-            row_count=len(rows),
-        )
-        done_payload = json.dumps({
-            'type': 'done',
-            'answer': answer_text,
-            'trace_id': context.trace_id,
-            'run_id': str(run_id) if run_id else '',
-            'tools_used': ['query'],
-            'response_type': 'table',
-            'response_data': response_data,
-            'steps_count': 3,
-            'execution_time_ms': int((time.monotonic() - t0) * 1000),
-            'sources_count': 0,
-            'top_sources': [],
-            'explainability': explainability,
-        }, ensure_ascii=False)
-        yield f"data: {done_payload}\n\n"
-        # 可观测性日志（log_nlq_query）
-        log_nlq_query(
-            user_id=current_user.get("id"),
-            question=question,
-            intent="data_query",
-            datasource_luid=datasource_luid,
-            response_type="table",
-            execution_time_ms=int((time.monotonic() - t0) * 1000),
-            error_code=None,
-        )
-
-    return (run_id, fast_event_generator())
-
-
-def _build_fast_answer(
-    question: str,
-    fields: List,
-    rows: List,
-    datasource_name: str,
-    response_data: Optional[dict] = None,
-) -> str:
-    """根据查询结果生成自然语言回答。"""
-    response_data = response_data or {}
-    substitution_note = _format_field_substitution_note(response_data.get("field_substitutions"))
-    churn = response_data.get("customer_churn")
-    if isinstance(churn, dict):
-        count = int(churn.get("churned_customer_count") or 0)
-        definition = churn.get("definition") or "指定基准期有订单，但最近一年没有订单"
-        if count == 0:
-            return f"{substitution_note}没有找到符合「{definition}」定义的流失客户。"
-        preview = ", ".join(str(row[0]) for row in rows[:10] if row)
-        suffix = f"（共 {count} 个）" if count > 10 else ""
-        return f"{substitution_note}符合「{definition}」定义的流失客户为：{preview}{suffix}。"
-
-    increasing = response_data.get("monotonic_increasing")
-    if isinstance(increasing, list) and ("一直在涨" in question or "持续增长" in question):
-        matched = [
-            str(item.get("dimension"))
-            for item in increasing
-            if isinstance(item, dict) and item.get("is_increasing") is True and item.get("dimension") is not None
-        ]
-        if matched:
-            return f"{substitution_note}「{question}」中符合利润持续上涨条件的渠道是：{', '.join(matched)}。"
-        return f"{substitution_note}「{question}」中没有找到利润持续上涨的渠道。"
-
-    if not rows:
-        return f"{substitution_note}没有找到符合「{question}」的数据。"
-    enum_answer = _format_dimension_enum_answer(fields, rows, substitution_note)
-    if enum_answer:
-        return enum_answer
-    row_count = len(rows)
-    if row_count == 1:
-        vals = ", ".join(str(r) for r in rows[0] if str(r) not in ('', 'None'))
-        return f"{substitution_note}「{question}」的结果是：{vals}。"
-    # 前3行预览
-    preview = "; ".join(
-        ", ".join(str(v) for v in row[:3] if str(v) not in ('', 'None'))
-        for row in rows[:3]
-    )
-    more = f"（共 {row_count} 条）" if row_count > 3 else ""
-    return f"{substitution_note}「{question}」共有 {row_count} 条结果，前几名为：{preview}{more}。"
-
-
-def _format_dimension_enum_answer(fields: List, rows: List, prefix: str = "") -> Optional[str]:
-    if len(fields) != 1:
-        return None
-    field_name = str(fields[0].get("name") if isinstance(fields[0], dict) else fields[0])
-    if not field_name or any(marker in field_name.upper() for marker in ("SUM(", "AVG(", "COUNT", "MIN(", "MAX(")):
-        return None
-
-    values = []
-    seen = set()
-    for row in rows:
-        if not isinstance(row, list) or not row:
-            continue
-        value = row[0]
-        if value is None or str(value) == "":
-            continue
-        key = str(value)
-        if key in seen:
-            continue
-        seen.add(key)
-        values.append(key)
-    if not values:
-        return None
-
-    preview = "、".join(values[:20])
-    suffix = f"（共 {len(values)} 个）" if len(values) > 20 else ""
-    return f"{prefix}「{field_name}」共有 {len(values)} 个取值：{preview}{suffix}。"
-
-
-def _format_field_substitution_note(field_substitutions: Any) -> str:
-    if not isinstance(field_substitutions, list) or not field_substitutions:
-        return ""
-    parts = []
-    for item in field_substitutions:
-        if not isinstance(item, dict):
-            continue
-        requested = item.get("requested")
-        used = item.get("used")
-        if requested and used:
-            parts.append(f"「{requested}」不可用，已改用「{used}」")
-    if not parts:
-        return ""
-    return "注意：" + "；".join(parts) + "统计。"
-
-
 def _validate_connection_access(
     connection_id: Optional[int],
     current_user: dict,
@@ -1114,6 +771,7 @@ async def agent_stream(
         tenant_id=str(current_user["tenant_id"]) if current_user.get("tenant_id") else None,
         selected_datasource_luid=req.datasource_luid,
         datasource_name=req.datasource_name,
+        user_role=current_user.get("role"),
     )
 
     # 构建丰富的会话上下文（工具可通过此获取用户信息、数据源列表等）
@@ -1200,10 +858,19 @@ async def agent_stream(
 
         # ── Deterministic route：稳定回答连接 schema / 数据源清单问题 ────────────
         deterministic_route = detect_deterministic_route(req.question, context.connection_type)
-        if (
+        chain_selection = select_data_agent_chain()
+        schema_inventory_should_defer_to_mcp_proxy = chain_selection.is_mcp_proxy and (
             intent_result.is_asset_inventory
             or route_decision.is_asset_question
             or deterministic_route == "schema_inventory"
+        )
+        if (
+            not schema_inventory_should_defer_to_mcp_proxy
+            and (
+                intent_result.is_asset_inventory
+                or route_decision.is_asset_question
+                or deterministic_route == "schema_inventory"
+            )
         ):
             run_id = uuid_lib.uuid4()
             active_skill_version = get_active_skill_version(db, "schema")
@@ -1367,39 +1034,6 @@ async def agent_stream(
                 )
             return
 
-        # ── 快通 MCP 路径：意图命中的简单问数直连 VizQL ──────────────────────
-        followup_datasource_name = resolve_recent_schema_asset_name(
-            session_mgr,
-            session,
-            current_user["id"],
-        )
-        if route_decision.is_data_question and not intent_result.is_data_intent:
-            logger.info("[FAST_ATTEMPTED] question=%s, trace=%s", req.question[:80], trace_id)
-            run_id: Optional[uuid_lib.UUID] = None
-            try:
-                fast_result = await try_fast_mcp_stream(
-                    question=req.question,
-                    context=context,
-                    current_user=current_user,
-                    req_connection_id=effective_connection_id,
-                    db=db,
-                    session=session,
-                    session_mgr=session_mgr,
-                    datasource_name_hint=followup_datasource_name,
-                )
-                if fast_result is not None:
-                    run_id, fast_gen = fast_result
-                    # 先发 metadata（含 conversation_id），run_id 等 BiAgentRun commit 后再补
-                    yield f"data: {json.dumps({'type': 'metadata', 'conversation_id': conversation_id_str, 'run_id': str(run_id) if run_id else '', 'trace_id': trace_id, 'contract_version': 'p0.1'}, ensure_ascii=False)}\n\n"
-                    async for chunk in fast_gen:
-                        yield chunk
-                    return
-            except Exception:
-                # H2 修复：外层仅捕获已知的、可恢复的错误；
-                # 认证/权限/限流（NLQ_009/010/011）不应 fallback 到 ReAct，
-                # 而是让其继续到标准 SSE 错误处理（event_generator 外层）。
-                logger.warning("[FAST_FALLBACK] 快通异常 fallback 到 run_agent, trace=%s", trace_id)
-
         # ── 标准 ReAct 路径 ──────────────────────────────────────────────────
         async for event in run_agent(
             engine=engine,
@@ -1530,9 +1164,13 @@ async def agent_stream(
                 )
 
     return StreamingResponse(
-        event_generator(),
+        _stream_with_keepalive(event_generator()),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

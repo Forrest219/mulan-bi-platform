@@ -66,6 +66,8 @@ export interface StreamingMessage {
   conversationId?: string;
   /** response_type from done event (e.g. 'text', 'table', 'chart') */
   responseType?: string;
+  /** Structured response_data from done event — rendered by AgentStructuredResponse */
+  responseData?: unknown;
   /** Structured table data from table_data event — rendered as QueryResultTable */
   tableData?: TableData;
   /** Structured chart data from chart_data event — rendered as QueryResultChart */
@@ -176,7 +178,7 @@ export function tableDataFromStructuredPayload(
   payload: unknown,
   responseType?: string,
 ): TableData | undefined {
-  if (responseType !== undefined && responseType !== 'table') return undefined;
+  if (responseType !== undefined && responseType !== 'table' && responseType !== 'query_result') return undefined;
   if (!payload || typeof payload !== 'object') return undefined;
   const data = payload as { fields?: unknown; rows?: unknown; col_types?: unknown; table_display?: unknown };
   if (!Array.isArray(data.fields) || !Array.isArray(data.rows) || data.fields.length === 0 || data.rows.length === 0) {
@@ -438,6 +440,7 @@ export function useStreamingChat(): UseStreamingChatReturn {
                         traceId: event.run_id,
                         executionTimeMs: event.execution_time_ms,
                         responseType: event.response_type,
+                        responseData: event.response_data,
                         tableData: tableData ?? m.tableData,
                         stepsCount: event.steps_count,
                         metadata: { sources_count: event.sources_count, top_sources: event.top_sources },

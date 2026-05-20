@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import MessageBubble from '../../../components/chat/MessageBubble';
 import { MessageActions } from './MessageActions';
+import { tableDataFromStructuredPayload } from '../../../hooks/useStreamingChat';
 import type { StreamingMessage, TableData } from '../../../hooks/useStreamingChat';
 import type { AgentExplainability, McpProxyExplain, McpProxyRepairExplain } from '../../../api/agent';
 
@@ -44,6 +45,7 @@ interface RenderItemOpts {
   errorHint?: string;
   thinking?: string;
   explainability?: AgentExplainability | null;
+  responseType?: string | null;
   responseData?: unknown;
   errorDetail?: unknown;
   traceId?: string | null;
@@ -63,12 +65,12 @@ interface RenderItemOpts {
 function renderMessageItem(opts: RenderItemOpts) {
   const {
     key, role, content, isStreaming, isError, errorCode, errorHint, thinking,
-    explainability, traceId, tableData, chartData, sourcesCount, topSources,
+    explainability, responseType, responseData, traceId, tableData, chartData, sourcesCount, topSources,
     timestamp, conversationId, messageIndex, question, isLastAssistant, onRegenerate, onSourceClick,
   } = opts;
   const mergedExplainability = mergeMcpProxyExplainability(
     explainability ?? undefined,
-    opts.responseData,
+    responseData,
     opts.errorDetail,
   );
   const timeStr = timestamp
@@ -87,6 +89,8 @@ function renderMessageItem(opts: RenderItemOpts) {
         thinking={thinking}
         explainability={mergedExplainability}
         traceId={traceId ?? undefined}
+        responseType={responseType}
+        responseData={responseData}
         tableData={tableData}
         chartData={chartData}
         sourcesCount={sourcesCount ?? undefined}
@@ -119,38 +123,7 @@ function renderMessageItem(opts: RenderItemOpts) {
 }
 
 function histTableData(msg: HistoryMessage): TableData | undefined {
-  if (msg.response_type !== 'table' || !msg.response_data || typeof msg.response_data !== 'object') return undefined;
-  const rd = msg.response_data as { fields?: string[]; rows?: (string | number | null)[][]; table_display?: unknown };
-  const { fields, rows } = rd;
-  if (!fields?.length || !rows?.length) return undefined;
-  const col_types = fields.map((_, i) => {
-    const sample = rows!.slice(0, 5).map((r) => r[i]).filter((v) => v != null && v !== '');
-    return sample.length > 0 && sample.every((v) => typeof v === 'number') ? 'numeric' : 'string';
-  }) as ('numeric' | 'string')[];
-  const table_display = histTableDisplay(rd.table_display);
-  return { fields, rows: rows!, col_types, ...(table_display ? { table_display } : {}) };
-}
-
-function histTableDisplay(value: unknown): TableData['table_display'] | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const columns = (value as { columns?: unknown }).columns;
-  if (!Array.isArray(columns)) return undefined;
-  return {
-    columns: columns
-      .filter((column): column is Record<string, unknown> => !!column && typeof column === 'object')
-      .map((column) => ({
-        key: typeof column.key === 'string' ? column.key : undefined,
-        label: typeof column.label === 'string' ? column.label : undefined,
-        semantic_type: typeof column.semantic_type === 'string' ? column.semantic_type : undefined,
-        value_type: typeof column.value_type === 'string' ? column.value_type : undefined,
-        align: column.align === 'left' || column.align === 'right' || column.align === 'center'
-          ? column.align
-          : undefined,
-        format: column.format === 'plain' || column.format === 'number' || column.format === 'integer' || column.format === 'percent' || column.format === 'date'
-          ? column.format
-          : undefined,
-      })),
-  };
+  return tableDataFromStructuredPayload(msg.response_data, msg.response_type ?? undefined);
 }
 
 function asObject(value: unknown): Record<string, unknown> | undefined {
@@ -310,6 +283,7 @@ function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onR
               errorHint: histErrorHint(msg),
               tableData: histTableData(msg),
               explainability: histExplainability(msg),
+              responseType: msg.response_type,
               responseData: msg.response_data,
               errorDetail: msg.error_detail,
               traceId: msg.run_id ?? msg.trace_id,
@@ -347,6 +321,7 @@ function MessageList({ messages, mockContent, isMockStreaming, lastQuestion, onR
               errorHint: msg.errorHint,
               thinking: msg.thinking,
               explainability: msg.explainability,
+              responseType: msg.responseType,
               responseData: structuredMsg.responseData,
               errorDetail: structuredMsg.errorDetail,
               traceId: msg.traceId,

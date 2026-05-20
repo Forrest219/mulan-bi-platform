@@ -51,6 +51,8 @@ ALLOWED_SORT_DIRECTIONS = frozenset({"ASC", "DESC"})
 MCP_ARGS_GUARDRAIL_PASS = "MCP_ARGS_GUARDRAIL_PASS"
 MCP_ARGS_GUARDRAIL_REJECT = "MCP_ARGS_GUARDRAIL_REJECT"
 MCP_QUERY_DATASOURCE_TOOL_NAME = "query-datasource"
+MCP_LIST_DATASOURCES_TOOL_NAME = "list-datasources"
+MCP_GET_DATASOURCE_METADATA_TOOL_NAME = "get-datasource-metadata"
 DANGEROUS_OPERATIONS = frozenset(
     {
         "delete",
@@ -175,6 +177,31 @@ def query_datasource_tool_schema() -> dict[str, Any]:
             "timeout": {"type": "integer", "minimum": 1},
         },
         "required": ["datasourceLuid", "query"],
+        "additionalProperties": False,
+    }
+
+
+def list_datasources_tool_schema() -> dict[str, Any]:
+    """Return the Tableau MCP list-datasources argument schema enforced here."""
+    return {
+        "type": "object",
+        "properties": {
+            "connectionId": {"type": "integer"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT},
+        },
+        "additionalProperties": False,
+    }
+
+
+def get_datasource_metadata_tool_schema() -> dict[str, Any]:
+    """Return the Tableau MCP get-datasource-metadata argument schema enforced here."""
+    return {
+        "type": "object",
+        "properties": {
+            "datasourceLuid": {"type": "string", "minLength": 1},
+            "connectionId": {"type": "integer"},
+        },
+        "required": ["datasourceLuid"],
         "additionalProperties": False,
     }
 
@@ -341,6 +368,12 @@ def validate_mcp_args(request: McpArgsGuardrailInput) -> McpArgsGuardrailResult:
             "只能执行只读、受控的数据查询。",
         )
 
+    if request.tool_name == MCP_LIST_DATASOURCES_TOOL_NAME:
+        return _validate_list_datasources_args(request, args, repairs)
+
+    if request.tool_name == MCP_GET_DATASOURCE_METADATA_TOOL_NAME:
+        return _validate_get_datasource_metadata_args(request, args, repairs)
+
     permission_error = _validate_datasource_permission(args, request.current_datasource, request.user_context)
     if permission_error:
         return _reject(*permission_error)
@@ -387,6 +420,75 @@ def validate_mcp_args(request: McpArgsGuardrailInput) -> McpArgsGuardrailResult:
 
     try:
         jsonschema.validate(instance=args, schema=request.tool_schema)
+    except jsonschema.ValidationError as exc:
+        return _reject(
+            "MCP_ARGS_SCHEMA_INVALID",
+            f"MCP 参数不符合工具 schema：{exc.message}",
+            "请调整查询参数后再试。",
+        )
+
+    if repairs:
+        return McpArgsGuardrailResult(
+            decision="repair",
+            args=args,
+            repairs=repairs,
+            reject_code=None,
+            message="MCP 参数已完成安全修复。",
+            user_hint="已应用确定性的安全修复后继续查询。",
+        )
+    return McpArgsGuardrailResult(
+        decision="allow",
+        args=args,
+        repairs=[],
+        reject_code=None,
+        message="MCP 参数通过安全检查。",
+        user_hint="",
+    )
+
+
+def _validate_list_datasources_args(
+    request: McpArgsGuardrailInput,
+    args: dict[str, Any],
+    repairs: list[McpArgsRepair],
+) -> McpArgsGuardrailResult:
+    permission_error = _validate_datasource_permission(args, request.current_datasource, request.user_context)
+    if permission_error:
+        return _reject(*permission_error)
+
+    limit_error = _repair_limit(args, request.tool_schema, repairs)
+    if limit_error:
+        return _reject(*limit_error)
+
+    timeout_error = _repair_timeout(args, request.tool_schema, repairs)
+    if timeout_error:
+        return _reject(*timeout_error)
+
+    return _validate_final_schema(args, request.tool_schema, repairs)
+
+
+def _validate_get_datasource_metadata_args(
+    request: McpArgsGuardrailInput,
+    args: dict[str, Any],
+    repairs: list[McpArgsRepair],
+) -> McpArgsGuardrailResult:
+    permission_error = _validate_datasource_permission(args, request.current_datasource, request.user_context)
+    if permission_error:
+        return _reject(*permission_error)
+
+    timeout_error = _repair_timeout(args, request.tool_schema, repairs)
+    if timeout_error:
+        return _reject(*timeout_error)
+
+    return _validate_final_schema(args, request.tool_schema, repairs)
+
+
+def _validate_final_schema(
+    args: dict[str, Any],
+    schema: dict[str, Any],
+    repairs: list[McpArgsRepair],
+) -> McpArgsGuardrailResult:
+    try:
+        jsonschema.validate(instance=args, schema=schema)
     except jsonschema.ValidationError as exc:
         return _reject(
             "MCP_ARGS_SCHEMA_INVALID",

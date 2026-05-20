@@ -1,0 +1,5 @@
+version: 1
+name: mcp-proxy-tableau-metadata-tools
+title: Transparent MCP Proxy + Guardrail
+description: Mulan 首页问答 Transparent MCP Proxy 增量增强方案，支持 Tableau metadata/list/query tools，移除 schema inventory 错误成功降级，增加 table_display 响应契约。
+status: draft

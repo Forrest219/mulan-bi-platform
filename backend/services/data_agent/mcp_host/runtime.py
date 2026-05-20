@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping, MutableSequence
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Optional
+
+from services.data_agent.tableau_mcp_cache import TableauMcpCacheFacade
 
 
 TraceSink = MutableSequence[dict[str, Any]]
@@ -12,6 +15,7 @@ QUERY_DATASOURCE_TOOL = "query-datasource"
 RESOURCE_CAP_MAX_ROWS = 1000
 RESOURCE_CAP_MAX_BYTES = 5 * 1024 * 1024
 RESOURCE_CAP_TIMEOUT_MS = 30000
+_CATALOG_CACHE = TableauMcpCacheFacade()
 
 
 class MCPHostRuntimeError(Exception):
@@ -287,6 +291,27 @@ class MCPHostRuntime:
         self.catalog: Optional[MCPToolCatalog] = None
 
     def load_catalog(self, *, force: bool = False) -> MCPToolCatalog:
+        cache_enabled = _catalog_cache_enabled() and self.connection_id is not None
+        gateway_version = _catalog_gateway_version()
+        if not force and cache_enabled:
+            cached = _CATALOG_CACHE.get_tools_catalog(
+                connection_id=str(self.connection_id),
+                gateway_version=gateway_version,
+            )
+            if cached.cache_hit and isinstance(cached.value, list):
+                self.catalog = MCPToolCatalog(cached.value)
+                _record_trace(
+                    self.trace_events,
+                    "mcp_host.catalog_cache",
+                    {
+                        "cache_hit": True,
+                        "cache_key": cached.cache_key,
+                        "source": cached.source,
+                        "tool_count": len(self.catalog),
+                    },
+                )
+                return self.catalog
+
         if self.catalog is None or force:
             self.catalog = MCPToolCatalog.discover(
                 self.client,
@@ -296,6 +321,24 @@ class MCPHostRuntime:
                 jwt_token=self.jwt_token,
                 trace=self.trace_events,
             )
+            if cache_enabled:
+                cache_key = _CATALOG_CACHE.set_tools_catalog(
+                    connection_id=str(self.connection_id),
+                    gateway_version=gateway_version,
+                    value=self.catalog.as_mcp_tools(),
+                    ttl_seconds=_catalog_cache_ttl_seconds(),
+                    source="mcp",
+                )
+                _record_trace(
+                    self.trace_events,
+                    "mcp_host.catalog_cache",
+                    {
+                        "cache_hit": False,
+                        "cache_key": cache_key,
+                        "source": "mcp",
+                        "tool_count": len(self.catalog),
+                    },
+                )
         return self.catalog
 
     def executor(self) -> MCPToolExecutor:
@@ -322,6 +365,26 @@ class MCPHostRuntime:
 def _input_schema_from_tool(tool: Mapping[str, Any]) -> dict[str, Any]:
     schema = tool.get("inputSchema") or tool.get("input_schema") or {}
     return dict(schema) if isinstance(schema, Mapping) else {}
+
+
+def reset_mcp_host_catalog_cache() -> None:
+    """Clear process-local MCP Host catalog cache for tests and admin refresh."""
+    _CATALOG_CACHE.cache.clear()
+
+
+def _catalog_cache_enabled() -> bool:
+    return str(os.getenv("TABLEAU_MCP_TOOLS_CACHE_ENABLED", "true")).strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _catalog_cache_ttl_seconds() -> int:
+    try:
+        return max(1, int(str(os.getenv("TABLEAU_MCP_TOOLS_CACHE_TTL_SECONDS", "600")).strip()))
+    except (TypeError, ValueError):
+        return 600
+
+
+def _catalog_gateway_version() -> str:
+    return str(os.getenv("TABLEAU_MCP_GATEWAY_VERSION", "default")).strip() or "default"
 
 
 def _missing_required_properties(

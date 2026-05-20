@@ -8,8 +8,16 @@ from services.data_agent.mcp_host import (
     MCPToolCatalog,
     MCPToolExecutor,
 )
+from services.data_agent.mcp_host.runtime import reset_mcp_host_catalog_cache
 
 pytestmark = pytest.mark.skip_db
+
+
+@pytest.fixture(autouse=True)
+def _clear_catalog_cache():
+    reset_mcp_host_catalog_cache()
+    yield
+    reset_mcp_host_catalog_cache()
 
 
 class FakeMCPClient:
@@ -165,7 +173,34 @@ def test_query_datasource_executes_through_generic_runtime_executor():
     ]
     assert [event["event"] for event in runtime.trace_events] == [
         "mcp_host.catalog",
+        "mcp_host.catalog_cache",
         "mcp_host.tool_call",
         "mcp_host.tool_result",
     ]
     json.dumps(runtime.trace_events)
+
+
+def test_runtime_reuses_connection_scoped_catalog_cache_between_sessions():
+    tools = [
+        {
+            "name": "query-datasource",
+            "inputSchema": {
+                "type": "object",
+                "required": ["datasourceLuid", "query"],
+                "properties": {"datasourceLuid": {"type": "string"}, "query": {"type": "object"}},
+            },
+        }
+    ]
+    first_client = FakeMCPClient(tools)
+    first_runtime = MCPHostRuntime(first_client, connection_id=42, datasource_luid="ds-1")
+    assert first_runtime.load_catalog().tool_names() == ["query-datasource"]
+    assert len(first_client.list_calls) == 1
+
+    second_client = FakeMCPClient(tools)
+    second_runtime = MCPHostRuntime(second_client, connection_id=42, datasource_luid="ds-2")
+    assert second_runtime.load_catalog().tool_names() == ["query-datasource"]
+    assert second_client.list_calls == []
+    assert any(
+        event["event"] == "mcp_host.catalog_cache" and event.get("payload", {}).get("cache_hit") is True
+        for event in second_runtime.trace_events
+    )
