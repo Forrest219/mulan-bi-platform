@@ -222,6 +222,17 @@ class TestChatStream:
         assert resp.status_code == 422
 
 
+class TestChatSuggestions:
+    def test_returns_homepage_suggestions(self, admin_client: TestClient):
+        resp = admin_client.get("/api/chat/suggestions")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data["suggestions"], list)
+        assert data["suggestions"]
+        assert {"title", "category"}.issubset(data["suggestions"][0])
+
+
 # ---------------------------------------------------------------------------
 # Test: /api/ask-data
 # ---------------------------------------------------------------------------

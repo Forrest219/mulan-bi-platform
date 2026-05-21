@@ -28,6 +28,21 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 from app.core.config import get_settings as _get_settings
 _INTERNAL_BASE = _get_settings().INTERNAL_API_BASE
 
+_DEFAULT_SUGGESTIONS = [
+    {"title": "你有哪些看板？", "category": "asset"},
+    {"title": "你有哪些数据源？", "category": "asset"},
+    {"title": "哪些子类别近6个月利润率持续下滑？", "category": "trend"},
+    {"title": "对比各区域本季度销售额与利润率排名", "category": "rank"},
+    {"title": "分析各类别近12个月销售额的月度变化趋势", "category": "trend"},
+    {"title": "利润贡献前10的客户是谁？集中度如何？", "category": "rank"},
+]
+
+
+@router.get("/suggestions")
+async def chat_suggestions(_current_user: dict = Depends(get_current_user)):
+    """Return homepage quick-start suggestions used by SuggestionGrid."""
+    return {"suggestions": _DEFAULT_SUGGESTIONS}
+
 
 async def _stream_via_agent_direct(
     question: str,
