@@ -301,6 +301,59 @@ describe('MessageBubble structured agent responses', () => {
     expect(screen.queryByText(/工具暂不可用|未找到匹配资产|出现错误/)).not.toBeInTheDocument();
   });
 
+  it('renders historical query_result table data without duplicating the structured table', () => {
+    render(
+      <MemoryRouter>
+        <MessageBubble
+          role="assistant"
+          content="历史查询已恢复，返回 1 行结果。"
+          responseType="query_result"
+          responseData={{
+            fields: ['指标', '数值'],
+            rows: [['收入', 89.5]],
+          }}
+          tableData={{
+            fields: ['指标', '数值'],
+            rows: [['收入', 89.5]],
+            col_types: ['string', 'numeric'],
+          }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('历史查询已恢复，返回 1 行结果。')).toBeInTheDocument();
+    expect(screen.getAllByRole('table')).toHaveLength(1);
+    expect(screen.getByRole('columnheader', { name: /指标/ })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /数值/ })).toBeInTheDocument();
+    expect(screen.getByText('收入')).toBeInTheDocument();
+    expect(screen.getByText('89.50')).toBeInTheDocument();
+  });
+
+  it('suppresses successful markdown for enveloped structured failures', () => {
+    render(
+      <MemoryRouter>
+        <MessageBubble
+          role="assistant"
+          content="### 查询成功\n查询完成，返回 0 行。"
+          responseData={{
+            response_type: 'tool_unavailable',
+            response_data: {
+              message: 'Tableau MCP 工具暂不可用',
+              user_hint: '请稍后重试或联系管理员检查 MCP Gateway。',
+              tool_name: 'query-datasource',
+            },
+          }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Tableau MCP 工具暂不可用')).toBeInTheDocument();
+    expect(screen.getByText('请稍后重试或联系管理员检查 MCP Gateway。')).toBeInTheDocument();
+    expect(screen.queryByText(/查询成功/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/查询完成/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
   it('renders tool_unavailable as a structured failure instead of a successful result', () => {
     render(
       <MemoryRouter>
