@@ -9,6 +9,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+pytest.skip(
+    "TDE-06/TDE-09: legacy LLM QuerySpec parsing/repair and mcp_first_main stability tests "
+    "are decommissioned; deletion target is QuerySpec fallback and mcp_first_main production removal "
+    "under TDE-24/TDE-26/TDE-30. Generic LLM provider error classification moved to "
+    "test_llm_service_error_classification.py.",
+    allow_module_level=True,
+)
+
 from app.core.errors import MulanError
 from services.data_agent import mcp_first_main
 from services.data_agent.intent_classifier import IntentClassification

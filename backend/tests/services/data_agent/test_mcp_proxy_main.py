@@ -6,6 +6,7 @@ import pytest
 from services.data_agent import mcp_first_main, mcp_proxy_main
 from services.data_agent.intent_classifier import IntentClassification, classify_intent
 from services.data_agent.models import BiAgentRun
+from services.data_agent.tableau_mcp_plan_compiler import CompileResult
 from services.data_agent.response import AgentEvent
 from services.data_agent.router_guardrail import RouteDecision
 from services.data_agent.runner import run_agent
@@ -24,7 +25,18 @@ class _FakeLLM:
         assert purpose == "data_agent_mcp_proxy_args"
         assert "QuerySpec" in system
         self.calls.append({"prompt": prompt, "system": system, "timeout": timeout, "purpose": purpose})
-        return {"content": json.dumps(self.payload, ensure_ascii=False)}
+        if isinstance(self.payload, dict) and {"tool_name", "args", "reason", "confidence", "needs_clarification", "clarification"}.issubset(self.payload):
+            payload = self.payload
+        else:
+            payload = {
+                "tool_name": "query-datasource",
+                "args": self.payload,
+                "reason": "test_plan",
+                "confidence": 0.9,
+                "needs_clarification": False,
+                "clarification": None,
+            }
+        return {"content": json.dumps(payload, ensure_ascii=False)}
 
 
 def _intent(intent: str = "aggregate") -> IntentClassification:
@@ -35,6 +47,20 @@ def _context() -> ToolContext:
     context = ToolContext(session_id="s1", user_id=7, connection_id=2, trace_id="trace-proxy")
     context.datasource_luid = "ds-1"
     context.datasource_name = "测试数据源"
+    context.selected_datasource = {
+        "luid": "ds-1",
+        "name": "测试数据源",
+        "metadata_fields": [
+            {"caption": "Metric A", "name": "metric_a", "role": "MEASURE", "dataType": "REAL", "defaultAggregation": "SUM"},
+            {"caption": "Dimension A", "name": "dimension_a", "role": "DIMENSION", "dataType": "STRING"},
+            {"caption": "销售额", "name": "sales", "role": "MEASURE", "dataType": "REAL", "defaultAggregation": "SUM"},
+            {"caption": "省份", "name": "province", "role": "DIMENSION", "dataType": "STRING"},
+            {"caption": "日期字段", "name": "date_field", "role": "DIMENSION", "dataType": "DATE"},
+            {"caption": "指标一", "name": "metric_one", "role": "MEASURE", "dataType": "REAL", "defaultAggregation": "SUM"},
+            {"caption": "Sales", "name": "sales_en", "role": "MEASURE", "dataType": "REAL", "defaultAggregation": "SUM"},
+            {"caption": "Customer", "name": "customer", "role": "DIMENSION", "dataType": "STRING"},
+        ],
+    }
     return context
 
 
@@ -146,12 +172,26 @@ def _patch_host(monkeypatch, *, query_result=None, query_error=None, actions=Non
     return executor, planner
 
 
+def _patch_proxy_executor(monkeypatch, *, query_result=None, query_error=None):
+    calls = []
+
+    async def _execute(**kwargs):
+        calls.append(kwargs)
+        if query_error is not None:
+            raise RuntimeError(str(query_error.get("error") or query_error.get("error_code") or query_error))
+        if kwargs.get("tool_name") == "get-datasource-metadata":
+            return {"fields": [{"name": "Metric A", "dataType": "REAL"}]}
+        return query_result or {"fields": ["Metric A"], "rows": [[100]]}
+
+    monkeypatch.setattr(mcp_proxy_main, "_execute_mcp_host_tool", _execute)
+    return calls
+
+
 def _forbidden_main_path_markers():
     return {
         "mcp_nl_tool_discovery",
         "tableau_mcp_nl",
         "llm_mcp_args",
-        "mcp_args_guardrail",
         "llm_queryspec",
         "llm_queryspec_repair",
         "queryspec_fallback",
@@ -163,7 +203,7 @@ def _forbidden_main_path_markers():
 
 @pytest.mark.asyncio
 async def test_mcp_proxy_calls_mcp_host_loop_without_llm_args(monkeypatch):
-    executor, planner = _patch_host(monkeypatch)
+    calls = _patch_proxy_executor(monkeypatch)
 
     events = [
         event
@@ -182,21 +222,19 @@ async def test_mcp_proxy_calls_mcp_host_loop_without_llm_args(monkeypatch):
     ]
 
     tool_names = _tool_names(events)
-    assert "mcp_host_catalog" in tool_names
-    assert "mcp_host_planner" in tool_names
+    assert "mcp_args_guardrail" in tool_names
     assert "tableau_mcp" in tool_names
-    assert "mcp_host_final_response" in tool_names
+    assert "mcp_host_planner" not in tool_names
     assert _forbidden_main_path_markers().isdisjoint(tool_names)
-    assert [call["tool_name"] for call in executor.calls] == ["get-datasource-metadata", "query-datasource"]
-    assert planner.calls[0]["previous_response_data"] is None
+    assert [call["tool_name"] for call in calls] == ["query-datasource"]
 
     response_data = next(
         event.content["result"]["data"]
         for event in events
-        if event.type == "tool_result" and event.content.get("tool") == "mcp_host_final_response"
+        if event.type == "tool_result" and event.content.get("tool") == "tableau_mcp"
     )
     assert response_data["chain_mode"] == "mcp_proxy"
-    assert response_data["mcp_host"] is True
+    assert response_data["strategy"] in {"deterministic_plan_compiler", "llm_planner"}
     assert response_data["fields"] == ["Metric A"]
     assert response_data["rows"] == [[100]]
     assert response_data["table_display"]["columns"][0]["semantic_type"] == "metric"
@@ -205,7 +243,7 @@ async def test_mcp_proxy_calls_mcp_host_loop_without_llm_args(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_mcp_proxy_mcp_error_returns_structured_error_without_queryspec(monkeypatch):
-    _patch_host(
+    _patch_proxy_executor(
         monkeypatch,
         query_error={"success": False, "error_code": "MCP_UPSTREAM_ERROR", "error": "upstream unavailable"},
     )
@@ -231,13 +269,24 @@ async def test_mcp_proxy_mcp_error_returns_structured_error_without_queryspec(mo
     tool_names = _tool_names(events)
     assert "tableau_mcp" in tool_names
     assert _forbidden_main_path_markers().isdisjoint(tool_names)
-    assert events[-1].type == "error"
-    assert events[-1].content["error_code"] == "MCP_UPSTREAM_ERROR"
+    assert events[-1].type == "answer"
+    failed_tool = next(
+        event.content["result"]["data"]
+        for event in events
+        if event.type == "tool_result" and event.content.get("tool") == "tableau_mcp"
+    )
+    assert failed_tool["response_type"] == "tool_unavailable"
+    assert failed_tool["response_data"]["error_code"] in {"MCP_PROXY_PLANNED_TOOL_FAILED", "MCP_PROXY_QUERY_FAILED"}
 
 
 @pytest.mark.asyncio
 async def test_mcp_proxy_followup_context_is_passed_to_host_not_used_to_construct_fields(monkeypatch):
-    executor, planner = _patch_host(
+    monkeypatch.setattr(
+        mcp_proxy_main._PLAN_COMPILER,
+        "compile",
+        lambda *args, **kwargs: CompileResult.unsupported(reason="complex_followup"),
+    )
+    calls = _patch_proxy_executor(
         monkeypatch,
         query_result={
             "fields": ["Dimension A", "Year A", "Metric A", "Metric B"],
@@ -272,16 +321,16 @@ async def test_mcp_proxy_followup_context_is_passed_to_host_not_used_to_construc
         )
     ]
 
-    assert executor.calls[1]["tool_name"] == "query-datasource"
-    assert executor.calls[1]["arguments"] == _query_tool_call()["tool_call"]["arguments"]
-    assert planner.calls[0]["previous_response_data"] == {"fields": ["Metric A"], "rows": [[100]]}
+    assert calls[0]["tool_name"] == "query-datasource"
+    assert calls[0]["args"] == llm.payload
     assert events[-1].type == "answer"
-    assert llm.calls == []
+    assert llm.calls
+    assert '"response_data"' in llm.calls[0]["prompt"]
 
 
 @pytest.mark.asyncio
 async def test_mcp_proxy_q1_like_question_enters_host_not_llm_or_queryspec(monkeypatch):
-    _patch_host(monkeypatch)
+    _patch_proxy_executor(monkeypatch)
 
     events = [
         event
@@ -303,7 +352,8 @@ async def test_mcp_proxy_q1_like_question_enters_host_not_llm_or_queryspec(monke
     ]
 
     tool_names = _tool_names(events)
-    assert {"mcp_host_catalog", "mcp_host_planner", "tableau_mcp", "mcp_host_final_response"}.issubset(set(tool_names))
+    assert {"mcp_args_guardrail", "tableau_mcp"}.issubset(set(tool_names))
+    assert "mcp_host_planner" not in tool_names
     assert _forbidden_main_path_markers().isdisjoint(tool_names)
     assert events[-1].type == "answer"
 
@@ -360,8 +410,223 @@ async def test_mcp_proxy_simple_aggregate_uses_deterministic_compiler_not_host_p
 
 
 @pytest.mark.asyncio
+async def test_mcp_proxy_resolved_followup_context_can_fast_path_without_llm(monkeypatch):
+    calls = _patch_proxy_executor(
+        monkeypatch,
+        query_result={"fields": ["Region", "YEAR(Order Date)", "Sales", "Profit"], "rows": [["East", 2024, 100, 20]]},
+    )
+    context = _context()
+    context.selected_datasource = {
+        "luid": "ds-1",
+        "name": "测试数据源",
+        "metadata_fields": [
+            {"caption": "Sales", "name": "sales", "role": "MEASURE", "dataType": "REAL", "defaultAggregation": "SUM"},
+            {"caption": "Profit", "name": "profit", "role": "MEASURE", "dataType": "REAL", "defaultAggregation": "SUM"},
+            {"caption": "Region", "name": "region", "role": "DIMENSION", "dataType": "STRING"},
+            {"caption": "Order Date", "name": "order_date", "role": "DIMENSION", "dataType": "DATE"},
+        ],
+        "queryable_fields": ["Sales", "Profit", "Region", "Order Date"],
+    }
+    llm = _FakeLLM({})
+
+    events = [
+        event
+        async for event in mcp_proxy_main.run_mcp_proxy_main_path(
+            question="continue by year",
+            context=context,
+            intent_result=_intent(),
+            analysis_context={
+                "is_follow_up": True,
+                "requested_metrics": ["Sales", "Profit"],
+                "requested_dimensions": ["Region"],
+                "unresolved_references": False,
+            },
+            llm_service=llm,
+        )
+    ]
+
+    assert llm.calls == []
+    assert calls[0]["tool_name"] == "query-datasource"
+    assert calls[0]["execution_source"] == "compiler_fast_path"
+    assert calls[0]["args"]["query"]["fields"] == [
+        {"fieldCaption": "Region"},
+        {"fieldCaption": "Order Date", "function": "YEAR", "sortDirection": "ASC", "sortPriority": 1},
+        {"fieldCaption": "Sales", "function": "SUM"},
+        {"fieldCaption": "Profit", "function": "SUM"},
+    ]
+    assert "tableau_mcp" in _tool_names(events)
+    assert events[-1].type == "answer"
+
+
+@pytest.mark.asyncio
+async def test_mcp_proxy_regression_multi_metric_question_calls_tableau_mcp(monkeypatch):
+    calls = _patch_proxy_executor(
+        monkeypatch,
+        query_result={
+            "data": [{"SUM(销售额)": 1000, "SUM(利润)": 200, "利润率": 0.2, "客户数": 50, "客单价": 20}],
+        },
+    )
+    context = _context()
+    context.selected_datasource = {
+        "luid": "ds-1",
+        "name": "测试数据源",
+        "metadata_fields": [
+            {"caption": "销售额", "name": "sales", "role": "MEASURE", "dataType": "REAL", "defaultAggregation": "SUM"},
+            {"caption": "利润", "name": "profit", "role": "MEASURE", "dataType": "REAL", "defaultAggregation": "SUM"},
+            {"caption": "利润率", "name": "profit_rate", "role": "MEASURE", "dataType": "REAL", "formula": "[利润]/[销售额]"},
+            {"caption": "客户数", "name": "customer_count", "role": "MEASURE", "dataType": "INTEGER", "defaultAggregation": "COUNTD"},
+            {"caption": "客单价", "name": "aov", "role": "MEASURE", "dataType": "REAL", "formula": "[销售额]/[客户数]"},
+        ],
+        "queryable_fields": ["销售额", "利润", "利润率", "客户数", "客单价"],
+    }
+
+    events = [
+        event
+        async for event in mcp_proxy_main.run_mcp_proxy_main_path(
+            question="整体的销售额、利润、利润率、客户数、客单价是什么样子",
+            context=context,
+            intent_result=_intent(),
+        )
+    ]
+
+    tool_names = _tool_names(events)
+    assert "tableau_mcp" in tool_names
+    assert all(event.content != "匹配到多个可能字段，请选择一个后继续。" for event in events if event.type == "answer")
+    assert calls[0]["tool_name"] == "query-datasource"
+    assert [field["fieldCaption"] for field in calls[0]["args"]["query"]["fields"]] == ["销售额", "利润", "利润率", "客户数", "客单价"]
+    response_data = next(
+        event.content["result"]["data"]
+        for event in events
+        if event.type == "tool_result" and event.content.get("tool") == "tableau_mcp"
+    )
+    assert response_data["response_type"] == "query_result"
+    assert response_data["fields"] == ["SUM(销售额)", "SUM(利润)", "利润率", "客户数", "客单价"]
+    assert response_data["rows"] == [[1000, 200, 0.2, 50, 20]]
+    assert len(response_data["table_display"]["columns"]) == len(response_data["fields"])
+    assert response_data["execution_source"] == "compiler_fast_path"
+
+
+@pytest.mark.asyncio
+async def test_mcp_proxy_unsupported_passes_compiler_advisory_to_planner(monkeypatch):
+    monkeypatch.setattr(
+        mcp_proxy_main._PLAN_COMPILER,
+        "compile",
+        lambda *args, **kwargs: CompileResult.unsupported(
+            reason="complex_question",
+            advisory={
+                "status": "unsupported",
+                "reason": "complex_question",
+                "matched_metrics": [{"fieldCaption": "Metric A"}],
+                "ambiguous_metrics": [],
+                "candidate_dimensions": [],
+                "candidate_filters": [],
+                "rejected_fast_path_reason": "complex_question",
+            },
+        ),
+    )
+    _patch_proxy_executor(monkeypatch)
+    llm = _FakeLLM(
+        {
+            "datasourceLuid": "ds-1",
+            "query": {"fields": [{"fieldCaption": "Metric A", "function": "SUM"}], "filters": []},
+            "limit": 50,
+        }
+    )
+
+    events = [
+        event
+        async for event in mcp_proxy_main.run_mcp_proxy_main_path(
+            question="why Metric A changed",
+            context=_context(),
+            intent_result=_intent(),
+            llm_service=llm,
+        )
+    ]
+
+    assert events[-1].type == "answer"
+    assert llm.calls
+    assert '"compiler_advisory"' in llm.calls[0]["prompt"]
+    assert '"rejected_fast_path_reason": "complex_question"' in llm.calls[0]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_proxy_soft_ambiguity_passes_compiler_advisory_to_planner(monkeypatch):
+    monkeypatch.setattr(
+        mcp_proxy_main._PLAN_COMPILER,
+        "compile",
+        lambda *args, **kwargs: CompileResult.ambiguous(
+            reason="soft_contains_metric_match",
+            ambiguity_level="soft",
+            clarification={"message": "soft only", "candidates": [{"fieldCaption": "Metric A"}]},
+            advisory={
+                "status": "ambiguous",
+                "reason": "soft_contains_metric_match",
+                "matched_metrics": [],
+                "ambiguous_metrics": [{"ambiguity_level": "soft", "candidates": [{"fieldCaption": "Metric A"}]}],
+                "candidate_dimensions": [],
+                "candidate_filters": [],
+                "rejected_fast_path_reason": "soft_contains_metric_match",
+            },
+        ),
+    )
+    _patch_proxy_executor(monkeypatch)
+    llm = _FakeLLM(
+        {
+            "datasourceLuid": "ds-1",
+            "query": {"fields": [{"fieldCaption": "Metric A", "function": "SUM"}], "filters": []},
+            "limit": 50,
+        }
+    )
+
+    events = [
+        event
+        async for event in mcp_proxy_main.run_mcp_proxy_main_path(
+            question="show metr by Dimension A",
+            context=_context(),
+            intent_result=_intent(),
+            llm_service=llm,
+        )
+    ]
+
+    assert events[-1].type == "answer"
+    assert '"ambiguity_level": "soft"' in llm.calls[0]["prompt"]
+    assert "tableau_mcp" in _tool_names(events)
+
+
+@pytest.mark.asyncio
+async def test_mcp_proxy_hard_ambiguity_returns_clarification_without_mcp(monkeypatch):
+    async def _unexpected_execute(**kwargs):
+        raise AssertionError("hard compiler ambiguity must not call MCP")
+
+    monkeypatch.setattr(
+        mcp_proxy_main._PLAN_COMPILER,
+        "compile",
+        lambda *args, **kwargs: CompileResult.ambiguous(
+            reason="metric_field_ambiguous",
+            ambiguity_level="hard",
+            clarification={"message": "匹配到多个可能字段，请选择一个后继续。", "candidates": [{"fieldCaption": "A"}, {"fieldCaption": "B"}]},
+        ),
+    )
+    monkeypatch.setattr(mcp_proxy_main, "_execute_mcp_host_tool", _unexpected_execute)
+
+    events = [
+        event
+        async for event in mcp_proxy_main.run_mcp_proxy_main_path(
+            question="show ambiguous metric",
+            context=_context(),
+            intent_result=_intent(),
+            llm_service=_FakeLLM({}),
+        )
+    ]
+
+    assert events[-1].type == "answer"
+    assert "匹配到多个可能字段" in events[-1].content
+    assert "tableau_mcp" not in _tool_names(events)
+
+
+@pytest.mark.asyncio
 async def test_mcp_proxy_blocks_detail_scan_result_before_renderer(monkeypatch):
-    _patch_host(
+    _patch_proxy_executor(
         monkeypatch,
         query_result={"fields": ["Customer", "Sales"], "rows": [[f"c{i}", i] for i in range(250)]},
     )
@@ -369,10 +634,19 @@ async def test_mcp_proxy_blocks_detail_scan_result_before_renderer(monkeypatch):
     events = [
         event
         async for event in mcp_proxy_main.run_mcp_proxy_main_path(
-            question="top customers by sales",
+            question="top Customer by Metric A",
             context=_context(),
             intent_result=_intent(),
-            llm_service=_FakeLLM({}),
+            llm_service=_FakeLLM(
+                {
+                    "datasourceLuid": "ds-1",
+                    "query": {
+                        "fields": [{"fieldCaption": "Customer"}, {"fieldCaption": "Metric A", "function": "SUM"}],
+                        "filters": [],
+                    },
+                    "limit": 250,
+                }
+            ),
         )
     ]
 
@@ -1001,3 +1275,64 @@ async def test_runner_routes_asset_question_decision_to_mcp_proxy(monkeypatch):
     done = events[-1].content
     assert done["response_type"] == "asset_not_found"
     assert done["response_data"]["source"] == "catalog_cache"
+
+
+@pytest.mark.asyncio
+async def test_runner_routes_datasource_list_schema_inventory_decision_to_mcp_proxy(monkeypatch):
+    monkeypatch.setenv("DATA_AGENT_CHAIN_MODE", "mcp_proxy")
+    monkeypatch.setenv("DATA_AGENT_MCP_PROXY_ENABLED", "true")
+
+    async def _proxy_path(**kwargs):
+        yield AgentEvent(type="tool_result", content={
+            "tool": "tableau_mcp",
+            "result": {
+                "data": {
+                    "response_type": "asset_candidates",
+                    "response_data": {
+                        "source": "mcp",
+                        "candidates": [{"datasource_luid": "ds-1", "name": "销售数据源"}],
+                    },
+                }
+            },
+        })
+        yield AgentEvent(type="answer", content="listed")
+
+    monkeypatch.setattr("services.data_agent.runner.run_mcp_proxy_main_path", _proxy_path)
+
+    db = _FakeDb()
+    session_mgr = _FakeSessionManager()
+    session = AgentSession(conversation_id=uuid.uuid4(), user_id=7)
+    context = ToolContext(session_id=str(session.conversation_id), user_id=7, connection_id=2, trace_id="t-list")
+    route_decision = RouteDecision(
+        question_type="asset_question",
+        confidence=0.95,
+        route="schema_inventory",
+        allowed_tools=["schema"],
+        forbidden_tools=["query"],
+        fallback_policy="schema_only",
+        reason="datasource_list_pattern",
+        mode="enforce",
+    )
+
+    events = [
+        event
+        async for event in run_agent(
+            engine=_NoEngine(),
+            context=context,
+            session_mgr=session_mgr,
+            session=session,
+            question="有哪些数据源",
+            trace_id="t-list",
+            current_user={"id": 7},
+            db=db,
+            connection_id=2,
+            route_decision=route_decision,
+            intent_result=IntentClassification(intent="unknown", confidence=0.35, route_reason="test"),
+            enforce_controlled_data_path=True,
+        )
+    ]
+
+    done = events[-1].content
+    assert done["response_type"] == "asset_candidates"
+    assert done["response_data"]["source"] == "mcp"
+    assert done["response_data"]["candidates"][0]["datasource_luid"] == "ds-1"

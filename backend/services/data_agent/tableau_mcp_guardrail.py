@@ -154,11 +154,11 @@ class TableauMcpGuardrailService:
                     user_hint="请使用当前连接下的数据源重新查询。",
                 )
 
-        args = _ensure_connection_arg(tool_name, args, connection_id)
         current_datasource = _current_datasource_context(request.current_datasource, connection_id, datasource_luid)
         user_context = _user_context(request.user_context, request.context, connection_id, datasource_luid)
         queryable_fields = list(request.queryable_fields or _queryable_fields_from_datasource(current_datasource))
         tool_schema = dict(request.tool_schema or _default_tool_schema(tool_name))
+        args = _ensure_connection_arg(tool_name, args, connection_id, tool_schema)
 
         result = validate_mcp_args(
             McpArgsGuardrailInput(
@@ -229,12 +229,29 @@ def _default_tool_schema(tool_name: str) -> dict[str, Any]:
     return query_datasource_tool_schema()
 
 
-def _ensure_connection_arg(tool_name: str, args: dict[str, Any], connection_id: int) -> dict[str, Any]:
-    if any(key in args for key in ("connectionId", "connection_id")):
-        return args
+def _ensure_connection_arg(
+    tool_name: str,
+    args: dict[str, Any],
+    connection_id: int,
+    tool_schema: Mapping[str, Any],
+) -> dict[str, Any]:
+    properties = tool_schema.get("properties") if isinstance(tool_schema, Mapping) else None
+    schema_properties = properties if isinstance(properties, Mapping) else {}
+    allows_camel = "connectionId" in schema_properties
+    allows_snake = "connection_id" in schema_properties
     safe_args = dict(args)
-    if tool_name in {MCP_LIST_DATASOURCES_TOOL_NAME, MCP_GET_DATASOURCE_METADATA_TOOL_NAME}:
+
+    if not allows_camel and not allows_snake:
+        safe_args.pop("connectionId", None)
+        safe_args.pop("connection_id", None)
+        return safe_args
+
+    if any(key in safe_args for key in ("connectionId", "connection_id")):
+        return safe_args
+    if tool_name in {MCP_LIST_DATASOURCES_TOOL_NAME, MCP_GET_DATASOURCE_METADATA_TOOL_NAME} and allows_camel:
         safe_args["connectionId"] = connection_id
+    elif allows_snake:
+        safe_args["connection_id"] = connection_id
     return safe_args
 
 

@@ -156,6 +156,60 @@ Attempted:
 
 ---
 
+## Scope — mcp-proxy-compiler-contraction
+
+按 `openspec/changes/mcp-proxy-compiler-contraction/` 实施 deterministic compiler 收缩：compiler 只做受限 fast path 与 structured advisory，不做安全/权限/归属判断，不作为事实源。
+
+## Implemented — mcp-proxy-compiler-contraction
+
+1. Compiler 语义
+- `deterministic_plan_compiler` 状态收敛为 `matched_executable`、`unsupported`、`ambiguous`。
+- `ambiguous` 增加 `ambiguity_level=hard|soft`。
+- 移除 compiler 自有安全拒绝路径；未引入 `safety_rejected`。
+
+2. Simple multi-metric fast path
+- 支持用户显式提到多个 queryable Tableau 指标时生成一个 `query-datasource` payload。
+- 非计算 numeric measure 使用字段 `defaultAggregation` 或 `SUM`。
+- 已存在 Tableau calculated/queryable derived field 直接选择，不在 Mulan 计算公式。
+- 任一显式指标缺失或存在强歧义时不部分执行。
+
+3. Advisory 与 planner handoff
+- `unsupported` 与 soft ambiguity 生成并传递 `compiler_advisory`。
+- planner prompt 明确 advisory 是 hint，不是事实源，不覆盖 datasource metadata、queryable fields、tool schema 或 guardrail。
+- hard ambiguity 返回 clarification，停止，不调用 Tableau MCP，不交给 LLM Planner 猜。
+
+4. 统一执行漏斗
+- compiler fast path 与 LLM Planner payload 都通过 `_execute_mcp_host_tool()` 进入 `MCPToolExecutor.execute()`。
+- `MCPToolExecutor.execute()` 内部调用 `TableauMcpGuardrailService`，trace 记录 `execution_source`、`compiler_status`、`compiler_reason`、`compiler_advisory`、`guardrail_decision` 和 tool。
+- query result 响应补充 `response_type=query_result`、`execution_source`、`compiler_*`、`mcp_tool_name`，并保留 MCP 返回的 `fields` / `rows` / `table_display.columns`。
+
+## Validation — mcp-proxy-compiler-contraction
+
+Executed:
+- `cd backend && python3 -m py_compile services/data_agent/mcp_proxy_main.py services/data_agent/tableau_mcp_plan_compiler.py services/data_agent/mcp_args_guardrail.py services/data_agent/mcp_host/runtime.py`: PASS.
+- `cd backend && python3 -m py_compile services/data_agent/mcp_proxy_main.py services/data_agent/tableau_mcp_plan_compiler.py services/data_agent/mcp_args_guardrail.py services/data_agent/mcp_host/runtime.py services/data_agent/tableau_mcp_response.py services/data_agent/tableau_mcp_planner.py`: PASS.
+- `cd backend && PYTHONPATH=. ./.venv/bin/pytest tests/services/data_agent/test_mcp_proxy_main.py tests/services/data_agent/test_tableau_mcp_plan_compiler.py -q -o addopts=''`: PASS, 40 passed.
+- `cd backend && PYTHONPATH=. ./.venv/bin/pytest tests/services/data_agent/ -x -q -o addopts=''`: PASS, 513 passed, 28 skipped.
+- `docker compose up -d --build backend`: PASS; refreshed `mulan-bi-backend` because the running container had no source mount and was still serving the old compiler.
+- Container smoke test for run `089471b2-6446-4135-a198-a1ad00b360f3` question: PASS; path calls `tableau_mcp`, returns `response_type=query_result`, fields `["SUM(销售额)", "SUM(利润)", "利润率", "客户数", "客单价"]`, one row, and five aligned `table_display.columns`.
+
+Attempted:
+- `cd backend && pytest tests/services/data_agent/test_mcp_proxy_main.py tests/services/data_agent/test_tableau_mcp_plan_compiler.py -q`: failed because `pytest` is not on PATH in the default shell.
+- `cd backend && PYTHONPATH=. ./.venv/bin/pytest tests/services/data_agent/test_mcp_proxy_main.py tests/services/data_agent/test_tableau_mcp_plan_compiler.py -q`: test cases all passed, then failed repository-wide coverage threshold because the targeted subset covered 9.70% vs configured fail-under 30%.
+
+## Debug Update — run 089471b2-6446-4135-a198-a1ad00b360f3
+
+Root cause:
+- The recorded run used the Docker backend image, not the host workspace code. The container had `CompileStatus = Literal["matched", "clarification", "unsupported"]` and no source mount, so it still returned the old compiler clarification.
+- After refreshing the container, the same question reached Tableau MCP, but MCP returned table data as `data: [{...}]`; the response normalizer only handled explicit `fields` / `rows`, so it produced empty `fields` / `rows`.
+
+Fix:
+- Rebuilt/restarted `mulan-bi-backend` with the current compiler changes.
+- Updated `TableauMcpResponseNormalizer.query_result()` to normalize MCP `data: [{...}]` into MCP-backed `fields` / `rows` without recalculating facts.
+- Preserved `table_display.columns` alignment with the normalized fields.
+
+---
+
 ## Scope — unify-tableau-mcp-entry
 
 按 `openspec/changes/unify-tableau-mcp-entry/` 执行 UTM-01 至 UTM-12：以 `tableau_connections` 作为 Tableau 主配置，`mcp_servers` 作为自动绑定的 Agent 工具配置，MVP 使用 `TABLEAU_MCP_GATEWAY_URL` 作为共享 MCP Gateway。

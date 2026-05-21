@@ -139,6 +139,8 @@ class TableauMcpResponseNormalizer:
     ) -> TableauMcpEnvelope:
         fields = list(result.get("fields") or [])
         rows = [list(row) if isinstance(row, (list, tuple)) else row for row in list(result.get("rows") or [])]
+        if not fields and not rows:
+            fields, rows = self.table_from_mcp_data(result.get("data"))
         metric_names = self.metric_names_from_args(args)
         payload = dict(result)
         payload.update({
@@ -231,6 +233,26 @@ class TableauMcpResponseNormalizer:
             if function and caption:
                 names.append(str(caption))
         return names
+
+    @staticmethod
+    def table_from_mcp_data(data: Any) -> tuple[list[Any], list[list[Any]]]:
+        """Normalize MCP tabular `data` rows without changing business values."""
+        if not isinstance(data, list):
+            return [], []
+        mapping_rows = [item for item in data if isinstance(item, Mapping)]
+        if not mapping_rows:
+            return [], []
+        fields: list[Any] = []
+        seen: set[str] = set()
+        for row in mapping_rows:
+            for key in row.keys():
+                field = str(key)
+                if field in seen:
+                    continue
+                seen.add(field)
+                fields.append(field)
+        rows = [[row.get(field) for field in fields] for row in mapping_rows]
+        return fields, rows
 
     @staticmethod
     def unwrap_mcp_result(result: Any) -> dict[str, Any]:

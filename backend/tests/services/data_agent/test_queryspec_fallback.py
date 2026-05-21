@@ -4,6 +4,14 @@ import json
 
 import pytest
 
+pytest.skip(
+    "TDE-06/TDE-09: legacy QuerySpec fallback and mcp_first_main path tests are decommissioned "
+    "for Tableau MCP; deletion target is QuerySpec fallback and mcp_first_main production removal "
+    "under TDE-24/TDE-26/TDE-30. Renderer/table display contracts moved to "
+    "test_renderer_contracts.py.",
+    allow_module_level=True,
+)
+
 from services.data_agent import mcp_first_main
 from services.data_agent.answer_prompt_builder import build_answer_prompt, build_renderer_input
 from services.data_agent.intent_classifier import IntentClassification

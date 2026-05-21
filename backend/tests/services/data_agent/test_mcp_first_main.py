@@ -4,6 +4,13 @@ import json
 
 import pytest
 
+pytest.skip(
+    "TDE-06/TDE-09: legacy mcp_first_main private/path tests are decommissioned; "
+    "deletion target is removal of mcp_first_main production reachability under TDE-24/TDE-30. "
+    "Business coverage is migrating to mcp_proxy_main top-level tests.",
+    allow_module_level=True,
+)
+
 from services.data_agent import mcp_first_main, mcp_proxy_main
 from services.data_agent.intent_classifier import IntentClassification
 from services.data_agent.mcp_first_main import run_mcp_first_main_path

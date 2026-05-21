@@ -15,6 +15,14 @@ from services.data_agent.tool_base import ToolContext, ToolResult
 
 pytestmark = pytest.mark.skip_db
 
+LEGACY_TABLEAU_SCHEMA_INVENTORY_SKIP = pytest.mark.skip(
+    reason=(
+        "TDE-06/TDE-09: known Tableau MCP asset/list/field questions must not be protected by "
+        "schema_inventory route tests; deletion target is Tableau schema_inventory production block under "
+        "TDE-12/TDE-13/TDE-30. Business coverage moves to mcp_proxy_main top-level tests."
+    )
+)
+
 
 class FakeSchemaTool:
     name = "schema"
@@ -84,6 +92,7 @@ def sample_tool_data():
         "月度指标汇总表 有哪些字段？",
     ],
 )
+@LEGACY_TABLEAU_SCHEMA_INVENTORY_SKIP
 def test_detect_deterministic_route_hits_inventory_keywords(question):
     assert detect_deterministic_route(question, "tableau") == "schema_inventory"
 
@@ -103,6 +112,7 @@ def test_detect_deterministic_route_excludes_ambiguous_or_analytic_questions(que
     assert detect_deterministic_route(question, "tableau") is None
 
 
+@LEGACY_TABLEAU_SCHEMA_INVENTORY_SKIP
 def test_build_schema_inventory_tool_params_for_field_and_asset_questions():
     assert build_schema_inventory_tool_params("月度指标汇总表 有哪些字段？") == {
         "table_name": "月度指标汇总表"
@@ -186,6 +196,7 @@ def test_validate_schema_inventory_payload_rejects_invalid_counts():
 
 
 @pytest.mark.asyncio
+@LEGACY_TABLEAU_SCHEMA_INVENTORY_SKIP
 async def test_run_schema_inventory_route_calls_only_schema_tool_with_empty_params():
     tool = FakeSchemaTool(sample_tool_data())
     registry = FakeRegistry(tool)
@@ -207,6 +218,7 @@ async def test_run_schema_inventory_route_calls_only_schema_tool_with_empty_para
 
 
 @pytest.mark.asyncio
+@LEGACY_TABLEAU_SCHEMA_INVENTORY_SKIP
 async def test_run_schema_inventory_route_for_assets_passes_explicit_asset_flag():
     tool = FakeSchemaTool(sample_tool_data())
     registry = FakeRegistry(tool)
@@ -242,6 +254,7 @@ async def test_run_schema_inventory_route_sets_skill_version_id_none_when_missin
 
 
 @pytest.mark.asyncio
+@LEGACY_TABLEAU_SCHEMA_INVENTORY_SKIP
 async def test_run_schema_inventory_route_for_field_question_uses_table_name_and_friendly_fields():
     tool = FakeSchemaTool({
         "requested_table_name": "订单明细表",
@@ -280,6 +293,7 @@ async def test_run_schema_inventory_route_for_field_question_uses_table_name_and
 
 
 @pytest.mark.asyncio
+@LEGACY_TABLEAU_SCHEMA_INVENTORY_SKIP
 async def test_run_schema_inventory_route_for_field_question_with_excluded_word_uses_table_name():
     tool = FakeSchemaTool({
         "requested_table_name": "月度指标汇总表",

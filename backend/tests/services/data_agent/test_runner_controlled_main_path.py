@@ -94,9 +94,14 @@ async def test_data_intent_returns_guarded_error_instead_of_schema_fallback(monk
         )
     ]
 
-    assert [event.type for event in events] == ["metadata", "thinking", "error"]
+    assert [event.type for event in events] == ["metadata", "thinking", "tool_result", "thinking", "tool_result", "error"]
+    assert events[2].content["tool"] == "fallback_audit"
+    assert events[4].content["tool"] == "mainline_trace"
     error_payload = events[-1].content
-    assert error_payload["fallback_type"] == "mcp_nl_passthrough_unavailable"
+    assert error_payload["fallback_type"] in {
+        "mcp_nl_passthrough_unavailable",
+        "mcp_explicit_datasource_required",
+    }
     assert error_payload["intent_classifier"]["intent"] == "ranking"
     assert error_payload["controlled_chain"]["status"] == "failed"
     assert "schema" not in error_payload.get("tools_used", [])
@@ -136,7 +141,7 @@ async def test_controlled_transient_failure_records_tools_without_chat_message(m
             },
         )
 
-    monkeypatch.setattr("services.data_agent.runner.run_mcp_first_main_path", _fake_controlled_path)
+    monkeypatch.setattr("services.data_agent.runner.run_mcp_proxy_main_path", _fake_controlled_path)
 
     db = _FakeDb()
     session_mgr = _FakeSessionManager()
@@ -210,7 +215,7 @@ async def test_unknown_intent_can_continue_existing_runner_path(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_controlled_path_defaults_to_legacy_queryspec(monkeypatch):
+async def test_non_tableau_controlled_path_defaults_to_legacy_queryspec(monkeypatch):
     monkeypatch.delenv("DATA_AGENT_CHAIN_MODE", raising=False)
     monkeypatch.delenv("DATA_AGENT_MCP_PROXY_ENABLED", raising=False)
 
@@ -241,7 +246,7 @@ async def test_controlled_path_defaults_to_legacy_queryspec(monkeypatch):
             current_user={"id": 7},
             db=db,
             connection_id=2,
-            intent_result=classify_intent("整体销售额是多少", connection_type="tableau"),
+            intent_result=classify_intent("整体销售额是多少", connection_type="postgres"),
             enforce_controlled_data_path=True,
         )
     ]
@@ -249,6 +254,60 @@ async def test_controlled_path_defaults_to_legacy_queryspec(monkeypatch):
     assert [event.type for event in events] == ["metadata", "thinking", "done"]
     assert events[1].content == "legacy"
     assert events[-1].content["answer"] == "legacy answer"
+
+
+@pytest.mark.asyncio
+async def test_tableau_controlled_path_blocks_default_legacy_fallback(monkeypatch):
+    monkeypatch.delenv("DATA_AGENT_CHAIN_MODE", raising=False)
+    monkeypatch.delenv("DATA_AGENT_MCP_PROXY_ENABLED", raising=False)
+
+    async def _legacy_path(**kwargs):
+        raise AssertionError("Tableau MCP strict context must not enter legacy QuerySpec")
+
+    async def _proxy_path(**kwargs):
+        yield AgentEvent(type="thinking", content="proxy")
+        yield AgentEvent(type="answer", content="proxy answer")
+
+    monkeypatch.setattr("services.data_agent.runner.run_mcp_first_main_path", _legacy_path)
+    monkeypatch.setattr("services.data_agent.runner.run_mcp_proxy_main_path", _proxy_path)
+
+    db = _FakeDb()
+    session_mgr = _FakeSessionManager()
+    session = AgentSession(conversation_id=uuid.uuid4(), user_id=7)
+    context = ToolContext(
+        session_id=str(session.conversation_id),
+        user_id=7,
+        connection_id=2,
+        connection_type="tableau",
+        trace_id="t-tableau-strict",
+    )
+
+    events = [
+        event
+        async for event in run_agent(
+            engine=_NoEngineFallback(),
+            context=context,
+            session_mgr=session_mgr,
+            session=session,
+            question="整体销售额是多少",
+            trace_id="t-tableau-strict",
+            current_user={"id": 7},
+            db=db,
+            connection_id=2,
+            intent_result=classify_intent("整体销售额是多少", connection_type="tableau"),
+            enforce_controlled_data_path=True,
+        )
+    ]
+
+    assert [event.type for event in events] == ["metadata", "thinking", "tool_result", "thinking", "done"]
+    assert "阻止回退到 legacy QuerySpec 链路" in events[1].content
+    audit_payload = events[2].content["result"]["data"]
+    assert audit_payload["trace"]["mainline_convergence_strict"] is True
+    assert audit_payload["trace"]["fallback_blocked"] is True
+    assert audit_payload["trace"]["fallback_target"] == "run_mcp_first_main_path"
+    assert audit_payload["fallback_audit"]["severity"] == "warning"
+    assert events[3].content == "proxy"
+    assert events[-1].content["answer"] == "proxy answer"
 
 
 @pytest.mark.asyncio
@@ -356,7 +415,8 @@ async def test_controlled_path_invalid_chain_mode_falls_back_with_clear_event(mo
         yield AgentEvent(type="answer", content="legacy answer")
 
     async def _proxy_path(**kwargs):
-        raise AssertionError("invalid chain mode must not enter mcp_proxy")
+        yield AgentEvent(type="thinking", content="proxy")
+        yield AgentEvent(type="answer", content="proxy answer")
 
     monkeypatch.setattr("services.data_agent.runner.run_mcp_first_main_path", _legacy_path)
     monkeypatch.setattr("services.data_agent.runner.run_mcp_proxy_main_path", _proxy_path)

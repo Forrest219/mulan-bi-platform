@@ -180,6 +180,44 @@ def test_query_datasource_executes_through_generic_runtime_executor():
     json.dumps(runtime.trace_events)
 
 
+def test_list_datasources_does_not_pass_transport_connection_as_tool_argument():
+    client = FakeMCPClient(
+        [
+            {
+                "name": "list-datasources",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"limit": {"type": "integer"}},
+                    "additionalProperties": False,
+                },
+            }
+        ],
+        result={"datasources": []},
+    )
+    runtime = MCPHostRuntime(client, connection_id=42, timeout=19)
+
+    result = runtime.call_tool(
+        "list-datasources",
+        {"connectionId": 42, "limit": 50},
+        question="列出数据源",
+        context={"connection_id": 42, "user_id": 7},
+        current_datasource={"connection_id": 42},
+        strict_connection_access=True,
+    )
+
+    assert result == {"datasources": []}
+    assert client.call_calls == [
+        {
+            "tool_name": "list-datasources",
+            "arguments": {"limit": 50},
+            "timeout": 19,
+            "connection_id": 42,
+            "datasource_luid": None,
+            "jwt_token": None,
+        }
+    ]
+
+
 def test_runtime_reuses_connection_scoped_catalog_cache_between_sessions():
     tools = [
         {

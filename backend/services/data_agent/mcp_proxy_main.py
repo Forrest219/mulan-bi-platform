@@ -9,6 +9,7 @@ import os
 import re
 import time
 from copy import deepcopy
+from dataclasses import dataclass, replace
 from typing import Any, AsyncGenerator, Mapping, Optional
 
 from services.data_agent.intent_classifier import IntentClassification
@@ -18,13 +19,12 @@ from services.data_agent.mcp_args_guardrail import (
     query_datasource_tool_schema,
 )
 from services.data_agent.mcp_first_main import (
-    _call_llm_json,
     _queryable_fields,
-    _redact_large,
     _resolve_datasource,
 )
 from services.data_agent.response import AgentEvent
 from services.data_agent.tableau_mcp_plan_compiler import CompileResult, DeterministicPlanCompiler
+from services.data_agent.tableau_mcp_planner import TableauMcpLlmPlanner, TableauMcpPlannerRequest
 from services.data_agent.tableau_mcp_response import (
     RESPONSE_ASSET_CANDIDATES,
     RESPONSE_ASSET_METADATA,
@@ -35,6 +35,10 @@ from services.data_agent.tableau_mcp_response import (
 from services.data_agent.tableau_mcp_guardrail import TableauMcpGuardrailRequest, TableauMcpGuardrailService
 from services.data_agent.tableau_mcp_cache import TableauMcpCacheFacade
 from services.data_agent.tableau_mcp_resolver import DatasourceCandidateResolver
+from services.data_agent.tableau_mcp_telemetry import (
+    build_compiler_unsupported_planner_reason_payload,
+    build_strict_trace_payload,
+)
 from services.data_agent.tool_base import ToolContext
 from services.llm.service import LLMService
 
@@ -54,6 +58,14 @@ _METRIC_FUNCTIONS = {"SUM", "AVG", "COUNT", "COUNTD", "MIN", "MAX", "MEDIAN", "A
 _RESPONSE_NORMALIZER = TableauMcpResponseNormalizer()
 _PLAN_COMPILER = DeterministicPlanCompiler()
 _MCP_CACHE = TableauMcpCacheFacade()
+
+
+@dataclass(frozen=True)
+class _CompilerRuntimeOutcome:
+    events: list[AgentEvent]
+    handled: bool
+    advisory: dict[str, Any] | None
+    result: CompileResult
 
 
 def mcp_proxy_enabled() -> bool:
@@ -79,6 +91,16 @@ async def run_mcp_proxy_main_path(
     from services.data_agent import mcp_first_main as thin_mcp
 
     yield AgentEvent(type="thinking", content="已进入 MCP Host 代理链路。")
+    yield AgentEvent(type="tool_result", content={
+        "tool": "mainline_trace",
+        "result": {
+            "success": True,
+            "data": build_strict_trace_payload(
+                actual_entry="mcp_proxy_main",
+                extra_trace={"chain_mode": CHAIN_MODE},
+            ),
+        },
+    })
 
     if _is_datasource_list_request(question):
         async for event in _run_list_datasources_path(question=question, context=context, intent_result=intent_result):
@@ -116,44 +138,30 @@ async def run_mcp_proxy_main_path(
         "result": {"data": _context_trace_payload(question, analysis_context)},
     })
 
-    compiled_events = await _try_deterministic_plan_compiler(
+    compiler_outcome = await _try_deterministic_plan_compiler(
         question=question,
         context=context,
         intent_result=intent_result,
         datasource=ds_info,
+        analysis_context=analysis_context,
     )
-    if compiled_events is not None:
-        for event in compiled_events:
-            yield event
+    for event in compiler_outcome.events:
+        yield event
+    if compiler_outcome.handled:
         return
 
-    attempt = await thin_mcp._run_mcp_main_route(
+    planned_events = await _run_llm_planner_path(
         question=question,
         context=context,
         intent_result=intent_result,
         datasource=ds_info,
         analysis_context=analysis_context,
         llm_service=llm_service,
-        chain_mode=CHAIN_MODE,
+        compiler_advisory=compiler_outcome.advisory,
+        compiler_result=compiler_outcome.result,
     )
-    for event in attempt.events:
+    for event in planned_events:
         yield event
-    if attempt.success:
-        return
-
-    yield AgentEvent(type="error", content=thin_mcp._mcp_passthrough_error_payload(
-        attempt.error_code or thin_mcp.MCP_NL_TOOL_UNAVAILABLE,
-        attempt.message,
-        attempt.user_hint,
-        context.trace_id,
-        intent_result,
-        chain_mode=CHAIN_MODE,
-        detail={
-            "chain_mode": CHAIN_MODE,
-            "reason": attempt.reason or thin_mcp.MCP_NL_TOOL_UNAVAILABLE,
-            "original_error": thin_mcp._queryspec_original_error(attempt.original_error),
-        },
-    ))
     return
 
 
@@ -410,7 +418,8 @@ async def _try_deterministic_plan_compiler(
     context: ToolContext,
     intent_result: IntentClassification,
     datasource: Mapping[str, Any],
-) -> list[AgentEvent] | None:
+    analysis_context: Optional[Mapping[str, Any]] = None,
+) -> _CompilerRuntimeOutcome:
     started_at = time.monotonic()
     queryable_fields, metadata_fields = _compiler_field_context(datasource, context)
     compile_result = _PLAN_COMPILER.compile(
@@ -418,11 +427,16 @@ async def _try_deterministic_plan_compiler(
         metadata_fields=metadata_fields,
         queryable_fields=queryable_fields,
         datasource_context=datasource,
+        analysis_context=analysis_context,
+    )
+    compile_result = replace(
+        compile_result,
+        compiler_advisory=_compiler_advisory_with_analysis_context(
+            compile_result.compiler_advisory,
+            analysis_context=analysis_context,
+        ),
     )
     compile_ms = max(0, int((time.monotonic() - started_at) * 1000))
-    if compile_result.status == "unsupported":
-        return None
-
     events: list[AgentEvent] = [
         AgentEvent(type="tool_call", content={
             "tool": "deterministic_plan_compiler",
@@ -436,12 +450,29 @@ async def _try_deterministic_plan_compiler(
         AgentEvent(type="tool_result", content={
             "tool": "deterministic_plan_compiler",
             "result": {
-                "success": compile_result.status == "matched",
+                "success": compile_result.status == "matched_executable",
                 "data": _compile_trace_payload(compile_result, compile_ms),
             },
         }),
     ]
-    if compile_result.status == "clarification":
+
+    if compile_result.status == "unsupported":
+        return _CompilerRuntimeOutcome(
+            events=events,
+            handled=False,
+            advisory=compile_result.compiler_advisory or {},
+            result=compile_result,
+        )
+
+    if compile_result.status == "ambiguous" and compile_result.ambiguity_level == "soft":
+        return _CompilerRuntimeOutcome(
+            events=events,
+            handled=False,
+            advisory=compile_result.compiler_advisory or {},
+            result=compile_result,
+        )
+
+    if compile_result.status == "ambiguous":
         clarification = compile_result.clarification or {}
         response_data = _RESPONSE_NORMALIZER.clarification(
             message=str(clarification.get("message") or "请补充更明确的字段后继续。"),
@@ -450,6 +481,7 @@ async def _try_deterministic_plan_compiler(
             candidates=clarification.get("candidates") if isinstance(clarification.get("candidates"), list) else [],
             detail={
                 "compiler_status": compile_result.status,
+                "ambiguity_level": compile_result.ambiguity_level,
                 "compile_confidence": compile_result.compile_confidence,
                 "pattern": compile_result.pattern,
             },
@@ -460,46 +492,7 @@ async def _try_deterministic_plan_compiler(
             "result": {"success": False, "data": response_data},
         }))
         events.append(AgentEvent(type="answer", content=_render_proxy_answer(response_data)))
-        return events
-
-    args = compile_result.query_args or {}
-    guardrail = _validate_tableau_mcp_tool(
-        question=question,
-        tool_name=MCP_TOOL_NAME,
-        args=args,
-        context=context,
-        current_datasource=_current_datasource(datasource, context),
-        queryable_fields=queryable_fields,
-    )
-    events.append(AgentEvent(type="tool_call", content={
-        "tool": "mcp_args_guardrail",
-        "params": {"tool": MCP_TOOL_NAME, "chain_mode": CHAIN_MODE, "strategy": "deterministic_plan_compiler"},
-    }))
-    events.append(AgentEvent(type="tool_result", content={
-        "tool": "mcp_args_guardrail",
-        "result": {
-            "success": guardrail.decision != "reject",
-            "event": MCP_ARGS_GUARDRAIL_REJECT if guardrail.decision == "reject" else MCP_ARGS_GUARDRAIL_PASS,
-            "data": guardrail.to_dict(),
-        },
-    }))
-    if guardrail.decision == "reject":
-        response_data = _tool_unavailable_response(
-            code=guardrail.reject_code or "MCP_ARGS_REJECTED",
-            message=guardrail.message,
-            user_hint=guardrail.user_hint,
-            detail={
-                "chain_mode": CHAIN_MODE,
-                "strategy": "deterministic_plan_compiler",
-                "compile_reason": compile_result.compile_reason,
-            },
-        )
-        events.append(AgentEvent(type="tool_result", content={
-            "tool": "mcp_args_guardrail",
-            "result": {"success": False, "data": response_data},
-        }))
-        events.append(AgentEvent(type="answer", content=_render_proxy_answer(response_data)))
-        return events
+        return _CompilerRuntimeOutcome(events=events, handled=True, advisory=None, result=compile_result)
 
     query_start = time.monotonic()
     events.append(AgentEvent(type="tool_call", content={
@@ -508,45 +501,78 @@ async def _try_deterministic_plan_compiler(
             "mcp_tool": MCP_TOOL_NAME,
             "chain_mode": CHAIN_MODE,
             "strategy": "deterministic_plan_compiler",
+            "execution_source": "compiler_fast_path",
             "pattern": compile_result.pattern,
         },
     }))
     try:
-        result = await _execute_mcp_host_tool(
+        execution = await _execute_mcp_host_tool(
             tool_name=MCP_TOOL_NAME,
-            args=guardrail.args or args,
+            args=compile_result.query_args or {},
             context=context,
-            datasource_luid=str(args.get("datasourceLuid") or ""),
+            datasource_luid=str((compile_result.query_args or {}).get("datasourceLuid") or ""),
+            question=question,
+            current_datasource=_current_datasource(datasource, context),
+            queryable_fields=queryable_fields,
+            execution_source="compiler_fast_path",
+            compiler_status=compile_result.status,
+            compiler_reason=compile_result.compile_reason,
+            compiler_advisory=compile_result.compiler_advisory,
+            return_guardrail=True,
         )
+        result, guardrail_payload = _unpack_execution_result(execution)
     except Exception as exc:
         logger.exception("Deterministic Tableau MCP query execution failed")
-        response_data = _tool_unavailable_response(
-            code="MCP_PROXY_QUERY_FAILED",
+        guardrail_payload = _guardrail_payload_from_exception(exc)
+        response_data = _execution_error_response(
+            exc,
+            default_code="MCP_PROXY_QUERY_FAILED",
             message="Tableau MCP 查询执行失败。",
-            user_hint="请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 MCP Gateway。",
-            detail={"error": str(exc), "chain_mode": CHAIN_MODE, "strategy": "deterministic_plan_compiler"},
+            strategy="deterministic_plan_compiler",
+            execution_source="compiler_fast_path",
+            detail={"compile_reason": compile_result.compile_reason},
         )
         events.append(AgentEvent(type="tool_result", content={
             "tool": "tableau_mcp",
             "result": {"success": False, "error": str(exc), "data": response_data},
         }))
+        events.append(_guardrail_event_from_payload(guardrail_payload, tool_name=MCP_TOOL_NAME, strategy="deterministic_plan_compiler"))
         events.append(AgentEvent(type="answer", content=_render_proxy_answer(response_data)))
-        return events
+        return _CompilerRuntimeOutcome(events=events, handled=True, advisory=None, result=compile_result)
+
+    events.append(_guardrail_event_from_payload(guardrail_payload, tool_name=MCP_TOOL_NAME, strategy="deterministic_plan_compiler"))
+
+    if _query_result_too_large_for_renderer(result):
+        events.append(AgentEvent(type="error", content={
+            "error_code": "DETAIL_SCAN_BLOCKED",
+            "message": "Tableau MCP 返回结果行数超过受控展示上限，本次不输出明细结果。",
+            "fallback_type": "query_result_too_large",
+            "chain_mode": CHAIN_MODE,
+            "strategy": "deterministic_plan_compiler",
+        }))
+        return _CompilerRuntimeOutcome(events=events, handled=True, advisory=None, result=compile_result)
 
     query_ms = max(0, int((time.monotonic() - query_start) * 1000))
     response_data = _normalize_response_data(
         result,
         ds_info=datasource,
-        args=guardrail.args or args,
-        guardrail_payload=guardrail.to_dict(),
+        args=compile_result.query_args or {},
+        guardrail_payload=guardrail_payload,
     )
+    response_data["response_type"] = "query_result"
     response_data["strategy"] = "deterministic_plan_compiler"
+    response_data["execution_source"] = "compiler_fast_path"
+    response_data["compiler_status"] = compile_result.status
+    response_data["compiler_reason"] = compile_result.compile_reason
+    response_data["compiler_advisory"] = compile_result.compiler_advisory or {}
+    response_data["mcp_tool_name"] = MCP_TOOL_NAME
     response_data["compile"] = {
         "status": compile_result.status,
         "pattern": compile_result.pattern,
         "compile_reason": compile_result.compile_reason,
         "compile_confidence": compile_result.compile_confidence,
         "matched_fields": compile_result.matched_fields or {},
+        "compiler_advisory": compile_result.compiler_advisory or {},
     }
     response_data["telemetry"] = {"compile_ms": compile_ms, "query_ms": query_ms, "strategy": "deterministic_plan_compiler"}
     events.append(AgentEvent(type="tool_result", content={
@@ -567,7 +593,219 @@ async def _try_deterministic_plan_compiler(
         "result": {"success": True, "data": response_data, "calculation_performed": False},
     }))
     events.append(AgentEvent(type="answer", content=_render_proxy_answer(response_data)))
+    return _CompilerRuntimeOutcome(events=events, handled=True, advisory=None, result=compile_result)
+
+
+async def _run_llm_planner_path(
+    *,
+    question: str,
+    context: ToolContext,
+    intent_result: IntentClassification,
+    datasource: Mapping[str, Any],
+    analysis_context: Optional[Mapping[str, Any]],
+    llm_service: Optional[LLMService],
+    compiler_advisory: Optional[Mapping[str, Any]] = None,
+    compiler_result: Optional[CompileResult] = None,
+) -> list[AgentEvent]:
+    started_at = time.monotonic()
+    queryable_fields, metadata_fields = _compiler_field_context(datasource, context)
+    handoff = build_compiler_unsupported_planner_reason_payload(
+        compiler_reason=(compiler_result.compile_reason if compiler_result else "deterministic_compiler_unsupported"),
+        planner_reason="planner_can_select_mcp_tool",
+        detail={
+            "intent": intent_result.intent,
+            "field_count": len(queryable_fields) or len(metadata_fields),
+            "compiler_status": compiler_result.status if compiler_result else "unsupported",
+            "ambiguity_level": compiler_result.ambiguity_level if compiler_result else None,
+            "compiler_advisory": dict(compiler_advisory or {}),
+        },
+    )
+    events: list[AgentEvent] = [
+        AgentEvent(type="tool_call", content={
+            "tool": "tableau_mcp_llm_planner",
+            "params": {
+                "chain_mode": CHAIN_MODE,
+                "strategy": "llm_planner",
+                "reason": handoff["planner"]["reason"],
+            },
+        }),
+        AgentEvent(type="tool_result", content={
+            "tool": "deterministic_plan_compiler",
+            "result": {"success": False, "data": handoff},
+        }),
+    ]
+    planner = TableauMcpLlmPlanner(llm_service=llm_service)
+    plan = await planner.plan(
+        TableauMcpPlannerRequest(
+            question=question,
+            datasource=_current_datasource(datasource, context),
+            metadata_fields=metadata_fields,
+            queryable_fields=queryable_fields,
+            context=context,
+            analysis_context=analysis_context,
+            compiler_reason=(compiler_result.compile_reason if compiler_result else "deterministic_compiler_unsupported"),
+            compiler_advisory=compiler_advisory,
+        )
+    )
+    planner_ms = max(0, int((time.monotonic() - started_at) * 1000))
+    plan_payload = plan.to_dict()
+    plan_payload["telemetry"] = {"planner_ms": planner_ms, "strategy": "llm_planner"}
+    events.append(AgentEvent(type="tool_result", content={
+        "tool": "tableau_mcp_llm_planner",
+        "result": {"success": plan.is_executable, "data": plan_payload},
+    }))
+
+    if plan.status == "clarification":
+        clarification = plan.clarification if isinstance(plan.clarification, Mapping) else {}
+        response_data = _RESPONSE_NORMALIZER.clarification(
+            message=str(clarification.get("message") or "请补充更明确的信息后继续。"),
+            chain_mode=CHAIN_MODE,
+            reason=plan.reason,
+            candidates=clarification.get("candidates") if isinstance(clarification.get("candidates"), list) else [],
+            detail={"planner_status": plan.status, "planner_confidence": plan.confidence, "planner_reason": plan.reason},
+            telemetry={"planner_ms": planner_ms, "strategy": "llm_planner"},
+        ).to_dict()
+        events.append(AgentEvent(type="answer", content=_render_proxy_answer(response_data)))
+        return events
+
+    if not plan.is_executable:
+        response_data = _tool_unavailable_response(
+            code=plan.error_code or "TABLEAU_MCP_PLANNER_UNAVAILABLE",
+            message="Tableau MCP Planner 未能生成可执行计划。",
+            user_hint="请补充更明确的数据源、字段、筛选条件或分析口径后重试。",
+            detail={"chain_mode": CHAIN_MODE, "strategy": "llm_planner", "plan": plan_payload},
+        )
+        events.append(AgentEvent(type="answer", content=_render_proxy_answer(response_data)))
+        return events
+
+    events.append(AgentEvent(type="tool_call", content={
+        "tool": "tableau_mcp",
+        "params": {"mcp_tool": plan.tool_name, "chain_mode": CHAIN_MODE, "strategy": "llm_planner", "execution_source": "llm_planner"},
+    }))
+    query_start = time.monotonic()
+    try:
+        current_datasource = _current_datasource(datasource, context)
+        execution = await _execute_mcp_host_tool(
+            tool_name=str(plan.tool_name),
+            args=plan.args,
+            context=context,
+            datasource_luid=str(plan.args.get("datasourceLuid") or current_datasource.get("datasource_luid") or ""),
+            question=question,
+            current_datasource=current_datasource,
+            queryable_fields=queryable_fields if plan.tool_name == MCP_TOOL_NAME else None,
+            strict_connection_access=plan.tool_name == MCP_LIST_DATASOURCES_TOOL_NAME,
+            execution_source="llm_planner",
+            compiler_status=compiler_result.status if compiler_result else None,
+            compiler_reason=compiler_result.compile_reason if compiler_result else None,
+            compiler_advisory=compiler_advisory,
+            return_guardrail=True,
+        )
+        result, guardrail_payload = _unpack_execution_result(execution)
+    except Exception as exc:
+        logger.exception("LLM-planned Tableau MCP tool execution failed")
+        guardrail_payload = _guardrail_payload_from_exception(exc)
+        response_data = _execution_error_response(
+            exc,
+            default_code="MCP_PROXY_PLANNED_TOOL_FAILED",
+            message="Tableau MCP 工具执行失败。",
+            strategy="llm_planner",
+            execution_source="llm_planner",
+            detail={"tool": plan.tool_name, "planner_reason": plan.reason},
+        )
+        events.append(AgentEvent(type="tool_result", content={
+            "tool": "tableau_mcp",
+            "result": {"success": False, "error": str(exc), "data": response_data},
+        }))
+        events.append(_guardrail_event_from_payload(guardrail_payload, tool_name=str(plan.tool_name), strategy="llm_planner"))
+        events.append(AgentEvent(type="answer", content=_render_proxy_answer(response_data)))
+        return events
+
+    events.append(_guardrail_event_from_payload(guardrail_payload, tool_name=str(plan.tool_name), strategy="llm_planner"))
+
+    if _query_result_too_large_for_renderer(result):
+        events.append(AgentEvent(type="error", content={
+            "error_code": "DETAIL_SCAN_BLOCKED",
+            "message": "Tableau MCP 返回结果行数超过受控展示上限，本次不输出明细结果。",
+            "fallback_type": "query_result_too_large",
+            "chain_mode": CHAIN_MODE,
+            "strategy": "llm_planner",
+        }))
+        return events
+
+    query_ms = max(0, int((time.monotonic() - query_start) * 1000))
+    response_data = _normalize_planner_tool_response(
+        result=result,
+        tool_name=str(plan.tool_name),
+        datasource=datasource,
+        context=context,
+        args=guardrail_payload.get("args") or plan.args,
+        guardrail_payload=guardrail_payload,
+        planner_payload=plan_payload,
+        planner_ms=planner_ms,
+        query_ms=query_ms,
+    )
+    if str(plan.tool_name) == MCP_TOOL_NAME:
+        response_data["response_type"] = "query_result"
+    response_data["execution_source"] = "llm_planner"
+    response_data["compiler_status"] = compiler_result.status if compiler_result else None
+    response_data["compiler_reason"] = compiler_result.compile_reason if compiler_result else None
+    response_data["compiler_advisory"] = dict(compiler_advisory or {})
+    response_data["mcp_tool_name"] = str(plan.tool_name)
+    events.append(AgentEvent(type="tool_result", content={
+        "tool": "tableau_mcp",
+        "result": {"success": True, "data": response_data},
+    }))
+    events.append(AgentEvent(type="answer", content=_render_proxy_answer(response_data)))
     return events
+
+
+def _query_result_too_large_for_renderer(result: Any, *, max_rows: int = 200) -> bool:
+    if not isinstance(result, Mapping):
+        return False
+    rows = result.get("rows")
+    return isinstance(rows, list) and len(rows) > max_rows
+
+
+def _normalize_planner_tool_response(
+    *,
+    result: Any,
+    tool_name: str,
+    datasource: Mapping[str, Any],
+    context: ToolContext,
+    args: Mapping[str, Any],
+    guardrail_payload: Mapping[str, Any],
+    planner_payload: Mapping[str, Any],
+    planner_ms: int,
+    query_ms: int,
+) -> dict[str, Any]:
+    if tool_name == MCP_LIST_DATASOURCES_TOOL_NAME:
+        candidates = _datasource_candidates_from_mcp_result(result)
+        response_data = _asset_candidates_response(
+            candidates=candidates,
+            query="",
+            source="mcp",
+            reason="list_datasources",
+            message="已从 Tableau MCP 读取当前连接的数据源列表。",
+            candidate_limit=50,
+        )
+    elif tool_name == MCP_GET_DATASOURCE_METADATA_TOOL_NAME:
+        response_data = _asset_metadata_response_from_mcp(result, _current_datasource(datasource, context))
+    else:
+        response_data = _normalize_response_data(
+            result,
+            ds_info=datasource,
+            args=args,
+            guardrail_payload=guardrail_payload,
+        )
+    response_data["strategy"] = "llm_planner"
+    response_data["planner"] = dict(planner_payload)
+    response_data["telemetry"] = {
+        **(response_data.get("telemetry") if isinstance(response_data.get("telemetry"), Mapping) else {}),
+        "planner_ms": planner_ms,
+        "query_ms": query_ms,
+        "strategy": "llm_planner",
+    }
+    return response_data
 
 
 def _compiler_field_context(datasource: Mapping[str, Any], context: ToolContext) -> tuple[list[Any], list[Mapping[str, Any]]]:
@@ -582,6 +820,12 @@ def _compiler_field_context(datasource: Mapping[str, Any], context: ToolContext)
             queryable_fields = []
     metadata_raw = datasource.get("metadata_fields") or datasource.get("fields") or metadata_fields
     metadata_fields = [dict(item) for item in metadata_raw if isinstance(item, Mapping)]
+    if not queryable_fields and metadata_fields:
+        queryable_fields = [
+            str(item.get("caption") or item.get("fieldCaption") or item.get("name") or item.get("fieldName") or "").strip()
+            for item in metadata_fields
+            if str(item.get("caption") or item.get("fieldCaption") or item.get("name") or item.get("fieldName") or "").strip()
+        ]
     return queryable_fields, metadata_fields
 
 
@@ -589,14 +833,104 @@ def _compile_trace_payload(result: CompileResult, compile_ms: int) -> dict[str, 
     return {
         "chain_mode": CHAIN_MODE,
         "status": result.status,
+        "ambiguity_level": result.ambiguity_level,
         "pattern": result.pattern,
         "compile_reason": result.compile_reason,
         "compile_confidence": result.compile_confidence,
         "tool_name": result.tool_name,
         "matched_fields": result.matched_fields or {},
         "clarification": result.clarification or {},
+        "compiler_advisory": result.compiler_advisory or {},
         "compile_ms": compile_ms,
     }
+
+
+def _compiler_advisory_with_analysis_context(
+    advisory: Mapping[str, Any] | None,
+    *,
+    analysis_context: Optional[Mapping[str, Any]],
+) -> dict[str, Any]:
+    payload = dict(advisory or {})
+    if not isinstance(analysis_context, Mapping) or not analysis_context:
+        payload.setdefault("analysis_context_summary", {})
+        payload.setdefault("unresolved_references", False)
+        return payload
+    requested_metrics = list(analysis_context.get("requested_metrics") or [])
+    requested_dimensions = list(analysis_context.get("requested_dimensions") or [])
+    requested_filters = list(analysis_context.get("requested_filters") or [])
+    unresolved = bool(analysis_context.get("unresolved_references"))
+    payload["analysis_context_summary"] = {
+        "is_follow_up": bool(analysis_context.get("is_follow_up") or analysis_context.get("is_followup")),
+        "unresolved_references": unresolved,
+        "requested_metrics": requested_metrics,
+        "requested_dimensions": requested_dimensions,
+        "requested_filter_count": len(requested_filters),
+        "has_previous_successful_mcp_call": bool(
+            analysis_context.get("previous_successful_mcp_call_ref") or analysis_context.get("mcp_args")
+        ),
+    }
+    payload["unresolved_references"] = unresolved
+    return payload
+
+
+def _unpack_execution_result(execution: Any) -> tuple[Any, dict[str, Any]]:
+    if isinstance(execution, tuple) and len(execution) == 2 and isinstance(execution[1], Mapping):
+        return execution[0], dict(execution[1])
+    return execution, {"decision": "allow", "args": None, "repairs": [], "tool_name": MCP_TOOL_NAME}
+
+
+def _guardrail_event_from_payload(payload: Mapping[str, Any] | None, *, tool_name: str, strategy: str) -> AgentEvent:
+    data = dict(payload or {})
+    decision = str(data.get("decision") or "allow")
+    return AgentEvent(type="tool_result", content={
+        "tool": "mcp_args_guardrail",
+        "result": {
+            "success": decision != "reject",
+            "event": MCP_ARGS_GUARDRAIL_REJECT if decision == "reject" else MCP_ARGS_GUARDRAIL_PASS,
+            "data": {**data, "tool_name": data.get("tool_name") or tool_name, "execution_strategy": strategy},
+        },
+    })
+
+
+def _guardrail_payload_from_exception(exc: Exception) -> dict[str, Any]:
+    details = getattr(exc, "details", None)
+    if isinstance(details, Mapping):
+        guardrail = details.get("guardrail_decision") or details.get("guardrail")
+        if isinstance(guardrail, Mapping):
+            return dict(guardrail)
+    return {"decision": "error", "args": None, "repairs": [], "tool_name": MCP_TOOL_NAME, "message": str(exc)}
+
+
+def _execution_error_response(
+    exc: Exception,
+    *,
+    default_code: str,
+    message: str,
+    strategy: str,
+    execution_source: str,
+    detail: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    details = getattr(exc, "details", None)
+    guardrail = _guardrail_payload_from_exception(exc)
+    code = str(
+        guardrail.get("reject_code")
+        or (details.get("code") if isinstance(details, Mapping) else "")
+        or getattr(exc, "code", "")
+        or default_code
+    )
+    return _tool_unavailable_response(
+        code=code,
+        message=str(guardrail.get("message") or message),
+        user_hint=str(guardrail.get("user_hint") or "请稍后重试；如果持续失败，请带 trace_id 联系管理员排查 MCP Gateway。"),
+        detail={
+            "error": str(exc),
+            "chain_mode": CHAIN_MODE,
+            "strategy": strategy,
+            "execution_source": execution_source,
+            "guardrail_decision": guardrail,
+            **dict(detail or {}),
+        },
+    )
 
 
 def _validate_tableau_mcp_tool(
@@ -658,6 +992,15 @@ async def _execute_mcp_host_tool(
     args: Mapping[str, Any],
     context: ToolContext,
     datasource_luid: str | None = None,
+    question: str | None = None,
+    current_datasource: Mapping[str, Any] | None = None,
+    queryable_fields: list[Any] | None = None,
+    strict_connection_access: bool = False,
+    execution_source: str | None = None,
+    compiler_status: str | None = None,
+    compiler_reason: str | None = None,
+    compiler_advisory: Mapping[str, Any] | None = None,
+    return_guardrail: bool = False,
 ) -> Any:
     from services.data_agent.mcp_host.runtime import MCPHostRuntime
     from services.tableau.mcp_client import get_tableau_mcp_client
@@ -681,7 +1024,20 @@ async def _execute_mcp_host_tool(
         timeout=30,
         trace=trace_events,
     )
-    result = runtime.call_tool(tool_name, dict(args), timeout=30)
+    result = runtime.call_tool(
+        tool_name,
+        dict(args),
+        timeout=30,
+        question=question,
+        context=context,
+        current_datasource=current_datasource,
+        queryable_fields=queryable_fields,
+        strict_connection_access=strict_connection_access,
+        execution_source=execution_source,
+        compiler_status=compiler_status,
+        compiler_reason=compiler_reason,
+        compiler_advisory=compiler_advisory,
+    )
     if inspect.isawaitable(result):
         result = await result
     if metadata_cache_key is not None:
@@ -695,7 +1051,20 @@ async def _execute_mcp_host_tool(
             source="mcp",
             metadata_freshness=payload.get("metadata_freshness") or payload.get("synced_at"),
         )
+    if return_guardrail:
+        return result, _last_guardrail_trace(trace_events)
     return result
+
+
+def _last_guardrail_trace(trace_events: list[dict[str, Any]]) -> dict[str, Any]:
+    for event in reversed(trace_events):
+        if event.get("event") == "mcp_host.guardrail" and isinstance(event.get("payload"), Mapping):
+            payload = dict(event["payload"])
+            decision = payload.get("guardrail_decision")
+            if isinstance(decision, Mapping):
+                return dict(decision)
+            return payload
+    return {"decision": "allow", "args": None, "repairs": [], "tool_name": MCP_TOOL_NAME}
 
 
 def _metadata_cache_key(*, tool_name: str, context: ToolContext, datasource_luid: str | None) -> dict[str, str] | None:
@@ -1911,7 +2280,10 @@ def _context_trace_payload(question: str, analysis_context: Optional[Mapping[str
         "datasource_name": context.get("datasource_name"),
         "metric_names": list(context.get("metric_names") or []),
         "dimension_names": list(context.get("dimension_names") or []),
+        "requested_metrics": list(context.get("requested_metrics") or []),
+        "requested_dimensions": list(context.get("requested_dimensions") or []),
         "filter_names": list(context.get("filter_names") or []),
+        "requested_filters": list(context.get("requested_filters") or []),
         "unresolved_references": unresolved,
         "calculation_performed": False,
     }

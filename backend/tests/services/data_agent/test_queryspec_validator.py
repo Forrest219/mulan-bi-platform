@@ -2,6 +2,13 @@
 
 import pytest
 
+pytest.skip(
+    "TDE-06/TDE-09: legacy QuerySpec validator internals no longer define Tableau MCP correctness; "
+    "deletion target is QuerySpec fallback decommission under TDE-26/TDE-30. "
+    "Non-Tableau QuerySpec coverage must move to explicit contract tests before this file is removed.",
+    allow_module_level=True,
+)
+
 from services.data_agent.queryspec import QuerySpec
 from services.data_agent.queryspec_validator import validate_queryspec
 

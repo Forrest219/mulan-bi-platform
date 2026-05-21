@@ -80,6 +80,26 @@ def test_rejects_unknown_tool_before_runtime():
     assert decision.reject_code == "TABLEAU_MCP_TOOL_FORBIDDEN"
 
 
+def test_strips_connection_arg_when_mcp_schema_uses_transport_connection():
+    decision = _service().validate(
+        TableauMcpGuardrailRequest(
+            question="列出数据源",
+            tool_name="list-datasources",
+            args={"connectionId": 7, "limit": 50},
+            context=_context(),
+            tool_schema={
+                "type": "object",
+                "properties": {"limit": {"type": "integer"}},
+                "additionalProperties": False,
+            },
+        )
+    )
+
+    assert decision.decision == "allow"
+    assert decision.args == {"limit": 50}
+    assert decision.connection_id == 7
+
+
 def test_rejects_datasource_outside_connection():
     decision = _service(belongs=False).validate(
         _query_request(

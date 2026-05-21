@@ -181,6 +181,15 @@ class MCPToolExecutor:
         arguments: Optional[dict[str, Any]] = None,
         *,
         timeout: Optional[int] = None,
+        question: Optional[str] = None,
+        context: Any = None,
+        current_datasource: Optional[Mapping[str, Any]] = None,
+        queryable_fields: Optional[list[Any]] = None,
+        strict_connection_access: bool = False,
+        execution_source: Optional[str] = None,
+        compiler_status: Optional[str] = None,
+        compiler_reason: Optional[str] = None,
+        compiler_advisory: Optional[Mapping[str, Any]] = None,
     ) -> Any:
         name = str(tool_name or "").strip()
         definition = self.catalog.get(name)
@@ -216,10 +225,52 @@ class MCPToolExecutor:
                 details={"missing_required_properties": missing},
             )
 
+        guardrail_decision = None
+        if question is not None or context is not None or current_datasource is not None:
+            guardrail_decision = self._validate_guardrail(
+                question=question or "",
+                tool_name=name,
+                arguments=call_arguments,
+                context=context,
+                current_datasource=current_datasource,
+                queryable_fields=queryable_fields,
+                tool_schema=definition.input_schema,
+                strict_connection_access=strict_connection_access,
+            )
+            _record_trace(
+                self.trace,
+                "mcp_host.guardrail",
+                {
+                    "tool": name,
+                    "execution_source": execution_source,
+                    "compiler_status": compiler_status,
+                    "compiler_reason": compiler_reason,
+                    "compiler_advisory": compiler_advisory or {},
+                    "guardrail_decision": guardrail_decision,
+                },
+            )
+            if guardrail_decision.get("decision") == "reject":
+                self._reject(
+                    code=str(guardrail_decision.get("reject_code") or "MCP_ARGS_REJECTED"),
+                    message=str(guardrail_decision.get("message") or "MCP tool arguments rejected by guardrail"),
+                    tool_name=name,
+                    details={"guardrail_decision": guardrail_decision},
+                )
+            if isinstance(guardrail_decision.get("args"), Mapping):
+                call_arguments = dict(guardrail_decision["args"])
+
         _record_trace(
             self.trace,
             "mcp_host.tool_call",
-            {"tool": name, "arguments": call_arguments},
+            {
+                "tool": name,
+                "arguments": call_arguments,
+                "execution_source": execution_source,
+                "compiler_status": compiler_status,
+                "compiler_reason": compiler_reason,
+                "compiler_advisory": compiler_advisory or {},
+                "guardrail_decision": guardrail_decision,
+            },
         )
         if name == QUERY_DATASOURCE_TOOL:
             call_arguments = _inject_resource_cap(call_arguments)
@@ -267,6 +318,47 @@ class MCPToolExecutor:
         payload = {"tool": tool_name, "code": code, "message": message, **details}
         _record_trace(self.trace, "mcp_host.tool_rejected", payload)
         raise MCPHostRuntimeError(code=code, message=message, details=details)
+
+    def _validate_guardrail(
+        self,
+        *,
+        question: str,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        context: Any,
+        current_datasource: Optional[Mapping[str, Any]],
+        queryable_fields: Optional[list[Any]],
+        tool_schema: Mapping[str, Any],
+        strict_connection_access: bool,
+    ) -> dict[str, Any]:
+        from services.data_agent.tableau_mcp_guardrail import (
+            TableauMcpGuardrailRequest,
+            TableauMcpGuardrailService,
+        )
+        from services.data_agent.tableau_mcp_resolver import DatasourceCandidateResolver
+
+        def _access_checker(connection_id: int, user_id: int | None, user_role: str | None) -> bool:
+            if not strict_connection_access:
+                return True
+            return _context_connection_id(context) == connection_id
+
+        resolver = DatasourceCandidateResolver(
+            connection_access_checker=_access_checker,
+            datasource_connection_checker=lambda datasource_luid, connection_id: True,
+        )
+        service = TableauMcpGuardrailService(resolver=resolver)
+        decision = service.validate(
+            TableauMcpGuardrailRequest(
+                question=question,
+                tool_name=tool_name,
+                args=arguments,
+                context=context,
+                current_datasource=current_datasource,
+                queryable_fields=queryable_fields,
+                tool_schema=tool_schema,
+            )
+        )
+        return decision.to_dict()
 
 
 class MCPHostRuntime:
@@ -358,8 +450,30 @@ class MCPHostRuntime:
         arguments: Optional[dict[str, Any]] = None,
         *,
         timeout: Optional[int] = None,
+        question: Optional[str] = None,
+        context: Any = None,
+        current_datasource: Optional[Mapping[str, Any]] = None,
+        queryable_fields: Optional[list[Any]] = None,
+        strict_connection_access: bool = False,
+        execution_source: Optional[str] = None,
+        compiler_status: Optional[str] = None,
+        compiler_reason: Optional[str] = None,
+        compiler_advisory: Optional[Mapping[str, Any]] = None,
     ) -> Any:
-        return self.executor().execute(tool_name, arguments, timeout=timeout)
+        return self.executor().execute(
+            tool_name,
+            arguments,
+            timeout=timeout,
+            question=question,
+            context=context,
+            current_datasource=current_datasource,
+            queryable_fields=queryable_fields,
+            strict_connection_access=strict_connection_access,
+            execution_source=execution_source,
+            compiler_status=compiler_status,
+            compiler_reason=compiler_reason,
+            compiler_advisory=compiler_advisory,
+        )
 
 
 def _input_schema_from_tool(tool: Mapping[str, Any]) -> dict[str, Any]:
@@ -396,6 +510,14 @@ def _missing_required_properties(
         return []
     required_names = [str(item) for item in required if str(item)]
     return [name for name in required_names if name not in arguments]
+
+
+def _context_connection_id(context: Any) -> int | None:
+    value = context.get("connection_id") if isinstance(context, Mapping) else getattr(context, "connection_id", None)
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _record_trace(

@@ -1,0 +1,5 @@
+version: 1
+name: mcp-proxy-compiler-contraction
+title: MCP Proxy Compiler Permission Contraction
+description: 收缩 deterministic_plan_compiler 权限，将其从用户可见规划器降级为高置信 fast path / advisory trace，确保 Tableau MCP 工具链成为首页问数事实主路径。
+status: draft
