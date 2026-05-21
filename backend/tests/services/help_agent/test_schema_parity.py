@@ -14,7 +14,6 @@ pytestmark = pytest.mark.skip_db
 
 RUN_TELEMETRY_FIELDS = [
     "status",
-    "error_code",
     "steps_count",
     "tools_used",
     "response_type",
@@ -60,6 +59,11 @@ def test_step_observability_fields_come_from_shared_mixin() -> None:
 
 def test_run_observability_schema_parity() -> None:
     _assert_parity(BiAgentRun, HelpAgentRun, RUN_TELEMETRY_FIELDS)
+
+
+def test_data_agent_error_code_is_wider_than_help_agent_contract() -> None:
+    assert BiAgentRun.__table__.columns["error_code"].type.length == 128
+    assert HelpAgentRun.__table__.columns["error_code"].type.length == 16
 
 
 def test_step_observability_schema_parity() -> None:

@@ -222,7 +222,6 @@ def test_non_inventory_question_keeps_existing_react_path(db_session):
     try:
         with (
             patch("app.api.agent.create_engine_with_skills", _fake_create_engine_with_skills),
-            patch("app.api.agent.is_direct_query", return_value=False),
             patch("app.api.agent.run_agent", _fake_run_agent),
             patch("app.api.agent.run_schema_inventory_route", new=AsyncMock()) as route_mock,
             patch("app.api.agent.log_nlq_query"),

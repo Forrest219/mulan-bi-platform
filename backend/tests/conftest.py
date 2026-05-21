@@ -122,6 +122,7 @@ def _create_tables():
     import services.datasources.models  # noqa: F401
     import services.llm.models  # noqa: F401
     import services.tableau.models  # noqa: F401
+    import services.skills.models  # noqa: F401
     import services.health_scan.models  # noqa: F401
     import services.semantic_maintenance.models  # noqa: F401
     import services.data_agent.models  # noqa: F401 — registers agent/bi_agent/analysis tables

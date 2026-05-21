@@ -116,6 +116,8 @@ class BiAgentRun(AgentRunTelemetryMixin, Base):
     user_id = Column(Integer, nullable=False)
     question = Column(Text, nullable=False)
     connection_id = Column(Integer, nullable=True)
+    error_code = Column(String(128), nullable=True)
+
     def to_dict(self) -> dict:
         return {
             "id": str(self.id),

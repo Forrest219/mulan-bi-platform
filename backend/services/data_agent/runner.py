@@ -29,6 +29,7 @@ from .result_transform import can_transform_previous_result, transform_previous_
 from .response import AgentEvent, normalize_table_response, table_data_event_from_response
 from .router_guardrail import RouteDecision
 from .session import AgentSession, SessionManager
+from .tableau_mcp_telemetry import build_fallback_audit_payload
 from .intent.keyword_match import is_direct_query, is_chart_request
 from .tool_base import ToolContext
 from .engine import _infer_col_types, _build_chart_data
@@ -37,6 +38,56 @@ logger = logging.getLogger(__name__)
 
 _SCHEMA_ASSET_PATTERN = re.compile(r"数据(?:资产|源)\s+\*\*([^*]+)\*\*")
 _FOLLOWUP_METRIC_PATTERN = re.compile(r"(这个|这些|上述|上面|该)\s*(指标|数据|结果)?")
+_AGGREGATE_CONTEXT_FUNCTIONS = {"SUM", "AVG", "COUNT", "COUNTD", "MIN", "MAX", "MEDIAN", "ATTR"}
+_TIME_CONTEXT_FUNCTIONS = {"YEAR", "QUARTER", "MONTH", "WEEK", "DAY"}
+_AGENT_PERSISTENCE_FAILED = "AGENT_PERSISTENCE_FAILED"
+
+
+def _rollback_after_persistence_error(db: Session) -> None:
+    rollback = getattr(db, "rollback", None)
+    if rollback is None:
+        return
+    try:
+        rollback()
+    except Exception:
+        logger.warning("Failed to rollback after agent persistence error", exc_info=True)
+
+
+def _log_final_telemetry_failure(
+    exc: Exception,
+    *,
+    conversation_id: str,
+    trace_id: str,
+    run_id: Optional[uuid_lib.UUID],
+    user_id: Optional[int],
+    response_type: str,
+    error_code: str,
+) -> None:
+    logger.exception(
+        "Agent final response telemetry persistence failed",
+        extra={
+            "conversation_id": conversation_id,
+            "trace_id": trace_id,
+            "run_id": str(run_id) if run_id else None,
+            "user_id": user_id,
+            "response_type": response_type,
+            "error_code": error_code,
+            "exception_type": type(exc).__name__,
+        },
+    )
+
+
+def _persistence_failed_event(*, trace_id: str, run_id: Optional[uuid_lib.UUID]) -> AgentEvent:
+    return AgentEvent(
+        type="error",
+        content={
+            "error_code": _AGENT_PERSISTENCE_FAILED,
+            "message": "回答生成成功但保存失败，请重试。",
+            "trace_id": trace_id,
+            "run_id": str(run_id) if run_id else "",
+            "retryable": True,
+        },
+    )
 
 
 async def run_agent(
@@ -169,39 +220,68 @@ async def run_agent(
             answer_text = f"已基于上一条结果追加 {transform_count} 个派生列，返回 {row_count} 行结果。"
             execution_time_ms = _elapsed_ms(total_start)
             step_number += 1
-            db.add(BiAgentStep(
-                run_id=run_id,
-                step_number=step_number,
-                step_type="answer",
-                tool_name="answer_renderer",
-                content=answer_text[:500],
-                execution_time_ms=_elapsed_ms(event_at),
-            ))
-            db.query(BiAgentRun).filter(BiAgentRun.id == run_id).update(
-                {
-                    BiAgentRun.status: "completed",
-                    BiAgentRun.steps_count: steps_count,
-                    BiAgentRun.tools_used: tools_used,
-                    BiAgentRun.response_type: "query_result",
-                    BiAgentRun.execution_time_ms: execution_time_ms,
-                    BiAgentRun.completed_at: sa_func.now(),
-                },
-                synchronize_session=False,
-            )
-            db.commit()
-            session_mgr.persist_message(
-                session=session,
-                role="assistant",
-                content=answer_text,
-                response_type="query_result",
-                response_data=response_data,
-                tools_used=tools_used,
-                trace_id=trace_id,
-                steps_count=steps_count,
-                execution_time_ms=execution_time_ms,
-                sources_count=1 if context.connection_id else 0,
-                top_sources=[context.connection_name] if context.connection_id and context.connection_name else [],
-            )
+            try:
+                db.add(BiAgentStep(
+                    run_id=run_id,
+                    step_number=step_number,
+                    step_type="answer",
+                    tool_name="answer_renderer",
+                    content=answer_text[:500],
+                    execution_time_ms=_elapsed_ms(event_at),
+                ))
+                db.query(BiAgentRun).filter(BiAgentRun.id == run_id).update(
+                    {
+                        BiAgentRun.status: "completed",
+                        BiAgentRun.steps_count: steps_count,
+                        BiAgentRun.tools_used: tools_used,
+                        BiAgentRun.response_type: "query_result",
+                        BiAgentRun.execution_time_ms: execution_time_ms,
+                        BiAgentRun.completed_at: sa_func.now(),
+                    },
+                    synchronize_session=False,
+                )
+                db.commit()
+            except Exception as exc:
+                _rollback_after_persistence_error(db)
+                _log_final_telemetry_failure(
+                    exc,
+                    conversation_id=conversation_id_str,
+                    trace_id=trace_id,
+                    run_id=run_id,
+                    user_id=current_user.get("id"),
+                    response_type="query_result",
+                    error_code="AGENT_TELEMETRY_PERSISTENCE_FAILED",
+                )
+            try:
+                session_mgr.persist_message(
+                    session=session,
+                    role="assistant",
+                    content=answer_text,
+                    response_type="query_result",
+                    response_data=response_data,
+                    tools_used=tools_used,
+                    trace_id=trace_id,
+                    steps_count=steps_count,
+                    execution_time_ms=execution_time_ms,
+                    sources_count=1 if context.connection_id else 0,
+                    top_sources=[context.connection_name] if context.connection_id and context.connection_name else [],
+                )
+            except Exception as exc:
+                _rollback_after_persistence_error(db)
+                logger.exception(
+                    "Agent assistant message persistence failed",
+                    extra={
+                        "conversation_id": conversation_id_str,
+                        "trace_id": trace_id,
+                        "run_id": str(run_id) if run_id else None,
+                        "user_id": current_user.get("id"),
+                        "response_type": "query_result",
+                        "error_code": _AGENT_PERSISTENCE_FAILED,
+                        "exception_type": type(exc).__name__,
+                    },
+                )
+                yield _persistence_failed_event(trace_id=trace_id, run_id=run_id)
+                return
             normalized = normalize_table_response(response_data)
             if normalized is not None:
                 yield AgentEvent(type="table_data", content=table_data_event_from_response(normalized))
@@ -220,18 +300,44 @@ async def run_agent(
             return
 
         chain_selection = select_data_agent_chain()
-        controlled_asset_intent = chain_selection.is_mcp_proxy and (
+        force_tableau_mcp_proxy = _is_tableau_mcp_context(context)
+        controlled_asset_intent = (chain_selection.is_mcp_proxy or force_tableau_mcp_proxy) and (
             intent_result.is_asset_inventory
             or bool(route_decision and route_decision.is_asset_question)
         )
         if enforce_controlled_data_path and (intent_result.is_data_intent or controlled_asset_intent):
             followup_context = resolve_recent_query_context(session_mgr, session, current_user["id"])
-            if chain_selection.is_fallback:
+            if chain_selection.is_fallback and not force_tableau_mcp_proxy:
                 logger.warning("Data Agent chain mode fallback: %s", chain_selection.trace_detail())
                 fallback_message = chain_selection.fallback_message()
                 if fallback_message:
                     yield AgentEvent(type="thinking", content=fallback_message)
-            controlled_path = run_mcp_proxy_main_path if chain_selection.is_mcp_proxy else run_mcp_first_main_path
+            if force_tableau_mcp_proxy and not chain_selection.is_mcp_proxy:
+                fallback_audit = build_fallback_audit_payload(
+                    actual_entry="runner",
+                    fallback_attempted=True,
+                    fallback_blocked=True,
+                    fallback_target="run_mcp_first_main_path",
+                    fallback_blocked_reason="tableau_mcp_strict_chain",
+                    extra_trace=chain_selection.trace_detail(),
+                )
+                logger.error(
+                    "Blocked Tableau MCP hidden fallback to legacy chain: %s",
+                    fallback_audit,
+                )
+                yield AgentEvent(
+                    type="thinking",
+                    content="已识别为 Tableau MCP 场景，阻止回退到 legacy QuerySpec 链路，改用 MCP Proxy 主干。",
+                )
+                yield AgentEvent(type="tool_result", content={
+                    "tool": "fallback_audit",
+                    "result": {"success": True, "data": fallback_audit},
+                })
+            controlled_path = (
+                run_mcp_proxy_main_path
+                if chain_selection.is_mcp_proxy or force_tableau_mcp_proxy
+                else run_mcp_first_main_path
+            )
             async for event in controlled_path(
                 question=question,
                 context=context,
@@ -325,39 +431,68 @@ async def run_agent(
                             else:
                                 response_type = "text"
                     step_number += 1
-                    db.add(BiAgentStep(
-                        run_id=run_id,
-                        step_number=step_number,
-                        step_type="answer",
-                        tool_name="answer_renderer",
-                        content=answer_text[:500],
-                        execution_time_ms=_elapsed_ms(last_step_at, event_at),
-                    ))
-                    db.query(BiAgentRun).filter(BiAgentRun.id == run_id).update(
-                        {
-                            BiAgentRun.status: "completed",
-                            BiAgentRun.steps_count: steps_count,
-                            BiAgentRun.tools_used: tools_used if tools_used else None,
-                            BiAgentRun.response_type: response_type,
-                            BiAgentRun.execution_time_ms: execution_time_ms,
-                            BiAgentRun.completed_at: sa_func.now(),
-                        },
-                        synchronize_session=False,
-                    )
-                    db.commit()
-                    session_mgr.persist_message(
-                        session=session,
-                        role="assistant",
-                        content=answer_text,
-                        response_type=response_type,
-                        response_data=response_data,
-                        tools_used=tools_used,
-                        trace_id=trace_id,
-                        steps_count=steps_count,
-                        execution_time_ms=execution_time_ms,
-                        sources_count=1 if context.connection_id else 0,
-                        top_sources=[context.connection_name] if context.connection_id and context.connection_name else [],
-                    )
+                    try:
+                        db.add(BiAgentStep(
+                            run_id=run_id,
+                            step_number=step_number,
+                            step_type="answer",
+                            tool_name="answer_renderer",
+                            content=answer_text[:500],
+                            execution_time_ms=_elapsed_ms(last_step_at, event_at),
+                        ))
+                        db.query(BiAgentRun).filter(BiAgentRun.id == run_id).update(
+                            {
+                                BiAgentRun.status: "completed",
+                                BiAgentRun.steps_count: steps_count,
+                                BiAgentRun.tools_used: tools_used if tools_used else None,
+                                BiAgentRun.response_type: response_type,
+                                BiAgentRun.execution_time_ms: execution_time_ms,
+                                BiAgentRun.completed_at: sa_func.now(),
+                            },
+                            synchronize_session=False,
+                        )
+                        db.commit()
+                    except Exception as exc:
+                        _rollback_after_persistence_error(db)
+                        _log_final_telemetry_failure(
+                            exc,
+                            conversation_id=conversation_id_str,
+                            trace_id=trace_id,
+                            run_id=run_id,
+                            user_id=current_user.get("id"),
+                            response_type=response_type,
+                            error_code="AGENT_TELEMETRY_PERSISTENCE_FAILED",
+                        )
+                    try:
+                        session_mgr.persist_message(
+                            session=session,
+                            role="assistant",
+                            content=answer_text,
+                            response_type=response_type,
+                            response_data=response_data,
+                            tools_used=tools_used,
+                            trace_id=trace_id,
+                            steps_count=steps_count,
+                            execution_time_ms=execution_time_ms,
+                            sources_count=1 if context.connection_id else 0,
+                            top_sources=[context.connection_name] if context.connection_id and context.connection_name else [],
+                        )
+                    except Exception as exc:
+                        _rollback_after_persistence_error(db)
+                        logger.exception(
+                            "Agent assistant message persistence failed",
+                            extra={
+                                "conversation_id": conversation_id_str,
+                                "trace_id": trace_id,
+                                "run_id": str(run_id) if run_id else None,
+                                "user_id": current_user.get("id"),
+                                "response_type": response_type,
+                                "error_code": _AGENT_PERSISTENCE_FAILED,
+                                "exception_type": type(exc).__name__,
+                            },
+                        )
+                        yield _persistence_failed_event(trace_id=trace_id, run_id=run_id)
+                        return
                     if response_type == "table" and table_response is not None and not table_data_emitted:
                         table_data_emitted = True
                         yield AgentEvent(type="table_data", content=table_data_event_from_response(table_response))
@@ -574,29 +709,41 @@ async def run_agent(
                             response_type = "table"
                             response_data = data
 
-                # Record answer step
+                # Record answer telemetry. If telemetry fails, preserve the user-visible answer.
                 step_number += 1
-                step = BiAgentStep(
-                    run_id=run_id,
-                    step_number=step_number,
-                    step_type="answer",
-                    content=answer_text[:500] if answer_text else None,
-                    execution_time_ms=answer_step_ms,
-                )
-                db.add(step)
+                try:
+                    step = BiAgentStep(
+                        run_id=run_id,
+                        step_number=step_number,
+                        step_type="answer",
+                        content=answer_text[:500] if answer_text else None,
+                        execution_time_ms=answer_step_ms,
+                    )
+                    db.add(step)
 
-                db.query(BiAgentRun).filter(BiAgentRun.id == run_id).update(
-                    {
-                        BiAgentRun.status: "completed",
-                        BiAgentRun.steps_count: steps_count,
-                        BiAgentRun.tools_used: tools_used if tools_used else None,
-                        BiAgentRun.response_type: response_type,
-                        BiAgentRun.execution_time_ms: execution_time_ms,
-                        BiAgentRun.completed_at: sa_func.now(),
-                    },
-                    synchronize_session=False,
-                )
-                db.commit()
+                    db.query(BiAgentRun).filter(BiAgentRun.id == run_id).update(
+                        {
+                            BiAgentRun.status: "completed",
+                            BiAgentRun.steps_count: steps_count,
+                            BiAgentRun.tools_used: tools_used if tools_used else None,
+                            BiAgentRun.response_type: response_type,
+                            BiAgentRun.execution_time_ms: execution_time_ms,
+                            BiAgentRun.completed_at: sa_func.now(),
+                        },
+                        synchronize_session=False,
+                    )
+                    db.commit()
+                except Exception as exc:
+                    _rollback_after_persistence_error(db)
+                    _log_final_telemetry_failure(
+                        exc,
+                        conversation_id=conversation_id_str,
+                        trace_id=trace_id,
+                        run_id=run_id,
+                        user_id=current_user.get("id"),
+                        response_type=response_type,
+                        error_code="AGENT_TELEMETRY_PERSISTENCE_FAILED",
+                    )
 
                 # Build sources metadata from connection context
                 sources_count = 1 if context.connection_id else 0
@@ -614,11 +761,43 @@ async def run_agent(
                                 content=_build_chart_data(_fields, _rows, _col_types, _chart_type),
                         )
 
+                # Persist assistant message
+                try:
+                    session_mgr.persist_message(
+                        session=session,
+                        role="assistant",
+                        content=answer_text,
+                        response_type=response_type,
+                        response_data=response_data,
+                        tools_used=tools_used,
+                        trace_id=trace_id,
+                        steps_count=steps_count,
+                        execution_time_ms=execution_time_ms,
+                        sources_count=sources_count,
+                        top_sources=top_sources,
+                    )
+                except Exception as exc:
+                    _rollback_after_persistence_error(db)
+                    logger.exception(
+                        "Agent assistant message persistence failed",
+                        extra={
+                            "conversation_id": conversation_id_str,
+                            "trace_id": trace_id,
+                            "run_id": str(run_id) if run_id else None,
+                            "user_id": current_user.get("id"),
+                            "response_type": response_type,
+                            "error_code": _AGENT_PERSISTENCE_FAILED,
+                            "exception_type": type(exc).__name__,
+                        },
+                    )
+                    yield _persistence_failed_event(trace_id=trace_id, run_id=run_id)
+                    return
+
                 if response_type == "table" and table_response is not None and not table_data_emitted:
                     table_data_emitted = True
                     yield AgentEvent(type="table_data", content=table_data_event_from_response(table_response))
 
-                # Yield a synthetic "done" event that carries all metadata
+                # Yield a synthetic "done" event only after assistant history is durable.
                 yield AgentEvent(
                     type="done",
                     content={
@@ -633,21 +812,6 @@ async def run_agent(
                         "sources_count": sources_count,
                         "top_sources": top_sources,
                     },
-                )
-
-                # Persist assistant message
-                session_mgr.persist_message(
-                    session=session,
-                    role="assistant",
-                    content=answer_text,
-                    response_type=response_type,
-                    response_data=response_data,
-                    tools_used=tools_used,
-                    trace_id=trace_id,
-                    steps_count=steps_count,
-                    execution_time_ms=execution_time_ms,
-                    sources_count=sources_count,
-                    top_sources=top_sources,
                 )
 
             elif event.type == "error":
@@ -828,6 +992,14 @@ def resolve_recent_schema_asset_name(session_mgr: SessionManager, session: Agent
     return None
 
 
+def _is_tableau_mcp_context(context: ToolContext) -> bool:
+    """Return whether controlled data path must stay on the Tableau MCP mainline."""
+    connection_type = str(getattr(context, "connection_type", "") or "").strip().lower()
+    if connection_type == "tableau":
+        return True
+    return bool(getattr(context, "selected_datasource_luid", None) and getattr(context, "connection_id", None))
+
+
 def resolve_recent_query_context(session_mgr: SessionManager, session: AgentSession, user_id: int) -> Dict[str, object]:
     """Return datasource and metric hints from the most recent query result in a conversation."""
     try:
@@ -855,13 +1027,31 @@ def resolve_recent_query_context(session_mgr: SessionManager, session: AgentSess
                 return datasource_context
             continue
         datasource_name = response_data.get("datasource_name")
-        metric_names = _extract_metric_names(response_data.get("fields") or [])
-        dimension_names = _extract_dimension_names(response_data.get("fields") or [])
+        context_fields = _extract_query_context_field_roles(response_data)
+        metric_names = context_fields["metric_names"] or _extract_metric_names(response_data.get("fields") or [])
+        dimension_names = context_fields["dimension_names"] or _extract_dimension_names(response_data.get("fields") or [])
         context: Dict[str, object] = {
+            "is_follow_up": True,
+            "unresolved_references": False,
             "datasource_name": datasource_name,
             "metric_names": metric_names,
             "dimension_names": dimension_names,
+            "requested_metrics": metric_names,
+            "requested_dimensions": dimension_names,
+            "requested_filters": _extract_query_context_filters(response_data),
+            "previous_successful_query_summary": {
+                "fields": list(response_data.get("fields") or []),
+                "metric_names": metric_names,
+                "dimension_names": dimension_names,
+            },
         }
+        mcp_args = response_data.get("mcp_args")
+        if isinstance(mcp_args, dict):
+            context["mcp_args"] = mcp_args
+            context["previous_successful_mcp_call_ref"] = {
+                "tool_name": response_data.get("mcp_tool_name") or "query-datasource",
+                "datasource_luid": mcp_args.get("datasourceLuid") or response_data.get("datasource_luid"),
+            }
         context.update(datasource_context)
         return context
     return {}
@@ -1005,6 +1195,126 @@ def _extract_dimension_names(fields: list) -> list[str]:
         seen.add(name)
         dimension_names.append(name)
     return dimension_names[:5]
+
+
+def _extract_query_context_field_roles(response_data: Dict[str, object]) -> Dict[str, List[str]]:
+    """Infer reusable planning field roles from a previous MCP query result.
+
+    This is a current-turn hint builder for the runner boundary.  It does not
+    create business facts and does not make compiler stateful.
+    """
+
+    metric_names: List[str] = []
+    dimension_names: List[str] = []
+    display_columns = _table_display_columns(response_data)
+    mcp_fields = _mcp_query_fields(response_data.get("mcp_args"))
+    if mcp_fields:
+        for index, field in enumerate(mcp_fields):
+            caption = _context_field_caption(field)
+            if not caption:
+                continue
+            function = str(field.get("function") or field.get("aggregation") or "").strip().upper()
+            semantic_type = _display_semantic_type(display_columns, index=index, caption=caption)
+            if function in _AGGREGATE_CONTEXT_FUNCTIONS or semantic_type in {"metric", "derived_metric"}:
+                _append_unique(metric_names, caption)
+            elif function in _TIME_CONTEXT_FUNCTIONS or semantic_type in {"dimension", "date", "time"}:
+                _append_unique(dimension_names, caption)
+            else:
+                _append_unique(dimension_names, caption)
+        return {"metric_names": metric_names[:8], "dimension_names": dimension_names[:8]}
+
+    fields = response_data.get("fields") or []
+    if not isinstance(fields, list):
+        return {"metric_names": [], "dimension_names": []}
+    for index, field in enumerate(fields):
+        caption = _context_field_caption(field)
+        if not caption:
+            continue
+        aggregate = re.match(r"^\s*([A-Z][A-Z0-9_]*)\s*\((.+)\)\s*$", caption, flags=re.IGNORECASE)
+        semantic_type = _display_semantic_type(display_columns, index=index, caption=caption)
+        if aggregate and aggregate.group(1).upper() in _AGGREGATE_CONTEXT_FUNCTIONS:
+            _append_unique(metric_names, aggregate.group(2).strip())
+        elif semantic_type in {"metric", "derived_metric"}:
+            _append_unique(metric_names, caption)
+        else:
+            _append_unique(dimension_names, caption)
+    return {"metric_names": metric_names[:8], "dimension_names": dimension_names[:8]}
+
+
+def _mcp_query_fields(args: object) -> List[Dict[str, object]]:
+    if not isinstance(args, dict):
+        return []
+    query = args.get("query")
+    if not isinstance(query, dict):
+        return []
+    fields = query.get("fields")
+    if not isinstance(fields, list):
+        return []
+    return [dict(field) for field in fields if isinstance(field, dict)]
+
+
+def _extract_query_context_filters(response_data: Dict[str, object]) -> List[object]:
+    mcp_args = response_data.get("mcp_args")
+    if not isinstance(mcp_args, dict):
+        return []
+    query = mcp_args.get("query")
+    if not isinstance(query, dict):
+        return []
+    filters = query.get("filters")
+    return list(filters) if isinstance(filters, list) else []
+
+
+def _table_display_columns(response_data: Dict[str, object]) -> List[Dict[str, object]]:
+    table_display = response_data.get("table_display")
+    if not isinstance(table_display, dict):
+        return []
+    columns = table_display.get("columns")
+    if not isinstance(columns, list):
+        return []
+    return [dict(column) for column in columns if isinstance(column, dict)]
+
+
+def _display_semantic_type(columns: List[Dict[str, object]], *, index: int, caption: str) -> str:
+    candidates: List[Dict[str, object]] = []
+    if 0 <= index < len(columns):
+        candidates.append(columns[index])
+    compact_caption = _compact_context_text(caption)
+    candidates.extend(
+        column
+        for column in columns
+        if compact_caption
+        and compact_caption
+        in {
+            _compact_context_text(column.get("key")),
+            _compact_context_text(column.get("label")),
+            _compact_context_text(column.get("name")),
+        }
+    )
+    for column in candidates:
+        semantic_type = str(column.get("semantic_type") or "").strip().lower()
+        if semantic_type:
+            return semantic_type
+    return ""
+
+
+def _context_field_caption(value: object) -> str:
+    if isinstance(value, dict):
+        for key in ("fieldCaption", "field_alias", "fieldAlias", "caption", "label", "name", "key"):
+            raw = value.get(key)
+            if raw:
+                return str(raw).strip()
+        return ""
+    return str(value or "").strip()
+
+
+def _append_unique(values: List[str], value: str) -> None:
+    cleaned = str(value or "").strip()
+    if cleaned and cleaned not in values:
+        values.append(cleaned)
+
+
+def _compact_context_text(value: object) -> str:
+    return re.sub(r"\s+", "", str(value or "")).casefold()
 
 
 def _infer_analysis_params(question: str) -> Dict[str, object]:

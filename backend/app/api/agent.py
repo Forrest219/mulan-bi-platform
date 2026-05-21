@@ -196,6 +196,38 @@ def _sse_data(payload: dict) -> str:
 
 _SSE_STREAM_DONE = object()
 _SSE_HEARTBEAT_INTERVAL_SECONDS = 15.0
+_AGENT_PERSISTENCE_FAILED = "AGENT_PERSISTENCE_FAILED"
+
+
+class AgentPersistenceError(RuntimeError):
+    """Raised when a user-visible assistant response cannot be persisted."""
+
+    def __init__(self, *, trace_id: str, run_id: str, conversation_id: str):
+        super().__init__("assistant message persistence failed")
+        self.trace_id = trace_id
+        self.run_id = run_id
+        self.conversation_id = conversation_id
+
+
+def _rollback_after_persistence_error(db: Session) -> None:
+    rollback = getattr(db, "rollback", None)
+    if rollback is None:
+        return
+    try:
+        rollback()
+    except Exception:
+        logger.warning("Failed to rollback after agent persistence error", exc_info=True)
+
+
+def _persistence_failed_sse(*, trace_id: str, run_id: str) -> str:
+    return _sse_data({
+        "type": "error",
+        "error_code": _AGENT_PERSISTENCE_FAILED,
+        "message": "回答生成成功但保存失败，请重试。",
+        "trace_id": trace_id,
+        "run_id": run_id,
+        "retryable": True,
+    })
 
 
 async def _stream_with_keepalive(
@@ -407,67 +439,102 @@ def _write_schema_inventory_success(
     )
     result.response_data = response_data
 
-    run = BiAgentRun(
-        id=run_id,
-        conversation_id=session.conversation_id,
-        user_id=current_user["id"],
-        connection_id=connection_id,
-        question=question,
-        status="completed",
-        steps_count=result.steps_count,
-        tools_used=result.tools_used,
-        response_type=result.response_type,
-        execution_time_ms=execution_time_ms,
-        completed_at=func.now(),
-    )
-    db.add(run)
-    db.flush()
-    db.add_all([
-        BiAgentStep(
-            run_id=run_id,
-            step_number=1,
-            step_type="thinking",
-            content="识别为数据源清单问题，准备读取当前连接的 schema 信息。",
-            execution_time_ms=step_durations_ms.get(1),
-        ),
-        BiAgentStep(
-            run_id=run_id,
-            step_number=2,
-            step_type="tool_call",
-            tool_name=result.tool_name,
-            tool_params=result.tool_params,
-            skill_version_id=skill_version_uuid,
-            execution_time_ms=step_durations_ms.get(2),
-        ),
-        BiAgentStep(
-            run_id=run_id,
-            step_number=3,
-            step_type="tool_result",
-            tool_name=result.tool_name,
-            tool_result_summary=result.tool_result_summary[:500],
-            execution_time_ms=step_durations_ms.get(3),
-        ),
-        BiAgentStep(
-            run_id=run_id,
-            step_number=4,
-            step_type="answer",
-            content=result.answer[:500],
-            execution_time_ms=step_durations_ms.get(4),
-        ),
-    ])
-    db.commit()
+    try:
+        run = BiAgentRun(
+            id=run_id,
+            conversation_id=session.conversation_id,
+            user_id=current_user["id"],
+            connection_id=connection_id,
+            question=question,
+            status="completed",
+            steps_count=result.steps_count,
+            tools_used=result.tools_used,
+            response_type=result.response_type,
+            execution_time_ms=execution_time_ms,
+            completed_at=func.now(),
+        )
+        db.add(run)
+        db.flush()
+        db.add_all([
+            BiAgentStep(
+                run_id=run_id,
+                step_number=1,
+                step_type="thinking",
+                content="识别为数据源清单问题，准备读取当前连接的 schema 信息。",
+                execution_time_ms=step_durations_ms.get(1),
+            ),
+            BiAgentStep(
+                run_id=run_id,
+                step_number=2,
+                step_type="tool_call",
+                tool_name=result.tool_name,
+                tool_params=result.tool_params,
+                skill_version_id=skill_version_uuid,
+                execution_time_ms=step_durations_ms.get(2),
+            ),
+            BiAgentStep(
+                run_id=run_id,
+                step_number=3,
+                step_type="tool_result",
+                tool_name=result.tool_name,
+                tool_result_summary=result.tool_result_summary[:500],
+                execution_time_ms=step_durations_ms.get(3),
+            ),
+            BiAgentStep(
+                run_id=run_id,
+                step_number=4,
+                step_type="answer",
+                content=result.answer[:500],
+                execution_time_ms=step_durations_ms.get(4),
+            ),
+        ])
+        db.commit()
+    except Exception as exc:
+        _rollback_after_persistence_error(db)
+        logger.exception(
+            "Agent schema inventory telemetry persistence failed",
+            extra={
+                "conversation_id": str(session.conversation_id),
+                "trace_id": context.trace_id,
+                "run_id": str(run_id),
+                "user_id": current_user.get("id"),
+                "response_type": result.response_type,
+                "error_code": "AGENT_TELEMETRY_PERSISTENCE_FAILED",
+                "exception_type": type(exc).__name__,
+            },
+        )
 
-    session_mgr.persist_message(
-        session=session,
-        role="assistant",
-        content=result.answer,
-        trace_id=context.trace_id,
-        response_type=result.response_type,
-        response_data=result.response_data,
-        tools_used=result.tools_used,
-        steps_count=result.steps_count,
-        execution_time_ms=execution_time_ms,
-    )
+    try:
+        session_mgr.persist_message(
+            session=session,
+            role="assistant",
+            content=result.answer,
+            trace_id=context.trace_id,
+            response_type=result.response_type,
+            response_data=result.response_data,
+            tools_used=result.tools_used,
+            steps_count=result.steps_count,
+            execution_time_ms=execution_time_ms,
+        )
+    except Exception as exc:
+        _rollback_after_persistence_error(db)
+        logger.exception(
+            "Agent schema inventory assistant message persistence failed",
+            extra={
+                "conversation_id": str(session.conversation_id),
+                "trace_id": context.trace_id,
+                "run_id": str(run_id),
+                "user_id": current_user.get("id"),
+                "response_type": result.response_type,
+                "error_code": _AGENT_PERSISTENCE_FAILED,
+                "exception_type": type(exc).__name__,
+            },
+        )
+        raise AgentPersistenceError(
+            trace_id=context.trace_id,
+            run_id=str(run_id),
+            conversation_id=str(session.conversation_id),
+        ) from exc
 
 
 def _write_schema_inventory_error_run(
@@ -524,43 +591,79 @@ def _write_standard_fallback_run(
     execution_time_ms: int,
 ) -> None:
     payload = fallback.to_dict()
-    run = BiAgentRun(
-        id=run_id,
-        conversation_id=session.conversation_id,
-        user_id=current_user["id"],
-        connection_id=connection_id,
-        question=question,
-        status="completed",
-        error_code=fallback.error_code,
-        steps_count=1,
-        tools_used=fallback.tools_used,
-        response_type="fallback",
-        execution_time_ms=execution_time_ms,
-        completed_at=func.now(),
-    )
-    db.add(run)
-    db.flush()
-    db.add(
-        BiAgentStep(
-            run_id=run_id,
-            step_number=1,
-            step_type="answer",
-            content=fallback.answer[:500],
+    try:
+        run = BiAgentRun(
+            id=run_id,
+            conversation_id=session.conversation_id,
+            user_id=current_user["id"],
+            connection_id=connection_id,
+            question=question,
+            status="completed",
+            error_code=fallback.error_code,
+            steps_count=1,
+            tools_used=fallback.tools_used,
+            response_type="fallback",
+            execution_time_ms=execution_time_ms,
+            completed_at=func.now(),
+        )
+        db.add(run)
+        db.flush()
+        db.add(
+            BiAgentStep(
+                run_id=run_id,
+                step_number=1,
+                step_type="answer",
+                content=fallback.answer[:500],
+                execution_time_ms=execution_time_ms,
+            )
+        )
+        db.commit()
+    except Exception as exc:
+        _rollback_after_persistence_error(db)
+        logger.exception(
+            "Agent fallback telemetry persistence failed",
+            extra={
+                "conversation_id": str(session.conversation_id),
+                "trace_id": fallback.trace_id,
+                "run_id": str(run_id),
+                "user_id": current_user.get("id"),
+                "response_type": "fallback",
+                "error_code": fallback.error_code,
+                "exception_type": type(exc).__name__,
+            },
+        )
+
+    try:
+        session_mgr.persist_message(
+            session=session,
+            role="assistant",
+            content=fallback.answer,
+            trace_id=fallback.trace_id,
+            response_type="fallback",
+            response_data=payload,
+            tools_used=fallback.tools_used,
+            steps_count=1,
             execution_time_ms=execution_time_ms,
         )
-    )
-    db.commit()
-    session_mgr.persist_message(
-        session=session,
-        role="assistant",
-        content=fallback.answer,
-        trace_id=fallback.trace_id,
-        response_type="fallback",
-        response_data=payload,
-        tools_used=fallback.tools_used,
-        steps_count=1,
-        execution_time_ms=execution_time_ms,
-    )
+    except Exception as exc:
+        _rollback_after_persistence_error(db)
+        logger.exception(
+            "Agent fallback assistant message persistence failed",
+            extra={
+                "conversation_id": str(session.conversation_id),
+                "trace_id": fallback.trace_id,
+                "run_id": str(run_id),
+                "user_id": current_user.get("id"),
+                "response_type": "fallback",
+                "error_code": _AGENT_PERSISTENCE_FAILED,
+                "exception_type": type(exc).__name__,
+            },
+        )
+        raise AgentPersistenceError(
+            trace_id=fallback.trace_id,
+            run_id=str(run_id),
+            conversation_id=str(session.conversation_id),
+        ) from exc
 
 
 def _validate_connection_access(
@@ -837,8 +940,9 @@ async def agent_stream(
                     fallback=fallback,
                     execution_time_ms=execution_time_ms,
                 )
-            except Exception as e:
-                logger.warning("[ROUTER] failed to write clarification fallback run: %s", e)
+            except AgentPersistenceError:
+                yield _persistence_failed_sse(trace_id=trace_id, run_id=str(run_id))
+                return
             yield _sse_data({
                 "type": "done",
                 "answer": fallback.answer,
@@ -859,7 +963,11 @@ async def agent_stream(
         # ── Deterministic route：稳定回答连接 schema / 数据源清单问题 ────────────
         deterministic_route = detect_deterministic_route(req.question, context.connection_type)
         chain_selection = select_data_agent_chain()
-        schema_inventory_should_defer_to_mcp_proxy = chain_selection.is_mcp_proxy and (
+        tableau_mcp_strict_context = (
+            str(getattr(context, "connection_type", "") or "").strip().lower() == "tableau"
+            or bool(getattr(context, "selected_datasource_luid", None) and getattr(context, "connection_id", None))
+        )
+        schema_inventory_should_defer_to_mcp_proxy = (chain_selection.is_mcp_proxy or tableau_mcp_strict_context) and (
             intent_result.is_asset_inventory
             or route_decision.is_asset_question
             or deterministic_route == "schema_inventory"
@@ -952,6 +1060,9 @@ async def agent_stream(
                         4: max(0, execution_time_ms - route_ms),
                     },
                 )
+            except AgentPersistenceError:
+                yield _persistence_failed_sse(trace_id=trace_id, run_id=str(run_id))
+                return
             except Exception as e:
                 logger.exception("[DETERMINISTIC] schema inventory route failed: %s", e)
                 error_code = "AGENT_003"
@@ -1122,6 +1233,7 @@ async def agent_stream(
                 for key in (
                     "fallback_type",
                     "trace_id",
+                    "run_id",
                     "retryable",
                     "suggested_actions",
                     "tools_used",

@@ -117,6 +117,27 @@ class _FakeSessionManager:
         return self._stored_messages
 
 
+class _FailingAssistantSessionManager(_FakeSessionManager):
+    def persist_message(self, **kwargs):
+        if kwargs.get("role") == "assistant":
+            raise RuntimeError("assistant persistence failed")
+        super().persist_message(**kwargs)
+
+
+class _FinalCommitFailDb(_FakeDb):
+    def __init__(self):
+        super().__init__()
+        self.rolled_back = False
+
+    def rollback(self):
+        self.rolled_back = True
+
+    def commit(self):
+        self.commits += 1
+        if self.commits == 3:
+            raise RuntimeError("final telemetry commit failed")
+
+
 @pytest.mark.asyncio
 async def test_failed_tool_result_persists_error_summary(monkeypatch):
     """回归：失败 tool_result 的错误摘要应写入 bi_agent_steps.tool_result_summary。"""
@@ -158,6 +179,88 @@ async def test_failed_tool_result_persists_error_summary(monkeypatch):
     assert tool_result_steps[0].tool_name == "schema"
     assert tool_result_steps[0].tool_result_summary == "Tableau asset fields are unavailable"
     assert db.updates[-1][BiAgentRun.status] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_answer_persistence_failure_returns_retryable_error_without_done(monkeypatch):
+    """回归：assistant message 保存失败时不得先发 done。"""
+    monkeypatch.setattr("services.data_agent.runner.is_direct_query", lambda question: False)
+
+    db = _FakeDb()
+    session_mgr = _FailingAssistantSessionManager(messages=[])
+    session = AgentSession(conversation_id=uuid.uuid4(), user_id=7)
+    context = ToolContext(
+        session_id=str(session.conversation_id),
+        user_id=7,
+        connection_id=1,
+        trace_id="t-persist-fail",
+    )
+
+    events = [
+        event
+        async for event in run_agent(
+            engine=_CapturingEngine(),
+            context=context,
+            session_mgr=session_mgr,
+            session=session,
+            question="普通问题",
+            trace_id="t-persist-fail",
+            current_user={"id": 7},
+            db=db,
+            connection_id=1,
+        )
+    ]
+
+    assert [event.type for event in events] == ["metadata", "error"]
+    assert events[-1].content["error_code"] == "AGENT_PERSISTENCE_FAILED"
+    assert events[-1].content["retryable"] is True
+    assert all(event.type != "done" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_final_telemetry_failure_still_persists_answer_and_returns_done(monkeypatch, caplog):
+    """回归：最终 run/step telemetry 失败不能导致 assistant message 丢失。"""
+    monkeypatch.setattr("services.data_agent.runner.is_direct_query", lambda question: False)
+
+    db = _FinalCommitFailDb()
+    session_mgr = _FakeSessionManager(messages=[])
+    session = AgentSession(conversation_id=uuid.uuid4(), user_id=7)
+    context = ToolContext(
+        session_id=str(session.conversation_id),
+        user_id=7,
+        connection_id=1,
+        trace_id="t-telemetry-fail",
+    )
+    caplog.set_level("ERROR", logger="services.data_agent.runner")
+
+    events = [
+        event
+        async for event in run_agent(
+            engine=_CapturingEngine(),
+            context=context,
+            session_mgr=session_mgr,
+            session=session,
+            question="普通问题",
+            trace_id="t-telemetry-fail",
+            current_user={"id": 7},
+            db=db,
+            connection_id=1,
+        )
+    ]
+
+    assert [event.type for event in events] == ["metadata", "done"]
+    assert session_mgr.messages[-1]["role"] == "assistant"
+    assert session_mgr.messages[-1]["content"] == "ok"
+    assert db.rolled_back is True
+    telemetry_logs = [
+        record
+        for record in caplog.records
+        if record.message == "Agent final response telemetry persistence failed"
+    ]
+    assert telemetry_logs
+    assert telemetry_logs[-1].conversation_id == str(session.conversation_id)
+    assert telemetry_logs[-1].trace_id == "t-telemetry-fail"
+    assert telemetry_logs[-1].error_code == "AGENT_TELEMETRY_PERSISTENCE_FAILED"
 
 
 @pytest.mark.asyncio
@@ -424,4 +527,51 @@ def test_recent_query_context_inherits_schema_inventory_datasource():
         "datasource_name": "订单+ (示例 - 超市)",
         "asset_id": 422,
         "connection_id": None,
+    }
+
+
+def test_recent_query_context_extracts_mcp_metrics_and_dimensions_from_successful_query():
+    previous_query_message = _FakeMessage(
+        tools_used=["tableau_mcp"],
+        response_type="query_result",
+        response_data={
+            "datasource_name": "订单+ (示例 - 超市)",
+            "datasource_luid": "ds-1",
+            "fields": ["子类别", "销售额", "利润", "利润率"],
+            "rows": [["桌子", 100, 20, 0.2]],
+            "mcp_tool_name": "query-datasource",
+            "mcp_args": {
+                "datasourceLuid": "ds-1",
+                "query": {
+                    "fields": [
+                        {"fieldCaption": "子类别"},
+                        {"fieldCaption": "销售额", "function": "SUM"},
+                        {"fieldCaption": "利润", "function": "SUM"},
+                        {"fieldCaption": "利润率"},
+                    ],
+                    "filters": [],
+                },
+            },
+            "table_display": {
+                "columns": [
+                    {"key": "子类别", "label": "子类别", "semantic_type": "dimension"},
+                    {"key": "销售额", "label": "销售额", "semantic_type": "metric"},
+                    {"key": "利润", "label": "利润", "semantic_type": "metric"},
+                    {"key": "利润率", "label": "利润率", "semantic_type": "derived_metric"},
+                ]
+            },
+        },
+    )
+    session_mgr = _FakeSessionManager(messages=[previous_query_message])
+    session = AgentSession(conversation_id=uuid.uuid4(), user_id=7)
+
+    context = resolve_recent_query_context(session_mgr, session, user_id=7)
+
+    assert context["requested_metrics"] == ["销售额", "利润", "利润率"]
+    assert context["requested_dimensions"] == ["子类别"]
+    assert context["metric_names"] == ["销售额", "利润", "利润率"]
+    assert context["dimension_names"] == ["子类别"]
+    assert context["previous_successful_mcp_call_ref"] == {
+        "tool_name": "query-datasource",
+        "datasource_luid": "ds-1",
     }
