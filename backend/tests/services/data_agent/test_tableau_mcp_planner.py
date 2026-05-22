@@ -29,6 +29,19 @@ class _FakeLLM:
         return {"content": json.dumps(self.payload, ensure_ascii=False)}
 
 
+class _FakeLLMSequence:
+    def __init__(self, payloads):
+        self.payloads = list(payloads)
+        self.calls = []
+
+    async def complete(self, *, prompt, system=None, timeout=None, purpose=None):
+        self.calls.append({"prompt": prompt, "system": system, "timeout": timeout, "purpose": purpose})
+        if not self.payloads:
+            raise AssertionError("unexpected extra planner retry")
+        payload = self.payloads.pop(0)
+        return {"content": json.dumps(payload, ensure_ascii=False)}
+
+
 def _request() -> TableauMcpPlannerRequest:
     context = ToolContext(session_id="s1", user_id=42, connection_id=7, trace_id="trace-planner")
     context.datasource_luid = "ds-1"
@@ -139,8 +152,41 @@ async def test_planner_rejects_missing_clarification_when_needed():
     plan = await planner.plan(_request())
 
     assert plan.status == "invalid_output"
-    assert plan.error_code == "TABLEAU_MCP_PLANNER_CLARIFICATION_REQUIRED"
-    assert plan.raw["detail"]["missing_optional"] == ["clarification"]
+    assert plan.error_code == "PLANNER_CONTRACT_FAILURE"
+    assert plan.raw["detail"]["first_error_code"] == "TABLEAU_MCP_PLANNER_CLARIFICATION_REQUIRED"
+    assert plan.raw["detail"]["planner_retry_attempted"] is True
+    assert plan.raw["detail"]["planner_retry_success"] is False
+    assert len(planner._llm_service.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_planner_retries_missing_clarification_and_accepts_valid_retry():
+    invalid = _query_plan_payload(
+        tool_name=None,
+        args={},
+        reason="The asset request needs clarification.",
+        confidence=0.72,
+        needs_clarification=True,
+    )
+    invalid.pop("clarification")
+    valid = _query_plan_payload(
+        tool_name=None,
+        args={},
+        reason="The asset request needs clarification.",
+        confidence=0.72,
+        needs_clarification=True,
+        clarification={"message": "请选择 Tableau 连接。"},
+    )
+    llm = _FakeLLMSequence([invalid, valid])
+    planner = TableauMcpLlmPlanner(llm_service=llm)
+
+    plan = await planner.plan(_request())
+
+    assert plan.status == "clarification"
+    assert plan.clarification["message"] == "请选择 Tableau 连接。"
+    assert plan.raw["_planner_retry"]["attempted"] is True
+    assert plan.raw["_planner_retry"]["success"] is True
+    assert "validation error" in llm.calls[1]["prompt"].lower()
 
 
 @pytest.mark.parametrize("clarification", [None, "", "   ", {}, {"message": ""}, []])

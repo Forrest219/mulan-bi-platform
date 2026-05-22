@@ -22,6 +22,8 @@ from typing import AsyncGenerator
 import pytest
 from fastapi.testclient import TestClient
 
+from services.data_agent.router_guardrail import classify_homepage_question
+
 # ---------------------------------------------------------------------------
 # 环境变量（必须在 import app 前设置，与 conftest.py 一致）
 # ---------------------------------------------------------------------------
@@ -231,6 +233,37 @@ class TestChatSuggestions:
         assert isinstance(data["suggestions"], list)
         assert data["suggestions"]
         assert {"title", "category"}.issubset(data["suggestions"][0])
+
+    def test_homepage_suggestions_do_not_trigger_router_clarification(self, admin_client: TestClient):
+        resp = admin_client.get("/api/chat/suggestions")
+
+        assert resp.status_code == 200
+        suggestions = resp.json()["suggestions"]
+        titles = [item["title"] for item in suggestions if isinstance(item.get("title"), str)]
+        assert titles
+
+        blocked = []
+        for title in titles:
+            decision = classify_homepage_question(title)
+            action = getattr(decision, "guardrail_action", decision.route)
+            if action == "clarify" or decision.route == "clarify" or decision.fallback_policy == "clarify_only":
+                blocked.append({"title": title, "decision": decision.to_dict()})
+
+        assert blocked == []
+
+    def test_dashboard_suggestion_is_asset_or_advisory_not_router_clarification(self, admin_client: TestClient):
+        resp = admin_client.get("/api/chat/suggestions")
+
+        assert resp.status_code == 200
+        titles = [item["title"] for item in resp.json()["suggestions"]]
+        assert "你有哪些看板？" in titles
+
+        decision = classify_homepage_question("你有哪些看板？")
+        action = getattr(decision, "guardrail_action", decision.route)
+
+        assert action in {"allow", "advisory"}
+        assert decision.route != "clarify"
+        assert decision.fallback_policy != "clarify_only"
 
 
 # ---------------------------------------------------------------------------

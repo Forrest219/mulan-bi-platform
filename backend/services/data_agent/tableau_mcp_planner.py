@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass, field, is_dataclass
+from dataclasses import asdict, dataclass, field, is_dataclass, replace
 from typing import Any, Literal, Protocol
 
 from services.data_agent.mcp_args_guardrail import (
@@ -15,6 +15,11 @@ from services.data_agent.mcp_args_guardrail import (
     get_datasource_metadata_tool_schema,
     list_datasources_tool_schema,
     query_datasource_tool_schema,
+)
+from services.data_agent.mcp_host.builtins import (
+    MULAN_BUILTIN_TOOL_NAMES,
+    MULAN_LIST_TABLEAU_ASSETS_TOOL_NAME,
+    mulan_list_tableau_assets_tool_schema,
 )
 from services.data_agent.tableau_mcp_guardrail import TABLEAU_MCP_ALLOWED_TOOLS
 from services.llm.service import LLMService
@@ -138,7 +143,7 @@ class TableauMcpLlmPlanner:
         self._timeout_seconds = timeout_seconds
         self._purpose = purpose
         self._min_confidence = min(1.0, max(0.0, float(min_confidence)))
-        self._allowed_tools = frozenset(allowed_tools or TABLEAU_MCP_ALLOWED_TOOLS)
+        self._allowed_tools = frozenset(allowed_tools or (TABLEAU_MCP_ALLOWED_TOOLS | MULAN_BUILTIN_TOOL_NAMES))
 
     async def plan(self, request: TableauMcpPlannerRequest) -> TableauMcpToolPlan:
         """Ask the model for a Tableau MCP tool plan and normalize failures."""
@@ -189,11 +194,97 @@ class TableauMcpLlmPlanner:
                 min_confidence=self._min_confidence,
             )
         except TableauMcpPlannerError as exc:
+            if exc.code == "TABLEAU_MCP_PLANNER_CLARIFICATION_REQUIRED":
+                return await self._retry_after_contract_failure(
+                    llm=llm,
+                    messages=messages,
+                    first_error=exc,
+                )
             return _failure_plan(
                 status="invalid_output",
                 code=exc.code,
                 reason=str(exc),
                 detail=exc.detail,
+            )
+
+    async def _retry_after_contract_failure(
+        self,
+        *,
+        llm: TableauMcpPlannerLLM,
+        messages: list[dict[str, str]],
+        first_error: TableauMcpPlannerError,
+    ) -> TableauMcpToolPlan:
+        retry_prompt = (
+            f"{messages[-1]['content']}\n\n"
+            "Planner validation error: The previous JSON was invalid. "
+            "You set needs_clarification to true, but omitted the required clarification block. "
+            "Return valid JSON that satisfies the output_contract. Do not include prose."
+        )
+        try:
+            result = await asyncio.wait_for(
+                llm.complete(
+                    prompt=retry_prompt,
+                    system=messages[0]["content"],
+                    timeout=self._timeout_seconds,
+                    purpose=self._purpose,
+                ),
+                timeout=self._timeout_seconds,
+            )
+        except Exception as exc:
+            return _failure_plan(
+                status="invalid_output",
+                code="PLANNER_CONTRACT_FAILURE",
+                reason="Planner output did not satisfy the clarification contract after retry.",
+                detail={
+                    "first_error_code": first_error.code,
+                    "retry_error_type": exc.__class__.__name__,
+                    "retry_error": str(exc),
+                    "planner_retry_attempted": True,
+                    "planner_retry_success": False,
+                },
+            )
+        if "content" not in result:
+            return _failure_plan(
+                status="invalid_output",
+                code="PLANNER_CONTRACT_FAILURE",
+                reason="Planner output did not satisfy the clarification contract after retry.",
+                detail={
+                    "first_error_code": first_error.code,
+                    "llm_result": _json_safe(result),
+                    "planner_retry_attempted": True,
+                    "planner_retry_success": False,
+                },
+            )
+        try:
+            plan = parse_tableau_mcp_planner_output(
+                str(result.get("content") or ""),
+                allowed_tools=self._allowed_tools,
+                min_confidence=self._min_confidence,
+            )
+            return replace(
+                plan,
+                raw={
+                    **dict(plan.raw),
+                    "_planner_retry": {
+                        "attempted": True,
+                        "success": True,
+                        "first_error_code": first_error.code,
+                    },
+                },
+            )
+        except TableauMcpPlannerError as retry_error:
+            return _failure_plan(
+                status="invalid_output",
+                code="PLANNER_CONTRACT_FAILURE",
+                reason="Planner output did not satisfy the clarification contract after retry.",
+                detail={
+                    "first_error_code": first_error.code,
+                    "retry_error_code": retry_error.code,
+                    "retry_error": str(retry_error),
+                    "retry_detail": retry_error.detail,
+                    "planner_retry_attempted": True,
+                    "planner_retry_success": False,
+                },
             )
 
 
@@ -203,20 +294,28 @@ def build_tableau_mcp_planner_messages(
     allowed_tools: set[str] | frozenset[str] | None = None,
 ) -> list[dict[str, str]]:
     """Build deterministic system/user messages for Tableau MCP planning."""
-    tools = sorted(allowed_tools or TABLEAU_MCP_ALLOWED_TOOLS)
+    tools = sorted(allowed_tools or (TABLEAU_MCP_ALLOWED_TOOLS | MULAN_BUILTIN_TOOL_NAMES))
+    analysis_context = dict(request.analysis_context or {})
+    router_advisory = analysis_context.get("router_advisory") if isinstance(analysis_context.get("router_advisory"), Mapping) else {}
     user_payload = {
         "question": request.question,
         "selected_datasource": _json_safe(request.datasource or {}),
         "metadata_fields": _json_safe(list(request.metadata_fields or [])[:80]),
         "queryable_fields": _json_safe(list(request.queryable_fields or [])[:120]),
         "context": _context_payload(request.context),
-        "analysis_context": _json_safe(request.analysis_context or {}),
+        "analysis_context": _json_safe(analysis_context),
+        "router_advisory": _json_safe(router_advisory),
+        "router_advisory_contract": (
+            "Router advisory is a non-authoritative routing hint only. "
+            "It is not a fact source, not permission approval, and not authorization to execute a tool. "
+            "Use it only to decide whether asset or query tools may be relevant; tool schemas and guardrails still decide."
+        ),
         "compiler_reason": request.compiler_reason,
         "compiler_advisory": _json_safe(request.compiler_advisory or {}),
         "compiler_advisory_contract": (
-            "Compiler advisory is a non-authoritative hint only. "
-            "Do not treat advisory candidates as facts; use selected datasource metadata/queryable_fields "
-            "and produce args that still pass tool schema and guardrail validation."
+            "Compiler advisory is a separate non-authoritative planning hint only. "
+            "Do not merge it with router_advisory. Do not treat advisory candidates as facts; use selected datasource "
+            "metadata/queryable_fields and produce args that still pass tool schema and guardrail validation."
         ),
         "allowed_tools": tools,
         "tool_schemas": _tool_schemas_for_prompt(tools),
@@ -351,13 +450,18 @@ def parse_tableau_mcp_planner_output(
 def _system_prompt() -> str:
     return (
         "You are Mulan's Tableau MCP planner. Return exactly one JSON object and nothing else. "
-        "Your job is only to choose a Tableau MCP read-only tool and produce its JSON arguments. "
+        "Your job is only to choose a read-only MCP tool and produce its JSON arguments. "
         "Never call MCP, never return QuerySpec, SQL, VizQL wrappers, code, markdown, or legacy query plans. "
-        "Valid tools are list-datasources, get-datasource-metadata, and query-datasource. "
+        "Valid tools include list-datasources, get-datasource-metadata, query-datasource, and "
+        "mulan-list-tableau-assets. Use mulan-list-tableau-assets only for Tableau asset inventory questions "
+        "about dashboards, workbooks, views, or datasources; never use it for business metric answers. "
         "For query-datasource, use selected_datasource.datasource_luid or selected_datasource.luid as datasourceLuid. "
+        "Business metric answers must use Tableau MCP query tools, not the Mulan asset catalog. "
         "If the user intent, datasource, fields, filters, or metric definitions are ambiguous, set needs_clarification=true. "
         "Compiler advisory may appear in the user payload; it is only a hint, not a fact source, and does not override "
         "selected datasource metadata, queryable fields, tool schemas, or guardrails. "
+        "Router advisory may also appear; keep it conceptually separate from compiler advisory. "
+        "Both advisories are hints only, not facts, not permission approval, and not executable authorization. "
         "If confidence is below 0.65, ask for clarification instead of guessing."
     )
 
@@ -367,6 +471,7 @@ def _tool_schemas_for_prompt(tool_names: Sequence[str]) -> dict[str, Any]:
         MCP_LIST_DATASOURCES_TOOL_NAME: list_datasources_tool_schema(),
         MCP_GET_DATASOURCE_METADATA_TOOL_NAME: get_datasource_metadata_tool_schema(),
         MCP_QUERY_DATASOURCE_TOOL_NAME: query_datasource_tool_schema(),
+        MULAN_LIST_TABLEAU_ASSETS_TOOL_NAME: mulan_list_tableau_assets_tool_schema(),
     }
     return {tool: _json_safe(schemas[tool]) for tool in tool_names if tool in schemas}
 

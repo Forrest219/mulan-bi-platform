@@ -1,0 +1,5 @@
+version: 1
+name: homepage-router-guardrail-advisory
+title: Homepage Router Guardrail Advisory Mode
+description: 将首页 Router Guardrail 从低置信硬拦截收缩为 advisory handoff，仅保留强冲突和高风险场景 clarification，降低推荐问题和自然语言同义词被前置误拦截的生产风险。
+status: draft

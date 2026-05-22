@@ -38,6 +38,7 @@ class ToolContext:
     selected_datasource_luid: Optional[str] = None
     datasource_name: Optional[str] = None
     user_role: Optional[str] = None
+    analysis_context: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

@@ -301,12 +301,20 @@ async def run_agent(
 
         chain_selection = select_data_agent_chain()
         force_tableau_mcp_proxy = _is_tableau_mcp_context(context)
+        router_advisory = _router_advisory_from_context(context)
         controlled_asset_intent = (chain_selection.is_mcp_proxy or force_tableau_mcp_proxy) and (
             intent_result.is_asset_inventory
             or bool(route_decision and route_decision.is_asset_question)
         )
-        if enforce_controlled_data_path and (intent_result.is_data_intent or controlled_asset_intent):
+        controlled_router_advisory = bool(router_advisory) and (chain_selection.is_mcp_proxy or force_tableau_mcp_proxy)
+        if enforce_controlled_data_path and (
+            intent_result.is_data_intent
+            or controlled_asset_intent
+            or controlled_router_advisory
+        ):
             followup_context = resolve_recent_query_context(session_mgr, session, current_user["id"])
+            if router_advisory:
+                followup_context = {**followup_context, "router_advisory": router_advisory}
             if chain_selection.is_fallback and not force_tableau_mcp_proxy:
                 logger.warning("Data Agent chain mode fallback: %s", chain_selection.trace_detail())
                 fallback_message = chain_selection.fallback_message()
@@ -1373,3 +1381,10 @@ def _extract_named_values(text: str, candidates: list[str]) -> list[str]:
         if candidate in text and candidate not in values:
             values.append(candidate)
     return values
+
+
+def _router_advisory_from_context(context: ToolContext) -> dict[str, Any]:
+    analysis_context = getattr(context, "analysis_context", None)
+    if isinstance(analysis_context, dict) and isinstance(analysis_context.get("router_advisory"), dict):
+        return dict(analysis_context["router_advisory"])
+    return {}

@@ -1,0 +1,5 @@
+version: 1
+name: tableau-asset-inventory-tool-provider
+title: Tableau Asset Inventory Built-in Tool Provider
+description: 将 Tableau 看板/工作簿/视图等资产清单能力封装为受连接与用户权限约束的 Mulan 内置 MCP Tool，并收紧 Planner clarification 合约失败处理，避免 Proxy 私有 SQL 分支、全局资产泄露和模型 reason 外泄。
+status: draft

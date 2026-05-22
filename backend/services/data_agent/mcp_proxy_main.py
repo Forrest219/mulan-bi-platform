@@ -18,11 +18,21 @@ from services.data_agent.mcp_args_guardrail import (
     MCP_ARGS_GUARDRAIL_REJECT,
     query_datasource_tool_schema,
 )
+from services.data_agent.mcp_host.builtins import MULAN_LIST_TABLEAU_ASSETS_TOOL_NAME
 from services.data_agent.mcp_first_main import (
     _queryable_fields,
     _resolve_datasource,
 )
 from services.data_agent.response import AgentEvent
+from services.data_agent.semantic_contract import (
+    ANSWER_QUALITY_BUSINESS_SUCCESS,
+    ANSWER_QUALITY_SEMANTIC_VALIDATION_FAILED,
+    SEMANTIC_CONTRACT_VERSION,
+    PlanValidator,
+    ResultVerifier,
+    SemanticCheckResult,
+    infer_semantic_operator,
+)
 from services.data_agent.tableau_mcp_plan_compiler import CompileResult, DeterministicPlanCompiler
 from services.data_agent.tableau_mcp_planner import TableauMcpLlmPlanner, TableauMcpPlannerRequest
 from services.data_agent.tableau_mcp_response import (
@@ -58,6 +68,8 @@ _METRIC_FUNCTIONS = {"SUM", "AVG", "COUNT", "COUNTD", "MIN", "MAX", "MEDIAN", "A
 _RESPONSE_NORMALIZER = TableauMcpResponseNormalizer()
 _PLAN_COMPILER = DeterministicPlanCompiler()
 _MCP_CACHE = TableauMcpCacheFacade()
+_PLAN_VALIDATOR = PlanValidator()
+_RESULT_VERIFIER = ResultVerifier(detail_scan_row_cap=100)
 
 
 @dataclass(frozen=True)
@@ -90,6 +102,8 @@ async def run_mcp_proxy_main_path(
     """Run the MCP Host proxy chain."""
     from services.data_agent import mcp_first_main as thin_mcp
 
+    analysis_context = _analysis_context_with_router_advisory(context, analysis_context)
+    router_advisory = _router_advisory_from_analysis_context(analysis_context)
     yield AgentEvent(type="thinking", content="已进入 MCP Host 代理链路。")
     yield AgentEvent(type="tool_result", content={
         "tool": "mainline_trace",
@@ -97,7 +111,11 @@ async def run_mcp_proxy_main_path(
             "success": True,
             "data": build_strict_trace_payload(
                 actual_entry="mcp_proxy_main",
-                extra_trace={"chain_mode": CHAIN_MODE},
+                extra_trace={
+                    "chain_mode": CHAIN_MODE,
+                    "planner_received_route_advisory": bool(router_advisory),
+                    "route_advisory": router_advisory,
+                },
             ),
         },
     })
@@ -118,6 +136,28 @@ async def run_mcp_proxy_main_path(
         analysis_context=analysis_context,
     )
     if not ds_info:
+        if router_advisory:
+            yield AgentEvent(type="tool_call", content={
+                "tool": "context_resolver",
+                "params": {"chain_mode": CHAIN_MODE, "intent": intent_result.intent, "router_advisory": True},
+            })
+            yield AgentEvent(type="tool_result", content={
+                "tool": "context_resolver",
+                "result": {"data": _context_trace_payload(question, analysis_context)},
+            })
+            planned_events = await _run_llm_planner_path(
+                question=question,
+                context=context,
+                intent_result=intent_result,
+                datasource={},
+                analysis_context=analysis_context,
+                llm_service=llm_service,
+                compiler_advisory=None,
+                compiler_result=None,
+            )
+            for event in planned_events:
+                yield event
+            return
         yield AgentEvent(type="error", content=thin_mcp._mcp_passthrough_error_payload(
             thin_mcp.MCP_EXPLICIT_DATASOURCE_REQUIRED,
             "请先选择一个 Tableau 数据源后再提问。",
@@ -412,6 +452,93 @@ def _query_datasource_tool_schema() -> dict[str, Any]:
     return query_datasource_tool_schema()
 
 
+def _semantic_contract_telemetry(
+    *,
+    operator: str,
+    plan_validation: SemanticCheckResult | None = None,
+    result_verification: SemanticCheckResult | None = None,
+    answer_quality_status: str | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    plan_payload = plan_validation.to_dict() if plan_validation else None
+    result_payload = result_verification.to_dict() if result_verification else None
+    violations = list((plan_payload or {}).get("violations") or []) + list((result_payload or {}).get("violations") or [])
+    return {
+        "semantic_contract_version": SEMANTIC_CONTRACT_VERSION,
+        "semantic_operator": operator,
+        "answer_quality_status": (
+            answer_quality_status
+            or (ANSWER_QUALITY_BUSINESS_SUCCESS if not violations else ANSWER_QUALITY_SEMANTIC_VALIDATION_FAILED)
+        ),
+        "plan_validation": plan_payload,
+        "result_verification": result_payload,
+        "detail_scan_violation": any(item.get("code") == "detail_scan_violation" for item in violations if isinstance(item, Mapping)),
+        "hidden_fallback": False,
+        "planner_contract_violation": any(
+            item.get("code", "").startswith("planner_") for item in violations if isinstance(item, Mapping)
+        ),
+        **extra,
+    }
+
+
+def _semantic_contract_event(
+    *,
+    tool: str,
+    check: SemanticCheckResult,
+    stage: str,
+    strategy: str,
+) -> AgentEvent:
+    return AgentEvent(type="tool_result", content={
+        "tool": tool,
+        "result": {
+            "success": check.ok,
+            "data": {
+                "stage": stage,
+                "strategy": strategy,
+                **check.to_dict(),
+            },
+        },
+    })
+
+
+def _semantic_validation_failed_response(
+    check: SemanticCheckResult,
+    *,
+    stage: str,
+    strategy: str,
+    execution_source: str,
+    detail: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    telemetry = _semantic_contract_telemetry(
+        operator=check.operator,
+        plan_validation=check if stage == "plan_validation" else None,
+        result_verification=check if stage == "result_verification" else None,
+        answer_quality_status=ANSWER_QUALITY_SEMANTIC_VALIDATION_FAILED,
+        stage=stage,
+        strategy=strategy,
+        execution_source=execution_source,
+    )
+    return {
+        "response_type": ANSWER_QUALITY_SEMANTIC_VALIDATION_FAILED,
+        "response_data": {
+            "source": "semantic_contract",
+            "chain_mode": CHAIN_MODE,
+            "status": ANSWER_QUALITY_SEMANTIC_VALIDATION_FAILED,
+            "error_code": check.error_code or "SEMANTIC_VALIDATION_FAILED",
+            "message": "查询计划或结果未通过语义校验，已阻止错误成功。",
+            "user_hint": "请补充更明确的指标、维度、筛选条件或分析口径后重试。",
+            "stage": stage,
+            "strategy": strategy,
+            "execution_source": execution_source,
+            "operator": check.operator,
+            "reason": check.reason,
+            "violations": [violation.to_dict() for violation in check.violations],
+            "detail": dict(detail or {}),
+            "telemetry": telemetry,
+        },
+    }
+
+
 async def _try_deterministic_plan_compiler(
     *,
     question: str,
@@ -609,6 +736,7 @@ async def _run_llm_planner_path(
 ) -> list[AgentEvent]:
     started_at = time.monotonic()
     queryable_fields, metadata_fields = _compiler_field_context(datasource, context)
+    router_advisory = _router_advisory_from_analysis_context(analysis_context)
     handoff = build_compiler_unsupported_planner_reason_payload(
         compiler_reason=(compiler_result.compile_reason if compiler_result else "deterministic_compiler_unsupported"),
         planner_reason="planner_can_select_mcp_tool",
@@ -618,6 +746,8 @@ async def _run_llm_planner_path(
             "compiler_status": compiler_result.status if compiler_result else "unsupported",
             "ambiguity_level": compiler_result.ambiguity_level if compiler_result else None,
             "compiler_advisory": dict(compiler_advisory or {}),
+            "planner_received_route_advisory": bool(router_advisory),
+            "route_advisory": router_advisory,
         },
     )
     events: list[AgentEvent] = [
@@ -650,6 +780,8 @@ async def _run_llm_planner_path(
     planner_ms = max(0, int((time.monotonic() - started_at) * 1000))
     plan_payload = plan.to_dict()
     plan_payload["telemetry"] = {"planner_ms": planner_ms, "strategy": "llm_planner"}
+    plan_payload["planner_received_route_advisory"] = bool(router_advisory)
+    plan_payload["route_advisory"] = router_advisory
     events.append(AgentEvent(type="tool_result", content={
         "tool": "tableau_mcp_llm_planner",
         "result": {"success": plan.is_executable, "data": plan_payload},
@@ -662,18 +794,56 @@ async def _run_llm_planner_path(
             chain_mode=CHAIN_MODE,
             reason=plan.reason,
             candidates=clarification.get("candidates") if isinstance(clarification.get("candidates"), list) else [],
-            detail={"planner_status": plan.status, "planner_confidence": plan.confidence, "planner_reason": plan.reason},
+            detail={
+                "planner_status": plan.status,
+                "planner_confidence": plan.confidence,
+                "planner_reason": plan.reason,
+                "planner_received_route_advisory": bool(router_advisory),
+                "route_advisory": router_advisory,
+            },
             telemetry={"planner_ms": planner_ms, "strategy": "llm_planner"},
         ).to_dict()
         events.append(AgentEvent(type="answer", content=_render_proxy_answer(response_data)))
         return events
 
     if not plan.is_executable:
+        if plan.error_code == "PLANNER_CONTRACT_FAILURE":
+            detail = plan.raw.get("detail") if isinstance(plan.raw, Mapping) else {}
+            response_data = _RESPONSE_NORMALIZER.clarification(
+                message="抱歉，我不太理解您的意图。您是想查询业务数据，还是想查找 Tableau 看板、视图或数据源？",
+                chain_mode=CHAIN_MODE,
+                reason="planner_contract_failure",
+                candidates=[],
+                detail={
+                    "planner_status": plan.status,
+                    "planner_error_code": plan.error_code,
+                    "planner_retry_attempted": bool(isinstance(detail, Mapping) and detail.get("planner_retry_attempted")),
+                    "planner_retry_success": bool(isinstance(detail, Mapping) and detail.get("planner_retry_success")),
+                    "planner_validation_error": detail,
+                    "planner_received_route_advisory": bool(router_advisory),
+                    "route_advisory": router_advisory,
+                },
+                telemetry={"planner_ms": planner_ms, "strategy": "llm_planner"},
+            ).to_dict()
+            response_data["response_data"]["source"] = "llm_planner"
+            response_data["response_data"]["error_code"] = "PLANNER_CONTRACT_FAILURE"
+            events.append(AgentEvent(type="tool_result", content={
+                "tool": "tableau_mcp_llm_planner",
+                "result": {"success": False, "data": response_data},
+            }))
+            events.append(AgentEvent(type="answer", content=_render_proxy_answer(response_data)))
+            return events
         response_data = _tool_unavailable_response(
             code=plan.error_code or "TABLEAU_MCP_PLANNER_UNAVAILABLE",
             message="Tableau MCP Planner 未能生成可执行计划。",
             user_hint="请补充更明确的数据源、字段、筛选条件或分析口径后重试。",
-            detail={"chain_mode": CHAIN_MODE, "strategy": "llm_planner", "plan": plan_payload},
+            detail={
+                "chain_mode": CHAIN_MODE,
+                "strategy": "llm_planner",
+                "plan": plan_payload,
+                "planner_received_route_advisory": bool(router_advisory),
+                "route_advisory": router_advisory,
+            },
         )
         events.append(AgentEvent(type="answer", content=_render_proxy_answer(response_data)))
         return events
@@ -750,6 +920,8 @@ async def _run_llm_planner_path(
     response_data["compiler_status"] = compiler_result.status if compiler_result else None
     response_data["compiler_reason"] = compiler_result.compile_reason if compiler_result else None
     response_data["compiler_advisory"] = dict(compiler_advisory or {})
+    response_data["route_advisory"] = router_advisory
+    response_data["planner_received_route_advisory"] = bool(router_advisory)
     response_data["mcp_tool_name"] = str(plan.tool_name)
     events.append(AgentEvent(type="tool_result", content={
         "tool": "tableau_mcp",
@@ -790,6 +962,8 @@ def _normalize_planner_tool_response(
         )
     elif tool_name == MCP_GET_DATASOURCE_METADATA_TOOL_NAME:
         response_data = _asset_metadata_response_from_mcp(result, _current_datasource(datasource, context))
+    elif tool_name == MULAN_LIST_TABLEAU_ASSETS_TOOL_NAME and isinstance(result, Mapping):
+        response_data = dict(result)
     else:
         response_data = _normalize_response_data(
             result,
@@ -2158,6 +2332,10 @@ def _render_proxy_answer(response_data: Mapping[str, Any]) -> str:
         return f"已通过 Tableau MCP 读取数据源元数据：{name}，共 {field_count} 个字段。{detail}"
     if response_type == RESPONSE_ASSET_CANDIDATES:
         candidates = payload.get("candidates") if isinstance(payload, Mapping) else []
+        if payload.get("reason") == "asset_inventory":
+            total = payload.get("total_count") or len(candidates or [])
+            names = "、".join(str(item.get("name")) for item in candidates if isinstance(item, Mapping) and item.get("name"))
+            return f"当前连接可见的 Tableau 资产共 {total} 个：{names}。" if names else "当前连接下没有匹配的 Tableau 资产。"
         if payload.get("reason") == "list_datasources":
             total = payload.get("total_count") or len(candidates or [])
             names = "、".join(str(item.get("name")) for item in candidates if isinstance(item, Mapping) and item.get("name"))
@@ -2275,6 +2453,7 @@ def _guardrail_fallback_payload(
 def _context_trace_payload(question: str, analysis_context: Optional[Mapping[str, Any]]) -> dict[str, Any]:
     context = dict(analysis_context or {})
     unresolved = bool(_FOLLOWUP_REFERENCE_RE.search(question or "") and not context)
+    router_advisory = _router_advisory_from_analysis_context(context)
     return {
         "status": "unresolved" if unresolved else ("resolved" if context else "empty"),
         "datasource_name": context.get("datasource_name"),
@@ -2286,4 +2465,30 @@ def _context_trace_payload(question: str, analysis_context: Optional[Mapping[str
         "requested_filters": list(context.get("requested_filters") or []),
         "unresolved_references": unresolved,
         "calculation_performed": False,
+        "planner_received_route_advisory": bool(router_advisory),
+        "route_advisory": router_advisory,
     }
+
+
+def _analysis_context_with_router_advisory(
+    context: ToolContext,
+    analysis_context: Optional[Mapping[str, Any]],
+) -> dict[str, Any]:
+    merged = dict(analysis_context or {})
+    context_analysis = getattr(context, "analysis_context", None)
+    if isinstance(context_analysis, Mapping):
+        advisory = context_analysis.get("router_advisory")
+        if isinstance(advisory, Mapping) and advisory:
+            merged["router_advisory"] = dict(advisory)
+    if merged:
+        context.analysis_context = dict(merged)
+    return merged
+
+
+def _router_advisory_from_analysis_context(analysis_context: Optional[Mapping[str, Any]]) -> dict[str, Any]:
+    if not isinstance(analysis_context, Mapping):
+        return {}
+    advisory = analysis_context.get("router_advisory")
+    if isinstance(advisory, Mapping):
+        return dict(advisory)
+    return {}

@@ -12,8 +12,9 @@ import unicodedata
 from typing import Any, Dict, Iterable, Literal, Optional
 
 QuestionType = Literal["asset_question", "data_question", "ambiguous"]
-RouteName = Literal["schema_inventory", "data_query", "clarify"]
-FallbackPolicy = Literal["schema_only", "data_only", "clarify_only"]
+GuardrailAction = Literal["allow", "advisory", "clarify"]
+RouteName = Literal["schema_inventory", "data_query", "advisory", "clarify"]
+FallbackPolicy = Literal["schema_only", "data_only", "advisory", "clarify_only"]
 GuardrailMode = Literal["shadow", "enforce"]
 
 
@@ -27,6 +28,8 @@ class RouteDecision:
     fallback_policy: FallbackPolicy
     reason: str
     mode: GuardrailMode = "enforce"
+    guardrail_action: GuardrailAction = "allow"
+    route_advisory: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -41,7 +44,7 @@ class RouteDecision:
 
     @property
     def needs_clarification(self) -> bool:
-        return self.question_type == "ambiguous"
+        return self.guardrail_action == "clarify"
 
 
 ASSET_METADATA_PATTERNS = (
@@ -190,15 +193,20 @@ BUSINESS_DIMENSION_KEYWORDS = (
     "销售员",
 )
 
-AMBIGUOUS_EXACT = (
-    "帮我查一下",
-    "看看数据",
-    "有哪些",
-    "查一下",
-    "看一下",
-    "介绍一下这个数据源",
-    "这个表怎么样",
-    "列出客户",
+WRITE_OR_DANGEROUS_PATTERNS = (
+    r"\b(drop|delete|truncate|update|insert|alter|grant|revoke)\b",
+    r"删除",
+    r"清空",
+    r"修改",
+    r"更新.+(数据|记录|字段|权限)",
+    r"写入",
+    r"新增",
+    r"创建.+(数据源|表|字段|权限|用户)",
+    r"授予.+权限",
+    r"撤销.+权限",
+    r"绕过.+权限",
+    r"提权",
+    r"导出.+(全部|所有).*(数据|记录)",
 )
 
 
@@ -213,8 +221,11 @@ def classify_homepage_question(
     normalized = _normalize(question)
     context_hints = context_hints or {}
 
-    if not normalized or normalized in AMBIGUOUS_EXACT:
-        return _ambiguous("empty_or_low_signal_question", mode=mode)
+    if _is_empty_or_noise(normalized):
+        return _clarify("empty_or_low_signal_question", mode=mode)
+
+    if _has_write_or_dangerous_request(normalized):
+        return _clarify("dangerous_or_write_request", mode=mode)
 
     asset_score, asset_reason = _score_asset_question(normalized)
     data_score, data_reason = _score_data_question(normalized, context_hints=context_hints)
@@ -228,6 +239,12 @@ def classify_homepage_question(
         data_score += 2
         data_reason = data_reason or "business_value_request"
 
+    if _is_strong_route_conflict(asset_score=asset_score, data_score=data_score, normalized=normalized):
+        return _clarify(
+            f"strong_route_conflict asset_score={asset_score} data_score={data_score}",
+            mode=mode,
+        )
+
     if data_score >= 2 and data_score >= asset_score:
         confidence = min(0.95, 0.55 + data_score * 0.1)
         return _data(confidence, data_reason or "data_question_rules", mode=mode)
@@ -236,7 +253,7 @@ def classify_homepage_question(
         confidence = min(0.95, 0.55 + asset_score * 0.1)
         return _asset(confidence, asset_reason or "asset_question_rules", mode=mode)
 
-    return _ambiguous(
+    return _advisory(
         f"low_confidence_route asset_score={asset_score} data_score={data_score}",
         mode=mode,
     )
@@ -282,6 +299,7 @@ def _asset(confidence: float, reason: str, *, mode: GuardrailMode) -> RouteDecis
         fallback_policy="schema_only",
         reason=reason,
         mode=mode,
+        guardrail_action="allow",
     )
 
 
@@ -295,19 +313,45 @@ def _data(confidence: float, reason: str, *, mode: GuardrailMode) -> RouteDecisi
         fallback_policy="data_only",
         reason=reason,
         mode=mode,
+        guardrail_action="allow",
     )
 
 
-def _ambiguous(reason: str, *, mode: GuardrailMode) -> RouteDecision:
+def _advisory(reason: str, *, mode: GuardrailMode) -> RouteDecision:
     return RouteDecision(
         question_type="ambiguous",
         confidence=0.35,
+        route="advisory",
+        allowed_tools=["schema", "query"],
+        forbidden_tools=[],
+        fallback_policy="advisory",
+        reason=reason,
+        mode=mode,
+        guardrail_action="advisory",
+        route_advisory={
+            "status": "ambiguous",
+            "action": "advisory",
+            "reason": reason,
+            "question_type": "ambiguous",
+            "confidence": 0.35,
+            "candidate_routes": ["asset_question", "data_question"],
+            "allowed_tool_hints": ["schema", "query"],
+            "is_authoritative": False,
+        },
+    )
+
+
+def _clarify(reason: str, *, mode: GuardrailMode) -> RouteDecision:
+    return RouteDecision(
+        question_type="ambiguous",
+        confidence=0.0,
         route="clarify",
         allowed_tools=[],
         forbidden_tools=["schema", "query"],
         fallback_policy="clarify_only",
         reason=reason,
         mode=mode,
+        guardrail_action="clarify",
     )
 
 
@@ -369,6 +413,25 @@ def _has_business_value_request(normalized: str) -> bool:
     action = any(re.search(pattern, normalized, flags=re.IGNORECASE) for pattern in DATA_ACTION_PATTERNS)
     business_dimension = any(keyword in normalized for keyword in BUSINESS_DIMENSION_KEYWORDS)
     return metric or (business_dimension and (time_filter or action))
+
+
+def _is_strong_route_conflict(*, asset_score: int, data_score: int, normalized: str) -> bool:
+    if asset_score < 2 or data_score < 2:
+        return False
+    return _has_asset_metadata_pattern(normalized) and _has_business_value_request(normalized)
+
+
+def _has_write_or_dangerous_request(normalized: str) -> bool:
+    return any(re.search(pattern, normalized, flags=re.IGNORECASE) for pattern in WRITE_OR_DANGEROUS_PATTERNS)
+
+
+def _is_empty_or_noise(normalized: str) -> bool:
+    if not normalized:
+        return True
+    signal_chars = [ch for ch in normalized if ch.isalnum()]
+    if not signal_chars:
+        return True
+    return len(signal_chars) <= 2
 
 
 def _normalize(text: str) -> str:

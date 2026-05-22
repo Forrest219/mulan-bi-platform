@@ -4,6 +4,7 @@ import uuid
 import pytest
 
 from services.data_agent import mcp_first_main, mcp_proxy_main
+from services.data_agent.mcp_host.builtins import MULAN_LIST_TABLEAU_ASSETS_TOOL_NAME
 from services.data_agent.intent_classifier import IntentClassification, classify_intent
 from services.data_agent.models import BiAgentRun
 from services.data_agent.tableau_mcp_plan_compiler import CompileResult
@@ -547,6 +548,207 @@ async def test_mcp_proxy_unsupported_passes_compiler_advisory_to_planner(monkeyp
     assert llm.calls
     assert '"compiler_advisory"' in llm.calls[0]["prompt"]
     assert '"rejected_fast_path_reason": "complex_question"' in llm.calls[0]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_proxy_keeps_router_and_compiler_advisories_distinct(monkeypatch):
+    compiler_advisory = {
+        "status": "unsupported",
+        "reason": "complex_question",
+        "rejected_fast_path_reason": "complex_question",
+    }
+    router_advisory = {
+        "status": "ambiguous",
+        "action": "advisory",
+        "reason": "low_confidence_route",
+        "is_authoritative": False,
+        "allowed_tool_hints": ["schema", "query"],
+    }
+    monkeypatch.setattr(
+        mcp_proxy_main._PLAN_COMPILER,
+        "compile",
+        lambda *args, **kwargs: CompileResult.unsupported(
+            reason="complex_question",
+            advisory=compiler_advisory,
+        ),
+    )
+    _patch_proxy_executor(monkeypatch)
+    llm = _FakeLLM(
+        {
+            "datasourceLuid": "ds-1",
+            "query": {"fields": [{"fieldCaption": "Metric A", "function": "SUM"}], "filters": []},
+            "limit": 50,
+        }
+    )
+
+    events = [
+        event
+        async for event in mcp_proxy_main.run_mcp_proxy_main_path(
+            question="你有哪些看板？",
+            context=_context(),
+            intent_result=_intent(),
+            analysis_context={"router_advisory": router_advisory},
+            llm_service=llm,
+        )
+    ]
+
+    assert events[-1].type == "answer"
+    assert llm.calls
+    planner_payload = json.loads(llm.calls[0]["prompt"])
+    assert planner_payload["analysis_context"]["router_advisory"] == router_advisory
+    assert planner_payload["compiler_advisory"]["reason"] == compiler_advisory["reason"]
+    assert planner_payload["compiler_advisory"]["rejected_fast_path_reason"] == compiler_advisory["rejected_fast_path_reason"]
+    assert "router_advisory" not in planner_payload["compiler_advisory"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_proxy_merges_context_router_advisory_before_datasource_gate(monkeypatch):
+    router_advisory = {
+        "status": "ambiguous",
+        "action": "advisory",
+        "reason": "low_confidence_route",
+        "is_authoritative": False,
+        "allowed_tool_hints": ["asset", "query"],
+    }
+    context = ToolContext(session_id="s1", user_id=7, connection_id=2, trace_id="trace-proxy")
+    context.analysis_context["router_advisory"] = router_advisory
+    calls = _patch_proxy_executor(monkeypatch, query_result={"datasources": []})
+    llm = _FakeLLM(
+        {
+            "tool_name": "list-datasources",
+            "args": {"connectionId": 2, "limit": 50},
+            "reason": "router advisory allows asset inventory planning",
+            "confidence": 0.9,
+            "needs_clarification": False,
+            "clarification": None,
+        }
+    )
+
+    events = [
+        event
+        async for event in mcp_proxy_main.run_mcp_proxy_main_path(
+            question="你有哪些看板？",
+            context=context,
+            intent_result=_intent("unknown"),
+            llm_service=llm,
+        )
+    ]
+
+    assert llm.calls
+    planner_payload = json.loads(llm.calls[0]["prompt"])
+    assert planner_payload["router_advisory"] == router_advisory
+    assert planner_payload["analysis_context"]["router_advisory"] == router_advisory
+    assert calls and calls[0]["tool_name"] == "list-datasources"
+    planner_events = [
+        event for event in events
+        if event.type == "tool_result"
+        and event.content.get("tool") == "tableau_mcp_llm_planner"
+    ]
+    assert planner_events[-1].content["result"]["data"]["planner_received_route_advisory"] is True
+
+
+@pytest.mark.asyncio
+async def test_mcp_proxy_dashboard_inventory_uses_mulan_builtin_asset_tool(monkeypatch):
+    router_advisory = {
+        "status": "ambiguous",
+        "action": "advisory",
+        "reason": "low_confidence_route",
+        "is_authoritative": False,
+        "allowed_tool_hints": ["asset", "query"],
+    }
+    context = ToolContext(session_id="s1", user_id=7, connection_id=2, trace_id="trace-proxy")
+    context.analysis_context["router_advisory"] = router_advisory
+    calls = _patch_proxy_executor(
+        monkeypatch,
+        query_result={
+            "response_type": "asset_candidates",
+            "response_data": {
+                "source": "tableau_asset_catalog",
+                "connection_id": 2,
+                "reason": "asset_inventory",
+                "total_count": 1,
+                "shown_count": 1,
+                "candidates": [{"asset_id": 1, "asset_type": "dashboard", "name": "销售看板"}],
+            },
+        },
+    )
+    llm = _FakeLLM(
+        {
+            "tool_name": MULAN_LIST_TABLEAU_ASSETS_TOOL_NAME,
+            "args": {"connectionId": 2, "assetTypes": ["dashboard"], "limit": 50},
+            "reason": "The user asks for Tableau dashboard assets.",
+            "confidence": 0.9,
+            "needs_clarification": False,
+            "clarification": None,
+        }
+    )
+
+    events = [
+        event
+        async for event in mcp_proxy_main.run_mcp_proxy_main_path(
+            question="你有哪些看板？",
+            context=context,
+            intent_result=_intent("unknown"),
+            llm_service=llm,
+        )
+    ]
+
+    assert calls and calls[0]["tool_name"] == MULAN_LIST_TABLEAU_ASSETS_TOOL_NAME
+    final_data = events[-2].content["result"]["data"]
+    assert final_data["response_type"] == "asset_candidates"
+    assert final_data["response_data"]["source"] == "tableau_asset_catalog"
+    assert final_data["response_data"]["candidates"][0]["asset_type"] == "dashboard"
+    assert "Planner 未能生成可执行计划" not in events[-1].content
+    assert "当前连接可见的 Tableau 资产" in events[-1].content
+
+
+@pytest.mark.asyncio
+async def test_mcp_proxy_planner_contract_failure_returns_standard_clarification(monkeypatch):
+    class BadClarificationLLM:
+        def __init__(self):
+            self.calls = []
+
+        async def complete(self, *, prompt, system=None, timeout=None, purpose=None):
+            self.calls.append({"prompt": prompt, "system": system, "timeout": timeout, "purpose": purpose})
+            return {
+                "content": json.dumps(
+                    {
+                        "tool_name": None,
+                        "args": {},
+                        "reason": "Internal planner reason that must not be shown.",
+                        "confidence": 0.72,
+                        "needs_clarification": True,
+                    },
+                    ensure_ascii=False,
+                )
+            }
+
+    async def _unexpected_execute(**kwargs):
+        raise AssertionError("invalid planner contract must not execute a tool")
+
+    router_advisory = {"status": "ambiguous", "action": "advisory", "is_authoritative": False}
+    context = ToolContext(session_id="s1", user_id=7, connection_id=2, trace_id="trace-proxy")
+    context.analysis_context["router_advisory"] = router_advisory
+    monkeypatch.setattr(mcp_proxy_main, "_execute_mcp_host_tool", _unexpected_execute)
+    llm = BadClarificationLLM()
+
+    events = [
+        event
+        async for event in mcp_proxy_main.run_mcp_proxy_main_path(
+            question="你有哪些看板？",
+            context=context,
+            intent_result=_intent("unknown"),
+            llm_service=llm,
+        )
+    ]
+
+    assert len(llm.calls) == 2
+    assert events[-1].type == "answer"
+    assert "您是想查询业务数据" in events[-1].content
+    assert "Internal planner reason" not in events[-1].content
+    response_data = events[-2].content["result"]["data"]
+    assert response_data["response_type"] == "clarification"
+    assert response_data["response_data"]["error_code"] == "PLANNER_CONTRACT_FAILURE"
 
 
 @pytest.mark.asyncio

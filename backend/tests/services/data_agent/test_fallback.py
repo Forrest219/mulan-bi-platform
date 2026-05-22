@@ -8,7 +8,7 @@ from services.data_agent.router_guardrail import classify_homepage_question
 
 
 def test_clarification_fallback_has_standard_shape():
-    decision = classify_homepage_question("有哪些")
+    decision = classify_homepage_question("???")
     fallback = make_clarification_fallback(trace_id="t1", route_decision=decision).to_dict()
 
     assert fallback["type"] == "fallback"

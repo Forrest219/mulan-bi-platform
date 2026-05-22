@@ -213,9 +213,15 @@ class TableauMcpResponseNormalizer:
         return {
             "asset_id": candidate.get("asset_id"),
             "datasource_luid": candidate.get("datasource_luid") or candidate.get("luid"),
+            "tableau_id": candidate.get("tableau_id"),
+            "asset_type": candidate.get("asset_type"),
             "name": candidate.get("name"),
             "project_name": candidate.get("project_name"),
+            "workbook_name": candidate.get("workbook_name") or candidate.get("parent_workbook_name"),
+            "tableau_url": candidate.get("tableau_url") or candidate.get("web_url") or candidate.get("content_url"),
+            "owner_name": candidate.get("owner_name"),
             "field_count": candidate.get("field_count"),
+            "view_count": candidate.get("view_count"),
             "synced_at": candidate.get("synced_at"),
         }
 

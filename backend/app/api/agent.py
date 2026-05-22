@@ -271,13 +271,11 @@ async def _stream_with_keepalive(
 
 def _intent_explainability_payload(route_decision) -> dict:
     intent = "ambiguous"
-    guardrail_decision = "fallback"
+    guardrail_decision = _route_guardrail_action(route_decision)
     if route_decision.is_asset_question:
         intent = "schema_inventory"
-        guardrail_decision = "allow"
     elif route_decision.is_data_question:
         intent = "query"
-        guardrail_decision = "allow"
     return {
         "intent": intent,
         "confidence": route_decision.confidence,
@@ -286,8 +284,39 @@ def _intent_explainability_payload(route_decision) -> dict:
             "decision": guardrail_decision,
             "reason_code": route_decision.reason,
             "message": route_decision.reason,
+            "route_advisory": _route_advisory(route_decision) or {},
         },
     }
+
+
+def _route_guardrail_action(route_decision) -> str:
+    explicit = getattr(route_decision, "guardrail_action", None)
+    if explicit:
+        return str(explicit)
+    advisory = _route_advisory(route_decision)
+    if isinstance(advisory, dict):
+        action = str(advisory.get("action") or "").strip()
+        if action:
+            return action
+    if route_decision.is_asset_question or route_decision.is_data_question:
+        return "allow"
+    return "clarify" if route_decision.needs_clarification else "allow"
+
+
+def _route_advisory(route_decision) -> Optional[dict[str, Any]]:
+    advisory = getattr(route_decision, "route_advisory", None)
+    if isinstance(advisory, dict) and advisory:
+        return dict(advisory)
+    return None
+
+
+def _merge_router_advisory_into_context(context: ToolContext, route_decision) -> None:
+    advisory = _route_advisory(route_decision)
+    if not advisory:
+        return
+    analysis_context = dict(getattr(context, "analysis_context", None) or {})
+    analysis_context["router_advisory"] = advisory
+    context.analysis_context = analysis_context
 
 
 def _fallback_explainability_payload(fallback: StandardFallback, *, final_source: str = "fallback") -> dict:
@@ -901,8 +930,16 @@ async def agent_stream(
         _t0 = time.monotonic()
         intent_result = classify_intent(req.question, connection_type=context.connection_type)
         route_decision = classify_homepage_question(req.question)
+        route_guardrail_action = _route_guardrail_action(route_decision)
+        route_advisory = _route_advisory(route_decision)
+        _merge_router_advisory_into_context(context, route_decision)
         yield _sse_data({"type": "intent_classifier", **intent_result.to_dict()})
-        yield _sse_data({"type": "route_decision", **route_decision.to_dict()})
+        yield _sse_data({
+            "type": "route_decision",
+            **route_decision.to_dict(),
+            "route_guardrail_action": route_guardrail_action,
+            "route_advisory": route_advisory or {},
+        })
         yield _sse_data({
             "type": "explainability",
             "phase": "intent",
@@ -910,11 +947,13 @@ async def agent_stream(
             "payload": {
                 **_intent_explainability_payload(route_decision),
                 "intent_classifier": intent_result.to_dict(),
+                "route_guardrail_action": route_guardrail_action,
+                "route_advisory": route_advisory or {},
             },
         })
 
         if (
-            route_decision.needs_clarification
+            route_guardrail_action == "clarify"
             and not intent_result.is_data_intent
             and not intent_result.is_asset_inventory
         ):

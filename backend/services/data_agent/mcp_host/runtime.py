@@ -7,6 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from services.data_agent.mcp_host.builtins import MulanBuiltInToolProvider, mulan_builtin_mcp_tools
 from services.data_agent.tableau_mcp_cache import TableauMcpCacheFacade
 
 
@@ -86,6 +87,17 @@ class MCPToolCatalog:
             definition = MCPToolDefinition.from_mcp_tool(tool)
             self._tools_by_name.setdefault(definition.name, definition)
 
+    def add_tools(self, tools: list[Mapping[str, Any]]) -> None:
+        for tool in tools:
+            if not isinstance(tool, Mapping):
+                raise MCPHostRuntimeError(
+                    code="MCP_HOST_INVALID_CATALOG",
+                    message="MCP tools/list returned a non-object tool entry",
+                    details={"tool": _json_safe(tool)},
+                )
+            definition = MCPToolDefinition.from_mcp_tool(tool)
+            self._tools_by_name.setdefault(definition.name, definition)
+
     @classmethod
     def discover(
         cls,
@@ -111,6 +123,7 @@ class MCPToolCatalog:
             )
 
         catalog = cls(tools)
+        catalog.add_tools(mulan_builtin_mcp_tools())
         _record_trace(
             trace,
             "mcp_host.catalog",
@@ -166,6 +179,7 @@ class MCPToolExecutor:
         timeout: int = 30,
         jwt_token: Optional[str] = None,
         trace: Optional[TraceSink] = None,
+        built_in_provider: MulanBuiltInToolProvider | None = None,
     ) -> None:
         self.client = client
         self.catalog = catalog
@@ -174,6 +188,7 @@ class MCPToolExecutor:
         self.timeout = timeout
         self.jwt_token = jwt_token
         self.trace = trace
+        self.built_in_provider = built_in_provider or MulanBuiltInToolProvider()
 
     def execute(
         self,
@@ -213,11 +228,19 @@ class MCPToolExecutor:
                 details={"argument_type": type(arguments).__name__},
             )
 
+        is_builtin_tool = self.built_in_provider.has_tool(name)
+        if is_builtin_tool and "connectionId" not in call_arguments and "connection_id" not in call_arguments:
+            context_connection_id = _context_connection_id(context)
+            if context_connection_id is None:
+                context_connection_id = self.connection_id
+            if context_connection_id is not None:
+                call_arguments["connectionId"] = int(context_connection_id)
+
         missing = _missing_required_properties(
             definition.input_schema,
             call_arguments,
         )
-        if missing:
+        if missing and not (is_builtin_tool and set(missing) == {"connectionId"}):
             self._reject(
                 code="MCP_HOST_MISSING_REQUIRED_ARGUMENTS",
                 message="MCP tool arguments are missing required top-level properties",
@@ -226,6 +249,49 @@ class MCPToolExecutor:
             )
 
         guardrail_decision = None
+        router_advisory = _router_advisory_from_context(context)
+        planner_received_route_advisory = bool(router_advisory)
+        if is_builtin_tool:
+            execution = self.built_in_provider.execute(name, call_arguments, context=context)
+            guardrail_decision = execution.guardrail_decision
+            _record_trace(
+                self.trace,
+                "mcp_host.guardrail",
+                {
+                    "tool": name,
+                    "tool_provider": "mulan_builtin",
+                    "execution_source": execution_source,
+                    "compiler_status": compiler_status,
+                    "compiler_reason": compiler_reason,
+                    "compiler_advisory": compiler_advisory or {},
+                    "planner_received_route_advisory": planner_received_route_advisory,
+                    "route_advisory": router_advisory,
+                    "guardrail_decision": guardrail_decision,
+                },
+            )
+            _record_trace(
+                self.trace,
+                "mcp_host.tool_call",
+                {
+                    "tool": name,
+                    "tool_provider": "mulan_builtin",
+                    "arguments": call_arguments,
+                    "execution_source": execution_source,
+                    "compiler_status": compiler_status,
+                    "compiler_reason": compiler_reason,
+                    "compiler_advisory": compiler_advisory or {},
+                    "planner_received_route_advisory": planner_received_route_advisory,
+                    "route_advisory": router_advisory,
+                    "guardrail_decision": guardrail_decision,
+                },
+            )
+            _record_trace(
+                self.trace,
+                "mcp_host.tool_result",
+                {"tool": name, "tool_provider": "mulan_builtin", "result": execution.result},
+            )
+            return execution.result
+
         if question is not None or context is not None or current_datasource is not None:
             guardrail_decision = self._validate_guardrail(
                 question=question or "",
@@ -246,6 +312,8 @@ class MCPToolExecutor:
                     "compiler_status": compiler_status,
                     "compiler_reason": compiler_reason,
                     "compiler_advisory": compiler_advisory or {},
+                    "planner_received_route_advisory": planner_received_route_advisory,
+                    "route_advisory": router_advisory,
                     "guardrail_decision": guardrail_decision,
                 },
             )
@@ -269,6 +337,8 @@ class MCPToolExecutor:
                 "compiler_status": compiler_status,
                 "compiler_reason": compiler_reason,
                 "compiler_advisory": compiler_advisory or {},
+                "planner_received_route_advisory": planner_received_route_advisory,
+                "route_advisory": router_advisory,
                 "guardrail_decision": guardrail_decision,
             },
         )
@@ -373,6 +443,7 @@ class MCPHostRuntime:
         timeout: int = 30,
         jwt_token: Optional[str] = None,
         trace: Optional[TraceSink] = None,
+        built_in_provider: MulanBuiltInToolProvider | None = None,
     ) -> None:
         self.client = client
         self.connection_id = connection_id
@@ -381,6 +452,7 @@ class MCPHostRuntime:
         self.jwt_token = jwt_token
         self.trace_events: TraceSink = trace if trace is not None else []
         self.catalog: Optional[MCPToolCatalog] = None
+        self.built_in_provider = built_in_provider or MulanBuiltInToolProvider()
 
     def load_catalog(self, *, force: bool = False) -> MCPToolCatalog:
         cache_enabled = _catalog_cache_enabled() and self.connection_id is not None
@@ -392,6 +464,7 @@ class MCPHostRuntime:
             )
             if cached.cache_hit and isinstance(cached.value, list):
                 self.catalog = MCPToolCatalog(cached.value)
+                self.catalog.add_tools(mulan_builtin_mcp_tools())
                 _record_trace(
                     self.trace_events,
                     "mcp_host.catalog_cache",
@@ -442,6 +515,7 @@ class MCPHostRuntime:
             timeout=self.timeout,
             jwt_token=self.jwt_token,
             trace=self.trace_events,
+            built_in_provider=self.built_in_provider,
         )
 
     def call_tool(
@@ -518,6 +592,17 @@ def _context_connection_id(context: Any) -> int | None:
         return int(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _router_advisory_from_context(context: Any) -> dict[str, Any]:
+    analysis_context = None
+    if isinstance(context, Mapping):
+        analysis_context = context.get("analysis_context")
+    elif context is not None:
+        analysis_context = getattr(context, "analysis_context", None)
+    if isinstance(analysis_context, Mapping) and isinstance(analysis_context.get("router_advisory"), Mapping):
+        return dict(analysis_context["router_advisory"])
+    return {}
 
 
 def _record_trace(

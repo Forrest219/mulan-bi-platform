@@ -8,6 +8,12 @@ from services.data_agent.mcp_host import (
     MCPToolCatalog,
     MCPToolExecutor,
 )
+from services.data_agent.mcp_host.builtins import (
+    BuiltInToolExecution,
+    MulanBuiltInToolProvider,
+    MULAN_LIST_TABLEAU_ASSETS_TOOL_NAME,
+    mulan_builtin_mcp_tools,
+)
 from services.data_agent.mcp_host.runtime import reset_mcp_host_catalog_cache
 
 pytestmark = pytest.mark.skip_db
@@ -36,7 +42,7 @@ class FakeMCPClient:
         return self.result
 
 
-def test_catalog_discovers_tools_from_mcp_list_only():
+def test_catalog_discovers_tools_and_mulan_builtins():
     client = FakeMCPClient(
         [
             {
@@ -60,7 +66,7 @@ def test_catalog_discovers_tools_from_mcp_list_only():
         trace=trace,
     )
 
-    assert catalog.tool_names() == ["metadata-tool", "execute-tool"]
+    assert catalog.tool_names() == ["metadata-tool", "execute-tool", MULAN_LIST_TABLEAU_ASSETS_TOOL_NAME]
     assert catalog.get("execute-tool").input_schema["required"] == ["payload"]
     assert client.list_calls == [
         {
@@ -231,14 +237,149 @@ def test_runtime_reuses_connection_scoped_catalog_cache_between_sessions():
     ]
     first_client = FakeMCPClient(tools)
     first_runtime = MCPHostRuntime(first_client, connection_id=42, datasource_luid="ds-1")
-    assert first_runtime.load_catalog().tool_names() == ["query-datasource"]
+    assert first_runtime.load_catalog().tool_names() == ["query-datasource", MULAN_LIST_TABLEAU_ASSETS_TOOL_NAME]
     assert len(first_client.list_calls) == 1
 
     second_client = FakeMCPClient(tools)
     second_runtime = MCPHostRuntime(second_client, connection_id=42, datasource_luid="ds-2")
-    assert second_runtime.load_catalog().tool_names() == ["query-datasource"]
+    assert second_runtime.load_catalog().tool_names() == ["query-datasource", MULAN_LIST_TABLEAU_ASSETS_TOOL_NAME]
     assert second_client.list_calls == []
     assert any(
         event["event"] == "mcp_host.catalog_cache" and event.get("payload", {}).get("cache_hit") is True
         for event in second_runtime.trace_events
     )
+
+
+def test_runtime_executes_mulan_builtin_tool_without_remote_client_call():
+    class FakeProvider:
+        def __init__(self):
+            self.calls = []
+
+        def has_tool(self, tool_name):
+            return tool_name == MULAN_LIST_TABLEAU_ASSETS_TOOL_NAME
+
+        def execute(self, tool_name, arguments, *, context=None):
+            self.calls.append({"tool_name": tool_name, "arguments": dict(arguments), "context": context})
+            return BuiltInToolExecution(
+                result={
+                    "response_type": "asset_candidates",
+                    "response_data": {
+                        "source": "tableau_asset_catalog",
+                        "connection_id": 7,
+                        "reason": "asset_inventory",
+                        "candidates": [{"asset_id": 1, "asset_type": "dashboard", "name": "销售看板"}],
+                    },
+                },
+                guardrail_decision={
+                    "decision": "allow",
+                    "tool_name": MULAN_LIST_TABLEAU_ASSETS_TOOL_NAME,
+                    "tool_provider": "mulan_builtin",
+                    "connection_id": 7,
+                    "args": {"connectionId": 7},
+                    "repairs": [],
+                },
+            )
+
+    provider = FakeProvider()
+    client = FakeMCPClient([])
+    runtime = MCPHostRuntime(client, connection_id=7, built_in_provider=provider)
+
+    result = runtime.call_tool(
+        MULAN_LIST_TABLEAU_ASSETS_TOOL_NAME,
+        {"assetTypes": ["dashboard"], "limit": 20},
+        context={"connection_id": 7, "user_id": 42},
+        execution_source="llm_planner",
+    )
+
+    assert result["response_type"] == "asset_candidates"
+    assert provider.calls[0]["arguments"]["connectionId"] == 7
+    assert client.call_calls == []
+    assert any(
+        event["event"] == "mcp_host.tool_call"
+        and event["payload"]["tool"] == MULAN_LIST_TABLEAU_ASSETS_TOOL_NAME
+        and event["payload"]["tool_provider"] == "mulan_builtin"
+        for event in runtime.trace_events
+    )
+
+
+def test_mulan_builtin_asset_tool_requires_connection_without_catalog_lookup():
+    provider = MulanBuiltInToolProvider(session_factory=lambda: (_ for _ in ()).throw(AssertionError("no db lookup")))
+
+    execution = provider.execute(MULAN_LIST_TABLEAU_ASSETS_TOOL_NAME, {}, context={"user_id": 42})
+
+    assert execution.result["response_type"] == "clarification"
+    assert execution.result["response_data"]["reason"] == "connection_required"
+    assert execution.guardrail_decision["decision"] == "clarify"
+
+
+def test_mulan_builtin_asset_tool_scopes_catalog_query_by_connection():
+    class Row:
+        id = 10
+        connection_id = 7
+        tableau_id = "dash-1"
+        asset_type = "dashboard"
+        name = "销售看板"
+        project_name = "经营"
+        parent_workbook_name = "销售工作簿"
+        description = None
+        owner_name = "alice"
+        web_url = "https://tableau.local/views/dash"
+        content_url = None
+        view_count = 3
+        synced_at = None
+        updated_on_server = None
+
+    class Connection:
+        id = 7
+        owner_id = 42
+        is_active = True
+
+    class Query:
+        def __init__(self, model):
+            self.model = model
+            self.filters = []
+
+        def filter(self, *conditions):
+            self.filters.extend(conditions)
+            return self
+
+        def first(self):
+            return Connection()
+
+        def order_by(self, *args):
+            return self
+
+        def limit(self, value):
+            self.limit_value = value
+            return self
+
+        def all(self):
+            return [Row()]
+
+    class Session:
+        def __init__(self):
+            self.queries = []
+
+        def query(self, model):
+            query = Query(model)
+            self.queries.append(query)
+            return query
+
+        def close(self):
+            pass
+
+    session = Session()
+    provider = MulanBuiltInToolProvider(session_factory=lambda: session)
+
+    execution = provider.execute(
+        MULAN_LIST_TABLEAU_ASSETS_TOOL_NAME,
+        {"connectionId": 7, "assetTypes": ["dashboard"], "limit": 20},
+        context={"user_id": 42},
+    )
+
+    assert execution.result["response_type"] == "asset_candidates"
+    assert execution.result["response_data"]["connection_id"] == 7
+    asset_query = session.queries[1]
+    filter_text = " ".join(str(condition) for condition in asset_query.filters)
+    assert "tableau_assets.connection_id" in filter_text
+    assert "tableau_assets.is_deleted" in filter_text

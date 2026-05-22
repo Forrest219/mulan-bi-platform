@@ -10,7 +10,7 @@ from app.core.dependencies import get_current_user
 from services.data_agent.models import AgentConversationMessage, BiAgentRun
 
 
-FALLBACK_QUESTION = "你有哪些看板？"
+FALLBACK_QUESTION = "???"
 FALLBACK_ERROR_CODE = "ROUTER_CLARIFY_REQUIRED"
 
 
@@ -83,7 +83,7 @@ def _agent_test_client(db_session):
 def _post_fallback_stream(client):
     return client.post(
         "/api/agent/stream",
-        json={"question": f"{FALLBACK_QUESTION} {uuid.uuid4()}"},
+        json={"question": FALLBACK_QUESTION},
     )
 
 
